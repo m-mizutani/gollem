@@ -162,21 +162,17 @@ func (s *Servantic) Order(ctx context.Context, prompt string) error {
 		return goerr.Wrap(err, "failed to create LLM session")
 	}
 
-	input := []Input{Text(prompt)}
-	for i := 0; i < s.loopLimit; i++ {
+	initPrompt := `You are a helpful assistant. When you complete the task, call the exit tool.`
+	input := []Input{Text(initPrompt), Text(prompt)}
+	exitToolCalled := false
+
+	for i := 0; i < s.loopLimit && !exitToolCalled; i++ {
 		logger.Debug("loop", "loop", i)
 		resp, err := ssn.Generate(ctx, input...)
 		if err != nil {
 			return goerr.Wrap(err, "failed to generate response")
 		}
 		input = nil
-
-		// Check if the exit tool is called at first
-		for _, toolCall := range resp.FunctionCalls {
-			if toolCall.Name == ExitToolName {
-				return nil
-			}
-		}
 
 		// Call the msgCallback for all texts
 		for _, text := range resp.Texts {
@@ -187,6 +183,11 @@ func (s *Servantic) Order(ctx context.Context, prompt string) error {
 
 		// Call the toolCallback for all tool calls
 		for _, toolCall := range resp.FunctionCalls {
+			if toolCall.Name == ExitToolName {
+				exitToolCalled = true
+				continue
+			}
+
 			if err := s.toolCallback(ctx, *toolCall); err != nil {
 				return goerr.Wrap(err, "failed to call toolCallback")
 			}
@@ -221,7 +222,11 @@ func (s *Servantic) Order(ctx context.Context, prompt string) error {
 		}
 	}
 
-	return goerr.Wrap(ErrLoopLimitExceeded, "")
+	if !exitToolCalled {
+		return goerr.Wrap(ErrLoopLimitExceeded, "")
+	}
+
+	return nil
 }
 
 type toolWrapper struct {
@@ -273,7 +278,7 @@ const (
 func (x *exitTool) Spec() *ToolSpec {
 	return &ToolSpec{
 		Name:        ExitToolName,
-		Description: "When you determine that the task for user prompt is completed, call this tool. When calling this tool, the session will be finished immediately and any other tool calls and text generation will be ignored.",
+		Description: "When you determine that the task for user prompt is completed, call this tool.",
 	}
 }
 

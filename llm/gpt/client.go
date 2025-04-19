@@ -41,8 +41,8 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 
 // NewSession creates a new session for the GPT API.
 func (c *Client) NewSession(ctx context.Context, tools []servantic.Tool) (servantic.Session, error) {
-	// Convert servantic.Tool to openai.FunctionDefinition
-	openaiTools := make([]openai.FunctionDefinition, len(tools))
+	// Convert servantic.Tool to openai.Tool
+	openaiTools := make([]openai.Tool, len(tools))
 	for i, tool := range tools {
 		openaiTools[i] = convertTool(tool)
 	}
@@ -60,7 +60,7 @@ func (c *Client) NewSession(ctx context.Context, tools []servantic.Tool) (servan
 type Session struct {
 	client       *openai.Client
 	defaultModel string
-	tools        []openai.FunctionDefinition
+	tools        []openai.Tool
 	messages     []openai.ChatCompletionMessage
 }
 
@@ -79,10 +79,11 @@ func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*serv
 				return nil, goerr.Wrap(err, "failed to marshal function response")
 			}
 			s.messages = append(s.messages, openai.ChatCompletionMessage{
-				Role:    openai.ChatMessageRoleTool,
-				Name:    v.Name,
-				Content: string(response),
+				Role:       openai.ChatMessageRoleTool,
+				Content:    string(response),
+				ToolCallID: v.ID,
 			})
+
 		default:
 			return nil, goerr.Wrap(servantic.ErrInvalidParameter, "invalid input")
 		}
@@ -91,9 +92,9 @@ func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*serv
 	resp, err := s.client.CreateChatCompletion(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model:     s.defaultModel,
-			Messages:  s.messages,
-			Functions: s.tools,
+			Model:    s.defaultModel,
+			Messages: s.messages,
+			Tools:    s.tools,
 		},
 	)
 	if err != nil {
@@ -118,21 +119,24 @@ func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*serv
 		})
 	}
 
-	if message.FunctionCall != nil {
-		var args map[string]interface{}
-		if err := json.Unmarshal([]byte(message.FunctionCall.Arguments), &args); err != nil {
-			return nil, goerr.Wrap(err, "failed to unmarshal function arguments")
-		}
+	if message.ToolCalls != nil {
+		for _, toolCall := range message.ToolCalls {
+			var args map[string]interface{}
+			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+				return nil, goerr.Wrap(err, "failed to unmarshal tool arguments")
+			}
 
-		response.FunctionCalls = append(response.FunctionCalls, &servantic.FunctionCall{
-			ID:        message.ToolCallID,
-			Name:      message.FunctionCall.Name,
-			Arguments: args,
-		})
-		s.messages = append(s.messages, openai.ChatCompletionMessage{
-			Role:         openai.ChatMessageRoleTool,
-			FunctionCall: message.FunctionCall,
-		})
+			response.FunctionCalls = append(response.FunctionCalls, &servantic.FunctionCall{
+				ID:        toolCall.ID,
+				Name:      toolCall.Function.Name,
+				Arguments: args,
+			})
+			s.messages = append(s.messages, openai.ChatCompletionMessage{
+				Role:      openai.ChatMessageRoleAssistant,
+				Content:   message.Content,
+				ToolCalls: []openai.ToolCall{toolCall},
+			})
+		}
 	}
 
 	return response, nil

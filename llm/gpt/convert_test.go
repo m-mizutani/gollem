@@ -67,10 +67,11 @@ func TestConvertTool(t *testing.T) {
 	tool := &complexTool{}
 	openaiTool := gpt.ConvertTool(tool)
 
-	gt.Value(t, openaiTool.Name).Equal("complex_tool")
-	gt.Value(t, openaiTool.Description).Equal("A tool with complex parameter structure")
+	gt.Value(t, openaiTool.Type).Equal("function")
+	gt.Value(t, openaiTool.Function.Name).Equal("complex_tool")
+	gt.Value(t, openaiTool.Function.Description).Equal("A tool with complex parameter structure")
 
-	params := openaiTool.Parameters.(map[string]interface{})
+	params := openaiTool.Function.Parameters.(map[string]interface{})
 	gt.Value(t, params["type"]).Equal("object")
 
 	// Check user object

@@ -5,8 +5,8 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-// ConvertTool converts servantic.Tool to openai.FunctionDefinition
-func convertTool(tool servantic.Tool) openai.FunctionDefinition {
+// ConvertTool converts servantic.Tool to openai.Tool
+func convertTool(tool servantic.Tool) openai.Tool {
 	parameters := make(map[string]interface{})
 	properties := make(map[string]interface{})
 	required := make([]string, 0)
@@ -25,10 +25,13 @@ func convertTool(tool servantic.Tool) openai.FunctionDefinition {
 		parameters["required"] = required
 	}
 
-	return openai.FunctionDefinition{
-		Name:        spec.Name,
-		Description: spec.Description,
-		Parameters:  parameters,
+	return openai.Tool{
+		Type: openai.ToolTypeFunction,
+		Function: &openai.FunctionDefinition{
+			Name:        spec.Name,
+			Description: spec.Description,
+			Parameters:  parameters,
+		},
 	}
 }
 
