@@ -53,13 +53,17 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 // NewSession creates a new session for the Gemini API.
 func (c *Client) NewSession(ctx context.Context, tools []servantic.Tool) (servantic.Session, error) {
 	// Convert servantic.Tool to *genai.Tool
-	genaiTools := make([]*genai.Tool, len(tools))
+	genaiFunctions := make([]*genai.FunctionDeclaration, len(tools))
 	for i, tool := range tools {
-		genaiTools[i] = convertTool(tool)
+		genaiFunctions[i] = convertTool(tool)
 	}
 
 	model := c.client.GenerativeModel(c.defaultModel)
-	model.Tools = genaiTools
+	model.Tools = []*genai.Tool{
+		{
+			FunctionDeclarations: genaiFunctions,
+		},
+	}
 	session := &Session{
 		session: model.StartChat(),
 	}
@@ -90,7 +94,7 @@ func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*serv
 
 	resp, err := s.session.SendMessage(ctx, parts...)
 	if err != nil {
-		return nil, err
+		return nil, goerr.Wrap(err, "failed to send message")
 	}
 
 	if len(resp.Candidates) == 0 {

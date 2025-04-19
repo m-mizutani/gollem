@@ -146,7 +146,7 @@ func (s *Servantic) Order(ctx context.Context, prompt string) error {
 	tools := append(s.tools, &exitTool{})
 	toolMap, err := buildToolMap(tools, s.toolSets)
 	if err != nil {
-		return goerr.Wrap(err, "failed to build tool map")
+		return err
 	}
 
 	toolList := make([]Tool, 0, len(toolMap))
@@ -159,7 +159,7 @@ func (s *Servantic) Order(ctx context.Context, prompt string) error {
 
 	ssn, err := s.llm.NewSession(ctx, toolList)
 	if err != nil {
-		return goerr.Wrap(err, "failed to create LLM session")
+		return err
 	}
 
 	initPrompt := `You are a helpful assistant. When you complete the task, call the exit tool.`
@@ -170,7 +170,7 @@ func (s *Servantic) Order(ctx context.Context, prompt string) error {
 		logger.Debug("loop", "loop", i)
 		resp, err := ssn.Generate(ctx, input...)
 		if err != nil {
-			return goerr.Wrap(err, "failed to generate response")
+			return err
 		}
 		input = nil
 

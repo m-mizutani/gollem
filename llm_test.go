@@ -125,9 +125,9 @@ func TestGemini(t *testing.T) {
 }
 
 func TestGPT(t *testing.T) {
-	apiKey, ok := os.LookupEnv("OPENAI_API_KEY")
+	apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
 	if !ok {
-		t.Skip("OPENAI_API_KEY is not set")
+		t.Skip("TEST_OPENAI_API_KEY is not set")
 	}
 
 	ctx := t.Context()

@@ -68,10 +68,10 @@ func TestConvertTool(t *testing.T) {
 	tool := &complexTool{}
 	genaiTool := gemini.ConvertTool(tool)
 
-	gt.Value(t, genaiTool.FunctionDeclarations[0].Name).Equal("complex_tool")
-	gt.Value(t, genaiTool.FunctionDeclarations[0].Description).Equal("A tool with complex parameter structure")
+	gt.Value(t, genaiTool.Name).Equal("complex_tool")
+	gt.Value(t, genaiTool.Description).Equal("A tool with complex parameter structure")
 
-	params := genaiTool.FunctionDeclarations[0].Parameters
+	params := genaiTool.Parameters
 	gt.Value(t, params.Type).Equal(genai.TypeObject)
 
 	// Check user object

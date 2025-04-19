@@ -30,7 +30,7 @@ func someAction(tasks []task) error {
 
 ## Style for similar testing
 
-Use following Helper Driven Testing style instead of general Tatble Driven Test.
+Use following Helper Driven Testing style instead of general Tatble Driven Test. Do not use Table Driven Test style.
 
 ```go
 	type testCase struct {

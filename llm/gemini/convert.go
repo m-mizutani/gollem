@@ -5,7 +5,7 @@ import (
 	"github.com/m-mizutani/servantic"
 )
 
-func convertTool(tool servantic.Tool) *genai.Tool {
+func convertTool(tool servantic.Tool) *genai.FunctionDeclaration {
 	parameters := &genai.Schema{
 		Type:       genai.TypeObject,
 		Properties: make(map[string]*genai.Schema),
@@ -16,14 +16,10 @@ func convertTool(tool servantic.Tool) *genai.Tool {
 		parameters.Properties[name] = convertParameterToSchema(name, param)
 	}
 
-	return &genai.Tool{
-		FunctionDeclarations: []*genai.FunctionDeclaration{
-			{
-				Name:        spec.Name,
-				Description: spec.Description,
-				Parameters:  parameters,
-			},
-		},
+	return &genai.FunctionDeclaration{
+		Name:        spec.Name,
+		Description: spec.Description,
+		Parameters:  parameters,
 	}
 }
 
