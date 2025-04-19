@@ -2,7 +2,9 @@ package servantic
 
 import (
 	"context"
+	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 )
 
@@ -20,6 +22,8 @@ type Servantic struct {
 	msgCallback  MsgCallback
 	toolCallback ToolCallback
 	errCallback  ErrCallback
+
+	logger *slog.Logger
 }
 
 const (
@@ -36,6 +40,7 @@ func New(llmClient LLMClient, options ...Option) *Servantic {
 		msgCallback:  defaultMsgCallback,
 		toolCallback: defaultToolCallback,
 		errCallback:  defaultErrCallback,
+		logger:       slog.New(slog.DiscardHandler),
 	}
 
 	for _, opt := range options {
@@ -96,7 +101,7 @@ func WithMsgCallback(callback func(ctx context.Context, msg string) error) Optio
 	}
 }
 
-// WithToolCallback sets a callback function for the tool. The callback function is called when receiving a tool call from the LLM.
+// WithToolCallback sets a callback function for the tool. The callback function is called just before executing the tool. If you want to abort the tool execution, return an error.
 // Usage:
 //
 //	servantic.WithToolCallback(func(ctx context.Context, tool servantic.Tool) error {
@@ -124,8 +129,20 @@ func WithErrCallback(callback func(ctx context.Context, err error, tool Function
 	}
 }
 
-// Order is the main function to start the servantic instance.
+// WithLogger sets the logger for the servantic instance. Default is discard logger.
+func WithLogger(logger *slog.Logger) Option {
+	return func(s *Servantic) {
+		s.logger = logger
+	}
+}
+
+// Order is the main function to start the servantic instance. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until the exit tool is called or the LoopLimit is reached.
 func (s *Servantic) Order(ctx context.Context, prompt string) error {
+	orderID := uuid.New().String()
+	logger := s.logger.With("servantic.order_id", orderID)
+	ctx = ctxWithLogger(ctx, logger)
+	logger.Info("start order", "prompt", prompt)
+
 	tools := append(s.tools, &exitTool{})
 	toolMap, err := buildToolMap(tools, s.toolSets)
 	if err != nil {
@@ -144,6 +161,7 @@ func (s *Servantic) Order(ctx context.Context, prompt string) error {
 
 	input := []Input{Text(prompt)}
 	for i := 0; i < s.loopLimit; i++ {
+		logger.Debug("loop", "loop", i)
 		resp, err := ssn.Generate(ctx, input...)
 		if err != nil {
 			return goerr.Wrap(err, "failed to generate response")

@@ -5,6 +5,7 @@ go 1.24
 require (
 	cloud.google.com/go/vertexai v0.13.3
 	github.com/anthropics/anthropic-sdk-go v0.2.0-beta.3
+	github.com/google/uuid v1.6.0
 	github.com/m-mizutani/goerr/v2 v2.0.0-alpha.3
 	github.com/m-mizutani/gt v0.0.16
 	github.com/sashabaranov/go-openai v1.38.2
@@ -24,7 +25,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/s2a-go v0.1.8 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.4 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.0 // indirect
 	github.com/tidwall/gjson v1.14.4 // indirect
