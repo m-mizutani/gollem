@@ -1,61 +1,58 @@
 package gemini_test
 
 import (
+	"context"
 	"testing"
 
 	"cloud.google.com/go/vertexai/genai"
 	"github.com/m-mizutani/gt"
-	"github.com/m-mizutani/servant/llm"
+	"github.com/m-mizutani/servant"
 	"github.com/m-mizutani/servant/llm/gemini"
 )
 
 type complexTool struct{}
 
-func (t *complexTool) Name() string {
-	return "complex_tool"
-}
-
-func (t *complexTool) Description() string {
-	return "A tool with complex parameter structure"
-}
-
-func (t *complexTool) Parameters() map[string]*llm.Parameter {
-	return map[string]*llm.Parameter{
-		"user": {
-			Type: llm.TypeObject,
-			Properties: map[string]*llm.Parameter{
-				"name": {
-					Type:        llm.TypeString,
-					Description: "User's name",
-					Required:    true,
-				},
-				"address": {
-					Type: llm.TypeObject,
-					Properties: map[string]*llm.Parameter{
-						"street": {
-							Type:        llm.TypeString,
-							Description: "Street address",
-						},
-						"city": {
-							Type:        llm.TypeString,
-							Description: "City name",
+func (t *complexTool) Spec() *servant.ToolSpec {
+	return &servant.ToolSpec{
+		Name:        "complex_tool",
+		Description: "A tool with complex parameter structure",
+		Parameters: map[string]*servant.Parameter{
+			"user": {
+				Type: servant.TypeObject,
+				Properties: map[string]*servant.Parameter{
+					"name": {
+						Type:        servant.TypeString,
+						Description: "User's name",
+						Required:    true,
+					},
+					"address": {
+						Type: servant.TypeObject,
+						Properties: map[string]*servant.Parameter{
+							"street": {
+								Type:        servant.TypeString,
+								Description: "Street address",
+							},
+							"city": {
+								Type:        servant.TypeString,
+								Description: "City name",
+							},
 						},
 					},
 				},
 			},
-		},
-		"items": {
-			Type: llm.TypeArray,
-			Items: &llm.Parameter{
-				Type: llm.TypeObject,
-				Properties: map[string]*llm.Parameter{
-					"id": {
-						Type:        llm.TypeString,
-						Description: "Item ID",
-					},
-					"quantity": {
-						Type:        llm.TypeNumber,
-						Description: "Item quantity",
+			"items": {
+				Type: servant.TypeArray,
+				Items: &servant.Parameter{
+					Type: servant.TypeObject,
+					Properties: map[string]*servant.Parameter{
+						"id": {
+							Type:        servant.TypeString,
+							Description: "Item ID",
+						},
+						"quantity": {
+							Type:        servant.TypeNumber,
+							Description: "Item quantity",
+						},
 					},
 				},
 			},
@@ -63,7 +60,7 @@ func (t *complexTool) Parameters() map[string]*llm.Parameter {
 	}
 }
 
-func (t *complexTool) Run(args map[string]any) (map[string]any, error) {
+func (t *complexTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
 	return nil, nil
 }
 

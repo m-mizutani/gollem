@@ -2,15 +2,16 @@ package claude
 
 import (
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/m-mizutani/servant/llm"
+	"github.com/m-mizutani/servant"
 )
 
-func convertTool(tool llm.Tool) *anthropic.ToolParam {
-	schema := convertParametersToJSONSchema(tool.Parameters())
+func convertTool(tool servant.Tool) *anthropic.ToolParam {
+	spec := tool.Spec()
+	schema := convertParametersToJSONSchema(spec.Parameters)
 
 	return &anthropic.ToolParam{
-		Name:        tool.Name(),
-		Description: anthropic.String(tool.Description()),
+		Name:        spec.Name,
+		Description: anthropic.String(spec.Description),
 		InputSchema: anthropic.ToolInputSchemaParam{
 			Properties: schema.Properties,
 		},
@@ -23,7 +24,7 @@ type jsonSchema struct {
 	Required   []string               `json:"required,omitempty"`
 }
 
-func convertParametersToJSONSchema(params map[string]*llm.Parameter) jsonSchema {
+func convertParametersToJSONSchema(params map[string]*servant.Parameter) jsonSchema {
 	properties := make(map[string]interface{})
 	required := make([]string, 0)
 
@@ -43,7 +44,7 @@ func convertParametersToJSONSchema(params map[string]*llm.Parameter) jsonSchema 
 	}
 }
 
-func convertParameterToSchema(param *llm.Parameter) map[string]interface{} {
+func convertParameterToSchema(param *servant.Parameter) map[string]interface{} {
 	schema := map[string]interface{}{
 		"type":        getClaudeType(param.Type),
 		"description": param.Description,
@@ -74,19 +75,19 @@ func convertParameterToSchema(param *llm.Parameter) map[string]interface{} {
 	return schema
 }
 
-func getClaudeType(paramType llm.ParameterType) string {
+func getClaudeType(paramType servant.ParameterType) string {
 	switch paramType {
-	case llm.TypeString:
+	case servant.TypeString:
 		return "string"
-	case llm.TypeNumber:
+	case servant.TypeNumber:
 		return "number"
-	case llm.TypeInteger:
+	case servant.TypeInteger:
 		return "integer"
-	case llm.TypeBoolean:
+	case servant.TypeBoolean:
 		return "boolean"
-	case llm.TypeArray:
+	case servant.TypeArray:
 		return "array"
-	case llm.TypeObject:
+	case servant.TypeObject:
 		return "object"
 	default:
 		return "string"

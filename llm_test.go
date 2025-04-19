@@ -1,4 +1,4 @@
-package llm_test
+package servant_test
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
-	"github.com/m-mizutani/servant/llm"
+	"github.com/m-mizutani/servant"
 	"github.com/m-mizutani/servant/llm/claude"
 	"github.com/m-mizutani/servant/llm/gemini"
 	"github.com/m-mizutani/servant/llm/gpt"
@@ -16,44 +16,40 @@ import (
 // Sample tool implementation for testing
 type randomNumberTool struct{}
 
-func (t *randomNumberTool) Name() string {
-	return "random_number"
-}
-
-func (t *randomNumberTool) Description() string {
-	return "A tool for generating random numbers within a specified range"
-}
-
-func (t *randomNumberTool) Parameters() map[string]*llm.Parameter {
-	return map[string]*llm.Parameter{
-		"min": {
-			Name:        "min",
-			Type:        llm.TypeNumber,
-			Description: "Minimum value of the random number",
-			Required:    true,
-		},
-		"max": {
-			Name:        "max",
-			Type:        llm.TypeNumber,
-			Description: "Maximum value of the random number",
-			Required:    true,
+func (t *randomNumberTool) Spec() *servant.ToolSpec {
+	return &servant.ToolSpec{
+		Name:        "random_number",
+		Description: "A tool for generating random numbers within a specified range",
+		Parameters: map[string]*servant.Parameter{
+			"min": {
+				Name:        "min",
+				Type:        servant.TypeNumber,
+				Description: "Minimum value of the random number",
+				Required:    true,
+			},
+			"max": {
+				Name:        "max",
+				Type:        servant.TypeNumber,
+				Description: "Maximum value of the random number",
+				Required:    true,
+			},
 		},
 	}
 }
 
-func (t *randomNumberTool) Run(args map[string]any) (map[string]any, error) {
+func (t *randomNumberTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
 	min, ok := args["min"].(float64)
 	if !ok {
-		return nil, goerr.Wrap(llm.ErrInvalidParameter, "min is required")
+		return nil, goerr.New("min is required")
 	}
 
 	max, ok := args["max"].(float64)
 	if !ok {
-		return nil, goerr.Wrap(llm.ErrInvalidParameter, "max is required")
+		return nil, goerr.New("max is required")
 	}
 
 	if min >= max {
-		return nil, goerr.Wrap(llm.ErrInvalidParameter, "min must be less than max")
+		return nil, goerr.New("min must be less than max")
 	}
 
 	// Note: In real implementation, you would use a proper random number generator
@@ -63,12 +59,12 @@ func (t *randomNumberTool) Run(args map[string]any) (map[string]any, error) {
 	return map[string]any{"result": result}, nil
 }
 
-func testLLM(t *testing.T, session llm.Session) {
+func testLLM(t *testing.T, session servant.Session) {
 	ctx := t.Context()
 
 	// Test case 1: Generate random number
 	t.Run("generate random number", func(t *testing.T) {
-		resp, err := session.Generate(ctx, llm.Text("Please generate a random number between 1 and 10"))
+		resp, err := session.Generate(ctx, servant.Text("Please generate a random number between 1 and 10"))
 		gt.NoError(t, err)
 		gt.Array(t, resp.FunctionCalls).Length(1).Required()
 		gt.Value(t, resp.FunctionCalls[0].Name).Equal("random_number")
@@ -77,7 +73,7 @@ func testLLM(t *testing.T, session llm.Session) {
 		gt.Value(t, args["min"]).Equal(1.0)
 		gt.Value(t, args["max"]).Equal(10.0)
 
-		resp, err = session.Generate(ctx, llm.FunctionResponse{
+		resp, err = session.Generate(ctx, servant.FunctionResponse{
 			ID:   resp.FunctionCalls[0].ID,
 			Name: "random_number",
 			Data: map[string]any{"result": 5.5},
@@ -89,7 +85,7 @@ func testLLM(t *testing.T, session llm.Session) {
 
 	// Test case 2: Generate random number with different range
 	t.Run("generate random number with different range", func(t *testing.T) {
-		resp, err := session.Generate(ctx, llm.Text("Please generate a random number between 100 and 200"))
+		resp, err := session.Generate(ctx, servant.Text("Please generate a random number between 100 and 200"))
 		gt.NoError(t, err)
 		gt.Array(t, resp.FunctionCalls).Length(1).Required()
 		gt.Value(t, resp.FunctionCalls[0].Name).Equal("random_number")
@@ -121,7 +117,7 @@ func TestGemini(t *testing.T) {
 	gt.NoError(t, err)
 
 	// Setup tools
-	tools := []llm.Tool{&randomNumberTool{}}
+	tools := []servant.Tool{&randomNumberTool{}}
 	session, err := client.NewSession(ctx, tools)
 	gt.NoError(t, err)
 
@@ -139,7 +135,7 @@ func TestGPT(t *testing.T) {
 	gt.NoError(t, err)
 
 	// Setup tools
-	tools := []llm.Tool{&randomNumberTool{}}
+	tools := []servant.Tool{&randomNumberTool{}}
 	session, err := client.NewSession(ctx, tools)
 	gt.NoError(t, err)
 
@@ -155,7 +151,7 @@ func TestClaude(t *testing.T) {
 	claudeClient, err := claude.New(context.Background(), apiKey)
 	gt.NoError(t, err)
 
-	session, err := claudeClient.NewSession(context.Background(), []llm.Tool{&randomNumberTool{}})
+	session, err := claudeClient.NewSession(context.Background(), []servant.Tool{&randomNumberTool{}})
 	gt.NoError(t, err)
 
 	testLLM(t, session)

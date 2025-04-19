@@ -2,31 +2,32 @@ package gemini
 
 import (
 	"cloud.google.com/go/vertexai/genai"
-	"github.com/m-mizutani/servant/llm"
+	"github.com/m-mizutani/servant"
 )
 
-func convertTool(tool llm.Tool) *genai.Tool {
+func convertTool(tool servant.Tool) *genai.Tool {
 	parameters := &genai.Schema{
 		Type:       genai.TypeObject,
 		Properties: make(map[string]*genai.Schema),
 	}
 
-	for name, param := range tool.Parameters() {
+	spec := tool.Spec()
+	for name, param := range spec.Parameters {
 		parameters.Properties[name] = convertParameterToSchema(name, param)
 	}
 
 	return &genai.Tool{
 		FunctionDeclarations: []*genai.FunctionDeclaration{
 			{
-				Name:        tool.Name(),
-				Description: tool.Description(),
+				Name:        spec.Name,
+				Description: spec.Description,
 				Parameters:  parameters,
 			},
 		},
 	}
 }
 
-func convertParameterToSchema(name string, param *llm.Parameter) *genai.Schema {
+func convertParameterToSchema(name string, param *servant.Parameter) *genai.Schema {
 	schema := &genai.Schema{
 		Type:        getGenaiType(param.Type),
 		Description: param.Description,
@@ -61,19 +62,19 @@ func convertParameterToSchema(name string, param *llm.Parameter) *genai.Schema {
 	return schema
 }
 
-func getGenaiType(paramType llm.ParameterType) genai.Type {
+func getGenaiType(paramType servant.ParameterType) genai.Type {
 	switch paramType {
-	case llm.TypeString:
+	case servant.TypeString:
 		return genai.TypeString
-	case llm.TypeNumber:
+	case servant.TypeNumber:
 		return genai.TypeNumber
-	case llm.TypeInteger:
+	case servant.TypeInteger:
 		return genai.TypeInteger
-	case llm.TypeBoolean:
+	case servant.TypeBoolean:
 		return genai.TypeBoolean
-	case llm.TypeArray:
+	case servant.TypeArray:
 		return genai.TypeArray
-	case llm.TypeObject:
+	case servant.TypeObject:
 		return genai.TypeObject
 	default:
 		return genai.TypeString
