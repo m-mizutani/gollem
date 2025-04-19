@@ -1,4 +1,4 @@
-module github.com/m-mizutani/servant
+module github.com/m-mizutani/servantic
 
 go 1.24
 

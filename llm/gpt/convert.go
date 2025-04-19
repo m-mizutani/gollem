@@ -1,12 +1,12 @@
 package gpt
 
 import (
-	"github.com/m-mizutani/servant"
+	"github.com/m-mizutani/servantic"
 	"github.com/sashabaranov/go-openai"
 )
 
-// ConvertTool converts servant.Tool to openai.FunctionDefinition
-func convertTool(tool servant.Tool) openai.FunctionDefinition {
+// ConvertTool converts servantic.Tool to openai.FunctionDefinition
+func convertTool(tool servantic.Tool) openai.FunctionDefinition {
 	parameters := make(map[string]interface{})
 	properties := make(map[string]interface{})
 	required := make([]string, 0)
@@ -32,7 +32,7 @@ func convertTool(tool servant.Tool) openai.FunctionDefinition {
 	}
 }
 
-func convertParameterToSchema(param *servant.Parameter) map[string]interface{} {
+func convertParameterToSchema(param *servantic.Parameter) map[string]interface{} {
 	schema := map[string]interface{}{
 		"type":        getOpenAIType(param.Type),
 		"description": param.Description,
@@ -64,19 +64,19 @@ func convertParameterToSchema(param *servant.Parameter) map[string]interface{} {
 	return schema
 }
 
-func getOpenAIType(paramType servant.ParameterType) string {
+func getOpenAIType(paramType servantic.ParameterType) string {
 	switch paramType {
-	case servant.TypeString:
+	case servantic.TypeString:
 		return "string"
-	case servant.TypeNumber:
+	case servantic.TypeNumber:
 		return "number"
-	case servant.TypeInteger:
+	case servantic.TypeInteger:
 		return "integer"
-	case servant.TypeBoolean:
+	case servantic.TypeBoolean:
 		return "boolean"
-	case servant.TypeArray:
+	case servantic.TypeArray:
 		return "array"
-	case servant.TypeObject:
+	case servantic.TypeObject:
 		return "object"
 	default:
 		return "string"

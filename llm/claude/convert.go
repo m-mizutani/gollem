@@ -2,10 +2,10 @@ package claude
 
 import (
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/m-mizutani/servant"
+	"github.com/m-mizutani/servantic"
 )
 
-func convertTool(tool servant.Tool) *anthropic.ToolParam {
+func convertTool(tool servantic.Tool) *anthropic.ToolParam {
 	spec := tool.Spec()
 	schema := convertParametersToJSONSchema(spec.Parameters)
 
@@ -24,7 +24,7 @@ type jsonSchema struct {
 	Required   []string               `json:"required,omitempty"`
 }
 
-func convertParametersToJSONSchema(params map[string]*servant.Parameter) jsonSchema {
+func convertParametersToJSONSchema(params map[string]*servantic.Parameter) jsonSchema {
 	properties := make(map[string]interface{})
 	required := make([]string, 0)
 
@@ -44,7 +44,7 @@ func convertParametersToJSONSchema(params map[string]*servant.Parameter) jsonSch
 	}
 }
 
-func convertParameterToSchema(param *servant.Parameter) map[string]interface{} {
+func convertParameterToSchema(param *servantic.Parameter) map[string]interface{} {
 	schema := map[string]interface{}{
 		"type":        getClaudeType(param.Type),
 		"description": param.Description,
@@ -75,19 +75,19 @@ func convertParameterToSchema(param *servant.Parameter) map[string]interface{} {
 	return schema
 }
 
-func getClaudeType(paramType servant.ParameterType) string {
+func getClaudeType(paramType servantic.ParameterType) string {
 	switch paramType {
-	case servant.TypeString:
+	case servantic.TypeString:
 		return "string"
-	case servant.TypeNumber:
+	case servantic.TypeNumber:
 		return "number"
-	case servant.TypeInteger:
+	case servantic.TypeInteger:
 		return "integer"
-	case servant.TypeBoolean:
+	case servantic.TypeBoolean:
 		return "boolean"
-	case servant.TypeArray:
+	case servantic.TypeArray:
 		return "array"
-	case servant.TypeObject:
+	case servantic.TypeObject:
 		return "object"
 	default:
 		return "string"

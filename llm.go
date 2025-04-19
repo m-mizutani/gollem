@@ -1,4 +1,4 @@
-package servant
+package servantic
 
 import "context"
 
@@ -22,7 +22,7 @@ type FunctionCall struct {
 	Arguments map[string]any
 }
 
-// Response is a general response type for each servant.
+// Response is a general response type for each servantic.
 type Response struct {
 	Texts         []string
 	FunctionCalls []*FunctionCall
@@ -36,7 +36,7 @@ type inputRestricted struct{}
 
 // Text is a text input as prompt.
 // Usage:
-// input := servant.Text("Hello, world!")
+// input := servantic.Text("Hello, world!")
 type Text string
 
 func (t Text) restricted() inputRestricted {
@@ -46,7 +46,7 @@ func (t Text) restricted() inputRestricted {
 // FunctionResponse is a function response.
 // Usage:
 //
-//	input := servant.FunctionResponse{
+//	input := servantic.FunctionResponse{
 //		Name:      "function_name",
 //		Arguments: map[string]any{"key": "value"},
 //	}

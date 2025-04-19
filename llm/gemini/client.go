@@ -5,7 +5,7 @@ import (
 
 	"cloud.google.com/go/vertexai/genai"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/servant"
+	"github.com/m-mizutani/servantic"
 	"google.golang.org/api/option"
 )
 
@@ -51,8 +51,8 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 }
 
 // NewSession creates a new session for the Gemini API.
-func (c *Client) NewSession(ctx context.Context, tools []servant.Tool) (servant.Session, error) {
-	// Convert servant.Tool to *genai.Tool
+func (c *Client) NewSession(ctx context.Context, tools []servantic.Tool) (servantic.Session, error) {
+	// Convert servantic.Tool to *genai.Tool
 	genaiTools := make([]*genai.Tool, len(tools))
 	for i, tool := range tools {
 		genaiTools[i] = convertTool(tool)
@@ -72,19 +72,19 @@ type Session struct {
 	session *genai.ChatSession
 }
 
-func (s *Session) Generate(ctx context.Context, input ...servant.Input) (*servant.Response, error) {
+func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*servantic.Response, error) {
 	parts := make([]genai.Part, len(input))
 	for i, in := range input {
 		switch v := in.(type) {
-		case servant.Text:
+		case servantic.Text:
 			parts[i] = genai.Text(string(v))
-		case servant.FunctionResponse:
+		case servantic.FunctionResponse:
 			parts[i] = genai.FunctionResponse{
 				Name:     v.Name,
 				Response: v.Data,
 			}
 		default:
-			return nil, goerr.Wrap(servant.ErrInvalidParameter, "invalid input")
+			return nil, goerr.Wrap(servantic.ErrInvalidParameter, "invalid input")
 		}
 	}
 
@@ -94,12 +94,12 @@ func (s *Session) Generate(ctx context.Context, input ...servant.Input) (*servan
 	}
 
 	if len(resp.Candidates) == 0 {
-		return &servant.Response{}, nil
+		return &servantic.Response{}, nil
 	}
 
-	response := &servant.Response{
+	response := &servantic.Response{
 		Texts:         make([]string, 0),
-		FunctionCalls: make([]*servant.FunctionCall, 0),
+		FunctionCalls: make([]*servantic.FunctionCall, 0),
 	}
 
 	for _, part := range resp.Candidates[0].Content.Parts {
@@ -107,7 +107,7 @@ func (s *Session) Generate(ctx context.Context, input ...servant.Input) (*servan
 		case genai.Text:
 			response.Texts = append(response.Texts, string(v))
 		case genai.FunctionCall:
-			response.FunctionCalls = append(response.FunctionCalls, &servant.FunctionCall{
+			response.FunctionCalls = append(response.FunctionCalls, &servantic.FunctionCall{
 				Name:      v.Name,
 				Arguments: v.Args,
 			})

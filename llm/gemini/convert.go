@@ -2,10 +2,10 @@ package gemini
 
 import (
 	"cloud.google.com/go/vertexai/genai"
-	"github.com/m-mizutani/servant"
+	"github.com/m-mizutani/servantic"
 )
 
-func convertTool(tool servant.Tool) *genai.Tool {
+func convertTool(tool servantic.Tool) *genai.Tool {
 	parameters := &genai.Schema{
 		Type:       genai.TypeObject,
 		Properties: make(map[string]*genai.Schema),
@@ -27,7 +27,7 @@ func convertTool(tool servant.Tool) *genai.Tool {
 	}
 }
 
-func convertParameterToSchema(name string, param *servant.Parameter) *genai.Schema {
+func convertParameterToSchema(name string, param *servantic.Parameter) *genai.Schema {
 	schema := &genai.Schema{
 		Type:        getGenaiType(param.Type),
 		Description: param.Description,
@@ -62,19 +62,19 @@ func convertParameterToSchema(name string, param *servant.Parameter) *genai.Sche
 	return schema
 }
 
-func getGenaiType(paramType servant.ParameterType) genai.Type {
+func getGenaiType(paramType servantic.ParameterType) genai.Type {
 	switch paramType {
-	case servant.TypeString:
+	case servantic.TypeString:
 		return genai.TypeString
-	case servant.TypeNumber:
+	case servantic.TypeNumber:
 		return genai.TypeNumber
-	case servant.TypeInteger:
+	case servantic.TypeInteger:
 		return genai.TypeInteger
-	case servant.TypeBoolean:
+	case servantic.TypeBoolean:
 		return genai.TypeBoolean
-	case servant.TypeArray:
+	case servantic.TypeArray:
 		return genai.TypeArray
-	case servant.TypeObject:
+	case servantic.TypeObject:
 		return genai.TypeObject
 	default:
 		return genai.TypeString

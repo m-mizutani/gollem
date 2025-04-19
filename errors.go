@@ -1,4 +1,4 @@
-package servant
+package servantic
 
 import "errors"
 

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/servant"
+	"github.com/m-mizutani/servantic"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -40,8 +40,8 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 }
 
 // NewSession creates a new session for the GPT API.
-func (c *Client) NewSession(ctx context.Context, tools []servant.Tool) (servant.Session, error) {
-	// Convert servant.Tool to openai.FunctionDefinition
+func (c *Client) NewSession(ctx context.Context, tools []servantic.Tool) (servantic.Session, error) {
+	// Convert servantic.Tool to openai.FunctionDefinition
 	openaiTools := make([]openai.FunctionDefinition, len(tools))
 	for i, tool := range tools {
 		openaiTools[i] = convertTool(tool)
@@ -64,16 +64,16 @@ type Session struct {
 	messages     []openai.ChatCompletionMessage
 }
 
-func (s *Session) Generate(ctx context.Context, input ...servant.Input) (*servant.Response, error) {
+func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*servantic.Response, error) {
 	// Convert input to messages
 	for _, in := range input {
 		switch v := in.(type) {
-		case servant.Text:
+		case servantic.Text:
 			s.messages = append(s.messages, openai.ChatCompletionMessage{
 				Role:    openai.ChatMessageRoleUser,
 				Content: string(v),
 			})
-		case servant.FunctionResponse:
+		case servantic.FunctionResponse:
 			response, err := json.Marshal(v.Data)
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to marshal function response")
@@ -84,7 +84,7 @@ func (s *Session) Generate(ctx context.Context, input ...servant.Input) (*servan
 				Content: string(response),
 			})
 		default:
-			return nil, goerr.Wrap(servant.ErrInvalidParameter, "invalid input")
+			return nil, goerr.Wrap(servantic.ErrInvalidParameter, "invalid input")
 		}
 	}
 
@@ -102,12 +102,12 @@ func (s *Session) Generate(ctx context.Context, input ...servant.Input) (*servan
 	}
 
 	if len(resp.Choices) == 0 {
-		return &servant.Response{}, nil
+		return &servantic.Response{}, nil
 	}
 
-	response := &servant.Response{
+	response := &servantic.Response{
 		Texts:         make([]string, 0),
-		FunctionCalls: make([]*servant.FunctionCall, 0),
+		FunctionCalls: make([]*servantic.FunctionCall, 0),
 	}
 
 	message := resp.Choices[0].Message
@@ -121,7 +121,7 @@ func (s *Session) Generate(ctx context.Context, input ...servant.Input) (*servan
 			return nil, goerr.Wrap(err, "failed to unmarshal function arguments")
 		}
 
-		response.FunctionCalls = append(response.FunctionCalls, &servant.FunctionCall{
+		response.FunctionCalls = append(response.FunctionCalls, &servantic.FunctionCall{
 			Name:      message.FunctionCall.Name,
 			Arguments: args,
 		})

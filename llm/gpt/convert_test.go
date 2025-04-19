@@ -5,34 +5,34 @@ import (
 	"testing"
 
 	"github.com/m-mizutani/gt"
-	"github.com/m-mizutani/servant"
-	"github.com/m-mizutani/servant/llm/gpt"
+	"github.com/m-mizutani/servantic"
+	"github.com/m-mizutani/servantic/llm/gpt"
 )
 
 type complexTool struct{}
 
-func (t *complexTool) Spec() *servant.ToolSpec {
-	return &servant.ToolSpec{
+func (t *complexTool) Spec() *servantic.ToolSpec {
+	return &servantic.ToolSpec{
 		Name:        "complex_tool",
 		Description: "A tool with complex parameter structure",
-		Parameters: map[string]*servant.Parameter{
+		Parameters: map[string]*servantic.Parameter{
 			"user": {
-				Type: servant.TypeObject,
-				Properties: map[string]*servant.Parameter{
+				Type: servantic.TypeObject,
+				Properties: map[string]*servantic.Parameter{
 					"name": {
-						Type:        servant.TypeString,
+						Type:        servantic.TypeString,
 						Description: "User's name",
 						Required:    true,
 					},
 					"address": {
-						Type: servant.TypeObject,
-						Properties: map[string]*servant.Parameter{
+						Type: servantic.TypeObject,
+						Properties: map[string]*servantic.Parameter{
 							"street": {
-								Type:        servant.TypeString,
+								Type:        servantic.TypeString,
 								Description: "Street address",
 							},
 							"city": {
-								Type:        servant.TypeString,
+								Type:        servantic.TypeString,
 								Description: "City name",
 							},
 						},
@@ -40,16 +40,16 @@ func (t *complexTool) Spec() *servant.ToolSpec {
 				},
 			},
 			"items": {
-				Type: servant.TypeArray,
-				Items: &servant.Parameter{
-					Type: servant.TypeObject,
-					Properties: map[string]*servant.Parameter{
+				Type: servantic.TypeArray,
+				Items: &servantic.Parameter{
+					Type: servantic.TypeObject,
+					Properties: map[string]*servantic.Parameter{
 						"id": {
-							Type:        servant.TypeString,
+							Type:        servantic.TypeString,
 							Description: "Item ID",
 						},
 						"quantity": {
-							Type:        servant.TypeNumber,
+							Type:        servantic.TypeNumber,
 							Description: "Item quantity",
 						},
 					},
