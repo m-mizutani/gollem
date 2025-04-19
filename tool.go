@@ -46,6 +46,9 @@ type Parameter struct {
 	// Name is the name of the parameter. It's required and must be unique.
 	Name string
 
+	// Title is the user friendly  of the parameter. It's optional.
+	Title string
+
 	// Type is the type of the parameter. It's required.
 	Type ParameterType
 

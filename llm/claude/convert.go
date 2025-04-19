@@ -47,6 +47,7 @@ func convertParametersToJSONSchema(params map[string]*servantic.Parameter) jsonS
 func convertParameterToSchema(param *servantic.Parameter) map[string]interface{} {
 	schema := map[string]interface{}{
 		"type":        getClaudeType(param.Type),
+		"title":       param.Title,
 		"description": param.Description,
 	}
 

@@ -26,6 +26,7 @@ func convertTool(tool servantic.Tool) *genai.FunctionDeclaration {
 func convertParameterToSchema(name string, param *servantic.Parameter) *genai.Schema {
 	schema := &genai.Schema{
 		Type:        getGenaiType(param.Type),
+		Title:       param.Title,
 		Description: param.Description,
 	}
 

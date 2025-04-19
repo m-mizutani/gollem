@@ -17,7 +17,7 @@ type Servantic struct {
 
 	tools      []Tool
 	toolSets   []ToolSet
-	mcpClients []MCPClient
+	mcpClients []*MCPClient
 
 	msgCallback  MsgCallback
 	toolCallback ToolCallback
@@ -81,10 +81,30 @@ func WithToolSets(toolSets ...ToolSet) Option {
 	}
 }
 
-// WithMCPClients sets the MCP clients for the servantic instance.
-func WithMCPClients(mcpClients ...MCPClient) Option {
+// WithMCPStdio sets the MCP client for local MCP executable server via stdio.
+func WithMCPonStdio(path string, args []string, options ...MCPonStdioOption) Option {
 	return func(s *Servantic) {
-		s.mcpClients = append(s.mcpClients, mcpClients...)
+		c := &MCPClient{
+			path: path,
+			args: args,
+		}
+		for _, opt := range options {
+			opt(c)
+		}
+		s.mcpClients = append(s.mcpClients, c)
+	}
+}
+
+// WithMCPonSSE sets the MCP client for remote MCP server via HTTP SSE.
+func WithMCPonSSE(baseURL string, options ...MCPonSSEOption) Option {
+	return func(s *Servantic) {
+		c := &MCPClient{
+			baseURL: baseURL,
+		}
+		for _, opt := range options {
+			opt(c)
+		}
+		s.mcpClients = append(s.mcpClients, c)
 	}
 }
 
@@ -144,7 +164,7 @@ func (s *Servantic) Order(ctx context.Context, prompt string) error {
 	logger.Info("start order", "prompt", prompt)
 
 	tools := append(s.tools, &exitTool{})
-	toolMap, err := buildToolMap(tools, s.toolSets)
+	toolMap, err := buildToolMap(ctx, tools, s.toolSets, s.mcpClients)
 	if err != nil {
 		return err
 	}
@@ -242,12 +262,36 @@ func (x *toolWrapper) Run(ctx context.Context, args map[string]any) (map[string]
 	return x.run(ctx, args)
 }
 
-func buildToolMap(tools []Tool, toolSets []ToolSet) (map[string]Tool, error) {
+func buildToolMap(ctx context.Context, tools []Tool, toolSets []ToolSet, mcpClients []*MCPClient) (map[string]Tool, error) {
 	toolMap := map[string]Tool{}
+
+	for _, mcpClient := range mcpClients {
+		if err := mcpClient.start(ctx); err != nil {
+			return nil, goerr.Wrap(err, "failed to start MCP client")
+		}
+
+		tools, err := mcpClient.listTools(ctx)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to list tools")
+		}
+
+		for _, tool := range tools {
+			if _, ok := toolMap[tool.Name]; ok {
+				return nil, goerr.Wrap(ErrToolNameConflict, "tool name conflict (MCP)", goerr.V("tool_name", tool.Name))
+			}
+
+			wrappedTool, err := wrapMCPToolCall(mcpClient, tool)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to wrap MCP tool")
+			}
+
+			toolMap[tool.Name] = wrappedTool
+		}
+	}
 
 	for _, tool := range tools {
 		if _, ok := toolMap[tool.Spec().Name]; ok {
-			return nil, goerr.Wrap(ErrToolNameConflict, "tool name conflict", goerr.V("tool_name", tool.Spec().Name))
+			return nil, goerr.Wrap(ErrToolNameConflict, "tool name conflict (builtin tools)", goerr.V("tool_name", tool.Spec().Name))
 		}
 		toolMap[tool.Spec().Name] = tool
 	}
@@ -255,7 +299,7 @@ func buildToolMap(tools []Tool, toolSets []ToolSet) (map[string]Tool, error) {
 	for _, toolSet := range toolSets {
 		for _, spec := range toolSet.Specs() {
 			if _, ok := toolMap[spec.Name]; ok {
-				return nil, goerr.Wrap(ErrToolNameConflict, "tool name conflict", goerr.V("tool_name", spec.Name))
+				return nil, goerr.Wrap(ErrToolNameConflict, "tool name conflict (builtintool sets)", goerr.V("tool_name", spec.Name))
 			}
 			toolMap[spec.Name] = &toolWrapper{
 				spec: spec,

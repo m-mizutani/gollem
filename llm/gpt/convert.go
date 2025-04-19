@@ -39,6 +39,7 @@ func convertParameterToSchema(param *servantic.Parameter) map[string]interface{}
 	schema := map[string]interface{}{
 		"type":        getOpenAIType(param.Type),
 		"description": param.Description,
+		"title":       param.Title,
 	}
 
 	if len(param.Enum) > 0 {

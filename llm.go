@@ -11,11 +11,6 @@ type LLMClient interface {
 	NewSession(ctx context.Context, tools []Tool) (Session, error)
 }
 
-type MCPClient interface {
-	ListTools() ([]Tool, error)
-	CallTool(ctx context.Context, name string, args map[string]any) (map[string]any, error)
-}
-
 type FunctionCall struct {
 	ID        string
 	Name      string
@@ -29,18 +24,18 @@ type Response struct {
 }
 
 type Input interface {
-	restricted() inputRestricted
+	isInput() restrictedValue
 }
 
-type inputRestricted struct{}
+type restrictedValue struct{}
 
 // Text is a text input as prompt.
 // Usage:
 // input := servantic.Text("Hello, world!")
 type Text string
 
-func (t Text) restricted() inputRestricted {
-	return inputRestricted{}
+func (t Text) isInput() restrictedValue {
+	return restrictedValue{}
 }
 
 // FunctionResponse is a function response.
@@ -57,6 +52,6 @@ type FunctionResponse struct {
 	Error error
 }
 
-func (f FunctionResponse) restricted() inputRestricted {
-	return inputRestricted{}
+func (f FunctionResponse) isInput() restrictedValue {
+	return restrictedValue{}
 }
