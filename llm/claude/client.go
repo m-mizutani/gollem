@@ -42,15 +42,9 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 
 func (c *Client) NewSession(ctx context.Context, tools []llm.Tool) (llm.Session, error) {
 	// Convert llm.Tool to anthropic.ToolUnionParam
-	claudeTools := make([]anthropic.ToolUnionParam, len(tools))
+	claudeTools := make([]*anthropic.ToolParam, len(tools))
 	for i, tool := range tools {
-		claudeTools[i] = anthropic.ToolUnionParamOfTool(
-			anthropic.ToolInputSchemaParam{
-				Type:       "object",
-				Properties: tool.Parameters(),
-			},
-			tool.Name(),
-		)
+		claudeTools[i] = convertTool(tool)
 	}
 
 	session := &Session{
@@ -65,7 +59,7 @@ func (c *Client) NewSession(ctx context.Context, tools []llm.Tool) (llm.Session,
 type Session struct {
 	client       *anthropic.Client
 	defaultModel string
-	tools        []anthropic.ToolUnionParam
+	tools        []*anthropic.ToolParam
 	messages     []anthropic.MessageParam
 }
 
@@ -95,10 +89,15 @@ func (s *Session) Generate(ctx context.Context, input ...llm.Input) (*llm.Respon
 		toolChoice = anthropic.ToolChoiceParamOfToolChoiceTool("auto")
 	}
 
+	claudeTools := make([]anthropic.ToolUnionParam, len(s.tools))
+	for i, tool := range s.tools {
+		claudeTools[i] = anthropic.ToolUnionParam{OfTool: tool}
+	}
+
 	params := anthropic.MessageNewParams{
 		Model:      s.defaultModel,
 		MaxTokens:  4096,
-		Tools:      s.tools,
+		Tools:      claudeTools,
 		ToolChoice: toolChoice,
 		Messages:   s.messages,
 	}

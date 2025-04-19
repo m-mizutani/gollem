@@ -5,8 +5,7 @@ import (
 	"github.com/m-mizutani/servant/llm"
 )
 
-// ConvertTool converts llm.Tool to anthropic.Tool
-func ConvertTool(tool llm.Tool) anthropic.ToolUnionParam {
+func convertTool(tool llm.Tool) *anthropic.ToolParam {
 	properties := make(map[string]interface{})
 
 	for name, param := range tool.Parameters() {
@@ -14,13 +13,48 @@ func ConvertTool(tool llm.Tool) anthropic.ToolUnionParam {
 		properties[name] = schema
 	}
 
-	return anthropic.ToolUnionParamOfTool(
-		anthropic.ToolInputSchemaParam{
-			Type:       "object",
-			Properties: properties,
+	schema := convertParametersToJSONSchema(tool.Parameters())
+	schemaMap := map[string]interface{}{
+		"type":       schema.Type,
+		"properties": schema.Properties,
+	}
+	if len(schema.Required) > 0 {
+		schemaMap["required"] = schema.Required
+	}
+
+	return &anthropic.ToolParam{
+		Name:        tool.Name(),
+		Description: anthropic.String(tool.Description()),
+		InputSchema: anthropic.ToolInputSchemaParam{
+			Properties: schemaMap,
 		},
-		tool.Name()+" - "+tool.Description(),
-	)
+	}
+}
+
+type jsonSchema struct {
+	Type       string                 `json:"type"`
+	Properties map[string]interface{} `json:"properties"`
+	Required   []string               `json:"required,omitempty"`
+}
+
+func convertParametersToJSONSchema(params map[string]*llm.Parameter) jsonSchema {
+	properties := make(map[string]interface{})
+	required := make([]string, 0)
+
+	for name, param := range params {
+		schema := convertParameterToSchema(param)
+		properties[name] = schema
+
+		if param.Required {
+			required = append(required, name)
+		}
+	}
+
+	return jsonSchema{
+		Type:       "object",
+		Properties: properties,
+		Required:   required,
+	}
 }
 
 func convertParameterToSchema(param *llm.Parameter) map[string]interface{} {

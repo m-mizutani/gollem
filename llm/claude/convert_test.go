@@ -1,10 +1,12 @@
-package claude
+package claude_test
 
 import (
 	"testing"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/m-mizutani/gt"
 	"github.com/m-mizutani/servant/llm"
+	"github.com/m-mizutani/servant/llm/claude"
 )
 
 type complexTool struct{}
@@ -67,14 +69,18 @@ func (t *complexTool) Run(args map[string]any) (map[string]any, error) {
 
 func TestConvertTool(t *testing.T) {
 	tool := &complexTool{}
-	claudeTool := ConvertTool(tool)
+	claudeTool := claude.ConvertTool(tool)
 
 	// Check basic properties
-	gt.Equal(t, claudeTool.OfTool.InputSchema.Type, "object")
-	gt.Equal(t, claudeTool.OfTool.Name, "complex_tool - A tool with complex parameter structure")
+	gt.Equal(t, claudeTool.Name, "complex_tool")
+	gt.Equal(t, claudeTool.Description, anthropic.String("A tool with complex parameter structure"))
+
+	// Check schema properties
+	schema := claudeTool.InputSchema.Properties.(map[string]interface{})
+	gt.Equal(t, schema["type"], "object")
+	props := schema["properties"].(map[string]interface{})
 
 	// Check user parameter
-	props := claudeTool.OfTool.InputSchema.Properties.(map[string]interface{})
 	userProp := props["user"].(map[string]interface{})
 	gt.Equal(t, userProp["type"], "object")
 
