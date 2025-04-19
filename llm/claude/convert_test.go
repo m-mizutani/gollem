@@ -71,7 +71,7 @@ func TestConvertTool(t *testing.T) {
 
 	// Check basic properties
 	gt.Equal(t, claudeTool.OfTool.InputSchema.Type, "object")
-	gt.Equal(t, claudeTool.OfTool.Name, "complex_tool")
+	gt.Equal(t, claudeTool.OfTool.Name, "complex_tool - A tool with complex parameter structure")
 
 	// Check user parameter
 	props := claudeTool.OfTool.InputSchema.Properties.(map[string]interface{})
@@ -81,6 +81,7 @@ func TestConvertTool(t *testing.T) {
 	userProps := userProp["properties"].(map[string]interface{})
 	gt.Equal(t, userProps["name"].(map[string]interface{})["type"], "string")
 	gt.Equal(t, userProps["name"].(map[string]interface{})["description"], "User's name")
+	gt.Equal(t, userProps["name"].(map[string]interface{})["required"], true)
 
 	addressProps := userProps["address"].(map[string]interface{})["properties"].(map[string]interface{})
 	gt.Equal(t, addressProps["street"].(map[string]interface{})["type"], "string")

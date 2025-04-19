@@ -11,9 +11,6 @@ func ConvertTool(tool llm.Tool) anthropic.ToolUnionParam {
 
 	for name, param := range tool.Parameters() {
 		schema := convertParameterToSchema(param)
-		if param.Required {
-			schema["required"] = true
-		}
 		properties[name] = schema
 	}
 
@@ -22,7 +19,7 @@ func ConvertTool(tool llm.Tool) anthropic.ToolUnionParam {
 			Type:       "object",
 			Properties: properties,
 		},
-		tool.Name(),
+		tool.Name()+" - "+tool.Description(),
 	)
 }
 
@@ -32,23 +29,20 @@ func convertParameterToSchema(param *llm.Parameter) map[string]interface{} {
 		"description": param.Description,
 	}
 
+	if param.Required {
+		schema["required"] = true
+	}
+
 	if len(param.Enum) > 0 {
 		schema["enum"] = param.Enum
 	}
 
 	if param.Properties != nil {
 		properties := make(map[string]interface{})
-		required := make([]string, 0)
 		for name, prop := range param.Properties {
 			properties[name] = convertParameterToSchema(prop)
-			if prop.Required {
-				required = append(required, name)
-			}
 		}
 		schema["properties"] = properties
-		if len(required) > 0 {
-			schema["required"] = required
-		}
 	}
 
 	if param.Items != nil {
