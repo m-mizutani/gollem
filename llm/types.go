@@ -3,6 +3,7 @@ package llm
 import "github.com/m-mizutani/goerr/v2"
 
 type FunctionCall struct {
+	ID        string
 	Name      string
 	Arguments map[string]any
 }
@@ -116,8 +117,10 @@ func (t Text) restricted() inputRestricted {
 //		Arguments: map[string]any{"key": "value"},
 //	}
 type FunctionResponse struct {
-	Name string
-	Data map[string]any
+	ID    string
+	Name  string
+	Data  map[string]any
+	Error error
 }
 
 func (f FunctionResponse) restricted() inputRestricted {

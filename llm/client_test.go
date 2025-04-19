@@ -78,6 +78,7 @@ func testLLM(t *testing.T, session llm.Session) {
 		gt.Value(t, args["max"]).Equal(10.0)
 
 		resp, err = session.Generate(ctx, llm.FunctionResponse{
+			ID:   resp.FunctionCalls[0].ID,
 			Name: "random_number",
 			Data: map[string]any{"result": 5.5},
 		})

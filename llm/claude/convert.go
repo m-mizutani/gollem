@@ -6,27 +6,13 @@ import (
 )
 
 func convertTool(tool llm.Tool) *anthropic.ToolParam {
-	properties := make(map[string]interface{})
-
-	for name, param := range tool.Parameters() {
-		schema := convertParameterToSchema(param)
-		properties[name] = schema
-	}
-
 	schema := convertParametersToJSONSchema(tool.Parameters())
-	schemaMap := map[string]interface{}{
-		"type":       schema.Type,
-		"properties": schema.Properties,
-	}
-	if len(schema.Required) > 0 {
-		schemaMap["required"] = schema.Required
-	}
 
 	return &anthropic.ToolParam{
 		Name:        tool.Name(),
 		Description: anthropic.String(tool.Description()),
 		InputSchema: anthropic.ToolInputSchemaParam{
-			Properties: schemaMap,
+			Properties: schema.Properties,
 		},
 	}
 }
@@ -63,20 +49,22 @@ func convertParameterToSchema(param *llm.Parameter) map[string]interface{} {
 		"description": param.Description,
 	}
 
-	if param.Required {
-		schema["required"] = true
-	}
-
 	if len(param.Enum) > 0 {
 		schema["enum"] = param.Enum
 	}
 
+	var required []string
 	if param.Properties != nil {
 		properties := make(map[string]interface{})
 		for name, prop := range param.Properties {
 			properties[name] = convertParameterToSchema(prop)
+			if prop.Required {
+				required = append(required, name)
+			}
 		}
+
 		schema["properties"] = properties
+		schema["required"] = required
 	}
 
 	if param.Items != nil {

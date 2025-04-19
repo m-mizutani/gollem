@@ -25,7 +25,7 @@ func WithDefaultModel(modelName string) Option {
 
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
 	client := &Client{
-		defaultModel: anthropic.ModelClaude3_7SonnetLatest,
+		defaultModel: anthropic.ModelClaude3_5SonnetLatest,
 	}
 
 	for _, option := range options {
@@ -64,6 +64,7 @@ type Session struct {
 }
 
 func (s *Session) Generate(ctx context.Context, input ...llm.Input) (*llm.Response, error) {
+	var toolResults []anthropic.ContentBlockParamUnion
 	// Convert input to messages
 	for _, in := range input {
 		switch v := in.(type) {
@@ -71,22 +72,21 @@ func (s *Session) Generate(ctx context.Context, input ...llm.Input) (*llm.Respon
 			s.messages = append(s.messages, anthropic.NewUserMessage(
 				anthropic.NewTextBlock(string(v)),
 			))
+
 		case llm.FunctionResponse:
 			response, err := json.Marshal(v.Data)
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to marshal function response")
 			}
-			s.messages = append(s.messages, anthropic.NewAssistantMessage(
-				anthropic.NewTextBlock(string(response)),
-			))
+			toolResults = append(toolResults, anthropic.NewToolResultBlock(v.ID, string(response), v.Error != nil))
+
 		default:
 			return nil, goerr.Wrap(llm.ErrInvalidParameter, "invalid input")
 		}
 	}
 
-	var toolChoice anthropic.ToolChoiceUnionParam
-	if len(s.tools) > 0 {
-		toolChoice = anthropic.ToolChoiceParamOfToolChoiceTool("auto")
+	if len(toolResults) > 0 {
+		s.messages = append(s.messages, anthropic.NewUserMessage(toolResults...))
 	}
 
 	claudeTools := make([]anthropic.ToolUnionParam, len(s.tools))
@@ -95,17 +95,17 @@ func (s *Session) Generate(ctx context.Context, input ...llm.Input) (*llm.Respon
 	}
 
 	params := anthropic.MessageNewParams{
-		Model:      s.defaultModel,
-		MaxTokens:  4096,
-		Tools:      claudeTools,
-		ToolChoice: toolChoice,
-		Messages:   s.messages,
+		Model:     s.defaultModel,
+		MaxTokens: 4096,
+		Tools:     claudeTools,
+		Messages:  s.messages,
 	}
 
 	resp, err := s.client.Messages.New(ctx, params)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create message")
 	}
+	s.messages = append(s.messages, resp.ToParam())
 
 	if len(resp.Content) == 0 {
 		return &llm.Response{}, nil
@@ -130,6 +130,7 @@ func (s *Session) Generate(ctx context.Context, input ...llm.Input) (*llm.Respon
 			}
 
 			response.FunctionCalls = append(response.FunctionCalls, &llm.FunctionCall{
+				ID:        toolUseBlock.ID,
 				Name:      toolUseBlock.Name,
 				Arguments: args,
 			})
