@@ -79,7 +79,7 @@ func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*serv
 				return nil, goerr.Wrap(err, "failed to marshal function response")
 			}
 			s.messages = append(s.messages, openai.ChatCompletionMessage{
-				Role:    openai.ChatMessageRoleFunction,
+				Role:    openai.ChatMessageRoleTool,
 				Name:    v.Name,
 				Content: string(response),
 			})
@@ -91,10 +91,9 @@ func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*serv
 	resp, err := s.client.CreateChatCompletion(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model:        s.defaultModel,
-			Messages:     s.messages,
-			Functions:    s.tools,
-			FunctionCall: "auto",
+			Model:     s.defaultModel,
+			Messages:  s.messages,
+			Functions: s.tools,
 		},
 	)
 	if err != nil {
@@ -113,6 +112,10 @@ func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*serv
 	message := resp.Choices[0].Message
 	if message.Content != "" {
 		response.Texts = append(response.Texts, message.Content)
+		s.messages = append(s.messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleAssistant,
+			Content: message.Content,
+		})
 	}
 
 	if message.FunctionCall != nil {
@@ -122,8 +125,13 @@ func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*serv
 		}
 
 		response.FunctionCalls = append(response.FunctionCalls, &servantic.FunctionCall{
+			ID:        message.ToolCallID,
 			Name:      message.FunctionCall.Name,
 			Arguments: args,
+		})
+		s.messages = append(s.messages, openai.ChatCompletionMessage{
+			Role:         openai.ChatMessageRoleTool,
+			FunctionCall: message.FunctionCall,
 		})
 	}
 

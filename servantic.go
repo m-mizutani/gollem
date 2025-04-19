@@ -150,9 +150,12 @@ func (s *Servantic) Order(ctx context.Context, prompt string) error {
 	}
 
 	toolList := make([]Tool, 0, len(toolMap))
+	toolNames := make([]string, 0, len(toolMap))
 	for _, tool := range toolMap {
 		toolList = append(toolList, tool)
+		toolNames = append(toolNames, tool.Spec().Name)
 	}
+	logger.Debug("tool list", "names", toolNames)
 
 	ssn, err := s.llm.NewSession(ctx, toolList)
 	if err != nil {
@@ -166,6 +169,7 @@ func (s *Servantic) Order(ctx context.Context, prompt string) error {
 		if err != nil {
 			return goerr.Wrap(err, "failed to generate response")
 		}
+		input = nil
 
 		// Check if the exit tool is called at first
 		for _, toolCall := range resp.FunctionCalls {
@@ -211,6 +215,7 @@ func (s *Servantic) Order(ctx context.Context, prompt string) error {
 
 			input = append(input, FunctionResponse{
 				ID:   toolCall.ID,
+				Name: toolCall.Name,
 				Data: result,
 			})
 		}
@@ -268,7 +273,7 @@ const (
 func (x *exitTool) Spec() *ToolSpec {
 	return &ToolSpec{
 		Name:        ExitToolName,
-		Description: "Exit the session. When calling this tool, the session will be finished immediately and any other tool calls and text generation will be ignored.",
+		Description: "When you determine that the task for user prompt is completed, call this tool. When calling this tool, the session will be finished immediately and any other tool calls and text generation will be ignored.",
 	}
 }
 
