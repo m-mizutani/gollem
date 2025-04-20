@@ -1,14 +1,17 @@
 package servantic
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 type MCPClient struct {
@@ -131,72 +134,74 @@ func (c *MCPClient) close() error {
 	return nil
 }
 
-func valueOrEmpty[T any](v any) T {
-	var empty T
-	if v == nil {
-		return empty
-	}
-	if v, ok := v.(T); ok {
-		return v
-	}
-	return empty
-}
-
 func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (map[string]*Parameter, error) {
 	parameters := map[string]*Parameter{}
+	jsonSchema, err := json.Marshal(inputSchema)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to marshal input schema")
+	}
 
-	for name, property := range inputSchema.Properties {
-		prop, ok := property.(map[string]any)
-		if !ok {
-			return nil, goerr.Wrap(ErrInvalidInputSchema, "invalid property", goerr.V("property", property))
-		}
+	rawSchema, err := jsonschema.UnmarshalJSON(bytes.NewReader(jsonSchema))
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to compile input schema")
+	}
 
-		parameter, err := propertyToParameter(name, prop)
-		if err != nil {
-			return nil, err
-		}
-		parameters[name] = parameter
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("schema.json", rawSchema); err != nil {
+		return nil, goerr.Wrap(err, "failed to add resource to compiler")
+	}
+	schema, err := c.Compile("schema.json")
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to compile input schema")
+	}
+
+	if schema.Types.String() != "object" {
+		return nil, goerr.Wrap(ErrInvalidInputSchema, "invalid input schema", goerr.V("schema", schema))
+	}
+
+	for name, property := range schema.Properties {
+		parameters[name] = jsonSchemaToParameter(property)
 	}
 
 	return parameters, nil
 }
 
-func propertyToParameter(name string, prop map[string]any) (*Parameter, error) {
-	var properties map[string]*Parameter
-	var items *Parameter
-	propType := valueOrEmpty[string](prop["type"])
-
-	if propType == "object" {
-		properties = map[string]*Parameter{}
-		nestedProperty := valueOrEmpty[map[string]any](prop["properties"])
-
-		for k, v := range nestedProperty {
-			objParam, err := propertyToParameter(k, v.(map[string]any))
-			if err != nil {
-				return nil, err
-			}
-			properties[k] = objParam
-		}
+func jsonSchemaToParameter(schema *jsonschema.Schema) *Parameter {
+	var enum []string
+	for _, v := range schema.Enum.Values {
+		enum = append(enum, fmt.Sprintf("%v", v))
 	}
 
-	if propType == "array" {
-		v, err := propertyToParameter(name, prop["items"].(map[string]any))
-		if err != nil {
-			return nil, err
+	properties := map[string]*Parameter{}
+	for name, property := range schema.Properties {
+		properties[name] = jsonSchemaToParameter(property)
+	}
+
+	var items *Parameter
+	if schema.Items != nil {
+		switch v := schema.Items.(type) {
+		case *jsonschema.Schema:
+			items = jsonSchemaToParameter(v)
+			/*
+				case []*jsonschema.Schema:
+					items = &Parameter{
+						Type: ParameterType(schema.Format.Name),
+					}
+			*/
 		}
-		items = v
 	}
 
 	return &Parameter{
-		Name:        name,
-		Type:        ParameterType(propType),
-		Title:       valueOrEmpty[string](prop["title"]),
-		Description: valueOrEmpty[string](prop["description"]),
-		Required:    valueOrEmpty[bool](prop["required"]),
-		Enum:        valueOrEmpty[[]string](prop["enum"]),
-		Properties:  properties,
-		Items:       items,
-	}, nil
+		Name:        schema.Format.Name,
+		Type:        ParameterType(schema.Format.Name),
+		Title:       schema.Title,
+		Description: schema.Description,
+		// TODO: Fix later
+		// Required:    schema.Required,
+		Enum:       enum,
+		Properties: properties,
+		Items:      items,
+	}
 }
 
 func wrapMCPToolCall(mcpClient *MCPClient, tool mcp.Tool) (*toolWrapper, error) {

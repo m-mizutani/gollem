@@ -9,6 +9,7 @@ require (
 	github.com/m-mizutani/goerr/v2 v2.0.0-alpha.3
 	github.com/m-mizutani/gt v0.0.16
 	github.com/mark3labs/mcp-go v0.22.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.1
 	github.com/sashabaranov/go-openai v1.38.2
 	google.golang.org/api v0.211.0
 )
