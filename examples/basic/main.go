@@ -21,15 +21,20 @@ func (t *HelloTool) Spec() *servantic.ToolSpec {
 				Name:        "name",
 				Type:        servantic.TypeString,
 				Description: "Name of the person to greet",
-				Required:    true,
 			},
 		},
+		Required: []string{"name"},
 	}
 }
 
 func (t *HelloTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	name, ok := args["name"].(string)
+	if !ok {
+		return nil, fmt.Errorf("name is required")
+	}
+
 	return map[string]any{
-		"message": fmt.Sprintf("Hello, %s!", args["name"]),
+		"message": fmt.Sprintf("Hello, %s!", name),
 	}, nil
 }
 

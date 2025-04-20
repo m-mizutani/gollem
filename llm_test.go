@@ -25,25 +25,29 @@ func (t *randomNumberTool) Spec() *servantic.ToolSpec {
 				Name:        "min",
 				Type:        servantic.TypeNumber,
 				Description: "Minimum value of the random number",
-				Required:    true,
 			},
 			"max": {
 				Name:        "max",
 				Type:        servantic.TypeNumber,
 				Description: "Maximum value of the random number",
-				Required:    true,
 			},
 		},
+		Required: []string{"min", "max"},
 	}
 }
 
 func (t *randomNumberTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	min, ok := args["min"].(float64)
+	params, ok := args["params"].(map[string]any)
+	if !ok {
+		return nil, goerr.New("params is required")
+	}
+
+	min, ok := params["min"].(float64)
 	if !ok {
 		return nil, goerr.New("min is required")
 	}
 
-	max, ok := args["max"].(float64)
+	max, ok := params["max"].(float64)
 	if !ok {
 		return nil, goerr.New("max is required")
 	}

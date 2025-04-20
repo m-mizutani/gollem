@@ -26,21 +26,15 @@ type jsonSchema struct {
 
 func convertParametersToJSONSchema(params map[string]*servantic.Parameter) jsonSchema {
 	properties := make(map[string]interface{})
-	required := make([]string, 0)
 
 	for name, param := range params {
 		schema := convertParameterToSchema(param)
 		properties[name] = schema
-
-		if param.Required {
-			required = append(required, name)
-		}
 	}
 
 	return jsonSchema{
 		Type:       "object",
 		Properties: properties,
-		Required:   required,
 	}
 }
 
@@ -55,18 +49,15 @@ func convertParameterToSchema(param *servantic.Parameter) map[string]interface{}
 		schema["enum"] = param.Enum
 	}
 
-	var required []string
 	if param.Properties != nil {
 		properties := make(map[string]interface{})
 		for name, prop := range param.Properties {
 			properties[name] = convertParameterToSchema(prop)
-			if prop.Required {
-				required = append(required, name)
-			}
 		}
-
 		schema["properties"] = properties
-		schema["required"] = required
+		if len(param.Required) > 0 {
+			schema["required"] = param.Required
+		}
 	}
 
 	if param.Items != nil {

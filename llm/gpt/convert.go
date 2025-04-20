@@ -9,21 +9,15 @@ import (
 func convertTool(tool servantic.Tool) openai.Tool {
 	parameters := make(map[string]interface{})
 	properties := make(map[string]interface{})
-	required := make([]string, 0)
 	spec := tool.Spec()
 
 	for name, param := range spec.Parameters {
 		properties[name] = convertParameterToSchema(param)
-		if param.Required {
-			required = append(required, name)
-		}
 	}
 
 	parameters["type"] = "object"
 	parameters["properties"] = properties
-	if len(required) > 0 {
-		parameters["required"] = required
-	}
+	parameters["required"] = spec.Required
 
 	return openai.Tool{
 		Type: openai.ToolTypeFunction,
@@ -48,16 +42,12 @@ func convertParameterToSchema(param *servantic.Parameter) map[string]interface{}
 
 	if param.Properties != nil {
 		properties := make(map[string]interface{})
-		required := make([]string, 0)
 		for name, prop := range param.Properties {
 			properties[name] = convertParameterToSchema(prop)
-			if prop.Required {
-				required = append(required, name)
-			}
 		}
 		schema["properties"] = properties
-		if len(required) > 0 {
-			schema["required"] = required
+		if len(param.Required) > 0 {
+			schema["required"] = param.Required
 		}
 	}
 

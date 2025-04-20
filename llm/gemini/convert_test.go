@@ -16,14 +16,15 @@ func (t *complexTool) Spec() *servantic.ToolSpec {
 	return &servantic.ToolSpec{
 		Name:        "complex_tool",
 		Description: "A tool with complex parameter structure",
+		Required:    []string{"user", "items"},
 		Parameters: map[string]*servantic.Parameter{
 			"user": {
-				Type: servantic.TypeObject,
+				Type:     servantic.TypeObject,
+				Required: []string{"name"},
 				Properties: map[string]*servantic.Parameter{
 					"name": {
 						Type:        servantic.TypeString,
 						Description: "User's name",
-						Required:    true,
 					},
 					"address": {
 						Type: servantic.TypeObject,
@@ -73,6 +74,7 @@ func TestConvertTool(t *testing.T) {
 
 	params := genaiTool.Parameters
 	gt.Value(t, params.Type).Equal(genai.TypeObject)
+	gt.Value(t, params.Required).Equal([]string{"user", "items"})
 
 	// Check user object
 	user := params.Properties["user"]

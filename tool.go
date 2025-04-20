@@ -11,6 +11,7 @@ type ToolSpec struct {
 	Name        string
 	Description string
 	Parameters  map[string]*Parameter
+	Required    []string
 }
 
 // Validate validates the tool specification.
@@ -55,8 +56,8 @@ type Parameter struct {
 	// Description is the description of the parameter. It's optional.
 	Description string
 
-	// Required is the required flag of the parameter.
-	Required bool
+	// Required is the list of required field names when Type is Object.
+	Required []string
 
 	// Enum is the enum of the parameter. It's optional.
 	Enum []string
@@ -90,6 +91,12 @@ func (p *Parameter) Validate() error {
 		for _, prop := range p.Properties {
 			if err := prop.Validate(); err != nil {
 				return eb.Wrap(ErrInvalidParameter, "invalid property")
+			}
+		}
+		// Validate required fields exist in properties
+		for _, req := range p.Required {
+			if _, ok := p.Properties[req]; !ok {
+				return eb.Wrap(ErrInvalidParameter, "required field not found in properties", goerr.V("field", req))
 			}
 		}
 	}

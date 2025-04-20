@@ -18,12 +18,12 @@ func (t *complexTool) Spec() *servantic.ToolSpec {
 		Description: "A tool with complex parameter structure",
 		Parameters: map[string]*servantic.Parameter{
 			"user": {
-				Type: servantic.TypeObject,
+				Type:     servantic.TypeObject,
+				Required: []string{"name"},
 				Properties: map[string]*servantic.Parameter{
 					"name": {
 						Type:        servantic.TypeString,
 						Description: "User's name",
-						Required:    true,
 					},
 					"address": {
 						Type: servantic.TypeObject,
@@ -37,6 +37,7 @@ func (t *complexTool) Spec() *servantic.ToolSpec {
 								Description: "City name",
 							},
 						},
+						Required: []string{"street"},
 					},
 				},
 			},
