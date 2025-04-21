@@ -18,7 +18,6 @@ func (t *HelloTool) Spec() *servantic.ToolSpec {
 		Description: "Returns a greeting",
 		Parameters: map[string]*servantic.Parameter{
 			"name": {
-				Name:        "name",
 				Type:        servantic.TypeString,
 				Description: "Name of the person to greet",
 			},

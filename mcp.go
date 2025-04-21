@@ -134,7 +134,7 @@ func (c *MCPClient) close() error {
 	return nil
 }
 
-func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (map[string]*Parameter, error) {
+func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (*Parameter, error) {
 	parameters := map[string]*Parameter{}
 	jsonSchema, err := json.Marshal(inputSchema)
 	if err != nil {
@@ -155,7 +155,8 @@ func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (map[string]*Parame
 		return nil, goerr.Wrap(err, "failed to compile input schema")
 	}
 
-	if schema.Types.String() != "object" {
+	schemaType := schema.Types.ToStrings()
+	if len(schemaType) != 1 || schemaType[0] != "object" {
 		return nil, goerr.Wrap(ErrInvalidInputSchema, "invalid input schema", goerr.V("schema", schema))
 	}
 
@@ -163,13 +164,21 @@ func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (map[string]*Parame
 		parameters[name] = jsonSchemaToParameter(property)
 	}
 
-	return parameters, nil
+	return &Parameter{
+		Type:        ParameterType(schema.Types.ToStrings()[0]),
+		Title:       schema.Title,
+		Description: schema.Description,
+		Required:    schema.Required,
+		Properties:  parameters,
+	}, nil
 }
 
 func jsonSchemaToParameter(schema *jsonschema.Schema) *Parameter {
 	var enum []string
-	for _, v := range schema.Enum.Values {
-		enum = append(enum, fmt.Sprintf("%v", v))
+	if schema.Enum != nil {
+		for _, v := range schema.Enum.Values {
+			enum = append(enum, fmt.Sprintf("%v", v))
+		}
 	}
 
 	properties := map[string]*Parameter{}
@@ -182,25 +191,17 @@ func jsonSchemaToParameter(schema *jsonschema.Schema) *Parameter {
 		switch v := schema.Items.(type) {
 		case *jsonschema.Schema:
 			items = jsonSchemaToParameter(v)
-			/*
-				case []*jsonschema.Schema:
-					items = &Parameter{
-						Type: ParameterType(schema.Format.Name),
-					}
-			*/
 		}
 	}
 
 	return &Parameter{
-		Name:        schema.Format.Name,
-		Type:        ParameterType(schema.Format.Name),
+		Type:        ParameterType(schema.Types.ToStrings()[0]),
 		Title:       schema.Title,
 		Description: schema.Description,
-		// TODO: Fix later
-		// Required:    schema.Required,
-		Enum:       enum,
-		Properties: properties,
-		Items:      items,
+		Required:    schema.Required,
+		Enum:        enum,
+		Properties:  properties,
+		Items:       items,
 	}
 }
 
@@ -214,7 +215,8 @@ func wrapMCPToolCall(mcpClient *MCPClient, tool mcp.Tool) (*toolWrapper, error) 
 		spec: &ToolSpec{
 			Name:        tool.Name,
 			Description: tool.Description,
-			Parameters:  parameters,
+			Parameters:  parameters.Properties,
+			Required:    parameters.Required,
 		},
 		run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
 			resp, err := mcpClient.callTool(ctx, tool.Name, args)

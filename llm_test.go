@@ -22,12 +22,10 @@ func (t *randomNumberTool) Spec() *servantic.ToolSpec {
 		Description: "A tool for generating random numbers within a specified range",
 		Parameters: map[string]*servantic.Parameter{
 			"min": {
-				Name:        "min",
 				Type:        servantic.TypeNumber,
 				Description: "Minimum value of the random number",
 			},
 			"max": {
-				Name:        "max",
 				Type:        servantic.TypeNumber,
 				Description: "Maximum value of the random number",
 			},

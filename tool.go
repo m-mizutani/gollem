@@ -44,9 +44,6 @@ const (
 
 // Parameter is a parameter of a tool.
 type Parameter struct {
-	// Name is the name of the parameter. It's required and must be unique.
-	Name string
-
 	// Title is the user friendly  of the parameter. It's optional.
 	Title string
 
@@ -72,10 +69,6 @@ type Parameter struct {
 // Validate validates the parameter.
 func (p *Parameter) Validate() error {
 	eb := goerr.NewBuilder(goerr.V("parameter", p))
-	// Name is required
-	if p.Name == "" {
-		return eb.Wrap(ErrInvalidParameter, "name is required")
-	}
 
 	// Type is required
 	if p.Type == "" {
