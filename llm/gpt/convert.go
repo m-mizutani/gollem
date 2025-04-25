@@ -5,7 +5,7 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-// ConvertTool converts servantic.Tool to openai.Tool
+// convertTool converts servantic.Tool to openai.Tool
 func convertTool(tool servantic.Tool) openai.Tool {
 	parameters := make(map[string]interface{})
 	properties := make(map[string]interface{})
@@ -29,6 +29,7 @@ func convertTool(tool servantic.Tool) openai.Tool {
 	}
 }
 
+// convertParameterToSchema converts servantic.Parameter to OpenAI schema
 func convertParameterToSchema(param *servantic.Parameter) map[string]interface{} {
 	schema := map[string]interface{}{
 		"type":        getOpenAIType(param.Type),
@@ -53,6 +54,44 @@ func convertParameterToSchema(param *servantic.Parameter) map[string]interface{}
 
 	if param.Items != nil {
 		schema["items"] = convertParameterToSchema(param.Items)
+	}
+
+	// Add number constraints
+	if param.Type == servantic.TypeNumber || param.Type == servantic.TypeInteger {
+		if param.Minimum != nil {
+			schema["minimum"] = *param.Minimum
+		}
+		if param.Maximum != nil {
+			schema["maximum"] = *param.Maximum
+		}
+	}
+
+	// Add string constraints
+	if param.Type == servantic.TypeString {
+		if param.MinLength != nil {
+			schema["minLength"] = *param.MinLength
+		}
+		if param.MaxLength != nil {
+			schema["maxLength"] = *param.MaxLength
+		}
+		if param.Pattern != "" {
+			schema["pattern"] = param.Pattern
+		}
+	}
+
+	// Add array constraints
+	if param.Type == servantic.TypeArray {
+		if param.MinItems != nil {
+			schema["minItems"] = *param.MinItems
+		}
+		if param.MaxItems != nil {
+			schema["maxItems"] = *param.MaxItems
+		}
+	}
+
+	// Add default value
+	if param.Default != nil {
+		schema["default"] = param.Default
 	}
 
 	return schema

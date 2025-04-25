@@ -5,6 +5,31 @@ import (
 	"github.com/m-mizutani/servantic"
 )
 
+// ConvertTool converts servantic.Tool to Claude tool
+func ConvertTool(tool servantic.Tool) *anthropic.Tool {
+	spec := tool.Spec()
+	parameters := make(map[string]interface{})
+	properties := make(map[string]interface{})
+
+	for name, param := range spec.Parameters {
+		properties[name] = ConvertParameterToSchema(param)
+	}
+
+	parameters["type"] = "object"
+	parameters["properties"] = properties
+	parameters["required"] = spec.Required
+
+	return &anthropic.Tool{
+		Name:        spec.Name,
+		Description: anthropic.String(spec.Description),
+		InputSchema: &anthropic.Schema{
+			Type:       "object",
+			Properties: parameters,
+		},
+	}
+}
+
+// convertTool converts servantic.Tool to Claude tool
 func convertTool(tool servantic.Tool) *anthropic.ToolParam {
 	spec := tool.Spec()
 	schema := convertParametersToJSONSchema(spec.Parameters)
@@ -38,11 +63,12 @@ func convertParametersToJSONSchema(params map[string]*servantic.Parameter) jsonS
 	}
 }
 
+// convertParameterToSchema converts servantic.Parameter to Claude schema
 func convertParameterToSchema(param *servantic.Parameter) map[string]interface{} {
 	schema := map[string]interface{}{
-		"type":        getClaudeType(param.Type),
-		"title":       param.Title,
+		"type":        getAnthropicType(param.Type),
 		"description": param.Description,
+		"title":       param.Title,
 	}
 
 	if len(param.Enum) > 0 {
@@ -64,10 +90,67 @@ func convertParameterToSchema(param *servantic.Parameter) map[string]interface{}
 		schema["items"] = convertParameterToSchema(param.Items)
 	}
 
+	// Add number constraints
+	if param.Type == servantic.TypeNumber || param.Type == servantic.TypeInteger {
+		if param.Minimum != nil {
+			schema["minimum"] = *param.Minimum
+		}
+		if param.Maximum != nil {
+			schema["maximum"] = *param.Maximum
+		}
+	}
+
+	// Add string constraints
+	if param.Type == servantic.TypeString {
+		if param.MinLength != nil {
+			schema["minLength"] = *param.MinLength
+		}
+		if param.MaxLength != nil {
+			schema["maxLength"] = *param.MaxLength
+		}
+		if param.Pattern != "" {
+			schema["pattern"] = param.Pattern
+		}
+	}
+
+	// Add array constraints
+	if param.Type == servantic.TypeArray {
+		if param.MinItems != nil {
+			schema["minItems"] = *param.MinItems
+		}
+		if param.MaxItems != nil {
+			schema["maxItems"] = *param.MaxItems
+		}
+	}
+
+	// Add default value
+	if param.Default != nil {
+		schema["default"] = param.Default
+	}
+
 	return schema
 }
 
 func getClaudeType(paramType servantic.ParameterType) string {
+	switch paramType {
+	case servantic.TypeString:
+		return "string"
+	case servantic.TypeNumber:
+		return "number"
+	case servantic.TypeInteger:
+		return "integer"
+	case servantic.TypeBoolean:
+		return "boolean"
+	case servantic.TypeArray:
+		return "array"
+	case servantic.TypeObject:
+		return "object"
+	default:
+		return "string"
+	}
+}
+
+func getAnthropicType(paramType servantic.ParameterType) string {
 	switch paramType {
 	case servantic.TypeString:
 		return "string"

@@ -1,6 +1,7 @@
 package gemini
 
-// Export test functions
+// Export convert functions for testing
 var (
-	ConvertTool = convertTool
+	ConvertTool              = convertTool
+	ConvertParameterToSchema = convertParameterToSchema
 )

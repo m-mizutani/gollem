@@ -98,3 +98,55 @@ func TestConvertTool(t *testing.T) {
 	gt.Equal(t, itemsProps["id"].(map[string]interface{})["type"], "string")
 	gt.Equal(t, itemsProps["quantity"].(map[string]interface{})["type"], "number")
 }
+
+func TestConvertParameterToSchema(t *testing.T) {
+	t.Run("number constraints", func(t *testing.T) {
+		p := &servantic.Parameter{
+			Type:    servantic.TypeNumber,
+			Minimum: ptr(1.0),
+			Maximum: ptr(10.0),
+		}
+		schema := claude.ConvertParameterToSchema(p)
+		gt.Value(t, schema["minimum"]).Equal(1.0)
+		gt.Value(t, schema["maximum"]).Equal(10.0)
+	})
+
+	t.Run("string constraints", func(t *testing.T) {
+		p := &servantic.Parameter{
+			Type:      servantic.TypeString,
+			MinLength: ptr(1),
+			MaxLength: ptr(10),
+			Pattern:   "^[a-z]+$",
+		}
+		schema := claude.ConvertParameterToSchema(p)
+		gt.Value(t, schema["minLength"]).Equal(1)
+		gt.Value(t, schema["maxLength"]).Equal(10)
+		gt.Value(t, schema["pattern"]).Equal("^[a-z]+$")
+	})
+
+	t.Run("array constraints", func(t *testing.T) {
+		p := &servantic.Parameter{
+			Type:     servantic.TypeArray,
+			Items:    &servantic.Parameter{Type: servantic.TypeString},
+			MinItems: ptr(1),
+			MaxItems: ptr(10),
+		}
+		schema := claude.ConvertParameterToSchema(p)
+		gt.Value(t, schema["minItems"]).Equal(1)
+		gt.Value(t, schema["maxItems"]).Equal(10)
+		gt.Value(t, schema["items"].(map[string]interface{})["type"]).Equal("string")
+	})
+
+	t.Run("default value", func(t *testing.T) {
+		p := &servantic.Parameter{
+			Type:    servantic.TypeString,
+			Default: "default value",
+		}
+		schema := claude.ConvertParameterToSchema(p)
+		gt.Value(t, schema["default"]).Equal("default value")
+	})
+}
+
+func ptr[T any](v T) *T {
+	return &v
+}

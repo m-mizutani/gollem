@@ -2,6 +2,7 @@ package servantic
 
 import (
 	"context"
+	"regexp"
 
 	"github.com/m-mizutani/goerr/v2"
 )
@@ -64,6 +65,22 @@ type Parameter struct {
 
 	// Items is the items of the parameter. It's used for array type.
 	Items *Parameter
+
+	// Number constraints
+	Minimum *float64
+	Maximum *float64
+
+	// String constraints
+	MinLength *int
+	MaxLength *int
+	Pattern   string
+
+	// Array constraints
+	MinItems *int
+	MaxItems *int
+
+	// Default value
+	Default interface{}
 }
 
 // Validate validates the parameter.
@@ -105,9 +122,30 @@ func (p *Parameter) Validate() error {
 		}
 	}
 
-	// Enum is only valid for string type
-	if len(p.Enum) > 0 && p.Type != TypeString {
-		return eb.Wrap(ErrInvalidParameter, "enum is only valid for string type")
+	// Validate number constraints
+	if p.Type == TypeNumber || p.Type == TypeInteger {
+		if p.Minimum != nil && p.Maximum != nil && *p.Minimum > *p.Maximum {
+			return eb.Wrap(ErrInvalidParameter, "minimum must be less than or equal to maximum")
+		}
+	}
+
+	// Validate string constraints
+	if p.Type == TypeString {
+		if p.MinLength != nil && p.MaxLength != nil && *p.MinLength > *p.MaxLength {
+			return eb.Wrap(ErrInvalidParameter, "minLength must be less than or equal to maxLength")
+		}
+		if p.Pattern != "" {
+			if _, err := regexp.Compile(p.Pattern); err != nil {
+				return eb.Wrap(ErrInvalidParameter, "invalid pattern", goerr.V("pattern", p.Pattern))
+			}
+		}
+	}
+
+	// Validate array constraints
+	if p.Type == TypeArray {
+		if p.MinItems != nil && p.MaxItems != nil && *p.MinItems > *p.MaxItems {
+			return eb.Wrap(ErrInvalidParameter, "minItems must be less than or equal to maxItems")
+		}
 	}
 
 	return nil
