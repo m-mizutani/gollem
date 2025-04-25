@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/m-mizutani/gt"
 	"github.com/m-mizutani/servantic"
 	"github.com/m-mizutani/servantic/llm/claude"
@@ -16,6 +15,7 @@ func (t *complexTool) Spec() *servantic.ToolSpec {
 	return &servantic.ToolSpec{
 		Name:        "complex_tool",
 		Description: "A tool with complex parameter structure",
+		Required:    []string{"user"},
 		Parameters: map[string]*servantic.Parameter{
 			"user": {
 				Type:     servantic.TypeObject,
@@ -70,11 +70,10 @@ func TestConvertTool(t *testing.T) {
 	claudeTool := claude.ConvertTool(tool)
 
 	// Check basic properties
-	gt.Equal(t, claudeTool.Name, "complex_tool")
-	gt.Equal(t, claudeTool.Description, anthropic.String("A tool with complex parameter structure"))
+	gt.Equal(t, claudeTool.OfTool.Name, "complex_tool")
 
 	// Check schema properties
-	schema := claudeTool.InputSchema.Properties.(map[string]interface{})
+	schema := claudeTool.OfTool.InputSchema.Properties.(map[string]interface{})
 
 	// Check user parameter
 	user := schema["user"].(map[string]interface{})

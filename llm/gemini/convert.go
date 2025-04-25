@@ -84,10 +84,7 @@ func convertParameterToSchema(param *servantic.Parameter) *genai.Schema {
 		}
 	}
 
-	// Add default value
-	if param.Default != nil {
-		schema.Default = param.Default
-	}
+	// No default value in Gemini
 
 	return schema
 }

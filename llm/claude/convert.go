@@ -5,42 +5,16 @@ import (
 	"github.com/m-mizutani/servantic"
 )
 
-// ConvertTool converts servantic.Tool to Claude tool
-func ConvertTool(tool servantic.Tool) *anthropic.Tool {
-	spec := tool.Spec()
-	parameters := make(map[string]interface{})
-	properties := make(map[string]interface{})
-
-	for name, param := range spec.Parameters {
-		properties[name] = ConvertParameterToSchema(param)
-	}
-
-	parameters["type"] = "object"
-	parameters["properties"] = properties
-	parameters["required"] = spec.Required
-
-	return &anthropic.Tool{
-		Name:        spec.Name,
-		Description: anthropic.String(spec.Description),
-		InputSchema: &anthropic.Schema{
-			Type:       "object",
-			Properties: parameters,
-		},
-	}
-}
-
-// convertTool converts servantic.Tool to Claude tool
-func convertTool(tool servantic.Tool) *anthropic.ToolParam {
+func convertTool(tool servantic.Tool) anthropic.ToolUnionParam {
 	spec := tool.Spec()
 	schema := convertParametersToJSONSchema(spec.Parameters)
 
-	return &anthropic.ToolParam{
-		Name:        spec.Name,
-		Description: anthropic.String(spec.Description),
-		InputSchema: anthropic.ToolInputSchemaParam{
+	return anthropic.ToolUnionParamOfTool(
+		anthropic.ToolInputSchemaParam{
 			Properties: schema.Properties,
 		},
-	}
+		spec.Name,
+	)
 }
 
 type jsonSchema struct {
@@ -66,7 +40,7 @@ func convertParametersToJSONSchema(params map[string]*servantic.Parameter) jsonS
 // convertParameterToSchema converts servantic.Parameter to Claude schema
 func convertParameterToSchema(param *servantic.Parameter) map[string]interface{} {
 	schema := map[string]interface{}{
-		"type":        getAnthropicType(param.Type),
+		"type":        getClaudeType(param.Type),
 		"description": param.Description,
 		"title":       param.Title,
 	}
@@ -132,25 +106,6 @@ func convertParameterToSchema(param *servantic.Parameter) map[string]interface{}
 }
 
 func getClaudeType(paramType servantic.ParameterType) string {
-	switch paramType {
-	case servantic.TypeString:
-		return "string"
-	case servantic.TypeNumber:
-		return "number"
-	case servantic.TypeInteger:
-		return "integer"
-	case servantic.TypeBoolean:
-		return "boolean"
-	case servantic.TypeArray:
-		return "array"
-	case servantic.TypeObject:
-		return "object"
-	default:
-		return "string"
-	}
-}
-
-func getAnthropicType(paramType servantic.ParameterType) string {
 	switch paramType {
 	case servantic.TypeString:
 		return "string"

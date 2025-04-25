@@ -42,7 +42,7 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 
 func (c *Client) NewSession(ctx context.Context, tools []servantic.Tool) (servantic.Session, error) {
 	// Convert servantic.Tool to anthropic.ToolUnionParam
-	claudeTools := make([]*anthropic.ToolParam, len(tools))
+	claudeTools := make([]anthropic.ToolUnionParam, len(tools))
 	for i, tool := range tools {
 		claudeTools[i] = convertTool(tool)
 	}
@@ -59,7 +59,7 @@ func (c *Client) NewSession(ctx context.Context, tools []servantic.Tool) (servan
 type Session struct {
 	client       *anthropic.Client
 	defaultModel string
-	tools        []*anthropic.ToolParam
+	tools        []anthropic.ToolUnionParam
 	messages     []anthropic.MessageParam
 }
 
@@ -89,15 +89,10 @@ func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*serv
 		s.messages = append(s.messages, anthropic.NewUserMessage(toolResults...))
 	}
 
-	claudeTools := make([]anthropic.ToolUnionParam, len(s.tools))
-	for i, tool := range s.tools {
-		claudeTools[i] = anthropic.ToolUnionParam{OfTool: tool}
-	}
-
 	params := anthropic.MessageNewParams{
 		Model:     s.defaultModel,
 		MaxTokens: 4096,
-		Tools:     claudeTools,
+		Tools:     s.tools,
 		Messages:  s.messages,
 	}
 
