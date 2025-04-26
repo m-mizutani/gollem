@@ -10,7 +10,7 @@ A more complex example using a calculator tool:
 type CalculatorTool struct{}
 
 func (t *CalculatorTool) Spec() gollam.ToolSpec {
-    return &gollam.ToolSpec{
+    return gollam.ToolSpec{
         Name:        "calculator",
         Description: "Performs basic arithmetic operations",
         Parameters: map[string]*gollam.Parameter{
