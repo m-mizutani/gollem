@@ -81,8 +81,8 @@ func WithToolSets(toolSets ...ToolSet) Option {
 	}
 }
 
-// WithMCPStdio sets the MCP client for local MCP executable server via stdio.
-func WithMCPonStdio(path string, args []string, options ...MCPonStdioOption) Option {
+// WithMCPviaStdio sets the MCP client for local MCP executable server via stdio.
+func WithMCPviaStdio(path string, args []string, options ...MCPonStdioOption) Option {
 	return func(s *Gollam) {
 		c := &MCPClient{
 			path: path,
@@ -95,8 +95,8 @@ func WithMCPonStdio(path string, args []string, options ...MCPonStdioOption) Opt
 	}
 }
 
-// WithMCPonSSE sets the MCP client for remote MCP server via HTTP SSE.
-func WithMCPonSSE(baseURL string, options ...MCPonSSEOption) Option {
+// WithMCPviaSSE sets the MCP client for remote MCP server via HTTP SSE.
+func WithMCPviaSSE(baseURL string, options ...MCPonSSEOption) Option {
 	return func(s *Gollam) {
 		c := &MCPClient{
 			baseURL: baseURL,
