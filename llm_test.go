@@ -1,4 +1,4 @@
-package servantic_test
+package gollam_test
 
 import (
 	"context"
@@ -6,27 +6,27 @@ import (
 	"testing"
 
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/m-mizutani/gollam"
+	"github.com/m-mizutani/gollam/llm/claude"
+	"github.com/m-mizutani/gollam/llm/gemini"
+	"github.com/m-mizutani/gollam/llm/gpt"
 	"github.com/m-mizutani/gt"
-	"github.com/m-mizutani/servantic"
-	"github.com/m-mizutani/servantic/llm/claude"
-	"github.com/m-mizutani/servantic/llm/gemini"
-	"github.com/m-mizutani/servantic/llm/gpt"
 )
 
 // Sample tool implementation for testing
 type randomNumberTool struct{}
 
-func (t *randomNumberTool) Spec() *servantic.ToolSpec {
-	return &servantic.ToolSpec{
+func (t *randomNumberTool) Spec() *gollam.ToolSpec {
+	return &gollam.ToolSpec{
 		Name:        "random_number",
 		Description: "A tool for generating random numbers within a specified range",
-		Parameters: map[string]*servantic.Parameter{
+		Parameters: map[string]*gollam.Parameter{
 			"min": {
-				Type:        servantic.TypeNumber,
+				Type:        gollam.TypeNumber,
 				Description: "Minimum value of the random number",
 			},
 			"max": {
-				Type:        servantic.TypeNumber,
+				Type:        gollam.TypeNumber,
 				Description: "Maximum value of the random number",
 			},
 		},
@@ -61,12 +61,12 @@ func (t *randomNumberTool) Run(ctx context.Context, args map[string]any) (map[st
 	return map[string]any{"result": result}, nil
 }
 
-func testLLM(t *testing.T, session servantic.Session) {
+func testLLM(t *testing.T, session gollam.Session) {
 	ctx := t.Context()
 
 	// Test case 1: Generate random number
 	t.Run("generate random number", func(t *testing.T) {
-		resp, err := session.Generate(ctx, servantic.Text("Please generate a random number between 1 and 10"))
+		resp, err := session.Generate(ctx, gollam.Text("Please generate a random number between 1 and 10"))
 		gt.NoError(t, err)
 		gt.Array(t, resp.FunctionCalls).Length(1).Required()
 		gt.Value(t, resp.FunctionCalls[0].Name).Equal("random_number")
@@ -75,7 +75,7 @@ func testLLM(t *testing.T, session servantic.Session) {
 		gt.Value(t, args["min"]).Equal(1.0)
 		gt.Value(t, args["max"]).Equal(10.0)
 
-		resp, err = session.Generate(ctx, servantic.FunctionResponse{
+		resp, err = session.Generate(ctx, gollam.FunctionResponse{
 			ID:   resp.FunctionCalls[0].ID,
 			Name: "random_number",
 			Data: map[string]any{"result": 5.5},
@@ -87,7 +87,7 @@ func testLLM(t *testing.T, session servantic.Session) {
 
 	// Test case 2: Generate random number with different range
 	t.Run("generate random number with different range", func(t *testing.T) {
-		resp, err := session.Generate(ctx, servantic.Text("Please generate a random number between 100 and 200"))
+		resp, err := session.Generate(ctx, gollam.Text("Please generate a random number between 100 and 200"))
 		gt.NoError(t, err)
 		gt.Array(t, resp.FunctionCalls).Length(1).Required()
 		gt.Value(t, resp.FunctionCalls[0].Name).Equal("random_number")
@@ -119,7 +119,7 @@ func TestGemini(t *testing.T) {
 	gt.NoError(t, err)
 
 	// Setup tools
-	tools := []servantic.Tool{&randomNumberTool{}}
+	tools := []gollam.Tool{&randomNumberTool{}}
 	session, err := client.NewSession(ctx, tools)
 	gt.NoError(t, err)
 
@@ -137,7 +137,7 @@ func TestGPT(t *testing.T) {
 	gt.NoError(t, err)
 
 	// Setup tools
-	tools := []servantic.Tool{&randomNumberTool{}}
+	tools := []gollam.Tool{&randomNumberTool{}}
 	session, err := client.NewSession(ctx, tools)
 	gt.NoError(t, err)
 
@@ -153,7 +153,7 @@ func TestClaude(t *testing.T) {
 	claudeClient, err := claude.New(context.Background(), apiKey)
 	gt.NoError(t, err)
 
-	session, err := claudeClient.NewSession(context.Background(), []servantic.Tool{&randomNumberTool{}})
+	session, err := claudeClient.NewSession(context.Background(), []gollam.Tool{&randomNumberTool{}})
 	gt.NoError(t, err)
 
 	testLLM(t, session)

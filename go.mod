@@ -1,4 +1,4 @@
-module github.com/m-mizutani/servantic
+module github.com/m-mizutani/gollam
 
 go 1.24
 

@@ -1,4 +1,4 @@
-package servantic
+package gollam
 
 import "context"
 
@@ -17,7 +17,7 @@ type FunctionCall struct {
 	Arguments map[string]any
 }
 
-// Response is a general response type for each servantic.
+// Response is a general response type for each gollam.
 type Response struct {
 	Texts         []string
 	FunctionCalls []*FunctionCall
@@ -31,7 +31,7 @@ type restrictedValue struct{}
 
 // Text is a text input as prompt.
 // Usage:
-// input := servantic.Text("Hello, world!")
+// input := gollam.Text("Hello, world!")
 type Text string
 
 func (t Text) isInput() restrictedValue {
@@ -41,7 +41,7 @@ func (t Text) isInput() restrictedValue {
 // FunctionResponse is a function response.
 // Usage:
 //
-//	input := servantic.FunctionResponse{
+//	input := gollam.FunctionResponse{
 //		Name:      "function_name",
 //		Arguments: map[string]any{"key": "value"},
 //	}

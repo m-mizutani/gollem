@@ -1,4 +1,4 @@
-package servantic
+package gollam
 
 import "context"
 

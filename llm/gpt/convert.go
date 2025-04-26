@@ -1,12 +1,12 @@
 package gpt
 
 import (
-	"github.com/m-mizutani/servantic"
+	"github.com/m-mizutani/gollam"
 	"github.com/sashabaranov/go-openai"
 )
 
-// convertTool converts servantic.Tool to openai.Tool
-func convertTool(tool servantic.Tool) openai.Tool {
+// convertTool converts gollam.Tool to openai.Tool
+func convertTool(tool gollam.Tool) openai.Tool {
 	parameters := make(map[string]interface{})
 	properties := make(map[string]interface{})
 	spec := tool.Spec()
@@ -31,8 +31,8 @@ func convertTool(tool servantic.Tool) openai.Tool {
 	}
 }
 
-// convertParameterToSchema converts servantic.Parameter to OpenAI schema
-func convertParameterToSchema(param *servantic.Parameter) map[string]interface{} {
+// convertParameterToSchema converts gollam.Parameter to OpenAI schema
+func convertParameterToSchema(param *gollam.Parameter) map[string]interface{} {
 	schema := map[string]interface{}{
 		"type":        getOpenAIType(param.Type),
 		"description": param.Description,
@@ -59,7 +59,7 @@ func convertParameterToSchema(param *servantic.Parameter) map[string]interface{}
 	}
 
 	// Add number constraints
-	if param.Type == servantic.TypeNumber || param.Type == servantic.TypeInteger {
+	if param.Type == gollam.TypeNumber || param.Type == gollam.TypeInteger {
 		if param.Minimum != nil {
 			schema["minimum"] = *param.Minimum
 		}
@@ -69,7 +69,7 @@ func convertParameterToSchema(param *servantic.Parameter) map[string]interface{}
 	}
 
 	// Add string constraints
-	if param.Type == servantic.TypeString {
+	if param.Type == gollam.TypeString {
 		if param.MinLength != nil {
 			schema["minLength"] = *param.MinLength
 		}
@@ -82,7 +82,7 @@ func convertParameterToSchema(param *servantic.Parameter) map[string]interface{}
 	}
 
 	// Add array constraints
-	if param.Type == servantic.TypeArray {
+	if param.Type == gollam.TypeArray {
 		if param.MinItems != nil {
 			schema["minItems"] = *param.MinItems
 		}
@@ -99,19 +99,19 @@ func convertParameterToSchema(param *servantic.Parameter) map[string]interface{}
 	return schema
 }
 
-func getOpenAIType(paramType servantic.ParameterType) string {
+func getOpenAIType(paramType gollam.ParameterType) string {
 	switch paramType {
-	case servantic.TypeString:
+	case gollam.TypeString:
 		return "string"
-	case servantic.TypeNumber:
+	case gollam.TypeNumber:
 		return "number"
-	case servantic.TypeInteger:
+	case gollam.TypeInteger:
 		return "integer"
-	case servantic.TypeBoolean:
+	case gollam.TypeBoolean:
 		return "boolean"
-	case servantic.TypeArray:
+	case gollam.TypeArray:
 		return "array"
-	case servantic.TypeObject:
+	case gollam.TypeObject:
 		return "object"
 	default:
 		return "string"

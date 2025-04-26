@@ -2,10 +2,10 @@ package claude
 
 import (
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/m-mizutani/servantic"
+	"github.com/m-mizutani/gollam"
 )
 
-func convertTool(tool servantic.Tool) anthropic.ToolUnionParam {
+func convertTool(tool gollam.Tool) anthropic.ToolUnionParam {
 	spec := tool.Spec()
 	schema := convertParametersToJSONSchema(spec.Parameters)
 
@@ -35,7 +35,7 @@ type jsonSchema struct {
 	Title       string                `json:"title,omitempty"`
 }
 
-func convertParametersToJSONSchema(params map[string]*servantic.Parameter) jsonSchema {
+func convertParametersToJSONSchema(params map[string]*gollam.Parameter) jsonSchema {
 	properties := make(map[string]jsonSchema)
 
 	for name, param := range params {
@@ -48,8 +48,8 @@ func convertParametersToJSONSchema(params map[string]*servantic.Parameter) jsonS
 	}
 }
 
-// convertParameterToSchema converts servantic.Parameter to Claude schema
-func convertParameterToSchema(param *servantic.Parameter) jsonSchema {
+// convertParameterToSchema converts gollam.Parameter to Claude schema
+func convertParameterToSchema(param *gollam.Parameter) jsonSchema {
 	schema := jsonSchema{
 		Type:        getClaudeType(param.Type),
 		Description: param.Description,
@@ -81,7 +81,7 @@ func convertParameterToSchema(param *servantic.Parameter) jsonSchema {
 	}
 
 	// Add number constraints
-	if param.Type == servantic.TypeNumber || param.Type == servantic.TypeInteger {
+	if param.Type == gollam.TypeNumber || param.Type == gollam.TypeInteger {
 		if param.Minimum != nil {
 			schema.Minimum = param.Minimum
 		}
@@ -91,7 +91,7 @@ func convertParameterToSchema(param *servantic.Parameter) jsonSchema {
 	}
 
 	// Add string constraints
-	if param.Type == servantic.TypeString {
+	if param.Type == gollam.TypeString {
 		if param.MinLength != nil {
 			schema.MinLength = param.MinLength
 		}
@@ -104,7 +104,7 @@ func convertParameterToSchema(param *servantic.Parameter) jsonSchema {
 	}
 
 	// Add array constraints
-	if param.Type == servantic.TypeArray {
+	if param.Type == gollam.TypeArray {
 		if param.MinItems != nil {
 			schema.MinItems = param.MinItems
 		}
@@ -121,19 +121,19 @@ func convertParameterToSchema(param *servantic.Parameter) jsonSchema {
 	return schema
 }
 
-func getClaudeType(paramType servantic.ParameterType) string {
+func getClaudeType(paramType gollam.ParameterType) string {
 	switch paramType {
-	case servantic.TypeString:
+	case gollam.TypeString:
 		return "string"
-	case servantic.TypeNumber:
+	case gollam.TypeNumber:
 		return "number"
-	case servantic.TypeInteger:
+	case gollam.TypeInteger:
 		return "integer"
-	case servantic.TypeBoolean:
+	case gollam.TypeBoolean:
 		return "boolean"
-	case servantic.TypeArray:
+	case gollam.TypeArray:
 		return "array"
-	case servantic.TypeObject:
+	case gollam.TypeObject:
 		return "object"
 	default:
 		return "string"

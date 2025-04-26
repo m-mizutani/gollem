@@ -1,4 +1,4 @@
-package servantic
+package gollam
 
 import (
 	"bytes"
@@ -85,7 +85,7 @@ func (c *MCPClient) start(ctx context.Context) error {
 	var initRequest mcp.InitializeRequest
 	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
 	initRequest.Params.ClientInfo = mcp.Implementation{
-		Name:    "servantic",
+		Name:    "gollam",
 		Version: "0.0.1",
 	}
 

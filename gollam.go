@@ -1,4 +1,4 @@
-package servantic
+package gollam
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 )
 
-// Servantic is core structure of the package.
-type Servantic struct {
+// Gollam is core structure of the package.
+type Gollam struct {
 	llm LLMClient
 
 	loopLimit  int
@@ -31,9 +31,9 @@ const (
 	DefaultRetryLimit = 8
 )
 
-// New creates a new servantic instance.
-func New(llmClient LLMClient, options ...Option) *Servantic {
-	s := &Servantic{
+// New creates a new gollam instance.
+func New(llmClient LLMClient, options ...Option) *Gollam {
+	s := &Gollam{
 		llm:          llmClient,
 		loopLimit:    DefaultLoopLimit,
 		retryLimit:   DefaultRetryLimit,
@@ -50,40 +50,40 @@ func New(llmClient LLMClient, options ...Option) *Servantic {
 	return s
 }
 
-// Option is the type for the options of the servantic instance.
-type Option func(*Servantic)
+// Option is the type for the options of the gollam instance.
+type Option func(*Gollam)
 
-// WithLoopLimit sets the maximum number of loops for the servantic session iteration (ask LLM and execute tools is one loop).
+// WithLoopLimit sets the maximum number of loops for the gollam session iteration (ask LLM and execute tools is one loop).
 func WithLoopLimit(loopLimit int) Option {
-	return func(s *Servantic) {
+	return func(s *Gollam) {
 		s.loopLimit = loopLimit
 	}
 }
 
-// WithRetryLimit sets the maximum number of retries for the servantic session. This is counted for error response from Tool. When reaching the limit, the session is finished immediately.
+// WithRetryLimit sets the maximum number of retries for the gollam session. This is counted for error response from Tool. When reaching the limit, the session is finished immediately.
 func WithRetryLimit(retryLimit int) Option {
-	return func(s *Servantic) {
+	return func(s *Gollam) {
 		s.retryLimit = retryLimit
 	}
 }
 
-// WithTools sets the tools for the servantic instance.
+// WithTools sets the tools for the gollam instance.
 func WithTools(tools ...Tool) Option {
-	return func(s *Servantic) {
+	return func(s *Gollam) {
 		s.tools = append(s.tools, tools...)
 	}
 }
 
-// WithToolSets sets the tool sets for the servantic instance.
+// WithToolSets sets the tool sets for the gollam instance.
 func WithToolSets(toolSets ...ToolSet) Option {
-	return func(s *Servantic) {
+	return func(s *Gollam) {
 		s.toolSets = append(s.toolSets, toolSets...)
 	}
 }
 
 // WithMCPStdio sets the MCP client for local MCP executable server via stdio.
 func WithMCPonStdio(path string, args []string, options ...MCPonStdioOption) Option {
-	return func(s *Servantic) {
+	return func(s *Gollam) {
 		c := &MCPClient{
 			path: path,
 			args: args,
@@ -97,7 +97,7 @@ func WithMCPonStdio(path string, args []string, options ...MCPonStdioOption) Opt
 
 // WithMCPonSSE sets the MCP client for remote MCP server via HTTP SSE.
 func WithMCPonSSE(baseURL string, options ...MCPonSSEOption) Option {
-	return func(s *Servantic) {
+	return func(s *Gollam) {
 		c := &MCPClient{
 			baseURL: baseURL,
 		}
@@ -111,12 +111,12 @@ func WithMCPonSSE(baseURL string, options ...MCPonSSEOption) Option {
 // WithMsgCallback sets a callback function for the message. The callback function is called when receiving a generated text message from the LLM.
 // Usage:
 //
-//	servantic.WithMsgCallback(func(ctx context.Context, msg string) error {
+//	gollam.WithMsgCallback(func(ctx context.Context, msg string) error {
 //		println(msg)
 //		return nil
 //	})
 func WithMsgCallback(callback func(ctx context.Context, msg string) error) Option {
-	return func(s *Servantic) {
+	return func(s *Gollam) {
 		s.msgCallback = callback
 	}
 }
@@ -124,12 +124,12 @@ func WithMsgCallback(callback func(ctx context.Context, msg string) error) Optio
 // WithToolCallback sets a callback function for the tool. The callback function is called just before executing the tool. If you want to abort the tool execution, return an error.
 // Usage:
 //
-//	servantic.WithToolCallback(func(ctx context.Context, tool servantic.Tool) error {
+//	gollam.WithToolCallback(func(ctx context.Context, tool gollam.Tool) error {
 //		println("running tool: " + tool.Spec().Name)
 //		return nil
 //	})
 func WithToolCallback(callback func(ctx context.Context, tool FunctionCall) error) Option {
-	return func(s *Servantic) {
+	return func(s *Gollam) {
 		s.toolCallback = callback
 	}
 }
@@ -137,29 +137,29 @@ func WithToolCallback(callback func(ctx context.Context, tool FunctionCall) erro
 // WithErrCallback sets a callback function for the error of the tool execution. If the callback returns an error (can be same as argument of the callback), the tool execution is aborted. If the callback returns nil, the tool execution is continued.
 // Usage:
 //
-//	servantic.WithErrCallback(func(ctx context.Context, err error, tool servantic.Tool) error {
+//	gollam.WithErrCallback(func(ctx context.Context, err error, tool gollam.Tool) error {
 //		if errors.Is(err, someErrorYouKnow) {
 //			return err // Abort the tool execution
 //		}
 //		return nil // Continue the tool execution
 //	})
 func WithErrCallback(callback func(ctx context.Context, err error, tool FunctionCall) error) Option {
-	return func(s *Servantic) {
+	return func(s *Gollam) {
 		s.errCallback = callback
 	}
 }
 
-// WithLogger sets the logger for the servantic instance. Default is discard logger.
+// WithLogger sets the logger for the gollam instance. Default is discard logger.
 func WithLogger(logger *slog.Logger) Option {
-	return func(s *Servantic) {
+	return func(s *Gollam) {
 		s.logger = logger
 	}
 }
 
-// Order is the main function to start the servantic instance. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until the exit tool is called or the LoopLimit is reached.
-func (s *Servantic) Order(ctx context.Context, prompt string) error {
+// Order is the main function to start the gollam instance. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until the exit tool is called or the LoopLimit is reached.
+func (s *Gollam) Order(ctx context.Context, prompt string) error {
 	orderID := uuid.New().String()
-	logger := s.logger.With("servantic.order_id", orderID)
+	logger := s.logger.With("gollam.order_id", orderID)
 	ctx = ctxWithLogger(ctx, logger)
 	logger.Info("start order", "prompt", prompt)
 

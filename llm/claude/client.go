@@ -7,7 +7,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/servantic"
+	"github.com/m-mizutani/gollam"
 )
 
 type Client struct {
@@ -40,8 +40,8 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 	return client, nil
 }
 
-func (c *Client) NewSession(ctx context.Context, tools []servantic.Tool) (servantic.Session, error) {
-	// Convert servantic.Tool to anthropic.ToolUnionParam
+func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Session, error) {
+	// Convert gollam.Tool to anthropic.ToolUnionParam
 	claudeTools := make([]anthropic.ToolUnionParam, len(tools))
 	for i, tool := range tools {
 		claudeTools[i] = convertTool(tool)
@@ -63,17 +63,17 @@ type Session struct {
 	messages     []anthropic.MessageParam
 }
 
-func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*servantic.Response, error) {
+func (s *Session) Generate(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
 	var toolResults []anthropic.ContentBlockParamUnion
 	// Convert input to messages
 	for _, in := range input {
 		switch v := in.(type) {
-		case servantic.Text:
+		case gollam.Text:
 			s.messages = append(s.messages, anthropic.NewUserMessage(
 				anthropic.NewTextBlock(string(v)),
 			))
 
-		case servantic.FunctionResponse:
+		case gollam.FunctionResponse:
 			response, err := json.Marshal(v.Data)
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to marshal function response")
@@ -81,7 +81,7 @@ func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*serv
 			toolResults = append(toolResults, anthropic.NewToolResultBlock(v.ID, string(response), v.Error != nil))
 
 		default:
-			return nil, goerr.Wrap(servantic.ErrInvalidParameter, "invalid input")
+			return nil, goerr.Wrap(gollam.ErrInvalidParameter, "invalid input")
 		}
 	}
 
@@ -103,12 +103,12 @@ func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*serv
 	s.messages = append(s.messages, resp.ToParam())
 
 	if len(resp.Content) == 0 {
-		return &servantic.Response{}, nil
+		return &gollam.Response{}, nil
 	}
 
-	response := &servantic.Response{
+	response := &gollam.Response{
 		Texts:         make([]string, 0),
-		FunctionCalls: make([]*servantic.FunctionCall, 0),
+		FunctionCalls: make([]*gollam.FunctionCall, 0),
 	}
 
 	for _, content := range resp.Content {
@@ -124,7 +124,7 @@ func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*serv
 				return nil, goerr.Wrap(err, "failed to unmarshal function arguments")
 			}
 
-			response.FunctionCalls = append(response.FunctionCalls, &servantic.FunctionCall{
+			response.FunctionCalls = append(response.FunctionCalls, &gollam.FunctionCall{
 				ID:        toolUseBlock.ID,
 				Name:      toolUseBlock.Name,
 				Arguments: args,

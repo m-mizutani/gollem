@@ -1,12 +1,12 @@
-package servantic_test
+package gollam_test
 
 import (
 	"context"
 	"os"
 	"testing"
 
+	"github.com/m-mizutani/gollam"
 	"github.com/m-mizutani/gt"
-	"github.com/m-mizutani/servantic"
 )
 
 func TestMCPLocalDryRun(t *testing.T) {
@@ -15,7 +15,7 @@ func TestMCPLocalDryRun(t *testing.T) {
 		t.Skip("TEST_MCP_EXEC_PATH is not set")
 	}
 
-	client := servantic.NewLocalMCPClient(mcpExecPath)
+	client := gollam.NewLocalMCPClient(mcpExecPath)
 
 	err := client.Start(context.Background())
 	gt.NoError(t, err)
@@ -24,7 +24,7 @@ func TestMCPLocalDryRun(t *testing.T) {
 	gt.NoError(t, err)
 	gt.A(t, tools).Longer(0)
 
-	parameter, err := servantic.InputSchemaToParameter(tools[0].InputSchema)
+	parameter, err := gollam.InputSchemaToParameter(tools[0].InputSchema)
 	gt.NoError(t, err)
 	t.Log("parameter:", parameter)
 

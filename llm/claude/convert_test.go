@@ -4,36 +4,36 @@ import (
 	"context"
 	"testing"
 
+	"github.com/m-mizutani/gollam"
+	"github.com/m-mizutani/gollam/llm/claude"
 	"github.com/m-mizutani/gt"
-	"github.com/m-mizutani/servantic"
-	"github.com/m-mizutani/servantic/llm/claude"
 )
 
 type complexTool struct{}
 
-func (t *complexTool) Spec() *servantic.ToolSpec {
-	return &servantic.ToolSpec{
+func (t *complexTool) Spec() *gollam.ToolSpec {
+	return &gollam.ToolSpec{
 		Name:        "complex_tool",
 		Description: "A tool with complex parameter structure",
 		Required:    []string{"user"},
-		Parameters: map[string]*servantic.Parameter{
+		Parameters: map[string]*gollam.Parameter{
 			"user": {
-				Type:     servantic.TypeObject,
+				Type:     gollam.TypeObject,
 				Required: []string{"name"},
-				Properties: map[string]*servantic.Parameter{
+				Properties: map[string]*gollam.Parameter{
 					"name": {
-						Type:        servantic.TypeString,
+						Type:        gollam.TypeString,
 						Description: "User's name",
 					},
 					"address": {
-						Type: servantic.TypeObject,
-						Properties: map[string]*servantic.Parameter{
+						Type: gollam.TypeObject,
+						Properties: map[string]*gollam.Parameter{
 							"street": {
-								Type:        servantic.TypeString,
+								Type:        gollam.TypeString,
 								Description: "Street address",
 							},
 							"city": {
-								Type:        servantic.TypeString,
+								Type:        gollam.TypeString,
 								Description: "City name",
 							},
 						},
@@ -42,16 +42,16 @@ func (t *complexTool) Spec() *servantic.ToolSpec {
 				},
 			},
 			"items": {
-				Type: servantic.TypeArray,
-				Items: &servantic.Parameter{
-					Type: servantic.TypeObject,
-					Properties: map[string]*servantic.Parameter{
+				Type: gollam.TypeArray,
+				Items: &gollam.Parameter{
+					Type: gollam.TypeObject,
+					Properties: map[string]*gollam.Parameter{
 						"id": {
-							Type:        servantic.TypeString,
+							Type:        gollam.TypeString,
 							Description: "Item ID",
 						},
 						"quantity": {
-							Type:        servantic.TypeNumber,
+							Type:        gollam.TypeNumber,
 							Description: "Item quantity",
 						},
 					},
@@ -102,7 +102,7 @@ func TestConvertTool(t *testing.T) {
 func TestConvertParameterToSchema(t *testing.T) {
 	type testCase struct {
 		name     string
-		schema   *servantic.Parameter
+		schema   *gollam.Parameter
 		expected claude.JsonSchema
 	}
 
@@ -115,8 +115,8 @@ func TestConvertParameterToSchema(t *testing.T) {
 
 	t.Run("number constraints", runTest(testCase{
 		name: "number constraints",
-		schema: &servantic.Parameter{
-			Type:    servantic.TypeNumber,
+		schema: &gollam.Parameter{
+			Type:    gollam.TypeNumber,
 			Minimum: ptr(1.0),
 			Maximum: ptr(10.0),
 		},
@@ -129,8 +129,8 @@ func TestConvertParameterToSchema(t *testing.T) {
 
 	t.Run("string constraints", runTest(testCase{
 		name: "string constraints",
-		schema: &servantic.Parameter{
-			Type:      servantic.TypeString,
+		schema: &gollam.Parameter{
+			Type:      gollam.TypeString,
 			MinLength: ptr(1),
 			MaxLength: ptr(10),
 			Pattern:   "^[a-z]+$",
@@ -145,9 +145,9 @@ func TestConvertParameterToSchema(t *testing.T) {
 
 	t.Run("array constraints", runTest(testCase{
 		name: "array constraints",
-		schema: &servantic.Parameter{
-			Type:     servantic.TypeArray,
-			Items:    &servantic.Parameter{Type: servantic.TypeString},
+		schema: &gollam.Parameter{
+			Type:     gollam.TypeArray,
+			Items:    &gollam.Parameter{Type: gollam.TypeString},
 			MinItems: ptr(1),
 			MaxItems: ptr(10),
 		},
@@ -161,8 +161,8 @@ func TestConvertParameterToSchema(t *testing.T) {
 
 	t.Run("default value", runTest(testCase{
 		name: "default value",
-		schema: &servantic.Parameter{
-			Type:    servantic.TypeString,
+		schema: &gollam.Parameter{
+			Type:    gollam.TypeString,
 			Default: "default value",
 		},
 		expected: claude.JsonSchema{
@@ -179,7 +179,7 @@ func ptr[T any](v T) *T {
 func TestConvertSchema(t *testing.T) {
 	type testCase struct {
 		name     string
-		schema   *servantic.Parameter
+		schema   *gollam.Parameter
 		expected claude.JsonSchema
 	}
 
@@ -192,8 +192,8 @@ func TestConvertSchema(t *testing.T) {
 
 	t.Run("string type", runTest(testCase{
 		name: "string type",
-		schema: &servantic.Parameter{
-			Type: servantic.TypeString,
+		schema: &gollam.Parameter{
+			Type: gollam.TypeString,
 		},
 		expected: claude.JsonSchema{
 			Type: "string",

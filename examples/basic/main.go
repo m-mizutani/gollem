@@ -5,20 +5,20 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/m-mizutani/servantic"
-	"github.com/m-mizutani/servantic/llm/gpt"
+	"github.com/m-mizutani/gollam"
+	"github.com/m-mizutani/gollam/llm/gpt"
 )
 
 // HelloTool is a simple tool that returns a greeting
 type HelloTool struct{}
 
-func (t *HelloTool) Spec() *servantic.ToolSpec {
-	return &servantic.ToolSpec{
+func (t *HelloTool) Spec() *gollam.ToolSpec {
+	return &gollam.ToolSpec{
 		Name:        "hello",
 		Description: "Returns a greeting",
-		Parameters: map[string]*servantic.Parameter{
+		Parameters: map[string]*gollam.Parameter{
 			"name": {
-				Type:        servantic.TypeString,
+				Type:        gollam.TypeString,
 				Description: "Name of the person to greet",
 			},
 		},
@@ -44,9 +44,9 @@ func main() {
 		panic(err)
 	}
 
-	// Create Servantic instance
-	s := servantic.New(client,
-		servantic.WithTools(&HelloTool{}),
+	// Create gollam instance
+	s := gollam.New(client,
+		gollam.WithTools(&HelloTool{}),
 	)
 
 	// Send a message

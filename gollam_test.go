@@ -1,4 +1,4 @@
-package servantic_test
+package gollam_test
 
 import (
 	"context"
@@ -7,27 +7,27 @@ import (
 	"os"
 	"testing"
 
+	"github.com/m-mizutani/gollam"
+	"github.com/m-mizutani/gollam/llm/claude"
+	"github.com/m-mizutani/gollam/llm/gemini"
+	"github.com/m-mizutani/gollam/llm/gpt"
 	"github.com/m-mizutani/gt"
-	"github.com/m-mizutani/servantic"
-	"github.com/m-mizutani/servantic/llm/claude"
-	"github.com/m-mizutani/servantic/llm/gemini"
-	"github.com/m-mizutani/servantic/llm/gpt"
 )
 
 // RandomNumberTool is a tool that generates a random number within a specified range
 type RandomNumberTool struct{}
 
-func (t *RandomNumberTool) Spec() *servantic.ToolSpec {
-	return &servantic.ToolSpec{
+func (t *RandomNumberTool) Spec() *gollam.ToolSpec {
+	return &gollam.ToolSpec{
 		Name:        "random_number",
 		Description: "Generates a random number within a specified range",
-		Parameters: map[string]*servantic.Parameter{
+		Parameters: map[string]*gollam.Parameter{
 			"min": {
-				Type:        servantic.TypeNumber,
+				Type:        gollam.TypeNumber,
 				Description: "Minimum value of the range",
 			},
 			"max": {
-				Type:        servantic.TypeNumber,
+				Type:        gollam.TypeNumber,
 				Description: "Maximum value of the range",
 			},
 		},
@@ -49,15 +49,15 @@ func (t *RandomNumberTool) Run(ctx context.Context, args map[string]any) (map[st
 	}, nil
 }
 
-func TestServanticWithTool(t *testing.T) {
-	testFn := func(t *testing.T, name string, newClient func(t *testing.T) (servantic.LLMClient, error)) {
+func TestgollamWithTool(t *testing.T) {
+	testFn := func(t *testing.T, name string, newClient func(t *testing.T) (gollam.LLMClient, error)) {
 		client, err := newClient(t)
 		gt.NoError(t, err)
 
 		toolCalled := false
-		s := servantic.New(client,
-			servantic.WithTools(&RandomNumberTool{}),
-			servantic.WithToolCallback(func(ctx context.Context, tool servantic.FunctionCall) error {
+		s := gollam.New(client,
+			gollam.WithTools(&RandomNumberTool{}),
+			gollam.WithToolCallback(func(ctx context.Context, tool gollam.FunctionCall) error {
 				toolCalled = true
 				gt.Equal(t, tool.Name, "random_number")
 				return nil
@@ -74,7 +74,7 @@ func TestServanticWithTool(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_OPENAI_API_KEY is not set")
 		}
-		testFn(t, "GPT", func(t *testing.T) (servantic.LLMClient, error) {
+		testFn(t, "GPT", func(t *testing.T) (gollam.LLMClient, error) {
 			return gpt.New(context.Background(), apiKey)
 		})
 	})
@@ -84,7 +84,7 @@ func TestServanticWithTool(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_CLAUDE_API_KEY is not set")
 		}
-		testFn(t, "Claude", func(t *testing.T) (servantic.LLMClient, error) {
+		testFn(t, "Claude", func(t *testing.T) (gollam.LLMClient, error) {
 			return claude.New(context.Background(), apiKey)
 		})
 	})
@@ -98,7 +98,7 @@ func TestServanticWithTool(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_GCP_LOCATION is not set")
 		}
-		testFn(t, "Gemini", func(t *testing.T) (servantic.LLMClient, error) {
+		testFn(t, "Gemini", func(t *testing.T) (gollam.LLMClient, error) {
 			return gemini.New(context.Background(), projectID, location)
 		})
 	})

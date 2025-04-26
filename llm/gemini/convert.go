@@ -2,11 +2,11 @@ package gemini
 
 import (
 	"cloud.google.com/go/vertexai/genai"
-	"github.com/m-mizutani/servantic"
+	"github.com/m-mizutani/gollam"
 )
 
-// convertTool converts servantic.Tool to Gemini tool
-func convertTool(tool servantic.Tool) *genai.FunctionDeclaration {
+// convertTool converts gollam.Tool to Gemini tool
+func convertTool(tool gollam.Tool) *genai.FunctionDeclaration {
 	spec := tool.Spec()
 	parameters := &genai.Schema{
 		Type:       genai.TypeObject,
@@ -25,8 +25,8 @@ func convertTool(tool servantic.Tool) *genai.FunctionDeclaration {
 	}
 }
 
-// convertParameterToSchema converts servantic.Parameter to Gemini schema
-func convertParameterToSchema(param *servantic.Parameter) *genai.Schema {
+// convertParameterToSchema converts gollam.Parameter to Gemini schema
+func convertParameterToSchema(param *gollam.Parameter) *genai.Schema {
 	schema := &genai.Schema{
 		Type:        getGeminiType(param.Type),
 		Description: param.Description,
@@ -52,7 +52,7 @@ func convertParameterToSchema(param *servantic.Parameter) *genai.Schema {
 	}
 
 	// Add number constraints
-	if param.Type == servantic.TypeNumber || param.Type == servantic.TypeInteger {
+	if param.Type == gollam.TypeNumber || param.Type == gollam.TypeInteger {
 		if param.Minimum != nil {
 			schema.Minimum = *param.Minimum
 		}
@@ -62,7 +62,7 @@ func convertParameterToSchema(param *servantic.Parameter) *genai.Schema {
 	}
 
 	// Add string constraints
-	if param.Type == servantic.TypeString {
+	if param.Type == gollam.TypeString {
 		if param.MinLength != nil {
 			schema.MinLength = int64(*param.MinLength)
 		}
@@ -75,7 +75,7 @@ func convertParameterToSchema(param *servantic.Parameter) *genai.Schema {
 	}
 
 	// Add array constraints
-	if param.Type == servantic.TypeArray {
+	if param.Type == gollam.TypeArray {
 		if param.MinItems != nil {
 			schema.MinItems = int64(*param.MinItems)
 		}
@@ -89,19 +89,19 @@ func convertParameterToSchema(param *servantic.Parameter) *genai.Schema {
 	return schema
 }
 
-func getGeminiType(paramType servantic.ParameterType) genai.Type {
+func getGeminiType(paramType gollam.ParameterType) genai.Type {
 	switch paramType {
-	case servantic.TypeString:
+	case gollam.TypeString:
 		return genai.TypeString
-	case servantic.TypeNumber:
+	case gollam.TypeNumber:
 		return genai.TypeNumber
-	case servantic.TypeInteger:
+	case gollam.TypeInteger:
 		return genai.TypeInteger
-	case servantic.TypeBoolean:
+	case gollam.TypeBoolean:
 		return genai.TypeBoolean
-	case servantic.TypeArray:
+	case gollam.TypeArray:
 		return genai.TypeArray
-	case servantic.TypeObject:
+	case gollam.TypeObject:
 		return genai.TypeObject
 	default:
 		return genai.TypeString
