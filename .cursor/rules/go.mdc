@@ -6,9 +6,9 @@ alwaysApply: true
 
 # Development rules
 
-## Comment
+## Comment & Literals
 
-All comment MUST be in English.
+All comment and literals in source code MUST be in English.
 
 ## Error handling
 
