@@ -16,8 +16,8 @@ import (
 // Sample tool implementation for testing
 type randomNumberTool struct{}
 
-func (t *randomNumberTool) Spec() *gollam.ToolSpec {
-	return &gollam.ToolSpec{
+func (t *randomNumberTool) Spec() gollam.ToolSpec {
+	return gollam.ToolSpec{
 		Name:        "random_number",
 		Description: "A tool for generating random numbers within a specified range",
 		Parameters: map[string]*gollam.Parameter{

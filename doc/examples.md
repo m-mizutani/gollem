@@ -9,7 +9,7 @@ A more complex example using a calculator tool:
 ```go
 type CalculatorTool struct{}
 
-func (t *CalculatorTool) Spec() *gollam.ToolSpec {
+func (t *CalculatorTool) Spec() gollam.ToolSpec {
     return &gollam.ToolSpec{
         Name:        "calculator",
         Description: "Performs basic arithmetic operations",
@@ -88,7 +88,7 @@ An example of a weather tool using MCP:
 ```go
 type WeatherTool struct{}
 
-func (t *WeatherTool) Spec() *mcp.ToolSpec {
+func (t *WeatherTool) Spec() mcp.ToolSpec {
     return &mcp.ToolSpec{
         Name:        "weather",
         Description: "Gets weather information for a location",

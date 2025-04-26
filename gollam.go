@@ -254,11 +254,11 @@ func (s *Gollam) Order(ctx context.Context, prompt string) error {
 }
 
 type toolWrapper struct {
-	spec *ToolSpec
+	spec ToolSpec
 	run  func(ctx context.Context, args map[string]any) (map[string]any, error)
 }
 
-func (x *toolWrapper) Spec() *ToolSpec {
+func (x *toolWrapper) Spec() ToolSpec {
 	return x.spec
 }
 
@@ -323,8 +323,8 @@ const (
 	ExitToolName = "exit"
 )
 
-func (x *exitTool) Spec() *ToolSpec {
-	return &ToolSpec{
+func (x *exitTool) Spec() ToolSpec {
+	return ToolSpec{
 		Name:        ExitToolName,
 		Description: "When you determine that the task for user prompt is completed, call this tool.",
 	}

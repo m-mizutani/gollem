@@ -8,7 +8,7 @@ To create a tool, you need to implement the `Tool` interface:
 
 ```go
 type Tool interface {
-    Spec() *ToolSpec
+    Spec() ToolSpec
     Run(ctx context.Context, args map[string]any) (map[string]any, error)
 }
 ```
@@ -18,7 +18,7 @@ Here's an example of a simple tool:
 ```go
 type HelloTool struct{}
 
-func (t *HelloTool) Spec() *gollam.ToolSpec {
+func (t *HelloTool) Spec() gollam.ToolSpec {
     return &gollam.ToolSpec{
         Name:        "hello",
         Description: "Returns a greeting",

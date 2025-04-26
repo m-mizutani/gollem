@@ -154,7 +154,7 @@ func (p *Parameter) Validate() error {
 // Tool is specification and execution of an action that can be called by the LLM.
 type Tool interface {
 	// Spec returns the specification of the tool. It's called when starting a LLM chat session in Order().
-	Spec() *ToolSpec
+	Spec() ToolSpec
 
 	// Run is the execution of the tool.
 	// It's called when receiving a tool call from the LLM. Even if the method returns an error, the tool execution is not aborted. Error will be passed to LLM as a response. If you want to abort the tool execution, you need to return an error from the callback function of WithErrCallback().
@@ -165,7 +165,7 @@ type Tool interface {
 // It's useful for providing a set of tools to the LLM.
 type ToolSet interface {
 	// Specs returns the specifications of the tools.
-	Specs() []*ToolSpec
+	Specs() []ToolSpec
 
 	// Run is the execution of the tool.
 	// It's called when receiving a tool call from the LLM.
