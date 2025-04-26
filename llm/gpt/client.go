@@ -10,13 +10,21 @@ import (
 )
 
 // Client is a client for the GPT API.
+// It provides methods to interact with OpenAI's GPT models.
 type Client struct {
-	client       *openai.Client
+	// client is the underlying OpenAI client.
+	client *openai.Client
+
+	// defaultModel is the model to use for chat completions.
+	// It can be overridden using WithDefaultModel option.
 	defaultModel string
 }
 
+// Option is a function that configures a Client.
 type Option func(*Client)
 
+// WithDefaultModel sets the default model to use for chat completions.
+// The model name should be a valid OpenAI model identifier.
 func WithDefaultModel(modelName string) Option {
 	return func(c *Client) {
 		c.defaultModel = modelName
@@ -24,6 +32,7 @@ func WithDefaultModel(modelName string) Option {
 }
 
 // New creates a new client for the GPT API.
+// It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
 	client := &Client{
 		defaultModel: "gpt-4-turbo-preview",
@@ -40,6 +49,7 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 }
 
 // NewSession creates a new session for the GPT API.
+// It converts the provided tools to OpenAI's tool format and initializes a new chat session.
 func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Session, error) {
 	// Convert gollam.Tool to openai.Tool
 	openaiTools := make([]openai.Tool, len(tools))
@@ -57,13 +67,23 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Se
 }
 
 // Session is a session for the GPT chat.
+// It maintains the conversation state and handles message generation.
 type Session struct {
-	client       *openai.Client
+	// client is the underlying OpenAI client.
+	client *openai.Client
+
+	// defaultModel is the model to use for chat completions.
 	defaultModel string
-	tools        []openai.Tool
-	messages     []openai.ChatCompletionMessage
+
+	// tools are the available tools for the session.
+	tools []openai.Tool
+
+	// messages stores the conversation history.
+	messages []openai.ChatCompletionMessage
 }
 
+// Generate processes the input and generates a response.
+// It handles both text messages and function responses.
 func (s *Session) Generate(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
 	// Convert input to messages
 	for _, in := range input {

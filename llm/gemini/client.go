@@ -10,20 +10,33 @@ import (
 )
 
 // Client is a client for the Gemini API.
+// It provides methods to interact with Google's Gemini models.
 type Client struct {
-	client       *genai.Client
+	// client is the underlying Gemini client.
+	client *genai.Client
+
+	// defaultModel is the model to use for chat completions.
+	// It can be overridden using WithDefaultModel option.
 	defaultModel string
-	gcpOptions   []option.ClientOption
+
+	// gcpOptions are additional options for Google Cloud Platform.
+	// They can be set using WithGoogleCloudOptions.
+	gcpOptions []option.ClientOption
 }
 
+// Option is a function that configures a Client.
 type Option func(*Client)
 
+// WithDefaultModel sets the default model to use for chat completions.
+// The model name should be a valid Gemini model identifier.
 func WithDefaultModel(modelName string) Option {
 	return func(c *Client) {
 		c.defaultModel = modelName
 	}
 }
 
+// WithGoogleCloudOptions sets additional options for Google Cloud Platform.
+// These options are passed to the underlying Gemini client.
 func WithGoogleCloudOptions(options ...option.ClientOption) Option {
 	return func(c *Client) {
 		c.gcpOptions = options
@@ -31,8 +44,8 @@ func WithGoogleCloudOptions(options ...option.ClientOption) Option {
 }
 
 // New creates a new client for the Gemini API.
+// It requires a project ID and location, and can be configured with additional options.
 func New(ctx context.Context, projectID, location string, options ...Option) (*Client, error) {
-
 	if projectID == "" {
 		return nil, goerr.New("projectID is required")
 	}
@@ -59,6 +72,7 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 }
 
 // NewSession creates a new session for the Gemini API.
+// It converts the provided tools to Gemini's tool format and initializes a new chat session.
 func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Session, error) {
 	// Convert gollam.Tool to *genai.Tool
 	genaiFunctions := make([]*genai.FunctionDeclaration, len(tools))
@@ -80,10 +94,14 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Se
 }
 
 // Session is a session for the Gemini chat.
+// It maintains the conversation state and handles message generation.
 type Session struct {
+	// session is the underlying Gemini chat session.
 	session *genai.ChatSession
 }
 
+// Generate processes the input and generates a response.
+// It handles both text messages and function responses.
 func (s *Session) Generate(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
 	parts := make([]genai.Part, len(input))
 	for i, in := range input {

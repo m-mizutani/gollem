@@ -10,19 +10,30 @@ import (
 	"github.com/m-mizutani/gollam"
 )
 
+// Client is a client for the Claude API.
+// It provides methods to interact with Anthropic's Claude models.
 type Client struct {
-	client       *anthropic.Client
+	// client is the underlying Claude client.
+	client *anthropic.Client
+
+	// defaultModel is the model to use for chat completions.
+	// It can be overridden using WithDefaultModel option.
 	defaultModel string
 }
 
+// Option is a function that configures a Client.
 type Option func(*Client)
 
+// WithDefaultModel sets the default model to use for chat completions.
+// The model name should be a valid Claude model identifier.
 func WithDefaultModel(modelName string) Option {
 	return func(c *Client) {
 		c.defaultModel = modelName
 	}
 }
 
+// New creates a new client for the Claude API.
+// It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
 	client := &Client{
 		defaultModel: anthropic.ModelClaude3_5SonnetLatest,
@@ -40,6 +51,8 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 	return client, nil
 }
 
+// NewSession creates a new session for the Claude API.
+// It converts the provided tools to Claude's tool format and initializes a new chat session.
 func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Session, error) {
 	// Convert gollam.Tool to anthropic.ToolUnionParam
 	claudeTools := make([]anthropic.ToolUnionParam, len(tools))
@@ -56,13 +69,24 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Se
 	return session, nil
 }
 
+// Session is a session for the Claude chat.
+// It maintains the conversation state and handles message generation.
 type Session struct {
-	client       *anthropic.Client
+	// client is the underlying Claude client.
+	client *anthropic.Client
+
+	// defaultModel is the model to use for chat completions.
 	defaultModel string
-	tools        []anthropic.ToolUnionParam
-	messages     []anthropic.MessageParam
+
+	// tools are the available tools for the session.
+	tools []anthropic.ToolUnionParam
+
+	// messages stores the conversation history.
+	messages []anthropic.MessageParam
 }
 
+// Generate processes the input and generates a response.
+// It handles both text messages and function responses.
 func (s *Session) Generate(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
 	var toolResults []anthropic.ContentBlockParamUnion
 	// Convert input to messages
