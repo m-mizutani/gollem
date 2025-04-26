@@ -1,24 +1,45 @@
-# 🧙‍♀️ gollam
+# 🤖 gollam
 
-`gollam` is a SDK for LLM agentic application in Go.
+<p align="center">
+  <img src="./doc/images/logo.png" height="128" />
+</p>
 
-## Features
+`gollam` is a Go framework for building applications with Large Language Models (LLMs). It provides an elegant and intuitive interface to seamlessly integrate LLMs into your applications while extending their capabilities through powerful tools and actions.
 
-### Supported LLM
+## Overview
+
+gollam empowers you to:
+- Seamlessly integrate with leading LLM providers (Gemini, Anthropic, OpenAI)
+- Create and leverage custom built-in tools that enhance LLM capabilities
+- Connect with MCP (Model Context Protocol) servers for advanced external tool integration
+- Develop sophisticated agentic applications that intelligently execute actions based on natural language inputs
+
+## Supported LLMs
 
 - [x] Gemini (choose model from the [document](https://ai.google.dev/gemini-api/docs/models?hl=ja))
 - [x] Anthropic (choose model from the [document](https://docs.anthropic.com/en/docs/about-claude/models/all-models))
 - [x] OpenAI (choose model from the [document](https://platform.openai.com/docs/models))
 
-### Actions
+## Features
 
-- Go code (as Tool)
-- MCP server
-  - [x] Tool
-  - [ ] Resource
-  - [ ] Prompt
+### Tools and Actions
 
-## Example
+- Built-in Tools: Pre-defined tools for common operations
+- MCP Server Integration
+  - [x] Tool: Define and expose custom tools
+  - [ ] Resource: Manage external resources
+  - [ ] Prompt: Customize LLM prompts
+
+## Quick Start
+
+### Install
+
+```bash
+go get github.com/m-mizutani/gollam
+```
+
+### Example
+Here's a simple example that demonstrates how to create a custom tool and use it with an LLM:
 
 ```go
 package main
@@ -63,15 +84,31 @@ func main() {
 		panic(err)
 	}
 
-	// Create gollam instance
+	// Create gollam instance with the custom tool
 	s := gollam.New(client,
+		// Register the custom tool
 		gollam.WithTools(&HelloTool{}),
+
+		// Register MCP server
+		gollam.WithMCPonSSE("http://localhost:8080"),
+
+		// Optional: Print the message from the LLM
+		gollam.WithMsgCallback(func(ctx context.Context, msg string) {
+			fmt.Println(msg)
+		}),
 	)
 
-	// Send a message
+	// Send a message to the LLM
 	if err := s.Order(context.Background(), "Hello, my name is Taro."); err != nil {
 		panic(err)
 	}
 }
 ```
 
+## Documentation
+
+For detailed documentation and examples, please visit our [documentation site](https://github.com/m-mizutani/gollam/tree/main/doc).
+
+## License
+
+Apache 2.0 License. See [LICENSE](LICENSE) for details.

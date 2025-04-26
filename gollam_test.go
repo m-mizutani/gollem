@@ -49,8 +49,8 @@ func (t *RandomNumberTool) Run(ctx context.Context, args map[string]any) (map[st
 	}, nil
 }
 
-func TestgollamWithTool(t *testing.T) {
-	testFn := func(t *testing.T, name string, newClient func(t *testing.T) (gollam.LLMClient, error)) {
+func TestGollamWithTool(t *testing.T) {
+	testFn := func(t *testing.T, newClient func(t *testing.T) (gollam.LLMClient, error)) {
 		client, err := newClient(t)
 		gt.NoError(t, err)
 
@@ -74,7 +74,7 @@ func TestgollamWithTool(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_OPENAI_API_KEY is not set")
 		}
-		testFn(t, "GPT", func(t *testing.T) (gollam.LLMClient, error) {
+		testFn(t, func(t *testing.T) (gollam.LLMClient, error) {
 			return gpt.New(context.Background(), apiKey)
 		})
 	})
@@ -84,7 +84,7 @@ func TestgollamWithTool(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_CLAUDE_API_KEY is not set")
 		}
-		testFn(t, "Claude", func(t *testing.T) (gollam.LLMClient, error) {
+		testFn(t, func(t *testing.T) (gollam.LLMClient, error) {
 			return claude.New(context.Background(), apiKey)
 		})
 	})
@@ -98,7 +98,7 @@ func TestgollamWithTool(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_GCP_LOCATION is not set")
 		}
-		testFn(t, "Gemini", func(t *testing.T) (gollam.LLMClient, error) {
+		testFn(t, func(t *testing.T) (gollam.LLMClient, error) {
 			return gemini.New(context.Background(), projectID, location)
 		})
 	})
