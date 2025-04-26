@@ -182,27 +182,29 @@ func (s *Servantic) Order(ctx context.Context, prompt string) error {
 		return err
 	}
 
-	initPrompt := `You are a helpful assistant. When you complete the task, call the exit tool.`
+	initPrompt := `You are a helpful assistant. When you complete the task, send conclusion and call the exit tool.`
 	input := []Input{Text(initPrompt), Text(prompt)}
 	exitToolCalled := false
 
 	for i := 0; i < s.loopLimit && !exitToolCalled; i++ {
-		logger.Debug("loop", "loop", i)
-		resp, err := ssn.Generate(ctx, input...)
+		logger.Debug("send request", "count", i, "input", input)
+		output, err := ssn.Generate(ctx, input...)
 		if err != nil {
 			return err
 		}
 		input = nil
 
+		logger.Debug("recv response", "output", output)
+
 		// Call the msgCallback for all texts
-		for _, text := range resp.Texts {
+		for _, text := range output.Texts {
 			if err := s.msgCallback(ctx, text); err != nil {
 				return goerr.Wrap(err, "failed to call msgCallback")
 			}
 		}
 
 		// Call the toolCallback for all tool calls
-		for _, toolCall := range resp.FunctionCalls {
+		for _, toolCall := range output.FunctionCalls {
 			if toolCall.Name == ExitToolName {
 				exitToolCalled = true
 				continue

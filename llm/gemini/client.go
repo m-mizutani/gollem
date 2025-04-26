@@ -32,6 +32,14 @@ func WithGoogleCloudOptions(options ...option.ClientOption) Option {
 
 // New creates a new client for the Gemini API.
 func New(ctx context.Context, projectID, location string, options ...Option) (*Client, error) {
+
+	if projectID == "" {
+		return nil, goerr.New("projectID is required")
+	}
+	if location == "" {
+		return nil, goerr.New("location is required")
+	}
+
 	client := &Client{
 		defaultModel: "gemini-2.0-flash",
 	}
