@@ -18,7 +18,9 @@ func convertTool(tool gollam.Tool) openai.Tool {
 	if len(properties) > 0 {
 		parameters["type"] = "object"
 		parameters["properties"] = properties
-		parameters["required"] = spec.Required
+		if len(spec.Required) > 0 {
+			parameters["required"] = spec.Required
+		}
 	}
 
 	return openai.Tool{
