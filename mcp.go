@@ -31,21 +31,21 @@ type MCPClient struct {
 	initMutex sync.Mutex
 }
 
-// MCPonStdioOption is the option for the MCP client for local MCP executable server via stdio.
-type MCPonStdioOption func(*MCPClient)
+// MCPviaStdioOption is the option for the MCP client for local MCP executable server via stdio.
+type MCPviaStdioOption func(*MCPClient)
 
 // WithEnvVars sets the environment variables for the MCP client. It appends the environment variables to the existing ones.
-func WithEnvVars(envVars []string) MCPonStdioOption {
+func WithEnvVars(envVars []string) MCPviaStdioOption {
 	return func(m *MCPClient) {
 		m.envVars = append(m.envVars, envVars...)
 	}
 }
 
-// MCPonSSEOption is the option for the MCP client for remote MCP server via HTTP SSE.
-type MCPonSSEOption func(*MCPClient)
+// MCPviaSSEOption is the option for the MCP client for remote MCP server via HTTP SSE.
+type MCPviaSSEOption func(*MCPClient)
 
 // WithHeaders sets the headers for the MCP client. It replaces the existing headers setting.
-func WithHeaders(headers map[string]string) MCPonSSEOption {
+func WithHeaders(headers map[string]string) MCPviaSSEOption {
 	return func(m *MCPClient) {
 		m.headers = headers
 	}
