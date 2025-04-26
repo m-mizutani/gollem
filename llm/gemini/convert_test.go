@@ -12,8 +12,8 @@ import (
 
 type complexTool struct{}
 
-func (t *complexTool) Spec() *gollam.ToolSpec {
-	return &gollam.ToolSpec{
+func (t *complexTool) Spec() gollam.ToolSpec {
+	return gollam.ToolSpec{
 		Name:        "complex_tool",
 		Description: "A tool with complex parameter structure",
 		Required:    []string{"user", "items"},

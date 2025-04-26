@@ -212,7 +212,7 @@ func wrapMCPToolCall(mcpClient *MCPClient, tool mcp.Tool) (*toolWrapper, error) 
 	}
 
 	return &toolWrapper{
-		spec: &ToolSpec{
+		spec: ToolSpec{
 			Name:        tool.Name,
 			Description: tool.Description,
 			Parameters:  parameters.Properties,

@@ -17,8 +17,8 @@ import (
 // RandomNumberTool is a tool that generates a random number within a specified range
 type RandomNumberTool struct{}
 
-func (t *RandomNumberTool) Spec() *gollam.ToolSpec {
-	return &gollam.ToolSpec{
+func (t *RandomNumberTool) Spec() gollam.ToolSpec {
+	return gollam.ToolSpec{
 		Name:        "random_number",
 		Description: "Generates a random number within a specified range",
 		Parameters: map[string]*gollam.Parameter{

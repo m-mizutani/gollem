@@ -54,8 +54,8 @@ func (t *AddTool) Run(ctx context.Context, args map[string]any) (map[string]any,
 	return map[string]any{"result": a + b}, nil
 }
 
-func (t *AddTool) Spec() *gollam.ToolSpec {
-	return &gollam.ToolSpec{
+func (t *AddTool) Spec() gollam.ToolSpec {
+	return gollam.ToolSpec{
 		Name:        "add",
 		Description: "Adds two numbers together",
 		Parameters: map[string]*gollam.Parameter{
@@ -81,8 +81,8 @@ func (t *MultiplyTool) Run(ctx context.Context, args map[string]any) (map[string
 	return map[string]any{"result": a * b}, nil
 }
 
-func (t *MultiplyTool) Spec() *gollam.ToolSpec {
-	return &gollam.ToolSpec{
+func (t *MultiplyTool) Spec() gollam.ToolSpec {
+	return gollam.ToolSpec{
 		Name:        "multiply",
 		Description: "Multiplies two numbers together",
 		Parameters: map[string]*gollam.Parameter{

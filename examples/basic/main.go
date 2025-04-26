@@ -12,8 +12,8 @@ import (
 // HelloTool is a simple tool that returns a greeting
 type HelloTool struct{}
 
-func (t *HelloTool) Spec() *gollam.ToolSpec {
-	return &gollam.ToolSpec{
+func (t *HelloTool) Spec() gollam.ToolSpec {
+	return gollam.ToolSpec{
 		Name:        "hello",
 		Description: "Returns a greeting",
 		Parameters: map[string]*gollam.Parameter{
