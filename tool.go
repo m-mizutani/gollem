@@ -22,9 +22,21 @@ func (s *ToolSpec) Validate() error {
 		return eb.Wrap(ErrInvalidTool, "name is required")
 	}
 
-	for _, param := range s.Parameters {
+	paramNames := make(map[string]struct{})
+	for name, param := range s.Parameters {
+		if _, ok := paramNames[name]; ok {
+			return eb.Wrap(ErrInvalidTool, "duplicate parameter name", goerr.V("name", name))
+		}
+		paramNames[name] = struct{}{}
+
 		if err := param.Validate(); err != nil {
 			return eb.Wrap(ErrInvalidTool, "invalid parameter")
+		}
+	}
+
+	for _, req := range s.Required {
+		if _, ok := paramNames[req]; !ok {
+			return eb.Wrap(ErrInvalidTool, "required parameter not found", goerr.V("name", req))
 		}
 	}
 
@@ -92,11 +104,29 @@ func (p *Parameter) Validate() error {
 		return eb.Wrap(ErrInvalidParameter, "type is required")
 	}
 
+	// Validate parameter type
+	switch p.Type {
+	case TypeString, TypeNumber, TypeInteger, TypeBoolean, TypeArray, TypeObject:
+		// Valid type
+	default:
+		return eb.Wrap(ErrInvalidParameter, "invalid parameter type", goerr.V("type", p.Type))
+	}
+
 	// Properties is required for object type
 	if p.Type == TypeObject {
 		if p.Properties == nil {
 			return eb.Wrap(ErrInvalidParameter, "properties is required for object type")
 		}
+
+		// Check for duplicate property names
+		propNames := make(map[string]struct{})
+		for name := range p.Properties {
+			if _, ok := propNames[name]; ok {
+				return eb.Wrap(ErrInvalidParameter, "duplicate property name", goerr.V("name", name))
+			}
+			propNames[name] = struct{}{}
+		}
+
 		// Validate nested properties
 		for _, prop := range p.Properties {
 			if err := prop.Validate(); err != nil {
