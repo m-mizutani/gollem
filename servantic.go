@@ -215,6 +215,7 @@ func (s *Servantic) Order(ctx context.Context, prompt string) error {
 			tool, ok := toolMap[toolCall.Name]
 			if !ok {
 				input = append(input, FunctionResponse{
+					Name:  toolCall.Name,
 					ID:    toolCall.ID,
 					Error: goerr.New(toolCall.Name+" is not found", goerr.V("call", toolCall)),
 				})
@@ -229,6 +230,7 @@ func (s *Servantic) Order(ctx context.Context, prompt string) error {
 
 				input = append(input, FunctionResponse{
 					ID:    toolCall.ID,
+					Name:  toolCall.Name,
 					Error: goerr.Wrap(err, toolCall.Name+" failed to run", goerr.V("call", toolCall)),
 				})
 				continue

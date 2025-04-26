@@ -6,9 +6,9 @@
 
 ### Supported LLM
 
-- [x] Gemini
-- [x] Anthropic
-- [x] OpenAI
+- [x] Gemini (choose model from the [document](https://ai.google.dev/gemini-api/docs/models?hl=ja))
+- [x] Anthropic (choose model from the [document](https://docs.anthropic.com/en/docs/about-claude/models/all-models))
+- [x] OpenAI (choose model from the [document](https://platform.openai.com/docs/models))
 
 ### Actions
 

@@ -89,14 +89,13 @@ func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*serv
 		}
 	}
 
-	resp, err := s.client.CreateChatCompletion(
-		ctx,
-		openai.ChatCompletionRequest{
-			Model:    s.defaultModel,
-			Messages: s.messages,
-			Tools:    s.tools,
-		},
-	)
+	req := openai.ChatCompletionRequest{
+		Model:    s.defaultModel,
+		Messages: s.messages,
+		Tools:    s.tools,
+	}
+
+	resp, err := s.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create chat completion")
 	}

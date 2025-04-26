@@ -83,9 +83,18 @@ func (s *Session) Generate(ctx context.Context, input ...servantic.Input) (*serv
 		case servantic.Text:
 			parts[i] = genai.Text(string(v))
 		case servantic.FunctionResponse:
-			parts[i] = genai.FunctionResponse{
-				Name:     v.Name,
-				Response: v.Data,
+			if v.Error != nil {
+				parts[i] = genai.FunctionResponse{
+					Name: v.Name,
+					Response: map[string]any{
+						"error_message": v.Error.Error(),
+					},
+				}
+			} else {
+				parts[i] = genai.FunctionResponse{
+					Name:     v.Name,
+					Response: v.Data,
+				}
 			}
 		default:
 			return nil, goerr.Wrap(servantic.ErrInvalidParameter, "invalid input")

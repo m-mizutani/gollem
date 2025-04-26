@@ -36,13 +36,8 @@ func (t *RandomNumberTool) Spec() *servantic.ToolSpec {
 }
 
 func (t *RandomNumberTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	params, ok := args["params"].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("params is required")
-	}
-
-	min := int(params["min"].(float64))
-	max := int(params["max"].(float64))
+	min := int(args["min"].(float64))
+	max := int(args["max"].(float64))
 
 	if min >= max {
 		return nil, fmt.Errorf("min must be less than max")

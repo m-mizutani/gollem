@@ -73,79 +73,130 @@ func TestConvertTool(t *testing.T) {
 	gt.Equal(t, claudeTool.OfTool.Name, "complex_tool")
 
 	// Check schema properties
-	schema := claudeTool.OfTool.InputSchema.Properties.(map[string]interface{})
+	schemaProps := claudeTool.OfTool.InputSchema.Properties.(map[string]claude.JsonSchema)
 
 	// Check user parameter
-	user := schema["user"].(map[string]interface{})
-	gt.Equal(t, user["type"], "object")
+	user := schemaProps["user"]
+	gt.Equal(t, user.Type, "object")
 
-	userProps := user["properties"].(map[string]interface{})
-	gt.Equal(t, userProps["name"].(map[string]interface{})["type"], "string")
-	gt.Equal(t, userProps["name"].(map[string]interface{})["description"], "User's name")
-	userRequired := gt.Cast[[]string](t, user["required"])
-	gt.Equal(t, userRequired, []string{"name"})
+	userProps := user.Properties
+	nameProps := userProps["name"]
+	gt.Equal(t, nameProps.Type, "string")
+	gt.Equal(t, nameProps.Description, "User's name")
+	gt.Array(t, user.Required).Equal([]string{"name"})
 
-	addressProps := userProps["address"].(map[string]interface{})["properties"].(map[string]interface{})
-	gt.Equal(t, addressProps["street"].(map[string]interface{})["type"], "string")
-	gt.Equal(t, addressProps["city"].(map[string]interface{})["type"], "string")
+	addressProps := userProps["address"].Properties
+	gt.Equal(t, addressProps["street"].Type, "string")
+	gt.Equal(t, addressProps["city"].Type, "string")
 
 	// Check items parameter
-	itemsProp := schema["items"].(map[string]interface{})
-	gt.Equal(t, itemsProp["type"], "array")
+	itemsProp := schemaProps["items"]
+	gt.Equal(t, itemsProp.Type, "array")
 
-	itemsProps := itemsProp["items"].(map[string]interface{})["properties"].(map[string]interface{})
-	gt.Equal(t, itemsProps["id"].(map[string]interface{})["type"], "string")
-	gt.Equal(t, itemsProps["quantity"].(map[string]interface{})["type"], "number")
+	itemsSchema := *itemsProp.Items
+	itemsProps := itemsSchema.Properties
+	gt.Equal(t, itemsProps["id"].Type, "string")
+	gt.Equal(t, itemsProps["quantity"].Type, "number")
 }
 
 func TestConvertParameterToSchema(t *testing.T) {
-	t.Run("number constraints", func(t *testing.T) {
-		p := &servantic.Parameter{
+	type testCase struct {
+		name     string
+		schema   *servantic.Parameter
+		expected claude.JsonSchema
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			actual := claude.ConvertParameterToSchema(tc.schema)
+			gt.Value(t, actual).Equal(tc.expected)
+		}
+	}
+
+	t.Run("number constraints", runTest(testCase{
+		name: "number constraints",
+		schema: &servantic.Parameter{
 			Type:    servantic.TypeNumber,
 			Minimum: ptr(1.0),
 			Maximum: ptr(10.0),
-		}
-		schema := claude.ConvertParameterToSchema(p)
-		gt.Value(t, schema["minimum"]).Equal(1.0)
-		gt.Value(t, schema["maximum"]).Equal(10.0)
-	})
+		},
+		expected: claude.JsonSchema{
+			Type:    "number",
+			Minimum: ptr(1.0),
+			Maximum: ptr(10.0),
+		},
+	}))
 
-	t.Run("string constraints", func(t *testing.T) {
-		p := &servantic.Parameter{
+	t.Run("string constraints", runTest(testCase{
+		name: "string constraints",
+		schema: &servantic.Parameter{
 			Type:      servantic.TypeString,
 			MinLength: ptr(1),
 			MaxLength: ptr(10),
 			Pattern:   "^[a-z]+$",
-		}
-		schema := claude.ConvertParameterToSchema(p)
-		gt.Value(t, schema["minLength"]).Equal(1)
-		gt.Value(t, schema["maxLength"]).Equal(10)
-		gt.Value(t, schema["pattern"]).Equal("^[a-z]+$")
-	})
+		},
+		expected: claude.JsonSchema{
+			Type:      "string",
+			MinLength: ptr(1),
+			MaxLength: ptr(10),
+			Pattern:   "^[a-z]+$",
+		},
+	}))
 
-	t.Run("array constraints", func(t *testing.T) {
-		p := &servantic.Parameter{
+	t.Run("array constraints", runTest(testCase{
+		name: "array constraints",
+		schema: &servantic.Parameter{
 			Type:     servantic.TypeArray,
 			Items:    &servantic.Parameter{Type: servantic.TypeString},
 			MinItems: ptr(1),
 			MaxItems: ptr(10),
-		}
-		schema := claude.ConvertParameterToSchema(p)
-		gt.Value(t, schema["minItems"]).Equal(1)
-		gt.Value(t, schema["maxItems"]).Equal(10)
-		gt.Value(t, schema["items"].(map[string]interface{})["type"]).Equal("string")
-	})
+		},
+		expected: claude.JsonSchema{
+			Type:     "array",
+			MinItems: ptr(1),
+			MaxItems: ptr(10),
+			Items:    &claude.JsonSchema{Type: "string"},
+		},
+	}))
 
-	t.Run("default value", func(t *testing.T) {
-		p := &servantic.Parameter{
+	t.Run("default value", runTest(testCase{
+		name: "default value",
+		schema: &servantic.Parameter{
 			Type:    servantic.TypeString,
 			Default: "default value",
-		}
-		schema := claude.ConvertParameterToSchema(p)
-		gt.Value(t, schema["default"]).Equal("default value")
-	})
+		},
+		expected: claude.JsonSchema{
+			Type:    "string",
+			Default: "default value",
+		},
+	}))
 }
 
 func ptr[T any](v T) *T {
 	return &v
+}
+
+func TestConvertSchema(t *testing.T) {
+	type testCase struct {
+		name     string
+		schema   *servantic.Parameter
+		expected claude.JsonSchema
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			actual := claude.ConvertParameterToSchema(tc.schema)
+			gt.Value(t, actual).Equal(tc.expected)
+		}
+	}
+
+	t.Run("string type", runTest(testCase{
+		name: "string type",
+		schema: &servantic.Parameter{
+			Type: servantic.TypeString,
+		},
+		expected: claude.JsonSchema{
+			Type: "string",
+		},
+	}))
 }

@@ -15,9 +15,11 @@ func convertTool(tool servantic.Tool) openai.Tool {
 		properties[name] = convertParameterToSchema(param)
 	}
 
-	parameters["type"] = "object"
-	parameters["properties"] = properties
-	parameters["required"] = spec.Required
+	if len(properties) > 0 {
+		parameters["type"] = "object"
+		parameters["properties"] = properties
+		parameters["required"] = spec.Required
+	}
 
 	return openai.Tool{
 		Type: openai.ToolTypeFunction,

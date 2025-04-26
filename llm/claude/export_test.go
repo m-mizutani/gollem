@@ -5,3 +5,5 @@ var (
 	ConvertTool              = convertTool
 	ConvertParameterToSchema = convertParameterToSchema
 )
+
+type JsonSchema = jsonSchema
