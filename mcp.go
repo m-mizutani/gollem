@@ -1,0 +1,254 @@
+package gollam
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"sync"
+
+	"github.com/m-mizutani/goerr/v2"
+	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/santhosh-tekuri/jsonschema/v6"
+)
+
+type MCPClient struct {
+	// For local MCP server
+	path    string
+	args    []string
+	envVars []string
+
+	// For remote MCP server
+	baseURL string
+	headers map[string]string
+
+	// Common client
+	client     *client.Client
+	initResult *mcp.InitializeResult
+
+	initMutex sync.Mutex
+}
+
+// MCPonStdioOption is the option for the MCP client for local MCP executable server via stdio.
+type MCPonStdioOption func(*MCPClient)
+
+// WithEnvVars sets the environment variables for the MCP client. It appends the environment variables to the existing ones.
+func WithEnvVars(envVars []string) MCPonStdioOption {
+	return func(m *MCPClient) {
+		m.envVars = append(m.envVars, envVars...)
+	}
+}
+
+// MCPonSSEOption is the option for the MCP client for remote MCP server via HTTP SSE.
+type MCPonSSEOption func(*MCPClient)
+
+// WithHeaders sets the headers for the MCP client. It replaces the existing headers setting.
+func WithHeaders(headers map[string]string) MCPonSSEOption {
+	return func(m *MCPClient) {
+		m.headers = headers
+	}
+}
+
+func (c *MCPClient) start(ctx context.Context) error {
+	c.initMutex.Lock()
+	defer c.initMutex.Unlock()
+
+	if c.initResult != nil {
+		return nil
+	}
+
+	var tp transport.Interface
+	if c.path != "" {
+		tp = transport.NewStdio(c.path, c.envVars, c.args...)
+	}
+
+	if c.baseURL != "" {
+		sse, err := transport.NewSSE(c.baseURL, transport.WithHeaders(c.headers))
+		if err != nil {
+			return goerr.Wrap(err, "failed to create SSE transport")
+		}
+		tp = sse
+	}
+
+	if tp == nil {
+		return goerr.New("no transport")
+	}
+
+	c.client = client.NewClient(tp)
+
+	if err := c.client.Start(ctx); err != nil {
+		return goerr.Wrap(err, "failed to start MCP client")
+	}
+
+	var initRequest mcp.InitializeRequest
+	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initRequest.Params.ClientInfo = mcp.Implementation{
+		Name:    "gollam",
+		Version: "0.0.1",
+	}
+
+	if resp, err := c.client.Initialize(ctx, initRequest); err != nil {
+		return goerr.Wrap(err, "failed to initialize MCP client")
+	} else {
+		c.initResult = resp
+	}
+
+	return nil
+}
+
+func (c *MCPClient) listTools(ctx context.Context) ([]mcp.Tool, error) {
+	if c.initResult == nil {
+		return nil, goerr.New("MCP client not initialized")
+	}
+
+	resp, err := c.client.ListTools(ctx, mcp.ListToolsRequest{})
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to list tools")
+	}
+
+	return resp.Tools, nil
+}
+
+func (c *MCPClient) callTool(ctx context.Context, name string, args map[string]any) (*mcp.CallToolResult, error) {
+	if c.initResult == nil {
+		return nil, goerr.New("MCP client not initialized")
+	}
+
+	req := mcp.CallToolRequest{}
+	req.Params.Name = name
+	req.Params.Arguments = args
+	resp, err := c.client.CallTool(ctx, req)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to call tool")
+	}
+
+	return resp, nil
+}
+
+func (c *MCPClient) close() error {
+	if err := c.client.Close(); err != nil {
+		return goerr.Wrap(err, "failed to close MCP client")
+	}
+	return nil
+}
+
+func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (*Parameter, error) {
+	parameters := map[string]*Parameter{}
+	jsonSchema, err := json.Marshal(inputSchema)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to marshal input schema")
+	}
+
+	rawSchema, err := jsonschema.UnmarshalJSON(bytes.NewReader(jsonSchema))
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to compile input schema")
+	}
+
+	c := jsonschema.NewCompiler()
+	if err := c.AddResource("schema.json", rawSchema); err != nil {
+		return nil, goerr.Wrap(err, "failed to add resource to compiler")
+	}
+	schema, err := c.Compile("schema.json")
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to compile input schema")
+	}
+
+	schemaType := schema.Types.ToStrings()
+	if len(schemaType) != 1 || schemaType[0] != "object" {
+		return nil, goerr.Wrap(ErrInvalidInputSchema, "invalid input schema", goerr.V("schema", schema))
+	}
+
+	for name, property := range schema.Properties {
+		parameters[name] = jsonSchemaToParameter(property)
+	}
+
+	return &Parameter{
+		Type:        ParameterType(schema.Types.ToStrings()[0]),
+		Title:       schema.Title,
+		Description: schema.Description,
+		Required:    schema.Required,
+		Properties:  parameters,
+	}, nil
+}
+
+func jsonSchemaToParameter(schema *jsonschema.Schema) *Parameter {
+	var enum []string
+	if schema.Enum != nil {
+		for _, v := range schema.Enum.Values {
+			enum = append(enum, fmt.Sprintf("%v", v))
+		}
+	}
+
+	properties := map[string]*Parameter{}
+	for name, property := range schema.Properties {
+		properties[name] = jsonSchemaToParameter(property)
+	}
+
+	var items *Parameter
+	if schema.Items != nil {
+		switch v := schema.Items.(type) {
+		case *jsonschema.Schema:
+			items = jsonSchemaToParameter(v)
+		}
+	}
+
+	return &Parameter{
+		Type:        ParameterType(schema.Types.ToStrings()[0]),
+		Title:       schema.Title,
+		Description: schema.Description,
+		Required:    schema.Required,
+		Enum:        enum,
+		Properties:  properties,
+		Items:       items,
+	}
+}
+
+func wrapMCPToolCall(mcpClient *MCPClient, tool mcp.Tool) (*toolWrapper, error) {
+	parameters, err := inputSchemaToParameter(tool.InputSchema)
+	if err != nil {
+		return nil, err
+	}
+
+	return &toolWrapper{
+		spec: &ToolSpec{
+			Name:        tool.Name,
+			Description: tool.Description,
+			Parameters:  parameters.Properties,
+			Required:    parameters.Required,
+		},
+		run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+			resp, err := mcpClient.callTool(ctx, tool.Name, args)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to call tool")
+			}
+
+			return mcpContentToMap(resp.Content), nil
+		},
+	}, nil
+}
+
+func mcpContentToMap(contents []mcp.Content) map[string]any {
+	for _, c := range contents {
+		if txt, ok := c.(*mcp.TextContent); ok {
+			var v any
+			if err := json.Unmarshal([]byte(txt.Text), &v); err == nil {
+				if mapData, ok := v.(map[string]any); ok {
+					return mapData
+				}
+
+				return map[string]any{
+					"result": v,
+				}
+			}
+
+			return map[string]any{
+				"result": txt.Text,
+			}
+		}
+	}
+
+	// No appropriate content found
+	return map[string]any{}
+}
