@@ -9,6 +9,28 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
+// generationParameters represents the parameters for text generation.
+type generationParameters struct {
+	// Temperature controls randomness in the output.
+	// Higher values make the output more random, lower values make it more focused.
+	Temperature float32
+
+	// TopP controls diversity via nucleus sampling.
+	// Higher values allow more diverse outputs.
+	TopP float32
+
+	// MaxTokens limits the number of tokens to generate.
+	MaxTokens int
+
+	// PresencePenalty increases the model's likelihood to talk about new topics.
+	// Range: -2.0 to 2.0
+	PresencePenalty float32
+
+	// FrequencyPenalty decreases the model's likelihood to repeat the same line verbatim.
+	// Range: -2.0 to 2.0
+	FrequencyPenalty float32
+}
+
 // Client is a client for the GPT API.
 // It provides methods to interact with OpenAI's GPT models.
 type Client struct {
@@ -18,6 +40,9 @@ type Client struct {
 	// defaultModel is the model to use for chat completions.
 	// It can be overridden using WithModel option.
 	defaultModel string
+
+	// generation parameters
+	params generationParameters
 }
 
 // Option is a function that configures a Client.
@@ -31,11 +56,54 @@ func WithModel(modelName string) Option {
 	}
 }
 
+// WithTemperature sets the temperature parameter for text generation.
+// Higher values make the output more random, lower values make it more focused.
+func WithTemperature(temp float32) Option {
+	return func(c *Client) {
+		c.params.Temperature = temp
+	}
+}
+
+// WithTopP sets the top_p parameter for text generation.
+// Controls diversity via nucleus sampling.
+func WithTopP(topP float32) Option {
+	return func(c *Client) {
+		c.params.TopP = topP
+	}
+}
+
+// WithMaxTokens sets the maximum number of tokens to generate.
+func WithMaxTokens(maxTokens int) Option {
+	return func(c *Client) {
+		c.params.MaxTokens = maxTokens
+	}
+}
+
+// WithPresencePenalty sets the presence penalty parameter.
+// Increases the model's likelihood to talk about new topics.
+func WithPresencePenalty(penalty float32) Option {
+	return func(c *Client) {
+		c.params.PresencePenalty = penalty
+	}
+}
+
+// WithFrequencyPenalty sets the frequency penalty parameter.
+// Decreases the model's likelihood to repeat the same line verbatim.
+func WithFrequencyPenalty(penalty float32) Option {
+	return func(c *Client) {
+		c.params.FrequencyPenalty = penalty
+	}
+}
+
 // New creates a new client for the GPT API.
 // It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
 	client := &Client{
 		defaultModel: "gpt-4-turbo-preview",
+		params: generationParameters{
+			Temperature: 1.0,
+			TopP:        1.0,
+		},
 	}
 
 	for _, option := range options {
@@ -46,24 +114,6 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 	client.client = openaiClient
 
 	return client, nil
-}
-
-// NewSession creates a new session for the GPT API.
-// It converts the provided tools to OpenAI's tool format and initializes a new chat session.
-func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Session, error) {
-	// Convert gollam.Tool to openai.Tool
-	openaiTools := make([]openai.Tool, len(tools))
-	for i, tool := range tools {
-		openaiTools[i] = convertTool(tool)
-	}
-
-	session := &Session{
-		client:       c.client,
-		defaultModel: c.defaultModel,
-		tools:        openaiTools,
-	}
-
-	return session, nil
 }
 
 // Session is a session for the GPT chat.
@@ -80,6 +130,28 @@ type Session struct {
 
 	// messages stores the conversation history.
 	messages []openai.ChatCompletionMessage
+
+	// generation parameters
+	params generationParameters
+}
+
+// NewSession creates a new session for the GPT API.
+// It converts the provided tools to OpenAI's tool format and initializes a new chat session.
+func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Session, error) {
+	// Convert gollam.Tool to openai.Tool
+	openaiTools := make([]openai.Tool, len(tools))
+	for i, tool := range tools {
+		openaiTools[i] = convertTool(tool)
+	}
+
+	session := &Session{
+		client:       c.client,
+		defaultModel: c.defaultModel,
+		tools:        openaiTools,
+		params:       c.params,
+	}
+
+	return session, nil
 }
 
 // Generate processes the input and generates a response.
@@ -110,9 +182,14 @@ func (s *Session) Generate(ctx context.Context, input ...gollam.Input) (*gollam.
 	}
 
 	req := openai.ChatCompletionRequest{
-		Model:    s.defaultModel,
-		Messages: s.messages,
-		Tools:    s.tools,
+		Model:            s.defaultModel,
+		Messages:         s.messages,
+		Tools:            s.tools,
+		Temperature:      s.params.Temperature,
+		TopP:             s.params.TopP,
+		MaxTokens:        s.params.MaxTokens,
+		PresencePenalty:  s.params.PresencePenalty,
+		FrequencyPenalty: s.params.FrequencyPenalty,
 	}
 
 	resp, err := s.client.CreateChatCompletion(ctx, req)
