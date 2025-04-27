@@ -3,6 +3,8 @@ package gpt
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollam"
@@ -100,10 +102,7 @@ func WithFrequencyPenalty(penalty float32) Option {
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
 	client := &Client{
 		defaultModel: "gpt-4-turbo-preview",
-		params: generationParameters{
-			Temperature: 1.0,
-			TopP:        1.0,
-		},
+		params:       generationParameters{},
 	}
 
 	for _, option := range options {
@@ -154,9 +153,9 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Se
 	return session, nil
 }
 
-// Generate processes the input and generates a response.
+// GenerateContent processes the input and generates a response.
 // It handles both text messages and function responses.
-func (s *Session) Generate(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
 	// Convert input to messages
 	for _, in := range input {
 		switch v := in.(type) {
@@ -236,4 +235,175 @@ func (s *Session) Generate(ctx context.Context, input ...gollam.Input) (*gollam.
 	}
 
 	return response, nil
+}
+
+// accumulator accumulates streaming responses for function calls
+type accumulator struct {
+	ID   string
+	Name string
+	Args string
+}
+
+func newAccumulator() *accumulator {
+	return &accumulator{}
+}
+
+func (a *accumulator) addFunctionCall(toolCall *openai.ToolCall) {
+	if toolCall.ID != "" {
+		a.ID = toolCall.ID
+	}
+	if toolCall.Function.Name != "" {
+		a.Name = toolCall.Function.Name
+	}
+	if toolCall.Function.Arguments != "" {
+		a.Args += toolCall.Function.Arguments
+	}
+}
+
+func (a *accumulator) accumulate() (*openai.ToolCall, *gollam.FunctionCall, error) {
+	if a.ID == "" || a.Name == "" || a.Args == "" {
+		return nil, nil, goerr.Wrap(gollam.ErrInvalidParameter, "function call is not complete")
+	}
+
+	var args map[string]any
+	if err := json.Unmarshal([]byte(a.Args), &args); err != nil {
+		return nil, nil, goerr.Wrap(err, "failed to unmarshal function call arguments", goerr.V("accumulator", a))
+	}
+
+	return &openai.ToolCall{
+			ID:   a.ID,
+			Type: openai.ToolTypeFunction,
+			Function: openai.FunctionCall{
+				Name:      a.Name,
+				Arguments: a.Args,
+			},
+		}, &gollam.FunctionCall{
+			ID:        a.ID,
+			Name:      a.Name,
+			Arguments: args,
+		}, nil
+}
+
+// GenerateStream processes the input and generates a response stream.
+// It handles both text messages and function responses, and returns a channel for streaming responses.
+func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-chan *gollam.Response, error) {
+	// Convert input to messages
+	for _, in := range input {
+		switch v := in.(type) {
+		case gollam.Text:
+			s.messages = append(s.messages, openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleUser,
+				Content: string(v),
+			})
+		case gollam.FunctionResponse:
+			response, err := json.Marshal(v.Data)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to marshal function response")
+			}
+			s.messages = append(s.messages, openai.ChatCompletionMessage{
+				Role:       openai.ChatMessageRoleTool,
+				Content:    string(response),
+				Name:       v.Name,
+				ToolCallID: v.ID,
+			})
+
+		default:
+			return nil, goerr.Wrap(gollam.ErrInvalidParameter, "invalid input")
+		}
+	}
+
+	req := openai.ChatCompletionRequest{
+		Model:            s.defaultModel,
+		Messages:         s.messages,
+		Tools:            s.tools,
+		Temperature:      s.params.Temperature,
+		TopP:             s.params.TopP,
+		MaxTokens:        s.params.MaxTokens,
+		PresencePenalty:  s.params.PresencePenalty,
+		FrequencyPenalty: s.params.FrequencyPenalty,
+		Stream:           true,
+	}
+
+	stream, err := s.client.CreateChatCompletionStream(ctx, req)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create chat completion stream")
+	}
+
+	responseChan := make(chan *gollam.Response)
+	acc := newAccumulator()
+
+	callHistory := make([]openai.ToolCall, 0)
+	textHistory := make([]string, 0)
+
+	go func() {
+		defer close(responseChan)
+		defer stream.Close()
+
+		defer func() {
+			if len(textHistory) > 0 {
+				s.messages = append(s.messages, openai.ChatCompletionMessage{
+					Role:    openai.ChatMessageRoleAssistant,
+					Content: strings.Join(textHistory, ""),
+				})
+			}
+			if len(callHistory) > 0 {
+				s.messages = append(s.messages, openai.ChatCompletionMessage{
+					Role:      openai.ChatMessageRoleAssistant,
+					ToolCalls: callHistory,
+				})
+			}
+		}()
+
+		for {
+			resp, err := stream.Recv()
+			if err != nil {
+				if err == io.EOF {
+					return
+				}
+				responseChan <- &gollam.Response{
+					Error: goerr.Wrap(err, "failed to receive chat completion stream"),
+				}
+				return
+			}
+
+			if len(resp.Choices) == 0 {
+				return
+			}
+
+			for _, choice := range resp.Choices {
+				if choice.Delta.Content != "" {
+					// Send text immediately for each delta.Content
+					responseChan <- &gollam.Response{
+						Texts: []string{choice.Delta.Content},
+					}
+				}
+
+				if choice.Delta.ToolCalls != nil {
+					for _, toolCall := range choice.Delta.ToolCalls {
+						acc.addFunctionCall(&toolCall)
+					}
+				}
+
+				if choice.FinishReason == openai.FinishReasonToolCalls {
+					openaiCall, funcCall, err := acc.accumulate()
+					if err != nil {
+						responseChan <- &gollam.Response{
+							Error: err,
+						}
+						return
+					}
+
+					callHistory = append(callHistory, *openaiCall)
+					responseChan <- &gollam.Response{
+						FunctionCalls: []*gollam.FunctionCall{funcCall},
+					}
+
+					acc = newAccumulator()
+				}
+
+			}
+		}
+	}()
+
+	return responseChan, nil
 }
