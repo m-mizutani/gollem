@@ -19,10 +19,12 @@ package main
 
 import (
     "context"
+    "fmt"
     "os"
 
     "github.com/m-mizutani/gollam"
     "github.com/m-mizutani/gollam/llm/gpt"
+    "github.com/m-mizutani/gollam/mcp"
 )
 
 func main() {
@@ -32,10 +34,21 @@ func main() {
         panic(err)
     }
 
+    // Create MCP client
+    mcpClient, err := mcp.NewSSE(context.Background(), "http://localhost:8080")
+    if err != nil {
+        panic(err)
+    }
+    defer mcpClient.Close()
+
     // Create gollam instance
-    s := gollam.New(client, gollam.WithMsgCallback(func(ctx context.Context, msg string) {
-        fmt.Println(msg)
-    }))
+    s := gollam.New(client,
+        gollam.WithToolSets(mcpClient),
+        gollam.WithMsgCallback(func(ctx context.Context, msg string) error {
+            fmt.Println(msg)
+            return nil
+        }),
+    )
 
     // Send a message to the LLM
     if err := s.Order(context.Background(), "Hello, how are you?"); err != nil {

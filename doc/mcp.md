@@ -16,13 +16,25 @@ To connect your gollam application to an MCP server, you can use either HTTP SSE
 
 ```go
 // Using HTTP SSE transport
+mcpClient, err := mcp.NewSSE(context.Background(), "http://localhost:8080")
+if err != nil {
+    panic(err)
+}
+defer mcpClient.Close()
+
 s := gollam.New(client,
-    gollam.WithMCPviaSSE("http://localhost:8080"),
+    gollam.WithToolSets(mcpClient),
 )
 
 // Using stdio transport
+mcpClient, err := mcp.NewStdio(context.Background(), "/path/to/mcp/server", []string{"--arg1", "value1"})
+if err != nil {
+    panic(err)
+}
+defer mcpClient.Close()
+
 s := gollam.New(client,
-    gollam.WithMCPviaStdio("/path/to/mcp/server", []string{"--arg1", "value1"}),
+    gollam.WithToolSets(mcpClient),
 )
 ```
 

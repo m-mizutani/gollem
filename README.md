@@ -51,6 +51,7 @@ import (
 
 	"github.com/m-mizutani/gollam"
 	"github.com/m-mizutani/gollam/llm/gpt"
+	"github.com/m-mizutani/gollam/mcp"
 )
 
 // HelloTool is a simple tool that returns a greeting
@@ -84,17 +85,25 @@ func main() {
 		panic(err)
 	}
 
+	// Create MCP client
+	mcpClient, err := mcp.NewSSE(context.Background(), "http://localhost:8080")
+	if err != nil {
+		panic(err)
+	}
+	defer mcpClient.Close()
+
 	// Create gollam instance with the custom tool
 	s := gollam.New(client,
 		// Register the custom tool
 		gollam.WithTools(&HelloTool{}),
 
 		// Register MCP server
-		gollam.WithMCPviaSSE("http://localhost:8080"),
+		gollam.WithToolSets(mcpClient),
 
 		// Optional: Print the message from the LLM
-		gollam.WithMsgCallback(func(ctx context.Context, msg string) {
+		gollam.WithMsgCallback(func(ctx context.Context, msg string) error {
 			fmt.Println(msg)
+			return nil
 		}),
 	)
 
