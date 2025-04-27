@@ -1,4 +1,4 @@
-package gollam
+package mcp
 
 import (
 	"bytes"
@@ -8,13 +8,14 @@ import (
 	"sync"
 
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/m-mizutani/gollam"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-type MCPClient struct {
+type Client struct {
 	// For local MCP server
 	path    string
 	args    []string
@@ -25,33 +26,105 @@ type MCPClient struct {
 	headers map[string]string
 
 	// Common client
-	client     *client.Client
-	initResult *mcp.InitializeResult
+	client *client.Client
 
-	initMutex sync.Mutex
+	initResult *mcp.InitializeResult
+	initMutex  sync.Mutex
 }
 
-// MCPonStdioOption is the option for the MCP client for local MCP executable server via stdio.
-type MCPonStdioOption func(*MCPClient)
+// Specs implements gollam.ToolSet interface
+func (c *Client) Specs(ctx context.Context) ([]gollam.ToolSpec, error) {
+	tools, err := c.listTools(ctx)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to list tools")
+	}
+
+	specs := make([]gollam.ToolSpec, len(tools))
+	for i, tool := range tools {
+		param, err := inputSchemaToParameter(tool.InputSchema)
+		if err != nil {
+			return nil, goerr.Wrap(err,
+				"failed to convert input schema to parameter",
+				goerr.V("tool.name", tool.Name),
+				goerr.V("tool.inputSchema", tool.InputSchema),
+			)
+		}
+
+		specs[i] = gollam.ToolSpec{
+			Name:        tool.Name,
+			Description: tool.Description,
+			Parameters:  param.Properties,
+			Required:    param.Required,
+		}
+	}
+
+	return specs, nil
+}
+
+// Run implements gollam.ToolSet interface
+func (c *Client) Run(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
+	resp, err := c.callTool(ctx, name, args)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to call tool")
+	}
+
+	return mcpContentToMap(resp.Content), nil
+}
+
+// StdioOption is the option for the MCP client for local MCP executable server via stdio.
+type StdioOption func(*Client)
 
 // WithEnvVars sets the environment variables for the MCP client. It appends the environment variables to the existing ones.
-func WithEnvVars(envVars []string) MCPonStdioOption {
-	return func(m *MCPClient) {
+func WithEnvVars(envVars []string) StdioOption {
+	return func(m *Client) {
 		m.envVars = append(m.envVars, envVars...)
 	}
 }
 
-// MCPonSSEOption is the option for the MCP client for remote MCP server via HTTP SSE.
-type MCPonSSEOption func(*MCPClient)
+// NewStdio creates a new MCP client for local MCP executable server via stdio.
+func NewStdio(ctx context.Context, path string, args []string, options ...StdioOption) (*Client, error) {
+	client := &Client{
+		path: path,
+		args: args,
+	}
+	for _, option := range options {
+		option(client)
+	}
+
+	if err := client.init(ctx); err != nil {
+		return nil, goerr.Wrap(err, "failed to initialize MCP client")
+	}
+
+	return client, nil
+}
+
+// SSEOption is the option for the MCP client for remote MCP server via HTTP SSE.
+type SSEOption func(*Client)
 
 // WithHeaders sets the headers for the MCP client. It replaces the existing headers setting.
-func WithHeaders(headers map[string]string) MCPonSSEOption {
-	return func(m *MCPClient) {
+func WithHeaders(headers map[string]string) SSEOption {
+	return func(m *Client) {
 		m.headers = headers
 	}
 }
 
-func (c *MCPClient) start(ctx context.Context) error {
+// NewSSE creates a new MCP client for remote MCP server via HTTP SSE.
+func NewSSE(ctx context.Context, baseURL string, options ...SSEOption) (*Client, error) {
+	client := &Client{
+		baseURL: baseURL,
+	}
+	for _, option := range options {
+		option(client)
+	}
+
+	if err := client.init(ctx); err != nil {
+		return nil, goerr.Wrap(err, "failed to initialize MCP client")
+	}
+
+	return client, nil
+}
+
+func (c *Client) init(ctx context.Context) error {
 	c.initMutex.Lock()
 	defer c.initMutex.Unlock()
 
@@ -98,11 +171,8 @@ func (c *MCPClient) start(ctx context.Context) error {
 	return nil
 }
 
-func (c *MCPClient) listTools(ctx context.Context) ([]mcp.Tool, error) {
-	if c.initResult == nil {
-		return nil, goerr.New("MCP client not initialized")
-	}
-
+func (c *Client) listTools(ctx context.Context) ([]mcp.Tool, error) {
+	// ListTools is thread safe
 	resp, err := c.client.ListTools(ctx, mcp.ListToolsRequest{})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list tools")
@@ -111,11 +181,7 @@ func (c *MCPClient) listTools(ctx context.Context) ([]mcp.Tool, error) {
 	return resp.Tools, nil
 }
 
-func (c *MCPClient) callTool(ctx context.Context, name string, args map[string]any) (*mcp.CallToolResult, error) {
-	if c.initResult == nil {
-		return nil, goerr.New("MCP client not initialized")
-	}
-
+func (c *Client) callTool(ctx context.Context, name string, args map[string]any) (*mcp.CallToolResult, error) {
 	req := mcp.CallToolRequest{}
 	req.Params.Name = name
 	req.Params.Arguments = args
@@ -127,15 +193,15 @@ func (c *MCPClient) callTool(ctx context.Context, name string, args map[string]a
 	return resp, nil
 }
 
-func (c *MCPClient) close() error {
+func (c *Client) Close() error {
 	if err := c.client.Close(); err != nil {
 		return goerr.Wrap(err, "failed to close MCP client")
 	}
 	return nil
 }
 
-func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (*Parameter, error) {
-	parameters := map[string]*Parameter{}
+func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (*gollam.Parameter, error) {
+	parameters := map[string]*gollam.Parameter{}
 	jsonSchema, err := json.Marshal(inputSchema)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to marshal input schema")
@@ -157,15 +223,15 @@ func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (*Parameter, error)
 
 	schemaType := schema.Types.ToStrings()
 	if len(schemaType) != 1 || schemaType[0] != "object" {
-		return nil, goerr.Wrap(ErrInvalidInputSchema, "invalid input schema", goerr.V("schema", schema))
+		return nil, goerr.Wrap(gollam.ErrInvalidTool, "invalid input schema", goerr.V("schema", schema))
 	}
 
 	for name, property := range schema.Properties {
 		parameters[name] = jsonSchemaToParameter(property)
 	}
 
-	return &Parameter{
-		Type:        ParameterType(schema.Types.ToStrings()[0]),
+	return &gollam.Parameter{
+		Type:        gollam.ParameterType(schema.Types.ToStrings()[0]),
 		Title:       schema.Title,
 		Description: schema.Description,
 		Required:    schema.Required,
@@ -173,7 +239,7 @@ func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (*Parameter, error)
 	}, nil
 }
 
-func jsonSchemaToParameter(schema *jsonschema.Schema) *Parameter {
+func jsonSchemaToParameter(schema *jsonschema.Schema) *gollam.Parameter {
 	var enum []string
 	if schema.Enum != nil {
 		for _, v := range schema.Enum.Values {
@@ -181,12 +247,12 @@ func jsonSchemaToParameter(schema *jsonschema.Schema) *Parameter {
 		}
 	}
 
-	properties := map[string]*Parameter{}
+	properties := map[string]*gollam.Parameter{}
 	for name, property := range schema.Properties {
 		properties[name] = jsonSchemaToParameter(property)
 	}
 
-	var items *Parameter
+	var items *gollam.Parameter
 	if schema.Items != nil {
 		switch v := schema.Items.(type) {
 		case *jsonschema.Schema:
@@ -194,8 +260,8 @@ func jsonSchemaToParameter(schema *jsonschema.Schema) *Parameter {
 		}
 	}
 
-	return &Parameter{
-		Type:        ParameterType(schema.Types.ToStrings()[0]),
+	return &gollam.Parameter{
+		Type:        gollam.ParameterType(schema.Types.ToStrings()[0]),
 		Title:       schema.Title,
 		Description: schema.Description,
 		Required:    schema.Required,
@@ -203,30 +269,6 @@ func jsonSchemaToParameter(schema *jsonschema.Schema) *Parameter {
 		Properties:  properties,
 		Items:       items,
 	}
-}
-
-func wrapMCPToolCall(mcpClient *MCPClient, tool mcp.Tool) (*toolWrapper, error) {
-	parameters, err := inputSchemaToParameter(tool.InputSchema)
-	if err != nil {
-		return nil, err
-	}
-
-	return &toolWrapper{
-		spec: ToolSpec{
-			Name:        tool.Name,
-			Description: tool.Description,
-			Parameters:  parameters.Properties,
-			Required:    parameters.Required,
-		},
-		run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
-			resp, err := mcpClient.callTool(ctx, tool.Name, args)
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to call tool")
-			}
-
-			return mcpContentToMap(resp.Content), nil
-		},
-	}, nil
 }
 
 func mcpContentToMap(contents []mcp.Content) map[string]any {

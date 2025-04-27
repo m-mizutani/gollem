@@ -16,16 +16,16 @@ type Client struct {
 	client *openai.Client
 
 	// defaultModel is the model to use for chat completions.
-	// It can be overridden using WithDefaultModel option.
+	// It can be overridden using WithModel option.
 	defaultModel string
 }
 
 // Option is a function that configures a Client.
 type Option func(*Client)
 
-// WithDefaultModel sets the default model to use for chat completions.
+// WithModel sets the default model to use for chat completions.
 // The model name should be a valid OpenAI model identifier.
-func WithDefaultModel(modelName string) Option {
+func WithModel(modelName string) Option {
 	return func(c *Client) {
 		c.defaultModel = modelName
 	}

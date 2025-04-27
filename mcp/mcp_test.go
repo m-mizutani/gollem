@@ -1,11 +1,11 @@
-package gollam_test
+package mcp_test
 
 import (
 	"context"
 	"os"
 	"testing"
 
-	"github.com/m-mizutani/gollam"
+	"github.com/m-mizutani/gollam/mcp"
 	"github.com/m-mizutani/gt"
 )
 
@@ -15,7 +15,7 @@ func TestMCPLocalDryRun(t *testing.T) {
 		t.Skip("TEST_MCP_EXEC_PATH is not set")
 	}
 
-	client := gollam.NewLocalMCPClient(mcpExecPath)
+	client := mcp.NewLocalMCPClient(mcpExecPath)
 
 	err := client.Start(context.Background())
 	gt.NoError(t, err)
@@ -24,7 +24,7 @@ func TestMCPLocalDryRun(t *testing.T) {
 	gt.NoError(t, err)
 	gt.A(t, tools).Longer(0)
 
-	parameter, err := gollam.InputSchemaToParameter(tools[0].InputSchema)
+	parameter, err := mcp.InputSchemaToParameter(tools[0].InputSchema)
 	gt.NoError(t, err)
 	t.Log("parameter:", parameter)
 

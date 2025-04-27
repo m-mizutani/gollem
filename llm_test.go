@@ -82,7 +82,6 @@ func testLLM(t *testing.T, session gollam.Session) {
 		})
 		gt.NoError(t, err)
 		gt.Array(t, resp.Texts).Length(1).Required()
-		t.Log("Response:", resp.Texts[0])
 	})
 
 	// Test case 2: Generate random number with different range

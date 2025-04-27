@@ -90,7 +90,7 @@ func main() {
 		gollam.WithTools(&HelloTool{}),
 
 		// Register MCP server
-		gollam.WithMCPonSSE("http://localhost:8080"),
+		gollam.WithMCPviaSSE("http://localhost:8080"),
 
 		// Optional: Print the message from the LLM
 		gollam.WithMsgCallback(func(ctx context.Context, msg string) {
