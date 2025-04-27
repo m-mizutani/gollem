@@ -255,19 +255,6 @@ func newFunctionCallAccumulator() *FunctionCallAccumulator {
 	}
 }
 
-func (a *FunctionCallAccumulator) addFunctionCall(delta *anthropic.ContentBlockDeltaEventDeltaUnion) {
-	if delta == nil {
-		return
-	}
-
-	if delta.Type == "tool_use" {
-		textDelta := delta.AsTextContentBlockDelta()
-		if textDelta.Text != "" {
-			a.Arguments += textDelta.Text
-		}
-	}
-}
-
 func (a *FunctionCallAccumulator) accumulate() (*gollam.FunctionCall, error) {
 	if a.ID == "" || a.Name == "" {
 		return nil, goerr.Wrap(gollam.ErrInvalidParameter, "function call is not complete")
