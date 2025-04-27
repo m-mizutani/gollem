@@ -22,6 +22,9 @@ type Client struct {
 	// gcpOptions are additional options for Google Cloud Platform.
 	// They can be set using WithGoogleCloudOptions.
 	gcpOptions []option.ClientOption
+
+	// generationConfig contains the default generation parameters
+	generationConfig genai.GenerationConfig
 }
 
 // Option is a function that configures a Client.
@@ -29,6 +32,7 @@ type Option func(*Client)
 
 // WithModel sets the default model to use for chat completions.
 // The model name should be a valid Gemini model identifier.
+// Default: "gemini-2.0-flash"
 func WithModel(modelName string) Option {
 	return func(c *Client) {
 		c.defaultModel = modelName
@@ -40,6 +44,47 @@ func WithModel(modelName string) Option {
 func WithGoogleCloudOptions(options ...option.ClientOption) Option {
 	return func(c *Client) {
 		c.gcpOptions = options
+	}
+}
+
+// WithTemperature sets the temperature parameter for text generation.
+// Higher values make the output more random, lower values make it more focused.
+// Range: 0.0 to 1.0
+func WithTemperature(temp float32) Option {
+	return func(c *Client) {
+		c.generationConfig.Temperature = &temp
+	}
+}
+
+// WithTopP sets the top_p parameter for text generation.
+// Controls diversity via nucleus sampling.
+// Range: 0.0 to 1.0
+func WithTopP(topP float32) Option {
+	return func(c *Client) {
+		c.generationConfig.TopP = &topP
+	}
+}
+
+// WithTopK sets the top_k parameter for text generation.
+// Controls diversity via top-k sampling.
+// Range: 1 to 40
+func WithTopK(topK int32) Option {
+	return func(c *Client) {
+		c.generationConfig.TopK = &topK
+	}
+}
+
+// WithMaxTokens sets the maximum number of tokens to generate.
+func WithMaxTokens(maxTokens int32) Option {
+	return func(c *Client) {
+		c.generationConfig.MaxOutputTokens = &maxTokens
+	}
+}
+
+// WithStopSequences sets the stop sequences for text generation.
+func WithStopSequences(stopSequences []string) Option {
+	return func(c *Client) {
+		c.generationConfig.StopSequences = stopSequences
 	}
 }
 
@@ -86,6 +131,8 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Se
 			FunctionDeclarations: genaiFunctions,
 		},
 	}
+	model.GenerationConfig = c.generationConfig
+
 	session := &Session{
 		session: model.StartChat(),
 	}
