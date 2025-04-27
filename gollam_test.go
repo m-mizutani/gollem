@@ -50,23 +50,33 @@ func (t *RandomNumberTool) Run(ctx context.Context, args map[string]any) (map[st
 }
 
 func TestGollamWithTool(t *testing.T) {
+	respModes := []gollam.ResponseMode{
+		gollam.ResponseModeBlocking,
+		gollam.ResponseModeStreaming,
+	}
+
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollam.LLMClient, error)) {
-		client, err := newClient(t)
-		gt.NoError(t, err)
+		for _, respMode := range respModes {
+			t.Run(fmt.Sprintf("ResponseMode=%s", respMode), func(t *testing.T) {
+				client, err := newClient(t)
+				gt.NoError(t, err)
 
-		toolCalled := false
-		s := gollam.New(client,
-			gollam.WithTools(&RandomNumberTool{}),
-			gollam.WithToolCallback(func(ctx context.Context, tool gollam.FunctionCall) error {
-				toolCalled = true
-				gt.Equal(t, tool.Name, "random_number")
-				return nil
-			}),
-		)
+				toolCalled := false
+				s := gollam.New(client,
+					gollam.WithTools(&RandomNumberTool{}),
+					gollam.WithToolCallback(func(ctx context.Context, tool gollam.FunctionCall) error {
+						toolCalled = true
+						gt.Equal(t, tool.Name, "random_number")
+						return nil
+					}),
+					gollam.WithResponseMode(respMode),
+				)
 
-		err = s.Order(context.Background(), "Generate a random number between 1 and 100.")
-		gt.NoError(t, err)
-		gt.True(t, toolCalled)
+				err = s.Order(t.Context(), "Generate a random number between 1 and 100.")
+				gt.NoError(t, err)
+				gt.True(t, toolCalled)
+			})
+		}
 	}
 
 	t.Run("GPT", func(t *testing.T) {

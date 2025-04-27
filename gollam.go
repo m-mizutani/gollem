@@ -2,11 +2,23 @@ package gollam
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 )
+
+type ResponseMode int
+
+const (
+	ResponseModeBlocking ResponseMode = iota
+	ResponseModeStreaming
+)
+
+func (x ResponseMode) String() string {
+	return []string{"blocking", "streaming"}[x]
+}
 
 // Gollam is core structure of the package.
 type Gollam struct {
@@ -21,6 +33,8 @@ type Gollam struct {
 	msgCallback  MsgCallback
 	toolCallback ToolCallback
 	errCallback  ErrCallback
+
+	responseMode ResponseMode
 
 	logger *slog.Logger
 }
@@ -39,6 +53,7 @@ func New(llmClient LLMClient, options ...Option) *Gollam {
 		msgCallback:  defaultMsgCallback,
 		toolCallback: defaultToolCallback,
 		errCallback:  defaultErrCallback,
+		responseMode: ResponseModeBlocking,
 		logger:       slog.New(slog.DiscardHandler),
 	}
 
@@ -121,6 +136,13 @@ func WithErrCallback(callback func(ctx context.Context, err error, tool Function
 	}
 }
 
+// WithResponseMode sets the response mode for the gollam instance. Default is ResponseModeBlocking.
+func WithResponseMode(responseMode ResponseMode) Option {
+	return func(s *Gollam) {
+		s.responseMode = responseMode
+	}
+}
+
 // WithLogger sets the logger for the gollam instance. Default is discard logger.
 func WithLogger(logger *slog.Logger) Option {
 	return func(s *Gollam) {
@@ -160,61 +182,41 @@ func (s *Gollam) Order(ctx context.Context, prompt string) error {
 
 	for i := 0; i < s.loopLimit && !exitToolCalled; i++ {
 		logger.Debug("send request", "count", i, "input", input)
-		output, err := ssn.GenerateContent(ctx, input...)
-		if err != nil {
-			return err
-		}
-		input = nil
 
-		logger.Debug("recv response", "output", output)
-
-		// Call the msgCallback for all texts
-		for _, text := range output.Texts {
-			if err := s.msgCallback(ctx, text); err != nil {
-				return goerr.Wrap(err, "failed to call msgCallback")
-			}
-		}
-
-		// Call the toolCallback for all tool calls
-		for _, toolCall := range output.FunctionCalls {
-			if toolCall.Name == ExitToolName {
-				exitToolCalled = true
-				continue
-			}
-
-			if err := s.toolCallback(ctx, *toolCall); err != nil {
-				return goerr.Wrap(err, "failed to call toolCallback")
-			}
-
-			tool, ok := toolMap[toolCall.Name]
-			if !ok {
-				input = append(input, FunctionResponse{
-					Name:  toolCall.Name,
-					ID:    toolCall.ID,
-					Error: goerr.New(toolCall.Name+" is not found", goerr.V("call", toolCall)),
-				})
-				continue
-			}
-
-			result, err := tool.Run(ctx, toolCall.Arguments)
+		switch s.responseMode {
+		case ResponseModeBlocking:
+			output, err := ssn.GenerateContent(ctx, input...)
 			if err != nil {
-				if cbErr := s.errCallback(ctx, err, *toolCall); cbErr != nil {
-					return goerr.Wrap(cbErr, "failed to call errCallback")
-				}
-
-				input = append(input, FunctionResponse{
-					ID:    toolCall.ID,
-					Name:  toolCall.Name,
-					Error: goerr.Wrap(err, toolCall.Name+" failed to run", goerr.V("call", toolCall)),
-				})
-				continue
+				return err
 			}
 
-			input = append(input, FunctionResponse{
-				ID:   toolCall.ID,
-				Name: toolCall.Name,
-				Data: result,
-			})
+			newInput, err := s.handleResponse(ctx, output, toolMap)
+			if err != nil {
+				if !errors.Is(err, errExitToolCalled) {
+					return err
+				}
+				exitToolCalled = true
+			}
+			input = newInput
+
+		case ResponseModeStreaming:
+			stream, err := ssn.GenerateStream(ctx, input...)
+			if err != nil {
+				return err
+			}
+			input = make([]Input, 0)
+
+			for output := range stream {
+				logger.Debug("recv response", "output", output)
+				newInput, err := s.handleResponse(ctx, output, toolMap)
+				if err != nil {
+					if !errors.Is(err, errExitToolCalled) {
+						return err
+					}
+					exitToolCalled = true
+				}
+				input = append(input, newInput...)
+			}
 		}
 	}
 
@@ -223,6 +225,64 @@ func (s *Gollam) Order(ctx context.Context, prompt string) error {
 	}
 
 	return nil
+}
+
+var errExitToolCalled = goerr.New("exit tool called")
+
+func (s *Gollam) handleResponse(ctx context.Context, output *Response, toolMap map[string]Tool) ([]Input, error) {
+	newInput := make([]Input, 0)
+	// Call the msgCallback for all texts
+	for _, text := range output.Texts {
+		if err := s.msgCallback(ctx, text); err != nil {
+			return nil, goerr.Wrap(err, "failed to call msgCallback")
+		}
+	}
+
+	var retErr error
+
+	// Call the toolCallback for all tool calls
+	for _, toolCall := range output.FunctionCalls {
+		if toolCall.Name == ExitToolName {
+			retErr = errExitToolCalled
+			continue
+		}
+
+		if err := s.toolCallback(ctx, *toolCall); err != nil {
+			return nil, goerr.Wrap(err, "failed to call toolCallback")
+		}
+
+		tool, ok := toolMap[toolCall.Name]
+		if !ok {
+			newInput = append(newInput, FunctionResponse{
+				Name:  toolCall.Name,
+				ID:    toolCall.ID,
+				Error: goerr.New(toolCall.Name+" is not found", goerr.V("call", toolCall)),
+			})
+			continue
+		}
+
+		result, err := tool.Run(ctx, toolCall.Arguments)
+		if err != nil {
+			if cbErr := s.errCallback(ctx, err, *toolCall); cbErr != nil {
+				return nil, goerr.Wrap(cbErr, "failed to call errCallback")
+			}
+
+			newInput = append(newInput, FunctionResponse{
+				ID:    toolCall.ID,
+				Name:  toolCall.Name,
+				Error: goerr.Wrap(err, toolCall.Name+" failed to run", goerr.V("call", toolCall)),
+			})
+			continue
+		}
+
+		newInput = append(newInput, FunctionResponse{
+			ID:   toolCall.ID,
+			Name: toolCall.Name,
+			Data: result,
+		})
+	}
+
+	return newInput, retErr
 }
 
 type toolWrapper struct {
