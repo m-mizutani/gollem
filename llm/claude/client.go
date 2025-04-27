@@ -383,9 +383,3 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-
 
 	return responseChan, nil
 }
-
-// mustMarshal is a helper function to marshal JSON without error handling
-func mustMarshal(v interface{}) []byte {
-	b, _ := json.Marshal(v)
-	return b
-}
