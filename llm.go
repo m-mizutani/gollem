@@ -3,7 +3,8 @@ package gollam
 import "context"
 
 type Session interface {
-	Generate(ctx context.Context, input ...Input) (*Response, error)
+	GenerateContent(ctx context.Context, input ...Input) (*Response, error)
+	GenerateStream(ctx context.Context, input ...Input) (<-chan *Response, error)
 }
 
 // LLMClient is a client for each LLM service.
@@ -21,6 +22,9 @@ type FunctionCall struct {
 type Response struct {
 	Texts         []string
 	FunctionCalls []*FunctionCall
+
+	// Error is an error that occurred during the generation for streaming response.
+	Error error
 }
 
 type Input interface {

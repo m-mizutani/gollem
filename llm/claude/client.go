@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -140,9 +141,9 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Se
 	return session, nil
 }
 
-// Generate processes the input and generates a response.
+// GenerateContent processes the input and generates a response.
 // It handles both text messages and function responses.
-func (s *Session) Generate(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
 	var toolResults []anthropic.ContentBlockParamUnion
 	// Convert input to messages
 	for _, in := range input {
@@ -181,6 +182,8 @@ func (s *Session) Generate(ctx context.Context, input ...gollam.Input) (*gollam.
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create message")
 	}
+
+	// Add assistant's response to message history
 	s.messages = append(s.messages, resp.ToParam())
 
 	if len(resp.Content) == 0 {
@@ -214,4 +217,117 @@ func (s *Session) Generate(ctx context.Context, input ...gollam.Input) (*gollam.
 	}
 
 	return response, nil
+}
+
+// GenerateStream processes the input and generates a response stream.
+// It handles both text messages and function responses, and returns a channel for streaming responses.
+func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-chan *gollam.Response, error) {
+	var toolResults []anthropic.ContentBlockParamUnion
+	// Convert input to messages
+	for _, in := range input {
+		switch v := in.(type) {
+		case gollam.Text:
+			s.messages = append(s.messages, anthropic.NewUserMessage(
+				anthropic.NewTextBlock(string(v)),
+			))
+
+		case gollam.FunctionResponse:
+			response, err := json.Marshal(v.Data)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to marshal function response")
+			}
+			toolResults = append(toolResults, anthropic.NewToolResultBlock(v.ID, string(response), v.Error != nil))
+
+		default:
+			return nil, goerr.Wrap(gollam.ErrInvalidParameter, "invalid input")
+		}
+	}
+
+	if len(toolResults) > 0 {
+		s.messages = append(s.messages, anthropic.NewUserMessage(toolResults...))
+	}
+
+	params := anthropic.MessageNewParams{
+		Model:       s.defaultModel,
+		MaxTokens:   s.params.MaxTokens,
+		Temperature: anthropic.Float(s.params.Temperature),
+		TopP:        anthropic.Float(s.params.TopP),
+		Tools:       s.tools,
+		Messages:    s.messages,
+	}
+
+	stream := s.client.Messages.NewStreaming(ctx, params)
+	if stream == nil {
+		return nil, goerr.New("failed to create message stream")
+	}
+
+	responseChan := make(chan *gollam.Response)
+
+	// Accumulate text and tool calls for message history
+	var textContent strings.Builder
+	var toolCalls []anthropic.ContentBlockParamUnion
+
+	go func() {
+		defer close(responseChan)
+
+		for {
+			if !stream.Next() {
+				// Add accumulated message to history when stream ends
+				if textContent.Len() > 0 || len(toolCalls) > 0 {
+					var content []anthropic.ContentBlockParamUnion
+					if textContent.Len() > 0 {
+						content = append(content, anthropic.NewTextBlock(textContent.String()))
+					}
+					content = append(content, toolCalls...)
+					s.messages = append(s.messages, anthropic.NewAssistantMessage(content...))
+				}
+				return
+			}
+
+			event := stream.Current()
+			response := &gollam.Response{
+				Texts:         make([]string, 0),
+				FunctionCalls: make([]*gollam.FunctionCall, 0),
+			}
+
+			switch event.Type {
+			case "content_block_delta":
+				deltaEvent := event.AsContentBlockDeltaEvent()
+				textDelta := deltaEvent.Delta.AsTextContentBlockDelta()
+				if textDelta.Type == "text_delta" {
+					response.Texts = append(response.Texts, textDelta.Text)
+					textContent.WriteString(textDelta.Text)
+				}
+			case "content_block_start":
+				startEvent := event.AsContentBlockStartEvent()
+				toolUseBlock := startEvent.ContentBlock.AsResponseToolUseBlock()
+				if toolUseBlock.Type == "tool_use" {
+					var args map[string]interface{}
+					if err := json.Unmarshal([]byte(toolUseBlock.Input), &args); err != nil {
+						response.Error = goerr.Wrap(err, "failed to unmarshal function arguments")
+						responseChan <- response
+						return
+					}
+
+					response.FunctionCalls = append(response.FunctionCalls, &gollam.FunctionCall{
+						ID:        toolUseBlock.ID,
+						Name:      toolUseBlock.Name,
+						Arguments: args,
+					})
+					toolCalls = append(toolCalls, anthropic.ContentBlockParamUnion{
+						OfRequestToolUseBlock: &anthropic.ToolUseBlockParam{
+							ID:    toolUseBlock.ID,
+							Name:  toolUseBlock.Name,
+							Input: toolUseBlock.Input,
+							Type:  toolUseBlock.Type,
+						},
+					})
+				}
+			}
+
+			responseChan <- response
+		}
+	}()
+
+	return responseChan, nil
 }

@@ -6,6 +6,7 @@ import (
 	"cloud.google.com/go/vertexai/genai"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollam"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
 
@@ -147,9 +148,9 @@ type Session struct {
 	session *genai.ChatSession
 }
 
-// Generate processes the input and generates a response.
+// GenerateContent processes the input and generates a response.
 // It handles both text messages and function responses.
-func (s *Session) Generate(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
 	parts := make([]genai.Part, len(input))
 	for i, in := range input {
 		switch v := in.(type) {
@@ -201,4 +202,79 @@ func (s *Session) Generate(ctx context.Context, input ...gollam.Input) (*gollam.
 	}
 
 	return response, nil
+}
+
+// GenerateStream processes the input and generates a response stream.
+// It handles both text messages and function responses, and returns a channel for streaming responses.
+func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-chan *gollam.Response, error) {
+	parts := make([]genai.Part, len(input))
+	for i, in := range input {
+		switch v := in.(type) {
+		case gollam.Text:
+			parts[i] = genai.Text(string(v))
+		case gollam.FunctionResponse:
+			if v.Error != nil {
+				parts[i] = genai.FunctionResponse{
+					Name: v.Name,
+					Response: map[string]any{
+						"error_message": v.Error.Error(),
+					},
+				}
+			} else {
+				parts[i] = genai.FunctionResponse{
+					Name:     v.Name,
+					Response: v.Data,
+				}
+			}
+		default:
+			return nil, goerr.Wrap(gollam.ErrInvalidParameter, "invalid input")
+		}
+	}
+
+	iter := s.session.SendMessageStream(ctx, parts...)
+	responseChan := make(chan *gollam.Response)
+
+	go func() {
+		defer close(responseChan)
+
+		for {
+			resp, err := iter.Next()
+			if err != nil {
+				if err == iterator.Done {
+					return
+				}
+				responseChan <- &gollam.Response{
+					Error: goerr.Wrap(err, "failed to generate stream"),
+				}
+				return
+			}
+
+			if len(resp.Candidates) == 0 {
+				continue
+			}
+
+			response := &gollam.Response{
+				Texts:         make([]string, 0),
+				FunctionCalls: make([]*gollam.FunctionCall, 0),
+			}
+
+			for _, candidate := range resp.Candidates {
+				for _, part := range candidate.Content.Parts {
+					switch v := part.(type) {
+					case genai.Text:
+						response.Texts = append(response.Texts, string(v))
+					case genai.FunctionCall:
+						response.FunctionCalls = append(response.FunctionCalls, &gollam.FunctionCall{
+							Name:      v.Name,
+							Arguments: v.Args,
+						})
+					}
+				}
+			}
+
+			responseChan <- response
+		}
+	}()
+
+	return responseChan, nil
 }

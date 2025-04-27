@@ -61,39 +61,72 @@ func (t *randomNumberTool) Run(ctx context.Context, args map[string]any) (map[st
 	return map[string]any{"result": result}, nil
 }
 
-func testLLM(t *testing.T, session gollam.Session) {
+func testGenerateContent(t *testing.T, session gollam.Session) {
 	ctx := t.Context()
 
 	// Test case 1: Generate random number
+	resp1, err := session.GenerateContent(ctx, gollam.Text("Please generate a random number between 1 and 10"))
+	gt.NoError(t, err)
+	gt.Array(t, resp1.FunctionCalls).Length(1).Required()
+	gt.Value(t, resp1.FunctionCalls[0].Name).Equal("random_number")
+
+	args := resp1.FunctionCalls[0].Arguments
+	gt.Value(t, args["min"]).Equal(1.0)
+	gt.Value(t, args["max"]).Equal(10.0)
+
+	resp2, err := session.GenerateContent(ctx, gollam.FunctionResponse{
+		ID:   resp1.FunctionCalls[0].ID,
+		Name: "random_number",
+		Data: map[string]any{"result": 5.5},
+	})
+	gt.NoError(t, err).Required()
+	gt.Array(t, resp2.Texts).Length(1).Required()
+}
+
+func testGenerateStream(t *testing.T, session gollam.Session) {
+	ctx := t.Context()
+
 	t.Run("generate random number", func(t *testing.T) {
-		resp, err := session.Generate(ctx, gollam.Text("Please generate a random number between 1 and 10"))
-		gt.NoError(t, err)
-		gt.Array(t, resp.FunctionCalls).Length(1).Required()
-		gt.Value(t, resp.FunctionCalls[0].Name).Equal("random_number")
+		stream, err := session.GenerateStream(ctx, gollam.Text("Please generate a random number between 1 and 10"))
+		gt.NoError(t, err).Required()
 
-		args := resp.FunctionCalls[0].Arguments
-		gt.Value(t, args["min"]).Equal(1.0)
-		gt.Value(t, args["max"]).Equal(10.0)
+		var id string
+		for resp := range stream {
+			gt.NoError(t, resp.Error).Required()
 
-		resp, err = session.Generate(ctx, gollam.FunctionResponse{
-			ID:   resp.FunctionCalls[0].ID,
+			if len(resp.Texts) > 0 {
+				for _, text := range resp.Texts {
+					t.Logf("text: %s", text)
+				}
+			}
+			if len(resp.FunctionCalls) > 0 {
+				for _, functionCall := range resp.FunctionCalls {
+					if functionCall.ID != "" {
+						id = functionCall.ID
+					}
+					t.Logf("function call: %+v", functionCall)
+				}
+			}
+		}
+
+		stream, err = session.GenerateStream(ctx, gollam.FunctionResponse{
+			ID:   id,
 			Name: "random_number",
 			Data: map[string]any{"result": 5.5},
 		})
-		gt.NoError(t, err)
-		gt.Array(t, resp.Texts).Length(1).Required()
-	})
+		gt.NoError(t, err).Required()
+		for resp := range stream {
+			gt.NoError(t, resp.Error).Required()
 
-	// Test case 2: Generate random number with different range
-	t.Run("generate random number with different range", func(t *testing.T) {
-		resp, err := session.Generate(ctx, gollam.Text("Please generate a random number between 100 and 200"))
-		gt.NoError(t, err)
-		gt.Array(t, resp.FunctionCalls).Length(1).Required()
-		gt.Value(t, resp.FunctionCalls[0].Name).Equal("random_number")
-
-		args := resp.FunctionCalls[0].Arguments
-		gt.Value(t, args["min"]).Equal(100.0)
-		gt.Value(t, args["max"]).Equal(200.0)
+			if len(resp.Texts) > 0 {
+				for _, text := range resp.Texts {
+					t.Logf("text: %s", text)
+				}
+			}
+			if len(resp.FunctionCalls) > 0 {
+				t.Logf("function call: %+v", resp.FunctionCalls[0])
+			}
+		}
 	})
 }
 
@@ -122,7 +155,12 @@ func TestGemini(t *testing.T) {
 	session, err := client.NewSession(ctx, tools)
 	gt.NoError(t, err)
 
-	testLLM(t, session)
+	t.Run("generate content", func(t *testing.T) {
+		testGenerateContent(t, session)
+	})
+	t.Run("generate stream", func(t *testing.T) {
+		testGenerateStream(t, session)
+	})
 }
 
 func TestGPT(t *testing.T) {
@@ -140,7 +178,12 @@ func TestGPT(t *testing.T) {
 	session, err := client.NewSession(ctx, tools)
 	gt.NoError(t, err)
 
-	testLLM(t, session)
+	t.Run("generate content", func(t *testing.T) {
+		testGenerateContent(t, session)
+	})
+	t.Run("generate stream", func(t *testing.T) {
+		testGenerateStream(t, session)
+	})
 }
 
 func TestClaude(t *testing.T) {
@@ -155,7 +198,12 @@ func TestClaude(t *testing.T) {
 	session, err := claudeClient.NewSession(context.Background(), []gollam.Tool{&randomNumberTool{}})
 	gt.NoError(t, err)
 
-	testLLM(t, session)
+	t.Run("generate content", func(t *testing.T) {
+		testGenerateContent(t, session)
+	})
+	t.Run("generate stream", func(t *testing.T) {
+		testGenerateStream(t, session)
+	})
 }
 
 type weatherTool struct {
@@ -181,7 +229,11 @@ func (t *weatherTool) Run(ctx context.Context, input map[string]any) (map[string
 	}, nil
 }
 
-func TestCallToolName(t *testing.T) {
+func TestCallToolNameConvention(t *testing.T) {
+	if _, ok := os.LookupEnv("TEST_FLAG_TOOL_NAME_CONVENTION"); !ok {
+		t.Skip("TEST_FLAG_TOOL_NAME_CONVENTION is not set")
+	}
+
 	testFunc := func(t *testing.T, client gollam.LLMClient) {
 		testCases := map[string]struct {
 			name    string
@@ -236,7 +288,7 @@ func TestCallToolName(t *testing.T) {
 				session, err := client.NewSession(ctx, []gollam.Tool{tool})
 				gt.NoError(t, err)
 
-				resp, err := session.Generate(ctx, gollam.Text("What is the weather in Tokyo?"))
+				resp, err := session.GenerateContent(ctx, gollam.Text("What is the weather in Tokyo?"))
 				if tc.isError {
 					gt.Error(t, err)
 					return

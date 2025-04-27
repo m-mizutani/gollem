@@ -160,7 +160,7 @@ func (s *Gollam) Order(ctx context.Context, prompt string) error {
 
 	for i := 0; i < s.loopLimit && !exitToolCalled; i++ {
 		logger.Debug("send request", "count", i, "input", input)
-		output, err := ssn.Generate(ctx, input...)
+		output, err := ssn.GenerateContent(ctx, input...)
 		if err != nil {
 			return err
 		}
