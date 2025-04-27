@@ -195,7 +195,7 @@ type Tool interface {
 // It's useful for providing a set of tools to the LLM.
 type ToolSet interface {
 	// Specs returns the specifications of the tools.
-	Specs() []ToolSpec
+	Specs(ctx context.Context) ([]ToolSpec, error)
 
 	// Run is the execution of the tool.
 	// It's called when receiving a tool call from the LLM.

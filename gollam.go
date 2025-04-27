@@ -15,9 +15,8 @@ type Gollam struct {
 	loopLimit  int
 	retryLimit int
 
-	tools      []Tool
-	toolSets   []ToolSet
-	mcpClients []*MCPClient
+	tools    []Tool
+	toolSets []ToolSet
 
 	msgCallback  MsgCallback
 	toolCallback ToolCallback
@@ -81,33 +80,6 @@ func WithToolSets(toolSets ...ToolSet) Option {
 	}
 }
 
-// WithMCPviaStdio sets the MCP client for local MCP executable server via stdio.
-func WithMCPviaStdio(path string, args []string, options ...MCPviaStdioOption) Option {
-	return func(s *Gollam) {
-		c := &MCPClient{
-			path: path,
-			args: args,
-		}
-		for _, opt := range options {
-			opt(c)
-		}
-		s.mcpClients = append(s.mcpClients, c)
-	}
-}
-
-// WithMCPviaSSE sets the MCP client for remote MCP server via HTTP SSE.
-func WithMCPviaSSE(baseURL string, options ...MCPviaSSEOption) Option {
-	return func(s *Gollam) {
-		c := &MCPClient{
-			baseURL: baseURL,
-		}
-		for _, opt := range options {
-			opt(c)
-		}
-		s.mcpClients = append(s.mcpClients, c)
-	}
-}
-
 // WithMsgCallback sets a callback function for the message. The callback function is called when receiving a generated text message from the LLM.
 // Usage:
 //
@@ -164,7 +136,7 @@ func (s *Gollam) Order(ctx context.Context, prompt string) error {
 	logger.Info("start order", "prompt", prompt)
 
 	tools := append(s.tools, &exitTool{})
-	toolMap, err := buildToolMap(ctx, tools, s.toolSets, s.mcpClients)
+	toolMap, err := buildToolMap(ctx, tools, s.toolSets)
 	if err != nil {
 		return err
 	}
@@ -266,32 +238,8 @@ func (x *toolWrapper) Run(ctx context.Context, args map[string]any) (map[string]
 	return x.run(ctx, args)
 }
 
-func buildToolMap(ctx context.Context, tools []Tool, toolSets []ToolSet, mcpClients []*MCPClient) (map[string]Tool, error) {
+func buildToolMap(ctx context.Context, tools []Tool, toolSets []ToolSet) (map[string]Tool, error) {
 	toolMap := map[string]Tool{}
-
-	for _, mcpClient := range mcpClients {
-		if err := mcpClient.start(ctx); err != nil {
-			return nil, goerr.Wrap(err, "failed to start MCP client")
-		}
-
-		tools, err := mcpClient.listTools(ctx)
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to list tools")
-		}
-
-		for _, tool := range tools {
-			if _, ok := toolMap[tool.Name]; ok {
-				return nil, goerr.Wrap(ErrToolNameConflict, "tool name conflict (MCP)", goerr.V("tool_name", tool.Name))
-			}
-
-			wrappedTool, err := wrapMCPToolCall(mcpClient, tool)
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to wrap MCP tool")
-			}
-
-			toolMap[tool.Name] = wrappedTool
-		}
-	}
 
 	for _, tool := range tools {
 		if _, ok := toolMap[tool.Spec().Name]; ok {
@@ -301,7 +249,12 @@ func buildToolMap(ctx context.Context, tools []Tool, toolSets []ToolSet, mcpClie
 	}
 
 	for _, toolSet := range toolSets {
-		for _, spec := range toolSet.Specs() {
+		specs, err := toolSet.Specs(ctx)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to get tool set specs")
+		}
+
+		for _, spec := range specs {
 			if _, ok := toolMap[spec.Name]; ok {
 				return nil, goerr.Wrap(ErrToolNameConflict, "tool name conflict (builtintool sets)", goerr.V("tool_name", spec.Name))
 			}
