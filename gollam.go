@@ -180,7 +180,11 @@ func (s *Gollam) Order(ctx context.Context, prompt string) error {
 	input := []Input{Text(initPrompt), Text(prompt)}
 	exitToolCalled := false
 
-	for i := 0; i < s.loopLimit && !exitToolCalled; i++ {
+	for i := 0; !exitToolCalled && len(input) > 0; i++ {
+		if i > s.loopLimit {
+			return goerr.Wrap(ErrLoopLimitExceeded, "order stopped", goerr.V("loop_limit", s.loopLimit))
+		}
+
 		logger.Debug("send request", "count", i, "input", input)
 
 		switch s.responseMode {
@@ -218,10 +222,6 @@ func (s *Gollam) Order(ctx context.Context, prompt string) error {
 				input = append(input, newInput...)
 			}
 		}
-	}
-
-	if !exitToolCalled {
-		return goerr.Wrap(ErrLoopLimitExceeded, "")
 	}
 
 	return nil
