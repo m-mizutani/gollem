@@ -27,6 +27,10 @@ type Response struct {
 	Error error
 }
 
+func (r *Response) HasData() bool {
+	return len(r.Texts) > 0 || len(r.FunctionCalls) > 0 || r.Error != nil
+}
+
 type Input interface {
 	isInput() restrictedValue
 }

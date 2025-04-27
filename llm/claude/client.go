@@ -242,6 +242,51 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*
 	return processResponse(resp), nil
 }
 
+// FunctionCallAccumulator accumulates function call information from stream
+type FunctionCallAccumulator struct {
+	ID        string
+	Name      string
+	Arguments string
+}
+
+func newFunctionCallAccumulator() *FunctionCallAccumulator {
+	return &FunctionCallAccumulator{
+		Arguments: "",
+	}
+}
+
+func (a *FunctionCallAccumulator) addFunctionCall(delta *anthropic.ContentBlockDeltaEventDeltaUnion) {
+	if delta == nil {
+		return
+	}
+
+	if delta.Type == "tool_use" {
+		textDelta := delta.AsTextContentBlockDelta()
+		if textDelta.Text != "" {
+			a.Arguments += textDelta.Text
+		}
+	}
+}
+
+func (a *FunctionCallAccumulator) accumulate() (*gollam.FunctionCall, error) {
+	if a.ID == "" || a.Name == "" {
+		return nil, goerr.Wrap(gollam.ErrInvalidParameter, "function call is not complete")
+	}
+
+	var args map[string]any
+	if a.Arguments != "" {
+		if err := json.Unmarshal([]byte(a.Arguments), &args); err != nil {
+			return nil, goerr.Wrap(err, "failed to unmarshal function call arguments", goerr.V("accumulator", a))
+		}
+	}
+
+	return &gollam.FunctionCall{
+		ID:        a.ID,
+		Name:      a.Name,
+		Arguments: args,
+	}, nil
+}
+
 // GenerateStream processes the input and generates a response stream.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
 func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-chan *gollam.Response, error) {
@@ -263,6 +308,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-
 	// Accumulate text and tool calls for message history
 	var textContent strings.Builder
 	var toolCalls []anthropic.ContentBlockParamUnion
+	acc := newFunctionCallAccumulator()
 
 	go func() {
 		defer close(responseChan)
@@ -290,41 +336,56 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-
 			switch event.Type {
 			case "content_block_delta":
 				deltaEvent := event.AsContentBlockDeltaEvent()
-				textDelta := deltaEvent.Delta.AsTextContentBlockDelta()
-				if textDelta.Type == "text_delta" {
+				switch deltaEvent.Delta.Type {
+				case "text_delta":
+					textDelta := deltaEvent.Delta.AsTextContentBlockDelta()
 					response.Texts = append(response.Texts, textDelta.Text)
 					textContent.WriteString(textDelta.Text)
+				case "input_json_delta":
+					jsonDelta := deltaEvent.Delta.AsInputJSONContentBlockDelta()
+					if jsonDelta.PartialJSON != "" {
+						acc.Arguments += jsonDelta.PartialJSON
+					}
 				}
 			case "content_block_start":
 				startEvent := event.AsContentBlockStartEvent()
-				toolUseBlock := startEvent.ContentBlock.AsResponseToolUseBlock()
-				if toolUseBlock.Type == "tool_use" {
-					var args map[string]interface{}
-					if err := json.Unmarshal([]byte(toolUseBlock.Input), &args); err != nil {
-						response.Error = goerr.Wrap(err, "failed to unmarshal function arguments")
+				if startEvent.ContentBlock.Type == "tool_use" {
+					toolUseBlock := startEvent.ContentBlock.AsResponseToolUseBlock()
+					acc.ID = toolUseBlock.ID
+					acc.Name = toolUseBlock.Name
+				}
+			case "content_block_stop":
+				if acc.ID != "" && acc.Name != "" {
+					funcCall, err := acc.accumulate()
+					if err != nil {
+						response.Error = err
 						responseChan <- response
 						return
 					}
-
-					response.FunctionCalls = append(response.FunctionCalls, &gollam.FunctionCall{
-						ID:        toolUseBlock.ID,
-						Name:      toolUseBlock.Name,
-						Arguments: args,
-					})
+					response.FunctionCalls = append(response.FunctionCalls, funcCall)
 					toolCalls = append(toolCalls, anthropic.ContentBlockParamUnion{
 						OfRequestToolUseBlock: &anthropic.ToolUseBlockParam{
-							ID:    toolUseBlock.ID,
-							Name:  toolUseBlock.Name,
-							Input: toolUseBlock.Input,
-							Type:  toolUseBlock.Type,
+							ID:    funcCall.ID,
+							Name:  funcCall.Name,
+							Input: funcCall.Arguments,
+							Type:  "tool_use",
 						},
 					})
+					acc = newFunctionCallAccumulator()
 				}
 			}
 
-			responseChan <- response
+			if response.HasData() {
+				responseChan <- response
+			}
 		}
 	}()
 
 	return responseChan, nil
+}
+
+// mustMarshal is a helper function to marshal JSON without error handling
+func mustMarshal(v interface{}) []byte {
+	b, _ := json.Marshal(v)
+	return b
 }
