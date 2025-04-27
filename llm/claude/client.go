@@ -141,53 +141,53 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Se
 	return session, nil
 }
 
-// GenerateContent processes the input and generates a response.
-// It handles both text messages and function responses.
-func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+// convertInputs converts gollam.Input to Claude messages and tool results
+func (s *Session) convertInputs(input ...gollam.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
 	var toolResults []anthropic.ContentBlockParamUnion
-	// Convert input to messages
+	var messages []anthropic.MessageParam
+
 	for _, in := range input {
 		switch v := in.(type) {
 		case gollam.Text:
-			s.messages = append(s.messages, anthropic.NewUserMessage(
+			messages = append(messages, anthropic.NewUserMessage(
 				anthropic.NewTextBlock(string(v)),
 			))
 
 		case gollam.FunctionResponse:
 			response, err := json.Marshal(v.Data)
 			if err != nil {
-				return nil, goerr.Wrap(err, "failed to marshal function response")
+				return nil, nil, goerr.Wrap(err, "failed to marshal function response")
 			}
 			toolResults = append(toolResults, anthropic.NewToolResultBlock(v.ID, string(response), v.Error != nil))
 
 		default:
-			return nil, goerr.Wrap(gollam.ErrInvalidParameter, "invalid input")
+			return nil, nil, goerr.Wrap(gollam.ErrInvalidParameter, "invalid input")
 		}
 	}
 
 	if len(toolResults) > 0 {
-		s.messages = append(s.messages, anthropic.NewUserMessage(toolResults...))
+		messages = append(messages, anthropic.NewUserMessage(toolResults...))
 	}
 
-	params := anthropic.MessageNewParams{
+	return messages, toolResults, nil
+}
+
+// createRequest creates a message request with the current session state
+func (s *Session) createRequest(messages []anthropic.MessageParam) anthropic.MessageNewParams {
+	return anthropic.MessageNewParams{
 		Model:       s.defaultModel,
 		MaxTokens:   s.params.MaxTokens,
 		Temperature: anthropic.Float(s.params.Temperature),
 		TopP:        anthropic.Float(s.params.TopP),
 		Tools:       s.tools,
-		Messages:    s.messages,
+		Messages:    messages,
 	}
+}
 
-	resp, err := s.client.Messages.New(ctx, params)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create message")
-	}
-
-	// Add assistant's response to message history
-	s.messages = append(s.messages, resp.ToParam())
-
+// processResponse converts Claude response to gollam.Response
+func processResponse(resp *anthropic.Message) *gollam.Response {
 	if len(resp.Content) == 0 {
-		return &gollam.Response{}, nil
+		return &gollam.Response{}
 	}
 
 	response := &gollam.Response{
@@ -205,7 +205,8 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*
 		if toolUseBlock.Type == "tool_use" {
 			var args map[string]interface{}
 			if err := json.Unmarshal([]byte(toolUseBlock.Input), &args); err != nil {
-				return nil, goerr.Wrap(err, "failed to unmarshal function arguments")
+				response.Error = goerr.Wrap(err, "failed to unmarshal function arguments")
+				return response
 			}
 
 			response.FunctionCalls = append(response.FunctionCalls, &gollam.FunctionCall{
@@ -216,45 +217,41 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*
 		}
 	}
 
-	return response, nil
+	return response
+}
+
+// GenerateContent processes the input and generates a response.
+// It handles both text messages and function responses.
+func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+	messages, _, err := s.convertInputs(input...)
+	if err != nil {
+		return nil, err
+	}
+
+	s.messages = append(s.messages, messages...)
+	params := s.createRequest(s.messages)
+
+	resp, err := s.client.Messages.New(ctx, params)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create message")
+	}
+
+	// Add assistant's response to message history
+	s.messages = append(s.messages, resp.ToParam())
+
+	return processResponse(resp), nil
 }
 
 // GenerateStream processes the input and generates a response stream.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
 func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-chan *gollam.Response, error) {
-	var toolResults []anthropic.ContentBlockParamUnion
-	// Convert input to messages
-	for _, in := range input {
-		switch v := in.(type) {
-		case gollam.Text:
-			s.messages = append(s.messages, anthropic.NewUserMessage(
-				anthropic.NewTextBlock(string(v)),
-			))
-
-		case gollam.FunctionResponse:
-			response, err := json.Marshal(v.Data)
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to marshal function response")
-			}
-			toolResults = append(toolResults, anthropic.NewToolResultBlock(v.ID, string(response), v.Error != nil))
-
-		default:
-			return nil, goerr.Wrap(gollam.ErrInvalidParameter, "invalid input")
-		}
+	messages, _, err := s.convertInputs(input...)
+	if err != nil {
+		return nil, err
 	}
 
-	if len(toolResults) > 0 {
-		s.messages = append(s.messages, anthropic.NewUserMessage(toolResults...))
-	}
-
-	params := anthropic.MessageNewParams{
-		Model:       s.defaultModel,
-		MaxTokens:   s.params.MaxTokens,
-		Temperature: anthropic.Float(s.params.Temperature),
-		TopP:        anthropic.Float(s.params.TopP),
-		Tools:       s.tools,
-		Messages:    s.messages,
-	}
+	s.messages = append(s.messages, messages...)
+	params := s.createRequest(s.messages)
 
 	stream := s.client.Messages.NewStreaming(ctx, params)
 	if stream == nil {

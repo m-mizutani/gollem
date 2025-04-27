@@ -153,10 +153,8 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Se
 	return session, nil
 }
 
-// GenerateContent processes the input and generates a response.
-// It handles both text messages and function responses.
-func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
-	// Convert input to messages
+// convertInputs converts gollam.Input to OpenAI messages
+func (s *Session) convertInputs(input ...gollam.Input) error {
 	for _, in := range input {
 		switch v := in.(type) {
 		case gollam.Text:
@@ -167,20 +165,23 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*
 		case gollam.FunctionResponse:
 			response, err := json.Marshal(v.Data)
 			if err != nil {
-				return nil, goerr.Wrap(err, "failed to marshal function response")
+				return goerr.Wrap(err, "failed to marshal function response")
 			}
 			s.messages = append(s.messages, openai.ChatCompletionMessage{
 				Role:       openai.ChatMessageRoleTool,
 				Content:    string(response),
 				ToolCallID: v.ID,
 			})
-
 		default:
-			return nil, goerr.Wrap(gollam.ErrInvalidParameter, "invalid input")
+			return goerr.Wrap(gollam.ErrInvalidParameter, "invalid input")
 		}
 	}
+	return nil
+}
 
-	req := openai.ChatCompletionRequest{
+// createRequest creates a chat completion request with the current session state
+func (s *Session) createRequest(stream bool) openai.ChatCompletionRequest {
+	return openai.ChatCompletionRequest{
 		Model:            s.defaultModel,
 		Messages:         s.messages,
 		Tools:            s.tools,
@@ -189,8 +190,18 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*
 		MaxTokens:        s.params.MaxTokens,
 		PresencePenalty:  s.params.PresencePenalty,
 		FrequencyPenalty: s.params.FrequencyPenalty,
+		Stream:           stream,
+	}
+}
+
+// GenerateContent processes the input and generates a response.
+// It handles both text messages and function responses.
+func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+	if err := s.convertInputs(input...); err != nil {
+		return nil, err
 	}
 
+	req := s.createRequest(false)
 	resp, err := s.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create chat completion")
@@ -287,43 +298,11 @@ func (a *accumulator) accumulate() (*openai.ToolCall, *gollam.FunctionCall, erro
 // GenerateStream processes the input and generates a response stream.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
 func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-chan *gollam.Response, error) {
-	// Convert input to messages
-	for _, in := range input {
-		switch v := in.(type) {
-		case gollam.Text:
-			s.messages = append(s.messages, openai.ChatCompletionMessage{
-				Role:    openai.ChatMessageRoleUser,
-				Content: string(v),
-			})
-		case gollam.FunctionResponse:
-			response, err := json.Marshal(v.Data)
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to marshal function response")
-			}
-			s.messages = append(s.messages, openai.ChatCompletionMessage{
-				Role:       openai.ChatMessageRoleTool,
-				Content:    string(response),
-				Name:       v.Name,
-				ToolCallID: v.ID,
-			})
-
-		default:
-			return nil, goerr.Wrap(gollam.ErrInvalidParameter, "invalid input")
-		}
+	if err := s.convertInputs(input...); err != nil {
+		return nil, err
 	}
 
-	req := openai.ChatCompletionRequest{
-		Model:            s.defaultModel,
-		Messages:         s.messages,
-		Tools:            s.tools,
-		Temperature:      s.params.Temperature,
-		TopP:             s.params.TopP,
-		MaxTokens:        s.params.MaxTokens,
-		PresencePenalty:  s.params.PresencePenalty,
-		FrequencyPenalty: s.params.FrequencyPenalty,
-		Stream:           true,
-	}
-
+	req := s.createRequest(true)
 	stream, err := s.client.CreateChatCompletionStream(ctx, req)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create chat completion stream")
@@ -400,7 +379,6 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-
 
 					acc = newAccumulator()
 				}
-
 			}
 		}
 	}()
