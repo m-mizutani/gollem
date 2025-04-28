@@ -2,7 +2,6 @@ package gollam
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"cloud.google.com/go/vertexai/genai"
 	"github.com/anthropics/anthropic-sdk-go"
@@ -83,7 +82,7 @@ type claudeImageSource struct {
 type claudeToolUse struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
-	Input string `json:"input"`
+	Input any    `json:"input"`
 	Type  string `json:"type"`
 }
 
@@ -146,7 +145,7 @@ func NewHistoryFromClaude(messages []anthropic.MessageParam) *History {
 					ToolUse: &claudeToolUse{
 						ID:    c.OfRequestToolUseBlock.ID,
 						Name:  c.OfRequestToolUseBlock.Name,
-						Input: fmt.Sprintf("%v", c.OfRequestToolUseBlock.Input),
+						Input: c.OfRequestToolUseBlock.Input,
 						Type:  string(c.OfRequestToolUseBlock.Type),
 					},
 				}
