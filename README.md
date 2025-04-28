@@ -54,7 +54,7 @@ func main() {
 	}
 
 	// Create MCP client with local server
-	mcpLocal, err := mcp.NewStdio(ctx, "./mcp-server", []string{}, mcp.WithEnvVars([]string{"MCP_ENV=test"}))
+	mcpLocal, err := mcp.NewStdio(ctx, "/path/to/mcp-server", []string{}, mcp.WithEnvVars([]string{"MCP_ENV=test"}))
 	if err != nil {
 		panic(err)
 	}
