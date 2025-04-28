@@ -173,14 +173,14 @@ func (s *Session) convertInputs(input ...gollam.Input) ([]anthropic.MessageParam
 }
 
 // createRequest creates a message request with the current session state
-func (s *Session) createRequest(messages []anthropic.MessageParam) anthropic.MessageNewParams {
+func (s *Session) createRequest() anthropic.MessageNewParams {
 	return anthropic.MessageNewParams{
 		Model:       s.defaultModel,
 		MaxTokens:   s.params.MaxTokens,
 		Temperature: anthropic.Float(s.params.Temperature),
 		TopP:        anthropic.Float(s.params.TopP),
 		Tools:       s.tools,
-		Messages:    messages,
+		Messages:    s.messages,
 	}
 }
 
@@ -229,7 +229,7 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*
 	}
 
 	s.messages = append(s.messages, messages...)
-	params := s.createRequest(s.messages)
+	params := s.createRequest()
 
 	resp, err := s.client.Messages.New(ctx, params)
 	if err != nil {
@@ -283,7 +283,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-
 	}
 
 	s.messages = append(s.messages, messages...)
-	params := s.createRequest(s.messages)
+	params := s.createRequest()
 
 	stream := s.client.Messages.NewStreaming(ctx, params)
 	if stream == nil {
