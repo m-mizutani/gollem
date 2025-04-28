@@ -20,6 +20,10 @@ func (x ResponseMode) String() string {
 	return []string{"blocking", "streaming"}[x]
 }
 
+const (
+	DefaultInitPrompt = `You are a helpful assistant. Call "exit" tool when you determine that the task for user prompt is completed.`
+)
+
 // Gollam is core structure of the package.
 type Gollam struct {
 	llm LLMClient
@@ -29,6 +33,8 @@ type Gollam struct {
 
 	tools    []Tool
 	toolSets []ToolSet
+
+	initPrompt string
 
 	msgCallback  MsgCallback
 	toolCallback ToolCallback
@@ -47,9 +53,12 @@ const (
 // New creates a new gollam instance.
 func New(llmClient LLMClient, options ...Option) *Gollam {
 	s := &Gollam{
-		llm:          llmClient,
-		loopLimit:    DefaultLoopLimit,
-		retryLimit:   DefaultRetryLimit,
+		llm:        llmClient,
+		loopLimit:  DefaultLoopLimit,
+		retryLimit: DefaultRetryLimit,
+
+		initPrompt: DefaultInitPrompt,
+
 		msgCallback:  defaultMsgCallback,
 		toolCallback: defaultToolCallback,
 		errCallback:  defaultErrCallback,
@@ -78,6 +87,13 @@ func WithLoopLimit(loopLimit int) Option {
 func WithRetryLimit(retryLimit int) Option {
 	return func(s *Gollam) {
 		s.retryLimit = retryLimit
+	}
+}
+
+// WithInitPrompt sets the initial prompt for the gollam instance.
+func WithInitPrompt(initPrompt string) Option {
+	return func(s *Gollam) {
+		s.initPrompt = initPrompt
 	}
 }
 
