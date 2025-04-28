@@ -22,6 +22,27 @@ type History struct {
 	historyData
 }
 
+func (x *History) ToGemini() ([]*genai.Content, error) {
+	if x.LLType != llmTypeGemini {
+		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not gemini")
+	}
+	return x.Messages.([]*genai.Content), nil
+}
+
+func (x *History) ToClaude() ([]anthropic.MessageParam, error) {
+	if x.LLType != llmTypeClaude {
+		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not claude")
+	}
+	return x.Messages.([]anthropic.MessageParam), nil
+}
+
+func (x *History) ToGPT() ([]openai.ChatCompletionMessage, error) {
+	if x.LLType != llmTypeGPT {
+		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not gpt")
+	}
+	return x.Messages.([]openai.ChatCompletionMessage), nil
+}
+
 type claudeMessage struct {
 	Role    anthropic.MessageParamRole `json:"role"`
 	Content []claudeContentBlock       `json:"content"`
