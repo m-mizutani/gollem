@@ -1,8 +1,12 @@
 # 🤖 gollam
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/m-mizutani/gollam.svg)](https://pkg.go.dev/github.com/m-mizutani/gollam) [![Test](https://github.com/m-mizutani/gollam/actions/workflows/test.yml/badge.svg)](https://github.com/m-mizutani/gollam/actions/workflows/test.yml) [![Lint](https://github.com/m-mizutani/gollam/actions/workflows/lint.yml/badge.svg)](https://github.com/m-mizutani/gollam/actions/workflows/lint.yml) [![Gosec](https://github.com/m-mizutani/gollam/actions/workflows/gosec.yml/badge.svg)](https://github.com/m-mizutani/gollam/actions/workflows/gosec.yml) [![Trivy](https://github.com/m-mizutani/gollam/actions/workflows/trivy.yml/badge.svg)](https://github.com/m-mizutani/gollam/actions/workflows/trivy.yml)
+
+
 <p align="center">
   <img src="./doc/images/logo.png" height="128" />
 </p>
+
 
 `gollam` is a Go framework for building agentic applications with Large Language Models (LLMs). It helps you integrate LLMs into your applications and extend their features with tools and actions.
 
