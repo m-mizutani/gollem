@@ -92,6 +92,7 @@ func TestHistoryClaude(t *testing.T) {
 				{
 					OfRequestTextBlock: &anthropic.TextBlockParam{
 						Text: "Hello",
+						Type: "text",
 					},
 				},
 				{
@@ -103,6 +104,7 @@ func TestHistoryClaude(t *testing.T) {
 								Data:      "base64encodedimage",
 							},
 						},
+						Type: "image",
 					},
 				},
 			},
@@ -113,6 +115,7 @@ func TestHistoryClaude(t *testing.T) {
 				{
 					OfRequestTextBlock: &anthropic.TextBlockParam{
 						Text: "Hi, how can I help you?",
+						Type: "text",
 					},
 				},
 			},
@@ -123,6 +126,7 @@ func TestHistoryClaude(t *testing.T) {
 				{
 					OfRequestTextBlock: &anthropic.TextBlockParam{
 						Text: "What's the weather like?",
+						Type: "text",
 					},
 				},
 			},
@@ -150,6 +154,7 @@ func TestHistoryClaude(t *testing.T) {
 							{
 								OfRequestTextBlock: &anthropic.TextBlockParam{
 									Text: `{"temperature": 30, "condition": "cloudy"}`,
+									Type: "text",
 								},
 							},
 						},
@@ -164,6 +169,7 @@ func TestHistoryClaude(t *testing.T) {
 				{
 					OfRequestTextBlock: &anthropic.TextBlockParam{
 						Text: "Second message",
+						Type: "text",
 					},
 				},
 			},
@@ -178,10 +184,12 @@ func TestHistoryClaude(t *testing.T) {
 							{
 								OfRequestTextBlock: &anthropic.TextBlockParam{
 									Text: `{"temperature": 35, "condition": "rainy"}`,
+									Type: "text",
 								},
 							},
 						},
 						IsError: param.NewOpt(false),
+						Type:    "tool_result",
 					},
 				},
 			},
@@ -192,6 +200,7 @@ func TestHistoryClaude(t *testing.T) {
 				{
 					OfRequestTextBlock: &anthropic.TextBlockParam{
 						Text: "The weather in Tokyo is sunny with a temperature of 25°C.",
+						Type: "text",
 					},
 				},
 			},

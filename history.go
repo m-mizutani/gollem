@@ -2,7 +2,6 @@ package gollam
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"cloud.google.com/go/vertexai/genai"
 	"github.com/anthropics/anthropic-sdk-go"
@@ -24,32 +23,32 @@ type History struct {
 }
 
 type claudeMessage struct {
-	Role    string               `json:"role"`
-	Content []claudeContentBlock `json:"content"`
+	Role    anthropic.MessageParamRole `json:"role"`
+	Content []claudeContentBlock       `json:"content"`
 }
 
 type claudeContentBlock struct {
-	Type       string           `json:"type"`
-	Text       *string          `json:"text,omitempty"`
-	Source     *imageBlock      `json:"source,omitempty"`
-	ToolUse    *toolUseBlock    `json:"tool_use,omitempty"`
-	ToolResult *toolResultBlock `json:"tool_result,omitempty"`
+	Type       string             `json:"type"`
+	Text       *string            `json:"text,omitempty"`
+	Source     *claudeImageSource `json:"source,omitempty"`
+	ToolUse    *claudeToolUse     `json:"tool_use,omitempty"`
+	ToolResult *claudeToolResult  `json:"tool_result,omitempty"`
 }
 
-type imageBlock struct {
+type claudeImageSource struct {
 	Type      string `json:"type"`
-	MediaType string `json:"media_type"`
+	MediaType string `json:"media_type,omitempty"`
 	Data      string `json:"data"`
 }
 
-type toolUseBlock struct {
+type claudeToolUse struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Input string `json:"input"`
 	Type  string `json:"type"`
 }
 
-type toolResultBlock struct {
+type claudeToolResult struct {
 	ToolUseID string          `json:"tool_use_id"`
 	Content   string          `json:"content"`
 	IsError   param.Opt[bool] `json:"is_error"`
@@ -81,49 +80,40 @@ func NewHistoryFromGPT(messages []openai.ChatCompletionMessage) *History {
 }
 
 func NewHistoryFromClaude(messages []anthropic.MessageParam) *History {
-	converted := make([]claudeMessage, len(messages))
+	claudeMessages := make([]claudeMessage, len(messages))
 	for i, msg := range messages {
 		content := make([]claudeContentBlock, len(msg.Content))
 		for j, c := range msg.Content {
 			if c.OfRequestTextBlock != nil {
-				text := c.OfRequestTextBlock.Text
 				content[j] = claudeContentBlock{
 					Type: "text",
-					Text: &text,
+					Text: &c.OfRequestTextBlock.Text,
 				}
 			} else if c.OfRequestImageBlock != nil {
 				if c.OfRequestImageBlock.Source.OfBase64ImageSource != nil {
 					content[j] = claudeContentBlock{
 						Type: "image",
-						Source: &imageBlock{
+						Source: &claudeImageSource{
 							Type:      string(c.OfRequestImageBlock.Source.OfBase64ImageSource.Type),
 							MediaType: string(c.OfRequestImageBlock.Source.OfBase64ImageSource.MediaType),
 							Data:      c.OfRequestImageBlock.Source.OfBase64ImageSource.Data,
-						},
-					}
-				} else if c.OfRequestImageBlock.Source.OfURLImageSource != nil {
-					content[j] = claudeContentBlock{
-						Type: "image",
-						Source: &imageBlock{
-							Type: string(c.OfRequestImageBlock.Source.OfURLImageSource.Type),
-							Data: c.OfRequestImageBlock.Source.OfURLImageSource.URL,
 						},
 					}
 				}
 			} else if c.OfRequestToolUseBlock != nil {
 				content[j] = claudeContentBlock{
 					Type: "tool_use",
-					ToolUse: &toolUseBlock{
+					ToolUse: &claudeToolUse{
 						ID:    c.OfRequestToolUseBlock.ID,
 						Name:  c.OfRequestToolUseBlock.Name,
-						Input: fmt.Sprintf("%v", c.OfRequestToolUseBlock.Input),
+						Input: c.OfRequestToolUseBlock.Input.(string),
 						Type:  string(c.OfRequestToolUseBlock.Type),
 					},
 				}
 			} else if c.OfRequestToolResultBlock != nil {
 				content[j] = claudeContentBlock{
 					Type: "tool_result",
-					ToolResult: &toolResultBlock{
+					ToolResult: &claudeToolResult{
 						ToolUseID: c.OfRequestToolResultBlock.ToolUseID,
 						Content:   c.OfRequestToolResultBlock.Content[0].OfRequestTextBlock.Text,
 						IsError:   c.OfRequestToolResultBlock.IsError,
@@ -131,15 +121,15 @@ func NewHistoryFromClaude(messages []anthropic.MessageParam) *History {
 				}
 			}
 		}
-		converted[i] = claudeMessage{
-			Role:    string(msg.Role),
+		claudeMessages[i] = claudeMessage{
+			Role:    msg.Role,
 			Content: content,
 		}
 	}
 	return &History{
 		historyData: historyData{
 			LLType:   LLMTypeClaude,
-			Messages: converted,
+			Messages: claudeMessages,
 		},
 	}
 }
@@ -222,17 +212,26 @@ func NewHistoryFromData(data []byte) (*History, error) {
 
 		messages := make([]anthropic.MessageParam, len(history.Messages))
 		for i, msg := range history.Messages {
-			content := make([]anthropic.ContentBlockParamUnion, len(msg.Content))
-			for j, c := range msg.Content {
-				if c.Type == "text" && c.Text != nil {
-					content[j] = anthropic.ContentBlockParamUnion{
+			content := make([]anthropic.ContentBlockParamUnion, 0, len(msg.Content))
+			for _, c := range msg.Content {
+				switch c.Type {
+				case "text":
+					if c.Text == nil {
+						return nil, goerr.New("text block has no text field")
+					}
+					content = append(content, anthropic.ContentBlockParamUnion{
 						OfRequestTextBlock: &anthropic.TextBlockParam{
 							Text: *c.Text,
+							Type: "text",
 						},
+					})
+
+				case "image":
+					if c.Source == nil {
+						return nil, goerr.New("image block has no source field")
 					}
-				} else if c.Type == "image" && c.Source != nil {
 					if c.Source.Type == "base64" {
-						content[j] = anthropic.ContentBlockParamUnion{
+						content = append(content, anthropic.ContentBlockParamUnion{
 							OfRequestImageBlock: &anthropic.ImageBlockParam{
 								Source: anthropic.ImageBlockParamSourceUnion{
 									OfBase64ImageSource: &anthropic.Base64ImageSourceParam{
@@ -241,47 +240,47 @@ func NewHistoryFromData(data []byte) (*History, error) {
 										Data:      c.Source.Data,
 									},
 								},
+								Type: "image",
 							},
-						}
-					} else if c.Source.Type == "url" {
-						content[j] = anthropic.ContentBlockParamUnion{
-							OfRequestImageBlock: &anthropic.ImageBlockParam{
-								Source: anthropic.ImageBlockParamSourceUnion{
-									OfURLImageSource: &anthropic.URLImageSourceParam{
-										Type: "url",
-										URL:  c.Source.Data,
-									},
-								},
-							},
-						}
+						})
 					}
-				} else if c.Type == "tool_use" && c.ToolUse != nil {
-					content[j] = anthropic.ContentBlockParamUnion{
+
+				case "tool_use":
+					if c.ToolUse == nil {
+						return nil, goerr.New("tool_use block has no tool_use field")
+					}
+					content = append(content, anthropic.ContentBlockParamUnion{
 						OfRequestToolUseBlock: &anthropic.ToolUseBlockParam{
 							ID:    c.ToolUse.ID,
 							Name:  c.ToolUse.Name,
 							Input: c.ToolUse.Input,
 							Type:  "tool_use",
 						},
+					})
+
+				case "tool_result":
+					if c.ToolResult == nil {
+						return nil, goerr.New("tool_result block has no tool_result field")
 					}
-				} else if c.Type == "tool_result" && c.ToolResult != nil {
-					content[j] = anthropic.ContentBlockParamUnion{
+					content = append(content, anthropic.ContentBlockParamUnion{
 						OfRequestToolResultBlock: &anthropic.ToolResultBlockParam{
 							ToolUseID: c.ToolResult.ToolUseID,
 							Content: []anthropic.ToolResultBlockParamContentUnion{
 								{
 									OfRequestTextBlock: &anthropic.TextBlockParam{
 										Text: c.ToolResult.Content,
+										Type: "text",
 									},
 								},
 							},
-							IsError: c.ToolResult.IsError,
+							IsError: param.NewOpt(c.ToolResult.IsError.Value),
 						},
-					}
+					})
 				}
 			}
+
 			messages[i] = anthropic.MessageParam{
-				Role:    anthropic.MessageParamRole(msg.Role),
+				Role:    msg.Role,
 				Content: content,
 			}
 		}
