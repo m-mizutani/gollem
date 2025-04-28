@@ -58,6 +58,7 @@ func main() {
 		}),
 	)
 
+	var history *gollam.History
 	for {
 		fmt.Print("> ")
 		scanner := bufio.NewScanner(os.Stdin)
@@ -65,9 +66,11 @@ func main() {
 		text := scanner.Text()
 
 		fmt.Printf("🤖 ")
-		if err := g.Order(ctx, text); err != nil {
+		newHistory, err := g.Order(ctx, text, history)
+		if err != nil {
 			panic(err)
 		}
+		history = newHistory
 		fmt.Printf("\n")
 	}
 }
