@@ -136,11 +136,20 @@ type Session struct {
 
 // NewSession creates a new session for the GPT API.
 // It converts the provided tools to OpenAI's tool format and initializes a new chat session.
-func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Session, error) {
+func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories ...*gollam.History) (gollam.Session, error) {
 	// Convert gollam.Tool to openai.Tool
 	openaiTools := make([]openai.Tool, len(tools))
 	for i, tool := range tools {
 		openaiTools[i] = convertTool(tool)
+	}
+
+	var messages []openai.ChatCompletionMessage
+	for _, history := range histories {
+		history, err := history.ToGPT()
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert history to openai.ChatCompletionMessage")
+		}
+		messages = append(messages, history...)
 	}
 
 	session := &Session{
@@ -148,9 +157,14 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Se
 		defaultModel: c.defaultModel,
 		tools:        openaiTools,
 		params:       c.params,
+		messages:     messages,
 	}
 
 	return session, nil
+}
+
+func (s *Session) History() *gollam.History {
+	return gollam.NewHistoryFromGPT(s.messages)
 }
 
 // convertInputs converts gollam.Input to OpenAI messages

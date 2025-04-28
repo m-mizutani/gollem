@@ -151,7 +151,7 @@ func WithLogger(logger *slog.Logger) Option {
 }
 
 // Order is the main function to start the gollam instance. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until the exit tool is called or the LoopLimit is reached.
-func (s *Gollam) Order(ctx context.Context, prompt string) error {
+func (s *Gollam) Order(ctx context.Context, prompt string, histories ...*History) (*History, error) {
 	orderID := uuid.New().String()
 	logger := s.logger.With("gollam.order_id", orderID)
 	ctx = ctxWithLogger(ctx, logger)
@@ -160,7 +160,7 @@ func (s *Gollam) Order(ctx context.Context, prompt string) error {
 	tools := append(s.tools, &exitTool{})
 	toolMap, err := buildToolMap(ctx, tools, s.toolSets)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	toolList := make([]Tool, 0, len(toolMap))
@@ -171,9 +171,17 @@ func (s *Gollam) Order(ctx context.Context, prompt string) error {
 	}
 	logger.Debug("tool list", "names", toolNames)
 
-	ssn, err := s.llm.NewSession(ctx, toolList)
+	var validHistories []*History
+	for _, history := range histories {
+		if history != nil && history.history.Messages != nil {
+			validHistories = append(validHistories, history)
+			println("valid history:", history.history.LLType)
+		}
+	}
+
+	ssn, err := s.llm.NewSession(ctx, toolList, validHistories...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	initPrompt := `You are a helpful assistant. When you complete the task, send conclusion and call the exit tool.`
@@ -182,7 +190,7 @@ func (s *Gollam) Order(ctx context.Context, prompt string) error {
 
 	for i := 0; !exitToolCalled && len(input) > 0; i++ {
 		if i > s.loopLimit {
-			return goerr.Wrap(ErrLoopLimitExceeded, "order stopped", goerr.V("loop_limit", s.loopLimit))
+			return nil, goerr.Wrap(ErrLoopLimitExceeded, "order stopped", goerr.V("loop_limit", s.loopLimit))
 		}
 
 		logger.Debug("send request", "count", i, "input", input)
@@ -191,13 +199,13 @@ func (s *Gollam) Order(ctx context.Context, prompt string) error {
 		case ResponseModeBlocking:
 			output, err := ssn.GenerateContent(ctx, input...)
 			if err != nil {
-				return err
+				return nil, err
 			}
 
 			newInput, err := s.handleResponse(ctx, output, toolMap)
 			if err != nil {
 				if !errors.Is(err, errExitToolCalled) {
-					return err
+					return nil, err
 				}
 				exitToolCalled = true
 			}
@@ -206,7 +214,7 @@ func (s *Gollam) Order(ctx context.Context, prompt string) error {
 		case ResponseModeStreaming:
 			stream, err := ssn.GenerateStream(ctx, input...)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			input = make([]Input, 0)
 
@@ -215,7 +223,7 @@ func (s *Gollam) Order(ctx context.Context, prompt string) error {
 				newInput, err := s.handleResponse(ctx, output, toolMap)
 				if err != nil {
 					if !errors.Is(err, errExitToolCalled) {
-						return err
+						return nil, err
 					}
 					exitToolCalled = true
 				}
@@ -224,7 +232,7 @@ func (s *Gollam) Order(ctx context.Context, prompt string) error {
 		}
 	}
 
-	return nil
+	return ssn.History(), nil
 }
 
 var errExitToolCalled = goerr.New("exit tool called")

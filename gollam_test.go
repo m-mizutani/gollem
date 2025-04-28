@@ -72,7 +72,7 @@ func TestGollamWithTool(t *testing.T) {
 					gollam.WithResponseMode(respMode),
 				)
 
-				err = s.Order(t.Context(), "Generate a random number between 1 and 100.")
+				_, err = s.Order(t.Context(), "Generate a random number between 1 and 100.")
 				gt.NoError(t, err)
 				gt.True(t, toolCalled)
 			})

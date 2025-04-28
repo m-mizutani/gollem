@@ -28,6 +28,8 @@ func someAction(tasks []task) error {
 
 # Testing
 
+If you need to run test for checking, run only the test that you modified or specified by the developer.
+
 ## Style for similar testing
 
 Use following Helper Driven Testing style instead of general Tatble Driven Test. Do not use Table Driven Test style.
