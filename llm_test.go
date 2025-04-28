@@ -3,6 +3,7 @@ package gollam_test
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -130,7 +131,7 @@ func testGenerateStream(t *testing.T, session gollam.Session) {
 	})
 }
 
-func TestGemini(t *testing.T) {
+func newGeminiClient(t *testing.T) gollam.LLMClient {
 	var testProjectID, testLocation string
 	v, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
 	if !ok {
@@ -149,10 +150,38 @@ func TestGemini(t *testing.T) {
 	ctx := t.Context()
 	client, err := gemini.New(ctx, testProjectID, testLocation)
 	gt.NoError(t, err)
+	return client
+}
+
+func newGPTClient(t *testing.T) gollam.LLMClient {
+	apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
+	if !ok {
+		t.Skip("TEST_OPENAI_API_KEY is not set")
+	}
+
+	ctx := t.Context()
+	client, err := gpt.New(ctx, apiKey)
+	gt.NoError(t, err)
+	return client
+}
+
+func newClaudeClient(t *testing.T) gollam.LLMClient {
+	apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
+	if !ok {
+		t.Skip("TEST_CLAUDE_API_KEY is not set")
+	}
+
+	client, err := claude.New(context.Background(), apiKey)
+	gt.NoError(t, err)
+	return client
+}
+
+func TestGemini(t *testing.T) {
+	client := newGeminiClient(t)
 
 	// Setup tools
 	tools := []gollam.Tool{&randomNumberTool{}}
-	session, err := client.NewSession(ctx, tools)
+	session, err := client.NewSession(t.Context(), tools)
 	gt.NoError(t, err)
 
 	t.Run("generate content", func(t *testing.T) {
@@ -164,18 +193,11 @@ func TestGemini(t *testing.T) {
 }
 
 func TestGPT(t *testing.T) {
-	apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
-	if !ok {
-		t.Skip("TEST_OPENAI_API_KEY is not set")
-	}
-
-	ctx := t.Context()
-	client, err := gpt.New(ctx, apiKey)
-	gt.NoError(t, err)
+	client := newGPTClient(t)
 
 	// Setup tools
 	tools := []gollam.Tool{&randomNumberTool{}}
-	session, err := client.NewSession(ctx, tools)
+	session, err := client.NewSession(t.Context(), tools)
 	gt.NoError(t, err)
 
 	t.Run("generate content", func(t *testing.T) {
@@ -187,15 +209,9 @@ func TestGPT(t *testing.T) {
 }
 
 func TestClaude(t *testing.T) {
-	apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
-	if !ok {
-		t.Skip("TEST_CLAUDE_API_KEY is not set")
-	}
+	client := newClaudeClient(t)
 
-	claudeClient, err := claude.New(context.Background(), apiKey)
-	gt.NoError(t, err)
-
-	session, err := claudeClient.NewSession(context.Background(), []gollam.Tool{&randomNumberTool{}})
+	session, err := client.NewSession(context.Background(), []gollam.Tool{&randomNumberTool{}})
 	gt.NoError(t, err)
 
 	t.Run("generate content", func(t *testing.T) {
@@ -342,5 +358,43 @@ func TestCallToolNameConvention(t *testing.T) {
 		client, err := claude.New(ctx, apiKey)
 		gt.NoError(t, err)
 		testFunc(t, client)
+	})
+}
+
+func TestSessionHistory(t *testing.T) {
+	testFn := func(t *testing.T, client gollam.LLMClient) {
+		ctx := t.Context()
+		session, err := client.NewSession(ctx, []gollam.Tool{})
+		gt.NoError(t, err).Required()
+
+		_, err = session.GenerateContent(ctx, gollam.Text("Remeber: Tokyo is sunny, Los Angeles is cloudy, and Paris is rainy."))
+		gt.NoError(t, err).Required()
+
+		history := session.History()
+
+		newSession, err := client.NewSession(ctx, []gollam.Tool{}, history)
+		gt.NoError(t, err)
+
+		resp, err := newSession.GenerateContent(ctx, gollam.Text("What is the weather in Tokyo?"))
+		gt.NoError(t, err).Required()
+
+		gt.A(t, resp.Texts).Any(func(v string) bool {
+			return strings.Contains(v, "sunny")
+		})
+	}
+
+	t.Run("gpt", func(t *testing.T) {
+		client := newGPTClient(t)
+		testFn(t, client)
+	})
+
+	t.Run("gemini", func(t *testing.T) {
+		client := newGeminiClient(t)
+		testFn(t, client)
+	})
+
+	t.Run("claude", func(t *testing.T) {
+		client := newClaudeClient(t)
+		testFn(t, client)
 	})
 }

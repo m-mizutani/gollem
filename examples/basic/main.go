@@ -50,7 +50,7 @@ func main() {
 	)
 
 	// Send a message
-	if err := s.Order(context.Background(), "Hello, my name is Taro."); err != nil {
+	if _, err := s.Order(context.Background(), "Hello, my name is Taro."); err != nil {
 		panic(err)
 	}
 }

@@ -119,26 +119,45 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 
 // NewSession creates a new session for the Gemini API.
 // It converts the provided tools to Gemini's tool format and initializes a new chat session.
-func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Session, error) {
+func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories ...*gollam.History) (gollam.Session, error) {
 	// Convert gollam.Tool to *genai.Tool
 	genaiFunctions := make([]*genai.FunctionDeclaration, len(tools))
 	for i, tool := range tools {
 		genaiFunctions[i] = convertTool(tool)
 	}
 
-	model := c.client.GenerativeModel(c.defaultModel)
-	model.Tools = []*genai.Tool{
-		{
-			FunctionDeclarations: genaiFunctions,
-		},
+	var messages []*genai.Content
+	for _, history := range histories {
+		history, err := history.ToGemini()
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert history to gemini.Content")
+		}
+		messages = append(messages, history...)
 	}
+
+	model := c.client.GenerativeModel(c.defaultModel)
 	model.GenerationConfig = c.generationConfig
+
+	if len(genaiFunctions) > 0 {
+		model.Tools = []*genai.Tool{
+			{
+				FunctionDeclarations: genaiFunctions,
+			},
+		}
+	}
 
 	session := &Session{
 		session: model.StartChat(),
 	}
+	if len(messages) > 0 {
+		session.session.History = messages
+	}
 
 	return session, nil
+}
+
+func (s *Session) History() *gollam.History {
+	return gollam.NewHistoryFromGemini(s.session.History)
 }
 
 // Session is a session for the Gemini chat.

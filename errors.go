@@ -9,6 +9,11 @@ var (
 	ErrToolNameConflict  = errors.New("tool name conflict")
 	ErrLoopLimitExceeded = errors.New("loop limit exceeded")
 
-	// ErrInvalidInputSchema is returned when the input schema from MCPis invalid or unsupported.
+	// ErrInvalidInputSchema is returned when the input schema from MCP is invalid or unsupported.
 	ErrInvalidInputSchema = errors.New("invalid input schema")
+
+	// ErrInvalidHistoryData is returned when the history data is invalid or unsupported.
+	ErrInvalidHistoryData = errors.New("invalid history data")
+
+	ErrLLMTypeMismatch = errors.New("llm type mismatch")
 )

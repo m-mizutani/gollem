@@ -124,11 +124,20 @@ type Session struct {
 
 // NewSession creates a new session for the Claude API.
 // It converts the provided tools to Claude's tool format and initializes a new chat session.
-func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Session, error) {
+func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories ...*gollam.History) (gollam.Session, error) {
 	// Convert gollam.Tool to anthropic.ToolUnionParam
 	claudeTools := make([]anthropic.ToolUnionParam, len(tools))
 	for i, tool := range tools {
 		claudeTools[i] = convertTool(tool)
+	}
+
+	var messages []anthropic.MessageParam
+	for _, history := range histories {
+		history, err := history.ToClaude()
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert history to anthropic.MessageParam")
+		}
+		messages = append(messages, history...)
 	}
 
 	session := &Session{
@@ -136,9 +145,14 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Se
 		defaultModel: c.defaultModel,
 		tools:        claudeTools,
 		params:       c.params,
+		messages:     messages,
 	}
 
 	return session, nil
+}
+
+func (s *Session) History() *gollam.History {
+	return gollam.NewHistoryFromClaude(s.messages)
 }
 
 // convertInputs converts gollam.Input to Claude messages and tool results
@@ -173,14 +187,14 @@ func (s *Session) convertInputs(input ...gollam.Input) ([]anthropic.MessageParam
 }
 
 // createRequest creates a message request with the current session state
-func (s *Session) createRequest(messages []anthropic.MessageParam) anthropic.MessageNewParams {
+func (s *Session) createRequest() anthropic.MessageNewParams {
 	return anthropic.MessageNewParams{
 		Model:       s.defaultModel,
 		MaxTokens:   s.params.MaxTokens,
 		Temperature: anthropic.Float(s.params.Temperature),
 		TopP:        anthropic.Float(s.params.TopP),
 		Tools:       s.tools,
-		Messages:    messages,
+		Messages:    s.messages,
 	}
 }
 
@@ -229,7 +243,7 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*
 	}
 
 	s.messages = append(s.messages, messages...)
-	params := s.createRequest(s.messages)
+	params := s.createRequest()
 
 	resp, err := s.client.Messages.New(ctx, params)
 	if err != nil {
@@ -283,7 +297,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-
 	}
 
 	s.messages = append(s.messages, messages...)
-	params := s.createRequest(s.messages)
+	params := s.createRequest()
 
 	stream := s.client.Messages.NewStreaming(ctx, params)
 	if stream == nil {
