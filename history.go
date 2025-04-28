@@ -10,12 +10,12 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-type LLMType string
+type llmType string
 
 const (
-	LLMTypeGPT    LLMType = "gpt"
-	LLMTypeGemini LLMType = "gemini"
-	LLMTypeClaude LLMType = "claude"
+	llmTypeGPT    llmType = "gpt"
+	llmTypeGemini llmType = "gemini"
+	llmTypeClaude llmType = "claude"
 )
 
 type History struct {
@@ -73,7 +73,7 @@ type geminiPart struct {
 func NewHistoryFromGPT(messages []openai.ChatCompletionMessage) *History {
 	return &History{
 		historyData: historyData{
-			LLType:   LLMTypeGPT,
+			LLType:   llmTypeGPT,
 			Messages: messages,
 		},
 	}
@@ -128,7 +128,7 @@ func NewHistoryFromClaude(messages []anthropic.MessageParam) *History {
 	}
 	return &History{
 		historyData: historyData{
-			LLType:   LLMTypeClaude,
+			LLType:   llmTypeClaude,
 			Messages: claudeMessages,
 		},
 	}
@@ -178,7 +178,7 @@ func NewHistoryFromGemini(messages []*genai.Content) *History {
 	}
 	return &History{
 		historyData: historyData{
-			LLType:   LLMTypeGemini,
+			LLType:   llmTypeGemini,
 			Messages: converted,
 		},
 	}
@@ -186,14 +186,14 @@ func NewHistoryFromGemini(messages []*genai.Content) *History {
 
 func NewHistoryFromData(data []byte) (*History, error) {
 	var check struct {
-		LLType LLMType `json:"type"`
+		LLType llmType `json:"type"`
 	}
 	if err := json.Unmarshal(data, &check); err != nil {
 		return nil, goerr.Wrap(err, "invalid history data", goerr.V("data", string(data)))
 	}
 
 	switch check.LLType {
-	case LLMTypeGPT:
+	case llmTypeGPT:
 		var history struct {
 			Messages []openai.ChatCompletionMessage `json:"messages"`
 		}
@@ -202,7 +202,7 @@ func NewHistoryFromData(data []byte) (*History, error) {
 		}
 		return NewHistoryFromGPT(history.Messages), nil
 
-	case LLMTypeClaude:
+	case llmTypeClaude:
 		var history struct {
 			Messages []claudeMessage `json:"messages"`
 		}
@@ -286,12 +286,12 @@ func NewHistoryFromData(data []byte) (*History, error) {
 		}
 		return &History{
 			historyData: historyData{
-				LLType:   LLMTypeClaude,
+				LLType:   llmTypeClaude,
 				Messages: messages,
 			},
 		}, nil
 
-	case LLMTypeGemini:
+	case llmTypeGemini:
 		var history struct {
 			Messages []geminiMessage `json:"messages"`
 		}
@@ -335,7 +335,7 @@ func NewHistoryFromData(data []byte) (*History, error) {
 		}
 		return &History{
 			historyData: historyData{
-				LLType:   LLMTypeGemini,
+				LLType:   llmTypeGemini,
 				Messages: messages,
 			},
 		}, nil
@@ -345,7 +345,7 @@ func NewHistoryFromData(data []byte) (*History, error) {
 }
 
 type historyData struct {
-	LLType   LLMType `json:"type"`
+	LLType   llmType `json:"type"`
 	Messages any     `json:"messages"`
 }
 
