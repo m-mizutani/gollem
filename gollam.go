@@ -151,7 +151,7 @@ func WithLogger(logger *slog.Logger) Option {
 }
 
 // Order is the main function to start the gollam instance. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until the exit tool is called or the LoopLimit is reached.
-func (s *Gollam) Order(ctx context.Context, prompt string) error {
+func (s *Gollam) Order(ctx context.Context, prompt string, histories ...*History) error {
 	orderID := uuid.New().String()
 	logger := s.logger.With("gollam.order_id", orderID)
 	ctx = ctxWithLogger(ctx, logger)
@@ -171,7 +171,7 @@ func (s *Gollam) Order(ctx context.Context, prompt string) error {
 	}
 	logger.Debug("tool list", "names", toolNames)
 
-	ssn, err := s.llm.NewSession(ctx, toolList)
+	ssn, err := s.llm.NewSession(ctx, toolList, histories...)
 	if err != nil {
 		return err
 	}

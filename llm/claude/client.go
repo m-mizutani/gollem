@@ -124,11 +124,20 @@ type Session struct {
 
 // NewSession creates a new session for the Claude API.
 // It converts the provided tools to Claude's tool format and initializes a new chat session.
-func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Session, error) {
+func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories ...*gollam.History) (gollam.Session, error) {
 	// Convert gollam.Tool to anthropic.ToolUnionParam
 	claudeTools := make([]anthropic.ToolUnionParam, len(tools))
 	for i, tool := range tools {
 		claudeTools[i] = convertTool(tool)
+	}
+
+	var messages []anthropic.MessageParam
+	for _, history := range histories {
+		history, err := history.ToClaude()
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert history to anthropic.MessageParam")
+		}
+		messages = append(messages, history...)
 	}
 
 	session := &Session{
@@ -136,9 +145,14 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool) (gollam.Se
 		defaultModel: c.defaultModel,
 		tools:        claudeTools,
 		params:       c.params,
+		messages:     messages,
 	}
 
 	return session, nil
+}
+
+func (s *Session) History() *gollam.History {
+	return gollam.NewHistoryFromClaude(s.messages)
 }
 
 // convertInputs converts gollam.Input to Claude messages and tool results
