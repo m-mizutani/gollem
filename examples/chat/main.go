@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -58,8 +59,21 @@ func main() {
 		}),
 	)
 
-	var history *gollam.History
+	tmpFile, err := os.CreateTemp("", "gollam-chat-*.txt")
+	if err != nil {
+		panic(err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		panic(err)
+	}
+	println("history file:", tmpFile.Name())
+
 	for {
+		history, err := loadHistory(tmpFile.Name())
+		if err != nil {
+			panic(err)
+		}
+
 		fmt.Print("> ")
 		scanner := bufio.NewScanner(os.Stdin)
 		scanner.Scan()
@@ -70,7 +84,43 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		history = newHistory
+
+		if err := dumpHistory(newHistory, tmpFile.Name()); err != nil {
+			panic(err)
+		}
+
 		fmt.Printf("\n")
 	}
+}
+
+func dumpHistory(history *gollam.History, path string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	if err := json.NewEncoder(f).Encode(history); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func loadHistory(path string) (*gollam.History, error) {
+	if st, err := os.Stat(path); err != nil || st.Size() == 0 {
+		return nil, err
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var history gollam.History
+	if err := json.NewDecoder(f).Decode(&history); err != nil {
+		return nil, err
+	}
+	return &history, nil
 }

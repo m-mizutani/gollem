@@ -88,14 +88,13 @@ An example of a weather tool using MCP:
 ```go
 type WeatherTool struct{}
 
-func (t *WeatherTool) Spec() mcp.ToolSpec {
-    return &mcp.ToolSpec{
+func (t *WeatherTool) Spec() gollam.ToolSpec {
+    return gollam.ToolSpec{
         Name:        "weather",
         Description: "Gets weather information for a location",
-        Parameters: map[string]*mcp.Parameter{
+        Parameters: map[string]*gollam.Parameter{
             "location": {
-                Name:        "location",
-                Type:        mcp.TypeString,
+                Type:        gollam.TypeString,
                 Description: "City name or coordinates",
                 Required:    true,
             },
@@ -104,7 +103,10 @@ func (t *WeatherTool) Spec() mcp.ToolSpec {
 }
 
 func (t *WeatherTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-    location := args["location"].(string)
+    location, ok := args["location"].(string)
+    if !ok {
+        return nil, fmt.Errorf("location must be a string")
+    }
     // Implement weather API call here
     return map[string]any{
         "temperature": 25.5,

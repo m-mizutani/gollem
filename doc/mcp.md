@@ -38,6 +38,24 @@ s := gollam.New(client,
 )
 ```
 
+## Options
+
+1. **Environment Variables**: Set environment variables for the MCP client
+```go
+mcpClient, err := mcp.NewStdio(context.Background(), "/path/to/mcp/server", []string{},
+    mcp.WithEnvVars([]string{"MCP_ENV=test"}),
+)
+```
+
+2. **HTTP Headers**: Set custom HTTP headers for SSE transport
+```go
+mcpClient, err := mcp.NewSSE(context.Background(), "http://localhost:8080",
+    mcp.WithHeaders(map[string]string{
+        "Authorization": "Bearer token",
+    }),
+)
+```
+
 ## Next Steps
 
 - Learn more about [tool creation](tools.md)

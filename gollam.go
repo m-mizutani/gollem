@@ -175,7 +175,6 @@ func (s *Gollam) Order(ctx context.Context, prompt string, histories ...*History
 	for _, history := range histories {
 		if history != nil && history.history.Messages != nil {
 			validHistories = append(validHistories, history)
-			println("valid history:", history.history.LLType)
 		}
 	}
 
