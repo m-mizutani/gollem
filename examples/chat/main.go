@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/m-mizutani/gollam"
@@ -118,9 +119,15 @@ func loadHistory(path string) (*gollam.History, error) {
 	}
 	defer f.Close()
 
-	var history gollam.History
-	if err := json.NewDecoder(f).Decode(&history); err != nil {
+	data, err := io.ReadAll(f)
+	if err != nil {
 		return nil, err
 	}
-	return &history, nil
+
+	history, err := gollam.NewHistoryFromData(data)
+	if err != nil {
+		return nil, err
+	}
+
+	return history, nil
 }
