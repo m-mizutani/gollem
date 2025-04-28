@@ -19,28 +19,45 @@ const (
 )
 
 type History struct {
-	historyData
+	history historyData
+}
+
+type historyData struct {
+	LLType   llmType `json:"type"`
+	Messages any     `json:"messages"`
+
+	gptMessages    []openai.ChatCompletionMessage
+	claudeMessages []anthropic.MessageParam
+	geminiMessages []*genai.Content
+}
+
+func (h *History) MarshalJSON() ([]byte, error) {
+	return json.Marshal(h.history)
+}
+
+func (h *History) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, &h.history)
 }
 
 func (x *History) ToGemini() ([]*genai.Content, error) {
-	if x.LLType != llmTypeGemini {
+	if x.history.LLType != llmTypeGemini {
 		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not gemini")
 	}
-	return x.Messages.([]*genai.Content), nil
+	return x.history.geminiMessages, nil
 }
 
 func (x *History) ToClaude() ([]anthropic.MessageParam, error) {
-	if x.LLType != llmTypeClaude {
+	if x.history.LLType != llmTypeClaude {
 		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not claude")
 	}
-	return x.Messages.([]anthropic.MessageParam), nil
+	return x.history.claudeMessages, nil
 }
 
 func (x *History) ToGPT() ([]openai.ChatCompletionMessage, error) {
-	if x.LLType != llmTypeGPT {
+	if x.history.LLType != llmTypeGPT {
 		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not gpt")
 	}
-	return x.Messages.([]openai.ChatCompletionMessage), nil
+	return x.history.gptMessages, nil
 }
 
 type claudeMessage struct {
@@ -93,9 +110,10 @@ type geminiPart struct {
 
 func NewHistoryFromGPT(messages []openai.ChatCompletionMessage) *History {
 	return &History{
-		historyData: historyData{
-			LLType:   llmTypeGPT,
-			Messages: messages,
+		history: historyData{
+			LLType:      llmTypeGPT,
+			Messages:    messages,
+			gptMessages: messages,
 		},
 	}
 }
@@ -148,9 +166,10 @@ func NewHistoryFromClaude(messages []anthropic.MessageParam) *History {
 		}
 	}
 	return &History{
-		historyData: historyData{
-			LLType:   llmTypeClaude,
-			Messages: claudeMessages,
+		history: historyData{
+			LLType:         llmTypeClaude,
+			Messages:       claudeMessages,
+			claudeMessages: messages,
 		},
 	}
 }
@@ -198,9 +217,10 @@ func NewHistoryFromGemini(messages []*genai.Content) *History {
 		}
 	}
 	return &History{
-		historyData: historyData{
-			LLType:   llmTypeGemini,
-			Messages: converted,
+		history: historyData{
+			LLType:         llmTypeGemini,
+			Messages:       converted,
+			geminiMessages: messages,
 		},
 	}
 }
@@ -305,12 +325,7 @@ func NewHistoryFromData(data []byte) (*History, error) {
 				Content: content,
 			}
 		}
-		return &History{
-			historyData: historyData{
-				LLType:   llmTypeClaude,
-				Messages: messages,
-			},
-		}, nil
+		return NewHistoryFromClaude(messages), nil
 
 	case llmTypeGemini:
 		var history struct {
@@ -354,26 +369,8 @@ func NewHistoryFromData(data []byte) (*History, error) {
 				Parts: parts,
 			}
 		}
-		return &History{
-			historyData: historyData{
-				LLType:   llmTypeGemini,
-				Messages: messages,
-			},
-		}, nil
+		return NewHistoryFromGemini(messages), nil
 	}
 
 	return nil, goerr.Wrap(ErrInvalidHistoryData, "unsupported history data", goerr.V("data", string(data)))
-}
-
-type historyData struct {
-	LLType   llmType `json:"type"`
-	Messages any     `json:"messages"`
-}
-
-func (h *History) MarshalJSON() ([]byte, error) {
-	return json.Marshal(h.historyData)
-}
-
-func (h *History) UnmarshalJSON(data []byte) error {
-	return json.Unmarshal(data, &h.historyData)
 }

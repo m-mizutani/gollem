@@ -61,9 +61,9 @@ func TestHistoryGPT(t *testing.T) {
 	restored, err := gollam.NewHistoryFromData(data)
 	gt.NoError(t, err)
 
-	// Type assertion and validation
-	restoredMessages, ok := restored.Messages.([]openai.ChatCompletionMessage)
-	gt.True(t, ok)
+	restoredMessages, err := restored.ToGPT()
+	gt.NoError(t, err)
+
 	gt.Equal(t, messages, restoredMessages)
 
 	// Validate specific message types
@@ -219,9 +219,8 @@ func TestHistoryClaude(t *testing.T) {
 	restored, err := gollam.NewHistoryFromData(data)
 	gt.NoError(t, err)
 
-	// Type assertion and validation
-	restoredMessages, ok := restored.Messages.([]anthropic.MessageParam)
-	gt.True(t, ok)
+	restoredMessages, err := restored.ToClaude()
+	gt.NoError(t, err)
 
 	// Compare each message individually to make debugging easier
 	for i := range messages {
@@ -297,9 +296,8 @@ func TestHistoryGemini(t *testing.T) {
 	restored, err := gollam.NewHistoryFromData(data)
 	gt.NoError(t, err)
 
-	// Type assertion and validation
-	restoredMessages, ok := restored.Messages.([]*genai.Content)
-	gt.True(t, ok)
+	restoredMessages, err := restored.ToGemini()
+	gt.NoError(t, err)
 	gt.Equal(t, messages, restoredMessages)
 
 	// Validate specific message types
