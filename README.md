@@ -90,7 +90,7 @@ func main() {
 }
 ```
 
-See the full example in [examples/basic](https://github.com/m-mizutani/gollam/tree/main/examples/basic).
+See the full example in [examples/basic](https://github.com/m-mizutani/gollam/tree/main/examples/basic), and more examples in [examples](https://github.com/m-mizutani/gollam/tree/main/examples).
 
 ## Documentation
 
