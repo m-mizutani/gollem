@@ -4,31 +4,31 @@
   <img src="./doc/images/logo.png" height="128" />
 </p>
 
-`gollam` is a Go framework for building applications with Large Language Models (LLMs). It provides an elegant and intuitive interface to seamlessly integrate LLMs into your applications while extending their capabilities through powerful tools and actions.
+`gollam` is a Go framework for building agentic applications with Large Language Models (LLMs). It helps you integrate LLMs into your applications and extend their features with tools and actions.
 
 ## Overview
 
-gollam empowers you to:
-- Seamlessly integrate with leading LLM providers (Gemini, Anthropic, OpenAI)
-- Create and leverage custom built-in tools that enhance LLM capabilities
-- Connect with MCP (Model Context Protocol) servers for advanced external tool integration
-- Develop sophisticated agentic applications that intelligently execute actions based on natural language inputs
+gollam lets you:
+- Connect with LLM providers (Gemini, Anthropic, OpenAI)
+- Use built-in tools to enhance LLM features
+- Connect with MCP servers for external tools
+- Build applications that run actions based on text input
 
 ## Supported LLMs
 
-- [x] Gemini (choose model from the [document](https://ai.google.dev/gemini-api/docs/models?hl=ja))
-- [x] Anthropic (choose model from the [document](https://docs.anthropic.com/en/docs/about-claude/models/all-models))
-- [x] OpenAI (choose model from the [document](https://platform.openai.com/docs/models))
+- [x] Gemini (see [models](https://ai.google.dev/gemini-api/docs/models?hl=ja))
+- [x] Anthropic (see [models](https://docs.anthropic.com/en/docs/about-claude/models/all-models))
+- [x] OpenAI (see [models](https://platform.openai.com/docs/models))
 
 ## Features
 
 ### Tools and Actions
 
-- Built-in Tools: Pre-defined tools for common operations
+- Built-in Tools: Common operation tools
 - MCP Server Integration
-  - [x] Tool: Define and expose custom tools
-  - [ ] Resource: Manage external resources
-  - [ ] Prompt: Customize LLM prompts
+  - [x] Tool: Custom tools
+  - [ ] Resource: External resources
+  - [ ] Prompt: LLM prompts
 
 ## Quick Start
 
@@ -39,7 +39,7 @@ go get github.com/m-mizutani/gollam
 ```
 
 ### Example
-Here's a simple example that demonstrates how to create a custom tool and use it with an LLM:
+Here's a simple example of creating a custom tool and using it with an LLM:
 
 ```go
 func main() {
@@ -67,11 +67,8 @@ func main() {
 
 	// Create gollam instance
 	s := gollam.New(client,
-		// Not only MCP servers,
 		gollam.WithToolSets(mcpLocal, mcpRemote),
-		// But also you can use your own built-in tools
 		gollam.WithTools(&MyTool{}),
-		// You can customize the callback function for each message and tool call.
 		gollam.WithMsgCallback(func(ctx context.Context, msg string) error {
 			fmt.Printf("🤖 %s\n", msg)
 			return nil
@@ -93,11 +90,11 @@ func main() {
 }
 ```
 
-Full example is available in the [examples/basic](https://github.com/m-mizutani/gollam/tree/main/examples/basic).
+See the full example in [examples/basic](https://github.com/m-mizutani/gollam/tree/main/examples/basic).
 
 ## Documentation
 
-For detailed documentation and examples, please visit our [documentation site](https://github.com/m-mizutani/gollam/tree/main/doc).
+For more details and examples, visit our [documentation site](https://github.com/m-mizutani/gollam/tree/main/doc).
 
 ## License
 
