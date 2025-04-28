@@ -45,6 +45,9 @@ type Client struct {
 
 	// generation parameters
 	params generationParameters
+
+	// systemPrompt is the system prompt to use for chat completions.
+	systemPrompt string
 }
 
 // Option is a function that configures a Client.
@@ -97,6 +100,13 @@ func WithFrequencyPenalty(penalty float32) Option {
 	}
 }
 
+// WithSystemPrompt sets the system prompt to use for chat completions.
+func WithSystemPrompt(prompt string) Option {
+	return func(c *Client) {
+		c.systemPrompt = prompt
+	}
+}
+
 // New creates a new client for the GPT API.
 // It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
@@ -144,6 +154,12 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories 
 	}
 
 	var messages []openai.ChatCompletionMessage
+	if c.systemPrompt != "" {
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: c.systemPrompt,
+		})
+	}
 	for _, history := range histories {
 		history, err := history.ToGPT()
 		if err != nil {

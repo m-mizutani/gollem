@@ -37,6 +37,9 @@ type Client struct {
 
 	// generation parameters
 	params generationParameters
+
+	// systemPrompt is the system prompt to use for chat completions.
+	systemPrompt string
 }
 
 // Option is a function that configures a Client.
@@ -76,6 +79,13 @@ func WithTopP(topP float64) Option {
 func WithMaxTokens(maxTokens int64) Option {
 	return func(c *Client) {
 		c.params.MaxTokens = maxTokens
+	}
+}
+
+// WithSystemPrompt sets the system prompt to use for chat completions.
+func WithSystemPrompt(prompt string) Option {
+	return func(c *Client) {
+		c.systemPrompt = prompt
 	}
 }
 
@@ -120,6 +130,9 @@ type Session struct {
 
 	// generation parameters
 	params generationParameters
+
+	// systemPrompt is the system prompt to use for chat completions.
+	systemPrompt string
 }
 
 // NewSession creates a new session for the Claude API.
@@ -146,6 +159,7 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories 
 		tools:        claudeTools,
 		params:       c.params,
 		messages:     messages,
+		systemPrompt: c.systemPrompt,
 	}
 
 	return session, nil
@@ -188,6 +202,15 @@ func (s *Session) convertInputs(input ...gollam.Input) ([]anthropic.MessageParam
 
 // createRequest creates a message request with the current session state
 func (s *Session) createRequest() anthropic.MessageNewParams {
+	var systemPrompt []anthropic.TextBlockParam
+	if s.systemPrompt != "" {
+		systemPrompt = []anthropic.TextBlockParam{
+			{
+				Text: s.systemPrompt,
+			},
+		}
+	}
+
 	return anthropic.MessageNewParams{
 		Model:       s.defaultModel,
 		MaxTokens:   s.params.MaxTokens,
@@ -195,6 +218,7 @@ func (s *Session) createRequest() anthropic.MessageNewParams {
 		TopP:        anthropic.Float(s.params.TopP),
 		Tools:       s.tools,
 		Messages:    s.messages,
+		System:      systemPrompt,
 	}
 }
 

@@ -26,6 +26,9 @@ type Client struct {
 
 	// generationConfig contains the default generation parameters
 	generationConfig genai.GenerationConfig
+
+	// systemPrompt is the system prompt to use for chat completions.
+	systemPrompt string
 }
 
 // Option is a function that configures a Client.
@@ -89,6 +92,13 @@ func WithStopSequences(stopSequences []string) Option {
 	}
 }
 
+// WithSystemPrompt sets the system prompt to use for chat completions.
+func WithSystemPrompt(prompt string) Option {
+	return func(c *Client) {
+		c.systemPrompt = prompt
+	}
+}
+
 // New creates a new client for the Gemini API.
 // It requires a project ID and location, and can be configured with additional options.
 func New(ctx context.Context, projectID, location string, options ...Option) (*Client, error) {
@@ -127,6 +137,12 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories 
 	}
 
 	var messages []*genai.Content
+	if c.systemPrompt != "" {
+		messages = append(messages, &genai.Content{
+			Role:  "system",
+			Parts: []genai.Part{genai.Text(c.systemPrompt)},
+		})
+	}
 	for _, history := range histories {
 		history, err := history.ToGemini()
 		if err != nil {
