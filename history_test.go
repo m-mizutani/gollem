@@ -159,6 +159,7 @@ func TestHistoryClaude(t *testing.T) {
 							},
 						},
 						IsError: param.NewOpt(false),
+						Type:    "tool_result",
 					},
 				},
 			},
