@@ -6,7 +6,7 @@
 </p>
 
 
-`gollam` is a Go framework for building agentic applications with Large Language Models (LLMs). It helps you integrate LLMs into your applications and extend their features with tools and actions.
+`gollam` is a Go framework for building agentic applications of Large Language Models (LLMs) with MCP (Model Context Protocol) server and your built-in tools.
 
 ## Overview
 
