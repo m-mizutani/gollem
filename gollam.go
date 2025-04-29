@@ -28,21 +28,7 @@ const (
 type Gollam struct {
 	llm LLMClient
 
-	loopLimit  int
-	retryLimit int
-
-	tools    []Tool
-	toolSets []ToolSet
-
-	initPrompt string
-
-	msgCallback  MsgCallback
-	toolCallback ToolCallback
-	errCallback  ErrCallback
-
-	responseMode ResponseMode
-
-	logger *slog.Logger
+	gollamConfig
 }
 
 const (
@@ -50,63 +36,80 @@ const (
 	DefaultRetryLimit = 8
 )
 
+type gollamConfig struct {
+	loopLimit  int
+	retryLimit int
+	initPrompt string
+
+	tools    []Tool
+	toolSets []ToolSet
+
+	msgCallback  MsgCallback
+	toolCallback ToolCallback
+	errCallback  ErrCallback
+	responseMode ResponseMode
+	logger       *slog.Logger
+	history      *History
+}
+
 // New creates a new gollam instance.
 func New(llmClient LLMClient, options ...Option) *Gollam {
 	s := &Gollam{
-		llm:        llmClient,
-		loopLimit:  DefaultLoopLimit,
-		retryLimit: DefaultRetryLimit,
+		llm: llmClient,
+		gollamConfig: gollamConfig{
+			loopLimit:  DefaultLoopLimit,
+			retryLimit: DefaultRetryLimit,
+			initPrompt: DefaultInitPrompt,
 
-		initPrompt: DefaultInitPrompt,
-
-		msgCallback:  defaultMsgCallback,
-		toolCallback: defaultToolCallback,
-		errCallback:  defaultErrCallback,
-		responseMode: ResponseModeBlocking,
-		logger:       slog.New(slog.DiscardHandler),
+			msgCallback:  defaultMsgCallback,
+			toolCallback: defaultToolCallback,
+			errCallback:  defaultErrCallback,
+			responseMode: ResponseModeBlocking,
+			logger:       slog.New(slog.DiscardHandler),
+		},
 	}
 
 	for _, opt := range options {
-		opt(s)
+		opt(&s.gollamConfig)
 	}
 
 	return s
 }
 
 // Option is the type for the options of the gollam instance.
-type Option func(*Gollam)
+type Option func(*gollamConfig)
 
 // WithLoopLimit sets the maximum number of loops for the gollam session iteration (ask LLM and execute tools is one loop).
 func WithLoopLimit(loopLimit int) Option {
-	return func(s *Gollam) {
+	return func(s *gollamConfig) {
 		s.loopLimit = loopLimit
 	}
 }
 
 // WithRetryLimit sets the maximum number of retries for the gollam session. This is counted for error response from Tool. When reaching the limit, the session is finished immediately.
 func WithRetryLimit(retryLimit int) Option {
-	return func(s *Gollam) {
+	return func(s *gollamConfig) {
 		s.retryLimit = retryLimit
 	}
 }
 
 // WithInitPrompt sets the initial prompt for the gollam instance.
 func WithInitPrompt(initPrompt string) Option {
-	return func(s *Gollam) {
+	return func(s *gollamConfig) {
 		s.initPrompt = initPrompt
 	}
 }
 
 // WithTools sets the tools for the gollam instance.
 func WithTools(tools ...Tool) Option {
-	return func(s *Gollam) {
+	return func(s *gollamConfig) {
 		s.tools = append(s.tools, tools...)
 	}
 }
 
 // WithToolSets sets the tool sets for the gollam instance.
 func WithToolSets(toolSets ...ToolSet) Option {
-	return func(s *Gollam) {
+	return func(s *gollamConfig) {
 		s.toolSets = append(s.toolSets, toolSets...)
 	}
 }
@@ -119,7 +122,7 @@ func WithToolSets(toolSets ...ToolSet) Option {
 //		return nil
 //	})
 func WithMsgCallback(callback func(ctx context.Context, msg string) error) Option {
-	return func(s *Gollam) {
+	return func(s *gollamConfig) {
 		s.msgCallback = callback
 	}
 }
@@ -132,7 +135,7 @@ func WithMsgCallback(callback func(ctx context.Context, msg string) error) Optio
 //		return nil
 //	})
 func WithToolCallback(callback func(ctx context.Context, tool FunctionCall) error) Option {
-	return func(s *Gollam) {
+	return func(s *gollamConfig) {
 		s.toolCallback = callback
 	}
 }
@@ -147,34 +150,46 @@ func WithToolCallback(callback func(ctx context.Context, tool FunctionCall) erro
 //		return nil // Continue the tool execution
 //	})
 func WithErrCallback(callback func(ctx context.Context, err error, tool FunctionCall) error) Option {
-	return func(s *Gollam) {
+	return func(s *gollamConfig) {
 		s.errCallback = callback
 	}
 }
 
 // WithResponseMode sets the response mode for the gollam instance. Default is ResponseModeBlocking.
 func WithResponseMode(responseMode ResponseMode) Option {
-	return func(s *Gollam) {
+	return func(s *gollamConfig) {
 		s.responseMode = responseMode
 	}
 }
 
 // WithLogger sets the logger for the gollam instance. Default is discard logger.
 func WithLogger(logger *slog.Logger) Option {
-	return func(s *Gollam) {
+	return func(s *gollamConfig) {
 		s.logger = logger
 	}
 }
 
+// WithHistory sets the history for the gollam instance.
+func WithHistory(history *History) Option {
+	return func(s *gollamConfig) {
+		s.history = history
+	}
+}
+
 // Order is the main function to start the gollam instance. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until the exit tool is called or the LoopLimit is reached.
-func (s *Gollam) Order(ctx context.Context, prompt string, histories ...*History) (*History, error) {
+func (g *Gollam) Order(ctx context.Context, prompt string, options ...Option) (*History, error) {
+	cfg := g.gollamConfig
+	for _, opt := range options {
+		opt(&cfg)
+	}
+
 	orderID := uuid.New().String()
-	logger := s.logger.With("gollam.order_id", orderID)
+	logger := cfg.logger.With("gollam.order_id", orderID)
 	ctx = ctxWithLogger(ctx, logger)
 	logger.Info("start order", "prompt", prompt)
 
-	tools := append(s.tools, &exitTool{})
-	toolMap, err := buildToolMap(ctx, tools, s.toolSets)
+	tools := append(cfg.tools, &exitTool{})
+	toolMap, err := buildToolMap(ctx, tools, cfg.toolSets)
 	if err != nil {
 		return nil, err
 	}
@@ -188,13 +203,11 @@ func (s *Gollam) Order(ctx context.Context, prompt string, histories ...*History
 	logger.Debug("tool list", "names", toolNames)
 
 	var validHistories []*History
-	for _, history := range histories {
-		if history != nil && history.history.Messages != nil {
-			validHistories = append(validHistories, history)
-		}
+	if cfg.history != nil && cfg.history.history.Messages != nil {
+		validHistories = append(validHistories, cfg.history)
 	}
 
-	ssn, err := s.llm.NewSession(ctx, toolList, validHistories...)
+	ssn, err := g.llm.NewSession(ctx, toolList, validHistories...)
 	if err != nil {
 		return nil, err
 	}
@@ -204,20 +217,20 @@ func (s *Gollam) Order(ctx context.Context, prompt string, histories ...*History
 	exitToolCalled := false
 
 	for i := 0; !exitToolCalled && len(input) > 0; i++ {
-		if i > s.loopLimit {
-			return nil, goerr.Wrap(ErrLoopLimitExceeded, "order stopped", goerr.V("loop_limit", s.loopLimit))
+		if i > cfg.loopLimit {
+			return nil, goerr.Wrap(ErrLoopLimitExceeded, "order stopped", goerr.V("loop_limit", cfg.loopLimit))
 		}
 
 		logger.Debug("send request", "count", i, "input", input)
 
-		switch s.responseMode {
+		switch cfg.responseMode {
 		case ResponseModeBlocking:
 			output, err := ssn.GenerateContent(ctx, input...)
 			if err != nil {
 				return nil, err
 			}
 
-			newInput, err := s.handleResponse(ctx, output, toolMap)
+			newInput, err := handleResponse(ctx, cfg, output, toolMap)
 			if err != nil {
 				if !errors.Is(err, errExitToolCalled) {
 					return nil, err
@@ -235,7 +248,7 @@ func (s *Gollam) Order(ctx context.Context, prompt string, histories ...*History
 
 			for output := range stream {
 				logger.Debug("recv response", "output", output)
-				newInput, err := s.handleResponse(ctx, output, toolMap)
+				newInput, err := handleResponse(ctx, cfg, output, toolMap)
 				if err != nil {
 					if !errors.Is(err, errExitToolCalled) {
 						return nil, err
@@ -252,11 +265,11 @@ func (s *Gollam) Order(ctx context.Context, prompt string, histories ...*History
 
 var errExitToolCalled = goerr.New("exit tool called")
 
-func (s *Gollam) handleResponse(ctx context.Context, output *Response, toolMap map[string]Tool) ([]Input, error) {
+func handleResponse(ctx context.Context, cfg gollamConfig, output *Response, toolMap map[string]Tool) ([]Input, error) {
 	newInput := make([]Input, 0)
 	// Call the msgCallback for all texts
 	for _, text := range output.Texts {
-		if err := s.msgCallback(ctx, text); err != nil {
+		if err := cfg.msgCallback(ctx, text); err != nil {
 			return nil, goerr.Wrap(err, "failed to call msgCallback")
 		}
 	}
@@ -270,7 +283,7 @@ func (s *Gollam) handleResponse(ctx context.Context, output *Response, toolMap m
 			continue
 		}
 
-		if err := s.toolCallback(ctx, *toolCall); err != nil {
+		if err := cfg.toolCallback(ctx, *toolCall); err != nil {
 			return nil, goerr.Wrap(err, "failed to call toolCallback")
 		}
 
@@ -286,7 +299,7 @@ func (s *Gollam) handleResponse(ctx context.Context, output *Response, toolMap m
 
 		result, err := tool.Run(ctx, toolCall.Arguments)
 		if err != nil {
-			if cbErr := s.errCallback(ctx, err, *toolCall); cbErr != nil {
+			if cbErr := cfg.errCallback(ctx, err, *toolCall); cbErr != nil {
 				return nil, goerr.Wrap(cbErr, "failed to call errCallback")
 			}
 
