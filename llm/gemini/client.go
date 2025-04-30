@@ -29,6 +29,9 @@ type Client struct {
 
 	// systemPrompt is the system prompt to use for chat completions.
 	systemPrompt string
+
+	// contentType is the type of content to be generated.
+	contentType gollam.ContentType
 }
 
 // Option is a function that configures a Client.
@@ -99,6 +102,14 @@ func WithSystemPrompt(prompt string) Option {
 	}
 }
 
+// WithContentType sets the content type for text generation.
+// This determines the format of the generated content.
+func WithContentType(contentType gollam.ContentType) Option {
+	return func(c *Client) {
+		c.contentType = contentType
+	}
+}
+
 // New creates a new client for the Gemini API.
 // It requires a project ID and location, and can be configured with additional options.
 func New(ctx context.Context, projectID, location string, options ...Option) (*Client, error) {
@@ -111,6 +122,7 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 
 	client := &Client{
 		defaultModel: "gemini-2.0-flash",
+		contentType:  gollam.ContentTypeText,
 	}
 
 	for _, option := range options {
@@ -143,6 +155,7 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories 
 			Parts: []genai.Part{genai.Text(c.systemPrompt)},
 		})
 	}
+
 	for _, history := range histories {
 		history, err := history.ToGemini()
 		if err != nil {
@@ -153,6 +166,13 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories 
 
 	model := c.client.GenerativeModel(c.defaultModel)
 	model.GenerationConfig = c.generationConfig
+
+	switch c.contentType {
+	case gollam.ContentTypeJSON:
+		model.GenerationConfig.ResponseMIMEType = "application/json"
+	case gollam.ContentTypeText:
+		model.GenerationConfig.ResponseMIMEType = "text/plain"
+	}
 
 	if len(genaiFunctions) > 0 {
 		model.Tools = []*genai.Tool{

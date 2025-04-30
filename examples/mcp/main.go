@@ -39,7 +39,7 @@ func main() {
 	)
 
 	// Send a message
-	if _, err := g.Order(ctx, "Hello, I want to use MCP tools."); err != nil {
+	if _, err := g.Instruct(ctx, "Hello, I want to use MCP tools."); err != nil {
 		panic(err)
 	}
 }

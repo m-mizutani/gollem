@@ -57,7 +57,7 @@ func main() {
 	defer mcpRemote.Close()
 
 	// Create gollam instance
-	s := gollam.New(client,
+	agent := gollam.New(client,
 		// Not only MCP servers,
 		gollam.WithToolSets(mcpLocal, mcpRemote),
 		// But also you can use your own built-in tools
@@ -75,7 +75,7 @@ func main() {
 		scanner := bufio.NewScanner(os.Stdin)
 		scanner.Scan()
 
-		newHistory, err := s.Order(ctx, scanner.Text(), gollam.WithHistory(history))
+		newHistory, err := agent.Instruct(ctx, scanner.Text(), gollam.WithHistory(history))
 		if err != nil {
 			panic(err)
 		}

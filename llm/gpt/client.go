@@ -48,6 +48,9 @@ type Client struct {
 
 	// systemPrompt is the system prompt to use for chat completions.
 	systemPrompt string
+
+	// contentType is the type of content to be generated.
+	contentType gollam.ContentType
 }
 
 // Option is a function that configures a Client.
@@ -107,12 +110,21 @@ func WithSystemPrompt(prompt string) Option {
 	}
 }
 
+// WithContentType sets the content type for text generation.
+// This determines the format of the generated content.
+func WithContentType(contentType gollam.ContentType) Option {
+	return func(c *Client) {
+		c.contentType = contentType
+	}
+}
+
 // New creates a new client for the GPT API.
 // It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
 	client := &Client{
 		defaultModel: "gpt-4-turbo-preview",
 		params:       generationParameters{},
+		contentType:  gollam.ContentTypeText,
 	}
 
 	for _, option := range options {
@@ -142,6 +154,9 @@ type Session struct {
 
 	// generation parameters
 	params generationParameters
+
+	// contentType is the type of content to be generated.
+	contentType gollam.ContentType
 }
 
 // NewSession creates a new session for the GPT API.
@@ -174,6 +189,7 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories 
 		tools:        openaiTools,
 		params:       c.params,
 		messages:     messages,
+		contentType:  c.contentType,
 	}
 
 	return session, nil
@@ -211,7 +227,7 @@ func (s *Session) convertInputs(input ...gollam.Input) error {
 
 // createRequest creates a chat completion request with the current session state
 func (s *Session) createRequest(stream bool) openai.ChatCompletionRequest {
-	return openai.ChatCompletionRequest{
+	req := openai.ChatCompletionRequest{
 		Model:            s.defaultModel,
 		Messages:         s.messages,
 		Tools:            s.tools,
@@ -222,6 +238,15 @@ func (s *Session) createRequest(stream bool) openai.ChatCompletionRequest {
 		FrequencyPenalty: s.params.FrequencyPenalty,
 		Stream:           stream,
 	}
+
+	// Add content type to the request
+	if s.contentType == gollam.ContentTypeJSON {
+		req.ResponseFormat = &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+		}
+	}
+
+	return req
 }
 
 // GenerateContent processes the input and generates a response.

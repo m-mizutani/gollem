@@ -28,7 +28,7 @@ func main() {
 	defer mcpLocal.Close()
 
 	// Create gollam instance
-	s := gollam.New(client,
+	agent := gollam.New(client,
 		gollam.WithToolSets(mcpLocal),
 		gollam.WithMsgCallback(func(ctx context.Context, msg string) error {
 			fmt.Printf("🤖 %s\n", msg)
@@ -40,7 +40,7 @@ func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Scan()
 
-	if _, err = s.Order(ctx, scanner.Text()); err != nil {
+	if _, err = agent.Instruct(ctx, scanner.Text()); err != nil {
 		panic(err)
 	}
 }
