@@ -81,7 +81,7 @@ func main() {
 		text := scanner.Text()
 
 		fmt.Printf("🤖 ")
-		newHistory, err := g.Order(ctx, text, gollam.WithHistory(history))
+		newHistory, err := g.Instruct(ctx, text, gollam.WithHistory(history))
 		if err != nil {
 			panic(err)
 		}

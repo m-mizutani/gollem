@@ -24,8 +24,8 @@ const (
 	DefaultInitPrompt = `You are a helpful assistant. Call "exit" tool when you determine that the task for user prompt is completed.`
 )
 
-// Gollam is core structure of the package.
-type Gollam struct {
+// Agent is core structure of the package.
+type Agent struct {
 	llm LLMClient
 
 	gollamConfig
@@ -53,8 +53,8 @@ type gollamConfig struct {
 }
 
 // New creates a new gollam instance.
-func New(llmClient LLMClient, options ...Option) *Gollam {
-	s := &Gollam{
+func New(llmClient LLMClient, options ...Option) *Agent {
+	s := &Agent{
 		llm: llmClient,
 		gollamConfig: gollamConfig{
 			loopLimit:  DefaultLoopLimit,
@@ -176,8 +176,8 @@ func WithHistory(history *History) Option {
 	}
 }
 
-// Order is the main function to start the gollam instance. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until the exit tool is called or the LoopLimit is reached.
-func (g *Gollam) Order(ctx context.Context, prompt string, options ...Option) (*History, error) {
+// Instruct is the main function to start the gollam instance. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until the exit tool is called or the LoopLimit is reached.
+func (g *Agent) Instruct(ctx context.Context, prompt string, options ...Option) (*History, error) {
 	cfg := g.gollamConfig
 	for _, opt := range options {
 		opt(&cfg)
