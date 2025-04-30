@@ -2,7 +2,7 @@ package gollam
 
 import "context"
 
-// Session is a session for the LLM. This can be called to generate content and stream. It's mainly used for Instruct() method, but it also can be used for one-shot content generation.
+// Session is a session for the LLM. This can be called to generate content and stream. It's mainly used for Prompt() method, but it also can be used for one-shot content generation.
 type Session interface {
 	GenerateContent(ctx context.Context, input ...Input) (*Response, error)
 	GenerateStream(ctx context.Context, input ...Input) (<-chan *Response, error)

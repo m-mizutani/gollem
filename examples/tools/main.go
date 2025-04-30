@@ -39,7 +39,7 @@ func main() {
 
 	query := "Add 5 and 3, then multiply the result by 2"
 	log.Printf("Query: %s", query)
-	if _, err := servant.Instruct(ctx, query); err != nil {
+	if _, err := servant.Prompt(ctx, query); err != nil {
 		log.Fatal(err)
 	}
 }

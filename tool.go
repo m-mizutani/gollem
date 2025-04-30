@@ -183,7 +183,7 @@ func (p *Parameter) Validate() error {
 
 // Tool is specification and execution of an action that can be called by the LLM.
 type Tool interface {
-	// Spec returns the specification of the tool. It's called when starting a LLM chat session in Instruct().
+	// Spec returns the specification of the tool. It's called when starting a LLM chat session in Prompt().
 	Spec() ToolSpec
 
 	// Run is the execution of the tool.
