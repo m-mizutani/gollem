@@ -75,7 +75,7 @@ func main() {
 		scanner := bufio.NewScanner(os.Stdin)
 		scanner.Scan()
 
-		newHistory, err := agent.Instruct(ctx, scanner.Text(), gollam.WithHistory(history))
+		newHistory, err := agent.Prompt(ctx, scanner.Text(), gollam.WithHistory(history))
 		if err != nil {
 			panic(err)
 		}

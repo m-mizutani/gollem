@@ -95,17 +95,11 @@ func testGenerateStream(t *testing.T, session gollam.Session) {
 		for resp := range stream {
 			gt.NoError(t, resp.Error).Required()
 
-			if len(resp.Texts) > 0 {
-				for _, text := range resp.Texts {
-					t.Logf("text: %s", text)
-				}
-			}
 			if len(resp.FunctionCalls) > 0 {
 				for _, functionCall := range resp.FunctionCalls {
 					if functionCall.ID != "" {
 						id = functionCall.ID
 					}
-					t.Logf("function call: %+v", functionCall)
 				}
 			}
 		}
@@ -118,15 +112,6 @@ func testGenerateStream(t *testing.T, session gollam.Session) {
 		gt.NoError(t, err).Required()
 		for resp := range stream {
 			gt.NoError(t, resp.Error).Required()
-
-			if len(resp.Texts) > 0 {
-				for _, text := range resp.Texts {
-					t.Logf("text: %s", text)
-				}
-			}
-			if len(resp.FunctionCalls) > 0 {
-				t.Logf("function call: %+v", resp.FunctionCalls[0])
-			}
 		}
 	})
 }

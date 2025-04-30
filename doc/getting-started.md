@@ -51,7 +51,7 @@ func main() {
     )
 
     // Send a message to the LLM
-    if err := s.Instruct(context.Background(), "Hello, how are you?"); err != nil {
+    if err := s.Prompt(context.Background(), "Hello, how are you?"); err != nil {
         panic(err)
     }
 }
@@ -95,7 +95,7 @@ gollam provides robust error handling capabilities to help you build reliable ap
 
 Example of error handling:
 ```go
-newHistory, err := s.Instruct(ctx, userInput, history)
+newHistory, err := s.Prompt(ctx, userInput, history)
 if err != nil {
     // Handle errors
     log.Printf("Error: %v", err)
@@ -125,7 +125,7 @@ Example of history management:
 var history *gollam.History
 
 // Process user input with history
-newHistory, err := s.Instruct(ctx, userInput, history)
+newHistory, err := s.Prompt(ctx, userInput, history)
 if err != nil {
     return nil, err
 }

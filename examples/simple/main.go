@@ -40,7 +40,7 @@ func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Scan()
 
-	if _, err = agent.Instruct(ctx, scanner.Text()); err != nil {
+	if _, err = agent.Prompt(ctx, scanner.Text()); err != nil {
 		panic(err)
 	}
 }
