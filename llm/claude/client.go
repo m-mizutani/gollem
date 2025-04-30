@@ -40,6 +40,9 @@ type Client struct {
 
 	// systemPrompt is the system prompt to use for chat completions.
 	systemPrompt string
+
+	// contentType is the type of content to be generated.
+	contentType gollam.ContentType
 }
 
 // Option is a function that configures a Client.
@@ -89,6 +92,14 @@ func WithSystemPrompt(prompt string) Option {
 	}
 }
 
+// WithContentType sets the content type for text generation.
+// This determines the format of the generated content.
+func WithContentType(contentType gollam.ContentType) Option {
+	return func(c *Client) {
+		c.contentType = contentType
+	}
+}
+
 // New creates a new client for the Claude API.
 // It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
@@ -99,6 +110,7 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 			TopP:        1.0,
 			MaxTokens:   4096,
 		},
+		contentType: gollam.ContentTypeText,
 	}
 
 	for _, option := range options {
@@ -133,6 +145,9 @@ type Session struct {
 
 	// systemPrompt is the system prompt to use for chat completions.
 	systemPrompt string
+
+	// contentType is the type of content to be generated.
+	contentType gollam.ContentType
 }
 
 // NewSession creates a new session for the Claude API.
@@ -160,6 +175,7 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories 
 		params:       c.params,
 		messages:     messages,
 		systemPrompt: c.systemPrompt,
+		contentType:  c.contentType,
 	}
 
 	return session, nil
@@ -208,6 +224,19 @@ func (s *Session) createRequest() anthropic.MessageNewParams {
 			{
 				Text: s.systemPrompt,
 			},
+		}
+	}
+
+	// Add content type instruction to system prompt
+	if s.contentType == gollam.ContentTypeJSON {
+		if len(systemPrompt) > 0 {
+			systemPrompt[0].Text += "\nPlease format your response as valid JSON."
+		} else {
+			systemPrompt = []anthropic.TextBlockParam{
+				{
+					Text: "Please format your response as valid JSON.",
+				},
+			}
 		}
 	}
 
