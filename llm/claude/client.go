@@ -40,9 +40,6 @@ type Client struct {
 
 	// systemPrompt is the system prompt to use for chat completions.
 	systemPrompt string
-
-	// contentType is the type of content to be generated.
-	contentType gollam.ContentType
 }
 
 // Option is a function that configures a Client.
@@ -92,14 +89,6 @@ func WithSystemPrompt(prompt string) Option {
 	}
 }
 
-// WithContentType sets the content type for text generation.
-// This determines the format of the generated content.
-func WithContentType(contentType gollam.ContentType) Option {
-	return func(c *Client) {
-		c.contentType = contentType
-	}
-}
-
 // New creates a new client for the Claude API.
 // It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
@@ -110,7 +99,6 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 			TopP:        1.0,
 			MaxTokens:   4096,
 		},
-		contentType: gollam.ContentTypeText,
 	}
 
 	for _, option := range options {
@@ -143,25 +131,23 @@ type Session struct {
 	// generation parameters
 	params generationParameters
 
-	// systemPrompt is the system prompt to use for chat completions.
-	systemPrompt string
-
-	// contentType is the type of content to be generated.
-	contentType gollam.ContentType
+	cfg gollam.SessionConfig
 }
 
 // NewSession creates a new session for the Claude API.
 // It converts the provided tools to Claude's tool format and initializes a new chat session.
-func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories ...*gollam.History) (gollam.Session, error) {
+func (c *Client) NewSession(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error) {
+	cfg := gollam.NewSessionConfig(options...)
+
 	// Convert gollam.Tool to anthropic.ToolUnionParam
-	claudeTools := make([]anthropic.ToolUnionParam, len(tools))
-	for i, tool := range tools {
+	claudeTools := make([]anthropic.ToolUnionParam, len(cfg.Tools()))
+	for i, tool := range cfg.Tools() {
 		claudeTools[i] = convertTool(tool)
 	}
 
 	var messages []anthropic.MessageParam
-	for _, history := range histories {
-		history, err := history.ToClaude()
+	if cfg.History() != nil {
+		history, err := cfg.History().ToClaude()
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history to anthropic.MessageParam")
 		}
@@ -174,8 +160,7 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories 
 		tools:        claudeTools,
 		params:       c.params,
 		messages:     messages,
-		systemPrompt: c.systemPrompt,
-		contentType:  c.contentType,
+		cfg:          cfg,
 	}
 
 	return session, nil
@@ -219,16 +204,16 @@ func (s *Session) convertInputs(input ...gollam.Input) ([]anthropic.MessageParam
 // createRequest creates a message request with the current session state
 func (s *Session) createRequest() anthropic.MessageNewParams {
 	var systemPrompt []anthropic.TextBlockParam
-	if s.systemPrompt != "" {
+	if s.cfg.SystemPrompt() != "" {
 		systemPrompt = []anthropic.TextBlockParam{
 			{
-				Text: s.systemPrompt,
+				Text: s.cfg.SystemPrompt(),
 			},
 		}
 	}
 
 	// Add content type instruction to system prompt
-	if s.contentType == gollam.ContentTypeJSON {
+	if s.cfg.ContentType() == gollam.ContentTypeJSON {
 		if len(systemPrompt) > 0 {
 			systemPrompt[0].Text += "\nPlease format your response as valid JSON."
 		} else {

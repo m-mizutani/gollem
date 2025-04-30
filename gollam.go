@@ -37,9 +37,10 @@ const (
 )
 
 type gollamConfig struct {
-	loopLimit  int
-	retryLimit int
-	initPrompt string
+	loopLimit    int
+	retryLimit   int
+	initPrompt   string
+	systemPrompt string
 
 	tools    []Tool
 	toolSets []ToolSet
@@ -49,7 +50,8 @@ type gollamConfig struct {
 	errCallback  ErrCallback
 	responseMode ResponseMode
 	logger       *slog.Logger
-	history      *History
+
+	history *History
 }
 
 // New creates a new gollam instance.
@@ -202,12 +204,18 @@ func (g *Agent) Instruct(ctx context.Context, prompt string, options ...Option) 
 	}
 	logger.Debug("tool list", "names", toolNames)
 
-	var validHistories []*History
+	var sessionOptions []SessionOption
 	if cfg.history != nil && cfg.history.history.Messages != nil {
-		validHistories = append(validHistories, cfg.history)
+		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
+	}
+	if cfg.systemPrompt != "" {
+		sessionOptions = append(sessionOptions, WithSessionSystemPrompt(cfg.systemPrompt))
+	}
+	if len(cfg.tools) > 0 {
+		sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
 	}
 
-	ssn, err := g.llm.NewSession(ctx, toolList, validHistories...)
+	ssn, err := g.llm.NewSession(ctx, sessionOptions...)
 	if err != nil {
 		return nil, err
 	}

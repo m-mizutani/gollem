@@ -2,15 +2,9 @@ package gollam
 
 import "context"
 
-type Session interface {
-	GenerateContent(ctx context.Context, input ...Input) (*Response, error)
-	GenerateStream(ctx context.Context, input ...Input) (<-chan *Response, error)
-	History() *History
-}
-
 // LLMClient is a client for each LLM service.
 type LLMClient interface {
-	NewSession(ctx context.Context, tools []Tool, histories ...*History) (Session, error)
+	NewSession(ctx context.Context, options ...SessionOption) (Session, error)
 }
 
 type FunctionCall struct {

@@ -181,7 +181,7 @@ func TestGemini(t *testing.T) {
 
 	// Setup tools
 	tools := []gollam.Tool{&randomNumberTool{}}
-	session, err := client.NewSession(t.Context(), tools)
+	session, err := client.NewSession(t.Context(), gollam.WithSessionTools(tools...))
 	gt.NoError(t, err)
 
 	t.Run("generate content", func(t *testing.T) {
@@ -197,7 +197,7 @@ func TestGPT(t *testing.T) {
 
 	// Setup tools
 	tools := []gollam.Tool{&randomNumberTool{}}
-	session, err := client.NewSession(t.Context(), tools)
+	session, err := client.NewSession(t.Context(), gollam.WithSessionTools(tools...))
 	gt.NoError(t, err)
 
 	t.Run("generate content", func(t *testing.T) {
@@ -211,7 +211,7 @@ func TestGPT(t *testing.T) {
 func TestClaude(t *testing.T) {
 	client := newClaudeClient(t)
 
-	session, err := client.NewSession(context.Background(), []gollam.Tool{&randomNumberTool{}})
+	session, err := client.NewSession(context.Background(), gollam.WithSessionTools(&randomNumberTool{}))
 	gt.NoError(t, err)
 
 	t.Run("generate content", func(t *testing.T) {
@@ -301,7 +301,7 @@ func TestCallToolNameConvention(t *testing.T) {
 				ctx := t.Context()
 				tool := &weatherTool{name: tc.name}
 
-				session, err := client.NewSession(ctx, []gollam.Tool{tool})
+				session, err := client.NewSession(ctx, gollam.WithSessionTools(tool))
 				gt.NoError(t, err)
 
 				resp, err := session.GenerateContent(ctx, gollam.Text("What is the weather in Tokyo?"))
@@ -364,7 +364,7 @@ func TestCallToolNameConvention(t *testing.T) {
 func TestSessionHistory(t *testing.T) {
 	testFn := func(t *testing.T, client gollam.LLMClient) {
 		ctx := t.Context()
-		session, err := client.NewSession(ctx, []gollam.Tool{})
+		session, err := client.NewSession(ctx, gollam.WithSessionTools())
 		gt.NoError(t, err).Required()
 
 		_, err = session.GenerateContent(ctx, gollam.Text("Remeber: Tokyo is sunny, Los Angeles is cloudy, and Paris is rainy."))
@@ -372,7 +372,7 @@ func TestSessionHistory(t *testing.T) {
 
 		history := session.History()
 
-		newSession, err := client.NewSession(ctx, []gollam.Tool{}, history)
+		newSession, err := client.NewSession(ctx, gollam.WithSessionTools(), gollam.WithSessionHistory(history))
 		gt.NoError(t, err)
 
 		resp, err := newSession.GenerateContent(ctx, gollam.Text("What is the weather in Tokyo?"))
