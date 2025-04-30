@@ -141,23 +141,25 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 
 // NewSession creates a new session for the Gemini API.
 // It converts the provided tools to Gemini's tool format and initializes a new chat session.
-func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories ...*gollam.History) (gollam.Session, error) {
+func (c *Client) NewSession(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error) {
+	cfg := gollam.NewSessionConfig(options...)
+
 	// Convert gollam.Tool to *genai.Tool
-	genaiFunctions := make([]*genai.FunctionDeclaration, len(tools))
-	for i, tool := range tools {
+	genaiFunctions := make([]*genai.FunctionDeclaration, len(cfg.Tools()))
+	for i, tool := range cfg.Tools() {
 		genaiFunctions[i] = convertTool(tool)
 	}
 
 	var messages []*genai.Content
-	if c.systemPrompt != "" {
+	if cfg.SystemPrompt() != "" {
 		messages = append(messages, &genai.Content{
 			Role:  "system",
-			Parts: []genai.Part{genai.Text(c.systemPrompt)},
+			Parts: []genai.Part{genai.Text(cfg.SystemPrompt())},
 		})
 	}
 
-	for _, history := range histories {
-		history, err := history.ToGemini()
+	if cfg.History() != nil {
+		history, err := cfg.History().ToGemini()
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history to gemini.Content")
 		}
@@ -167,7 +169,7 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories 
 	model := c.client.GenerativeModel(c.defaultModel)
 	model.GenerationConfig = c.generationConfig
 
-	switch c.contentType {
+	switch cfg.ContentType() {
 	case gollam.ContentTypeJSON:
 		model.GenerationConfig.ResponseMIMEType = "application/json"
 	case gollam.ContentTypeText:

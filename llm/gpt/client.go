@@ -155,16 +155,17 @@ type Session struct {
 	// generation parameters
 	params generationParameters
 
-	// contentType is the type of content to be generated.
-	contentType gollam.ContentType
+	cfg gollam.SessionConfig
 }
 
 // NewSession creates a new session for the GPT API.
 // It converts the provided tools to OpenAI's tool format and initializes a new chat session.
-func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories ...*gollam.History) (gollam.Session, error) {
+func (c *Client) NewSession(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error) {
+	cfg := gollam.NewSessionConfig(options...)
+
 	// Convert gollam.Tool to openai.Tool
-	openaiTools := make([]openai.Tool, len(tools))
-	for i, tool := range tools {
+	openaiTools := make([]openai.Tool, len(cfg.Tools()))
+	for i, tool := range cfg.Tools() {
 		openaiTools[i] = convertTool(tool)
 	}
 
@@ -172,11 +173,11 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories 
 	if c.systemPrompt != "" {
 		messages = append(messages, openai.ChatCompletionMessage{
 			Role:    openai.ChatMessageRoleSystem,
-			Content: c.systemPrompt,
+			Content: cfg.SystemPrompt(),
 		})
 	}
-	for _, history := range histories {
-		history, err := history.ToGPT()
+	if cfg.History() != nil {
+		history, err := cfg.History().ToGPT()
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history to openai.ChatCompletionMessage")
 		}
@@ -189,7 +190,7 @@ func (c *Client) NewSession(ctx context.Context, tools []gollam.Tool, histories 
 		tools:        openaiTools,
 		params:       c.params,
 		messages:     messages,
-		contentType:  c.contentType,
+		cfg:          cfg,
 	}
 
 	return session, nil
@@ -240,7 +241,7 @@ func (s *Session) createRequest(stream bool) openai.ChatCompletionRequest {
 	}
 
 	// Add content type to the request
-	if s.contentType == gollam.ContentTypeJSON {
+	if s.cfg.ContentType() == gollam.ContentTypeJSON {
 		req.ResponseFormat = &openai.ChatCompletionResponseFormat{
 			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
 		}
