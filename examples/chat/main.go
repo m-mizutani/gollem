@@ -124,10 +124,10 @@ func loadHistory(path string) (*gollam.History, error) {
 		return nil, err
 	}
 
-	history, err := gollam.NewHistoryFromData(data)
-	if err != nil {
+	var history gollam.History
+	if err := json.Unmarshal(data, &history); err != nil {
 		return nil, err
 	}
 
-	return history, nil
+	return &history, nil
 }

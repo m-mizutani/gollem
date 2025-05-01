@@ -225,7 +225,7 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 	logger.Debug("tool list", "names", toolNames)
 
 	var sessionOptions []SessionOption
-	if cfg.history != nil && cfg.history.history.Messages != nil {
+	if cfg.history != nil {
 		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
 	}
 	if cfg.systemPrompt != "" {

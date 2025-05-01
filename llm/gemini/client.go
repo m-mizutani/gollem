@@ -151,12 +151,6 @@ func (c *Client) NewSession(ctx context.Context, options ...gollam.SessionOption
 	}
 
 	var messages []*genai.Content
-	if cfg.SystemPrompt() != "" {
-		messages = append(messages, &genai.Content{
-			Role:  "system",
-			Parts: []genai.Part{genai.Text(cfg.SystemPrompt())},
-		})
-	}
 
 	if cfg.History() != nil {
 		history, err := cfg.History().ToGemini()
@@ -174,6 +168,13 @@ func (c *Client) NewSession(ctx context.Context, options ...gollam.SessionOption
 		model.GenerationConfig.ResponseMIMEType = "application/json"
 	case gollam.ContentTypeText:
 		model.GenerationConfig.ResponseMIMEType = "text/plain"
+	}
+
+	if cfg.SystemPrompt() != "" {
+		model.SystemInstruction = &genai.Content{
+			Role:  "system",
+			Parts: []genai.Part{genai.Text(cfg.SystemPrompt())},
+		}
 	}
 
 	if len(genaiFunctions) > 0 {
