@@ -2,8 +2,8 @@ package gollam_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -349,22 +349,40 @@ func TestCallToolNameConvention(t *testing.T) {
 func TestSessionHistory(t *testing.T) {
 	testFn := func(t *testing.T, client gollam.LLMClient) {
 		ctx := t.Context()
-		session, err := client.NewSession(ctx, gollam.WithSessionTools())
+		session, err := client.NewSession(ctx, gollam.WithSessionTools(&weatherTool{name: "weather"}))
 		gt.NoError(t, err).Required()
 
-		_, err = session.GenerateContent(ctx, gollam.Text("Remeber: Tokyo is sunny, Los Angeles is cloudy, and Paris is rainy."))
+		resp1, err := session.GenerateContent(ctx, gollam.Text("What is the weather in Tokyo?"))
 		gt.NoError(t, err).Required()
+		gt.A(t, resp1.FunctionCalls).Length(1).At(0, func(t testing.TB, v *gollam.FunctionCall) {
+			gt.Equal(t, v.Name, "weather")
+		})
+
+		resp2, err := session.GenerateContent(ctx, gollam.FunctionResponse{
+			ID:   resp1.FunctionCalls[0].ID,
+			Name: "weather",
+			Data: map[string]any{"weather": "sunny"},
+		})
+		gt.NoError(t, err).Required()
+		gt.A(t, resp2.Texts).Length(1).At(0, func(t testing.TB, v string) {
+			gt.S(t, v).Contains("sunny")
+		})
 
 		history := session.History()
-
-		newSession, err := client.NewSession(ctx, gollam.WithSessionTools(), gollam.WithSessionHistory(history))
-		gt.NoError(t, err)
-
-		resp, err := newSession.GenerateContent(ctx, gollam.Text("What is the weather in Tokyo?"))
+		rawData, err := json.Marshal(history)
 		gt.NoError(t, err).Required()
 
-		gt.A(t, resp.Texts).Any(func(v string) bool {
-			return strings.Contains(v, "sunny")
+		var restored gollam.History
+		gt.NoError(t, json.Unmarshal(rawData, &restored))
+
+		newSession, err := client.NewSession(ctx, gollam.WithSessionHistory(&restored))
+		gt.NoError(t, err)
+
+		resp3, err := newSession.GenerateContent(ctx, gollam.Text("Do you remember the weather in Tokyo?"))
+		gt.NoError(t, err).Required()
+
+		gt.A(t, resp3.Texts).Longer(0).At(0, func(t testing.TB, v string) {
+			gt.S(t, v).Contains("sunny")
 		})
 	}
 

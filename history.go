@@ -151,54 +151,6 @@ func NewHistoryFromClaude(messages []anthropic.MessageParam) *History {
 	}
 }
 
-func NewHistoryFromGemini(messages []*genai.Content) *History {
-	converted := make([]geminiMessage, len(messages))
-	for i, msg := range messages {
-		parts := make([]geminiPart, len(msg.Parts))
-		for j, p := range msg.Parts {
-			switch v := p.(type) {
-			case genai.Text:
-				parts[j] = geminiPart{
-					Type: "text",
-					Text: string(v),
-				}
-			case *genai.Blob:
-				parts[j] = geminiPart{
-					Type:     "blob",
-					MIMEType: v.MIMEType,
-					Data:     v.Data,
-				}
-			case *genai.FileData:
-				parts[j] = geminiPart{
-					Type:     "file_data",
-					MIMEType: v.MIMEType,
-					FileURI:  v.FileURI,
-				}
-			case *genai.FunctionCall:
-				parts[j] = geminiPart{
-					Type: "function_call",
-					Name: v.Name,
-					Args: v.Args,
-				}
-			case *genai.FunctionResponse:
-				parts[j] = geminiPart{
-					Type:     "function_response",
-					Name:     v.Name,
-					Response: v.Response,
-				}
-			}
-		}
-		converted[i] = geminiMessage{
-			Role:  msg.Role,
-			Parts: parts,
-		}
-	}
-	return &History{
-		LLType: llmTypeGemini,
-		Gemini: converted,
-	}
-}
-
 func toClaudeMessages(messages []claudeMessage) ([]anthropic.MessageParam, error) {
 	converted := make([]anthropic.MessageParam, len(messages))
 
@@ -278,6 +230,54 @@ func toClaudeMessages(messages []claudeMessage) ([]anthropic.MessageParam, error
 	return converted, nil
 }
 
+func NewHistoryFromGemini(messages []*genai.Content) *History {
+	converted := make([]geminiMessage, len(messages))
+	for i, msg := range messages {
+		parts := make([]geminiPart, len(msg.Parts))
+		for j, p := range msg.Parts {
+			switch v := p.(type) {
+			case genai.Text:
+				parts[j] = geminiPart{
+					Type: "text",
+					Text: string(v),
+				}
+			case genai.Blob:
+				parts[j] = geminiPart{
+					Type:     "blob",
+					MIMEType: v.MIMEType,
+					Data:     v.Data,
+				}
+			case genai.FileData:
+				parts[j] = geminiPart{
+					Type:     "file_data",
+					MIMEType: v.MIMEType,
+					FileURI:  v.FileURI,
+				}
+			case genai.FunctionCall:
+				parts[j] = geminiPart{
+					Type: "function_call",
+					Name: v.Name,
+					Args: v.Args,
+				}
+			case genai.FunctionResponse:
+				parts[j] = geminiPart{
+					Type:     "function_response",
+					Name:     v.Name,
+					Response: v.Response,
+				}
+			}
+		}
+		converted[i] = geminiMessage{
+			Role:  msg.Role,
+			Parts: parts,
+		}
+	}
+	return &History{
+		LLType: llmTypeGemini,
+		Gemini: converted,
+	}
+}
+
 func toGeminiMessages(messages []geminiMessage) ([]*genai.Content, error) {
 	converted := make([]*genai.Content, len(messages))
 	for i, msg := range messages {
@@ -287,22 +287,22 @@ func toGeminiMessages(messages []geminiMessage) ([]*genai.Content, error) {
 			case "text":
 				parts[j] = genai.Text(p.Text)
 			case "blob":
-				parts[j] = &genai.Blob{
+				parts[j] = genai.Blob{
 					MIMEType: p.MIMEType,
 					Data:     p.Data,
 				}
 			case "file_data":
-				parts[j] = &genai.FileData{
+				parts[j] = genai.FileData{
 					MIMEType: p.MIMEType,
 					FileURI:  p.FileURI,
 				}
 			case "function_call":
-				parts[j] = &genai.FunctionCall{
+				parts[j] = genai.FunctionCall{
 					Name: p.Name,
 					Args: p.Args,
 				}
 			case "function_response":
-				parts[j] = &genai.FunctionResponse{
+				parts[j] = genai.FunctionResponse{
 					Name:     p.Name,
 					Response: p.Response,
 				}

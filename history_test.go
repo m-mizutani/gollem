@@ -247,11 +247,11 @@ func TestHistoryGemini(t *testing.T) {
 			Role: "user",
 			Parts: []genai.Part{
 				genai.Text("Hello"),
-				&genai.Blob{
+				genai.Blob{
 					MIMEType: "image/jpeg",
 					Data:     []byte("fake image data"),
 				},
-				&genai.FileData{
+				genai.FileData{
 					MIMEType: "application/pdf",
 					FileURI:  "gs://bucket/file.pdf",
 				},
@@ -261,7 +261,7 @@ func TestHistoryGemini(t *testing.T) {
 			Role: "model",
 			Parts: []genai.Part{
 				genai.Text("Hi, how can I help you?"),
-				&genai.FunctionCall{
+				genai.FunctionCall{
 					Name: "test_function",
 					Args: map[string]interface{}{
 						"param1": "value1",
@@ -274,7 +274,7 @@ func TestHistoryGemini(t *testing.T) {
 			Role: "model",
 			Parts: []genai.Part{
 				genai.Text("Function result"),
-				&genai.FunctionResponse{
+				genai.FunctionResponse{
 					Name: "test_function",
 					Response: map[string]interface{}{
 						"status": "success",
@@ -304,21 +304,21 @@ func TestHistoryGemini(t *testing.T) {
 	gt.Equal(t, "user", restoredMessages[0].Role)
 	gt.Equal(t, 3, len(restoredMessages[0].Parts))
 	gt.Equal(t, "Hello", restoredMessages[0].Parts[0].(genai.Text))
-	gt.Equal(t, "image/jpeg", restoredMessages[0].Parts[1].(*genai.Blob).MIMEType)
-	gt.Equal(t, "application/pdf", restoredMessages[0].Parts[2].(*genai.FileData).MIMEType)
-	gt.Equal(t, "gs://bucket/file.pdf", restoredMessages[0].Parts[2].(*genai.FileData).FileURI)
+	gt.Equal(t, "image/jpeg", restoredMessages[0].Parts[1].(genai.Blob).MIMEType)
+	gt.Equal(t, "application/pdf", restoredMessages[0].Parts[2].(genai.FileData).MIMEType)
+	gt.Equal(t, "gs://bucket/file.pdf", restoredMessages[0].Parts[2].(genai.FileData).FileURI)
 
 	gt.Equal(t, "model", restoredMessages[1].Role)
 	gt.Equal(t, 2, len(restoredMessages[1].Parts))
 	gt.Equal(t, "Hi, how can I help you?", restoredMessages[1].Parts[0].(genai.Text))
-	gt.Equal(t, "test_function", restoredMessages[1].Parts[1].(*genai.FunctionCall).Name)
-	gt.Equal(t, "value1", restoredMessages[1].Parts[1].(*genai.FunctionCall).Args["param1"])
-	gt.Equal(t, float64(123), restoredMessages[1].Parts[1].(*genai.FunctionCall).Args["param2"].(float64))
+	gt.Equal(t, "test_function", restoredMessages[1].Parts[1].(genai.FunctionCall).Name)
+	gt.Equal(t, "value1", restoredMessages[1].Parts[1].(genai.FunctionCall).Args["param1"])
+	gt.Equal(t, float64(123), restoredMessages[1].Parts[1].(genai.FunctionCall).Args["param2"].(float64))
 
 	gt.Equal(t, "model", restoredMessages[2].Role)
 	gt.Equal(t, 2, len(restoredMessages[2].Parts))
 	gt.Equal(t, "Function result", restoredMessages[2].Parts[0].(genai.Text))
-	gt.Equal(t, "test_function", restoredMessages[2].Parts[1].(*genai.FunctionResponse).Name)
-	gt.Equal(t, "success", restoredMessages[2].Parts[1].(*genai.FunctionResponse).Response["status"])
-	gt.Equal(t, "operation completed", restoredMessages[2].Parts[1].(*genai.FunctionResponse).Response["result"])
+	gt.Equal(t, "test_function", restoredMessages[2].Parts[1].(genai.FunctionResponse).Name)
+	gt.Equal(t, "success", restoredMessages[2].Parts[1].(genai.FunctionResponse).Response["status"])
+	gt.Equal(t, "operation completed", restoredMessages[2].Parts[1].(genai.FunctionResponse).Response["result"])
 }
