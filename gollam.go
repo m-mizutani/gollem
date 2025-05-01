@@ -54,6 +54,26 @@ type gollamConfig struct {
 	history *History
 }
 
+func (c *gollamConfig) Clone() *gollamConfig {
+	return &gollamConfig{
+		loopLimit:    c.loopLimit,
+		retryLimit:   c.retryLimit,
+		initPrompt:   c.initPrompt,
+		systemPrompt: c.systemPrompt,
+
+		tools:    c.tools[:],
+		toolSets: c.toolSets[:],
+
+		msgCallback:  c.msgCallback,
+		toolCallback: c.toolCallback,
+		errCallback:  c.errCallback,
+		responseMode: c.responseMode,
+		logger:       c.logger,
+
+		history: c.history,
+	}
+}
+
 // New creates a new gollam instance.
 func New(llmClient LLMClient, options ...Option) *Agent {
 	s := &Agent{
@@ -180,9 +200,9 @@ func WithHistory(history *History) Option {
 
 // Instruct is the main function to start the gollam instance. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until the exit tool is called or the LoopLimit is reached.
 func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*History, error) {
-	cfg := g.gollamConfig
+	cfg := g.gollamConfig.Clone()
 	for _, opt := range options {
-		opt(&cfg)
+		opt(cfg)
 	}
 
 	orderID := uuid.New().String()
@@ -238,7 +258,7 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 				return nil, err
 			}
 
-			newInput, err := handleResponse(ctx, cfg, output, toolMap)
+			newInput, err := handleResponse(ctx, *cfg, output, toolMap)
 			if err != nil {
 				if !errors.Is(err, errExitToolCalled) {
 					return nil, err
@@ -256,7 +276,7 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 
 			for output := range stream {
 				logger.Debug("recv response", "output", output)
-				newInput, err := handleResponse(ctx, cfg, output, toolMap)
+				newInput, err := handleResponse(ctx, *cfg, output, toolMap)
 				if err != nil {
 					if !errors.Is(err, errExitToolCalled) {
 						return nil, err
