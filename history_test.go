@@ -40,7 +40,7 @@ func TestHistoryGPT(t *testing.T) {
 			},
 		},
 		{
-			Role:    "function",
+			Role:    "tool",
 			Name:    "get_weather",
 			Content: `{"temperature": 25, "condition": "sunny"}`,
 		},
@@ -58,8 +58,8 @@ func TestHistoryGPT(t *testing.T) {
 	gt.NoError(t, err)
 
 	// Restore from JSON
-	restored, err := gollam.NewHistoryFromData(data)
-	gt.NoError(t, err)
+	var restored gollam.History
+	gt.NoError(t, json.Unmarshal(data, &restored))
 
 	restoredMessages, err := restored.ToGPT()
 	gt.NoError(t, err)
@@ -78,7 +78,7 @@ func TestHistoryGPT(t *testing.T) {
 	gt.Equal(t, "get_weather", restoredMessages[4].FunctionCall.Name)
 	gt.Equal(t, `{"location": "Tokyo"}`, restoredMessages[4].FunctionCall.Arguments)
 
-	gt.Equal(t, "function", restoredMessages[5].Role)
+	gt.Equal(t, "tool", restoredMessages[5].Role)
 	gt.Equal(t, "get_weather", restoredMessages[5].Name)
 	gt.Equal(t, `{"temperature": 25, "condition": "sunny"}`, restoredMessages[5].Content)
 }
@@ -216,8 +216,8 @@ func TestHistoryClaude(t *testing.T) {
 	gt.NoError(t, err)
 
 	// Restore from JSON
-	restored, err := gollam.NewHistoryFromData(data)
-	gt.NoError(t, err)
+	var restored gollam.History
+	gt.NoError(t, json.Unmarshal(data, &restored))
 
 	restoredMessages, err := restored.ToClaude()
 	gt.NoError(t, err)
@@ -293,8 +293,8 @@ func TestHistoryGemini(t *testing.T) {
 	gt.NoError(t, err)
 
 	// Restore from JSON
-	restored, err := gollam.NewHistoryFromData(data)
-	gt.NoError(t, err)
+	var restored gollam.History
+	gt.NoError(t, json.Unmarshal(data, &restored))
 
 	restoredMessages, err := restored.ToGemini()
 	gt.NoError(t, err)

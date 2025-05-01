@@ -1,8 +1,6 @@
 package gollam
 
 import (
-	"encoding/json"
-
 	"cloud.google.com/go/vertexai/genai"
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
@@ -19,45 +17,29 @@ const (
 )
 
 type History struct {
-	history historyData
-}
+	LLType llmType `json:"type"`
 
-type historyData struct {
-	LLType   llmType `json:"type"`
-	Messages any     `json:"messages"`
-
-	gptMessages    []openai.ChatCompletionMessage
-	claudeMessages []anthropic.MessageParam
-	geminiMessages []*genai.Content
-}
-
-func (h *History) MarshalJSON() ([]byte, error) {
-	return json.Marshal(h.history)
-}
-
-func (h *History) UnmarshalJSON(data []byte) error {
-	return json.Unmarshal(data, &h.history)
+	Claude []claudeMessage                `json:"claude,omitempty"`
+	GPT    []openai.ChatCompletionMessage `json:"gpt,omitempty"`
+	Gemini []geminiMessage                `json:"gemini,omitempty"`
 }
 
 func (x *History) ToGemini() ([]*genai.Content, error) {
-	if x.history.LLType != llmTypeGemini {
+	if x.LLType != llmTypeGemini {
 		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not gemini")
 	}
-	return x.history.geminiMessages, nil
+	return toGeminiMessages(x.Gemini)
 }
 
 func (x *History) ToClaude() ([]anthropic.MessageParam, error) {
-	if x.history.LLType != llmTypeClaude {
+	if x.LLType != llmTypeClaude {
 		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not claude")
 	}
-	return x.history.claudeMessages, nil
+	return toClaudeMessages(x.Claude)
 }
 
 func (x *History) ToGPT() ([]openai.ChatCompletionMessage, error) {
-	if x.history.LLType != llmTypeGPT {
-		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not gpt")
-	}
-	return x.history.gptMessages, nil
+	return x.GPT, nil
 }
 
 type claudeMessage struct {
@@ -110,11 +92,8 @@ type geminiPart struct {
 
 func NewHistoryFromGPT(messages []openai.ChatCompletionMessage) *History {
 	return &History{
-		history: historyData{
-			LLType:      llmTypeGPT,
-			Messages:    messages,
-			gptMessages: messages,
-		},
+		LLType: llmTypeGPT,
+		GPT:    messages,
 	}
 }
 
@@ -165,12 +144,10 @@ func NewHistoryFromClaude(messages []anthropic.MessageParam) *History {
 			Content: content,
 		}
 	}
+
 	return &History{
-		history: historyData{
-			LLType:         llmTypeClaude,
-			Messages:       claudeMessages,
-			claudeMessages: messages,
-		},
+		LLType: llmTypeClaude,
+		Claude: claudeMessages,
 	}
 }
 
@@ -217,160 +194,124 @@ func NewHistoryFromGemini(messages []*genai.Content) *History {
 		}
 	}
 	return &History{
-		history: historyData{
-			LLType:         llmTypeGemini,
-			Messages:       converted,
-			geminiMessages: messages,
-		},
+		LLType: llmTypeGemini,
+		Gemini: converted,
 	}
 }
 
-func NewHistoryFromData(data []byte) (*History, error) {
-	var check struct {
-		LLType llmType `json:"type"`
-	}
-	if err := json.Unmarshal(data, &check); err != nil {
-		return nil, goerr.Wrap(err, "invalid history data", goerr.V("data", string(data)))
-	}
+func toClaudeMessages(messages []claudeMessage) ([]anthropic.MessageParam, error) {
+	converted := make([]anthropic.MessageParam, len(messages))
 
-	switch check.LLType {
-	case llmTypeGPT:
-		var history struct {
-			Messages []openai.ChatCompletionMessage `json:"messages"`
-		}
-		if err := json.Unmarshal(data, &history); err != nil {
-			return nil, goerr.Wrap(err, "failed to unmarshal gpt history", goerr.V("data", string(data)))
-		}
-		return NewHistoryFromGPT(history.Messages), nil
+	for i, msg := range messages {
+		content := make([]anthropic.ContentBlockParamUnion, 0, len(msg.Content))
+		for _, c := range msg.Content {
+			switch c.Type {
+			case "text":
+				if c.Text == nil {
+					return nil, goerr.New("text block has no text field")
+				}
+				content = append(content, anthropic.ContentBlockParamUnion{
+					OfRequestTextBlock: &anthropic.TextBlockParam{
+						Text: *c.Text,
+						Type: "text",
+					},
+				})
 
-	case llmTypeClaude:
-		var history struct {
-			Messages []claudeMessage `json:"messages"`
-		}
-		if err := json.Unmarshal(data, &history); err != nil {
-			return nil, goerr.Wrap(err, "failed to unmarshal claude history", goerr.V("data", string(data)))
-		}
-
-		messages := make([]anthropic.MessageParam, len(history.Messages))
-		for i, msg := range history.Messages {
-			content := make([]anthropic.ContentBlockParamUnion, 0, len(msg.Content))
-			for _, c := range msg.Content {
-				switch c.Type {
-				case "text":
-					if c.Text == nil {
-						return nil, goerr.New("text block has no text field")
-					}
+			case "image":
+				if c.Source == nil {
+					return nil, goerr.New("image block has no source field")
+				}
+				if c.Source.Type == "base64" {
 					content = append(content, anthropic.ContentBlockParamUnion{
-						OfRequestTextBlock: &anthropic.TextBlockParam{
-							Text: *c.Text,
-							Type: "text",
-						},
-					})
-
-				case "image":
-					if c.Source == nil {
-						return nil, goerr.New("image block has no source field")
-					}
-					if c.Source.Type == "base64" {
-						content = append(content, anthropic.ContentBlockParamUnion{
-							OfRequestImageBlock: &anthropic.ImageBlockParam{
-								Source: anthropic.ImageBlockParamSourceUnion{
-									OfBase64ImageSource: &anthropic.Base64ImageSourceParam{
-										Type:      "base64",
-										MediaType: anthropic.Base64ImageSourceMediaType(c.Source.MediaType),
-										Data:      c.Source.Data,
-									},
-								},
-								Type: "image",
-							},
-						})
-					}
-
-				case "tool_use":
-					if c.ToolUse == nil {
-						return nil, goerr.New("tool_use block has no tool_use field")
-					}
-					content = append(content, anthropic.ContentBlockParamUnion{
-						OfRequestToolUseBlock: &anthropic.ToolUseBlockParam{
-							ID:    c.ToolUse.ID,
-							Name:  c.ToolUse.Name,
-							Input: c.ToolUse.Input,
-							Type:  "tool_use",
-						},
-					})
-
-				case "tool_result":
-					if c.ToolResult == nil {
-						return nil, goerr.New("tool_result block has no tool_result field")
-					}
-					content = append(content, anthropic.ContentBlockParamUnion{
-						OfRequestToolResultBlock: &anthropic.ToolResultBlockParam{
-							ToolUseID: c.ToolResult.ToolUseID,
-							Content: []anthropic.ToolResultBlockParamContentUnion{
-								{
-									OfRequestTextBlock: &anthropic.TextBlockParam{
-										Text: c.ToolResult.Content,
-										Type: "text",
-									},
+						OfRequestImageBlock: &anthropic.ImageBlockParam{
+							Source: anthropic.ImageBlockParamSourceUnion{
+								OfBase64ImageSource: &anthropic.Base64ImageSourceParam{
+									Type:      "base64",
+									MediaType: anthropic.Base64ImageSourceMediaType(c.Source.MediaType),
+									Data:      c.Source.Data,
 								},
 							},
-							IsError: param.NewOpt(c.ToolResult.IsError.Value),
+							Type: "image",
 						},
 					})
 				}
-			}
 
-			messages[i] = anthropic.MessageParam{
-				Role:    msg.Role,
-				Content: content,
-			}
-		}
-		return NewHistoryFromClaude(messages), nil
-
-	case llmTypeGemini:
-		var history struct {
-			Messages []geminiMessage `json:"messages"`
-		}
-		if err := json.Unmarshal(data, &history); err != nil {
-			return nil, goerr.Wrap(err, "failed to unmarshal gemini history", goerr.V("data", string(data)))
-		}
-
-		messages := make([]*genai.Content, len(history.Messages))
-		for i, msg := range history.Messages {
-			parts := make([]genai.Part, len(msg.Parts))
-			for j, p := range msg.Parts {
-				switch p.Type {
-				case "text":
-					parts[j] = genai.Text(p.Text)
-				case "blob":
-					parts[j] = &genai.Blob{
-						MIMEType: p.MIMEType,
-						Data:     p.Data,
-					}
-				case "file_data":
-					parts[j] = &genai.FileData{
-						MIMEType: p.MIMEType,
-						FileURI:  p.FileURI,
-					}
-				case "function_call":
-					parts[j] = &genai.FunctionCall{
-						Name: p.Name,
-						Args: p.Args,
-					}
-				case "function_response":
-					parts[j] = &genai.FunctionResponse{
-						Name:     p.Name,
-						Response: p.Response,
-					}
+			case "tool_use":
+				if c.ToolUse == nil {
+					return nil, goerr.New("tool_use block has no tool_use field")
 				}
-			}
-			messages[i] = &genai.Content{
-				Role:  msg.Role,
-				Parts: parts,
+				content = append(content, anthropic.ContentBlockParamUnion{
+					OfRequestToolUseBlock: &anthropic.ToolUseBlockParam{
+						ID:    c.ToolUse.ID,
+						Name:  c.ToolUse.Name,
+						Input: c.ToolUse.Input,
+						Type:  "tool_use",
+					},
+				})
+
+			case "tool_result":
+				if c.ToolResult == nil {
+					return nil, goerr.New("tool_result block has no tool_result field")
+				}
+				content = append(content, anthropic.ContentBlockParamUnion{
+					OfRequestToolResultBlock: &anthropic.ToolResultBlockParam{
+						ToolUseID: c.ToolResult.ToolUseID,
+						Content: []anthropic.ToolResultBlockParamContentUnion{
+							{
+								OfRequestTextBlock: &anthropic.TextBlockParam{
+									Text: c.ToolResult.Content,
+									Type: "text",
+								},
+							},
+						},
+						IsError: param.NewOpt(c.ToolResult.IsError.Value),
+					},
+				})
 			}
 		}
-		return NewHistoryFromGemini(messages), nil
+		converted[i] = anthropic.MessageParam{
+			Role:    msg.Role,
+			Content: content,
+		}
 	}
 
-	return nil, goerr.Wrap(ErrInvalidHistoryData, "unsupported history data", goerr.V("data", string(data)))
+	return converted, nil
+}
+
+func toGeminiMessages(messages []geminiMessage) ([]*genai.Content, error) {
+	converted := make([]*genai.Content, len(messages))
+	for i, msg := range messages {
+		parts := make([]genai.Part, len(msg.Parts))
+		for j, p := range msg.Parts {
+			switch p.Type {
+			case "text":
+				parts[j] = genai.Text(p.Text)
+			case "blob":
+				parts[j] = &genai.Blob{
+					MIMEType: p.MIMEType,
+					Data:     p.Data,
+				}
+			case "file_data":
+				parts[j] = &genai.FileData{
+					MIMEType: p.MIMEType,
+					FileURI:  p.FileURI,
+				}
+			case "function_call":
+				parts[j] = &genai.FunctionCall{
+					Name: p.Name,
+					Args: p.Args,
+				}
+			case "function_response":
+				parts[j] = &genai.FunctionResponse{
+					Name:     p.Name,
+					Response: p.Response,
+				}
+			}
+		}
+		converted[i] = &genai.Content{
+			Role:  msg.Role,
+			Parts: parts,
+		}
+	}
+	return converted, nil
 }
