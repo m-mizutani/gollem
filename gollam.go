@@ -115,10 +115,21 @@ func WithRetryLimit(retryLimit int) Option {
 	}
 }
 
-// WithInitPrompt sets the initial prompt for the gollam instance.
+// WithInitPrompt sets the initial prompt for the gollam instance. The initial prompt is used when there is no history. If you want to use the system prompt, use WithSystemPrompt instead.a
 func WithInitPrompt(initPrompt string) Option {
 	return func(s *gollamConfig) {
 		s.initPrompt = initPrompt
+	}
+}
+
+const (
+	DefaultSystemPrompt = `When you determine that the task for user prompt is completed, call the exit tool.`
+)
+
+// WithSystemPrompt replaces the system prompt with default one. You can see the default system prompt in DefaultSystemPrompt. Please note that the default system prompt includes the exit tool to stop the session loop. It's recommended to merge the default system prompt with your system prompt.
+func WithSystemPrompt(systemPrompt string) Option {
+	return func(s *gollamConfig) {
+		s.systemPrompt = systemPrompt
 	}
 }
 
@@ -224,13 +235,22 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 	}
 	logger.Debug("tool list", "names", toolNames)
 
+	input := []Input{Text(prompt)}
+
 	var sessionOptions []SessionOption
+
+	systemPrompt := DefaultSystemPrompt
+	if cfg.systemPrompt != "" {
+		systemPrompt = cfg.systemPrompt
+	}
+	sessionOptions = append(sessionOptions, WithSessionSystemPrompt(systemPrompt))
+
 	if cfg.history != nil {
 		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
+	} else if cfg.initPrompt != "" {
+		input = append([]Input{Text(cfg.initPrompt)}, input...)
 	}
-	if cfg.systemPrompt != "" {
-		sessionOptions = append(sessionOptions, WithSessionSystemPrompt(cfg.systemPrompt))
-	}
+
 	if len(cfg.tools) > 0 {
 		sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
 	}
@@ -240,8 +260,6 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 		return nil, err
 	}
 
-	initPrompt := `You are a helpful assistant. When you complete the task, send conclusion and call the exit tool.`
-	input := []Input{Text(initPrompt), Text(prompt)}
 	exitToolCalled := false
 
 	for i := 0; !exitToolCalled && len(input) > 0; i++ {
