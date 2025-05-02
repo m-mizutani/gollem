@@ -15,5 +15,6 @@ var (
 	// ErrInvalidHistoryData is returned when the history data is invalid or unsupported.
 	ErrInvalidHistoryData = errors.New("invalid history data")
 
-	ErrLLMTypeMismatch = errors.New("llm type mismatch")
+	ErrLLMTypeMismatch        = errors.New("llm type mismatch")
+	ErrHistoryVersionMismatch = errors.New("history version mismatch")
 )
