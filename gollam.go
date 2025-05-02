@@ -20,10 +20,6 @@ func (x ResponseMode) String() string {
 	return []string{"blocking", "streaming"}[x]
 }
 
-const (
-	DefaultInitPrompt = `You are a helpful assistant. Call "exit" tool when you determine that the task for user prompt is completed.`
-)
-
 // Agent is core structure of the package.
 type Agent struct {
 	llm LLMClient
@@ -79,9 +75,10 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 	s := &Agent{
 		llm: llmClient,
 		gollamConfig: gollamConfig{
-			loopLimit:  DefaultLoopLimit,
-			retryLimit: DefaultRetryLimit,
-			initPrompt: DefaultInitPrompt,
+			loopLimit:    DefaultLoopLimit,
+			retryLimit:   DefaultRetryLimit,
+			initPrompt:   "",
+			systemPrompt: DefaultSystemPrompt,
 
 			msgCallback:  defaultMsgCallback,
 			toolCallback: defaultToolCallback,
@@ -237,20 +234,15 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 
 	input := []Input{Text(prompt)}
 
-	var sessionOptions []SessionOption
-
-	systemPrompt := DefaultSystemPrompt
-	if cfg.systemPrompt != "" {
-		systemPrompt = cfg.systemPrompt
+	sessionOptions := []SessionOption{
+		WithSessionSystemPrompt(cfg.systemPrompt),
 	}
-	sessionOptions = append(sessionOptions, WithSessionSystemPrompt(systemPrompt))
 
 	if cfg.history != nil {
 		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
 	} else if cfg.initPrompt != "" {
 		input = append([]Input{Text(cfg.initPrompt)}, input...)
 	}
-
 	if len(cfg.tools) > 0 {
 		sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
 	}
