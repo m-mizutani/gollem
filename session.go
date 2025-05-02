@@ -72,7 +72,7 @@ func WithSessionContentType(contentType ContentType) SessionOption {
 // session, err := llmClient.NewSession(ctx, gollam.WithSessionTools(tools))
 func WithSessionTools(tools ...Tool) SessionOption {
 	return func(cfg *SessionConfig) {
-		cfg.tools = tools
+		cfg.tools = append(cfg.tools, tools...)
 	}
 }
 
