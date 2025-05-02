@@ -243,7 +243,7 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 	} else if cfg.initPrompt != "" {
 		input = append([]Input{Text(cfg.initPrompt)}, input...)
 	}
-	if len(cfg.tools) > 0 {
+	if len(toolList) > 0 {
 		sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
 	}
 
