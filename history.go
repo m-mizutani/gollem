@@ -1,3 +1,4 @@
+// Package gollam provides a unified interface for interacting with various LLM services.
 package gollam
 
 import (
@@ -8,6 +9,10 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
+// History represents a conversation history that can be used across different LLM sessions.
+// It stores messages in a format specific to each LLM type (GPT, Claude, or Gemini).
+//
+// For detailed documentation, see doc/history.md
 type llmType string
 
 const (
@@ -16,8 +21,13 @@ const (
 	llmTypeClaude llmType = "claude"
 )
 
+const (
+	HistoryVersion = 1
+)
+
 type History struct {
-	LLType llmType `json:"type"`
+	LLType  llmType `json:"type"`
+	Version int     `json:"version"`
 
 	Claude []claudeMessage                `json:"claude,omitempty"`
 	GPT    []openai.ChatCompletionMessage `json:"gpt,omitempty"`
@@ -25,20 +35,32 @@ type History struct {
 }
 
 func (x *History) ToGemini() ([]*genai.Content, error) {
+	if x.Version != HistoryVersion {
+		return nil, goerr.Wrap(ErrHistoryVersionMismatch, "history version is not supported", goerr.V("expected", HistoryVersion), goerr.V("actual", x.Version))
+	}
 	if x.LLType != llmTypeGemini {
-		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not gemini")
+		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not gemini", goerr.V("expected", llmTypeGemini), goerr.V("actual", x.LLType))
 	}
 	return toGeminiMessages(x.Gemini)
 }
 
 func (x *History) ToClaude() ([]anthropic.MessageParam, error) {
+	if x.Version != HistoryVersion {
+		return nil, goerr.Wrap(ErrHistoryVersionMismatch, "history version is not supported", goerr.V("expected", HistoryVersion), goerr.V("actual", x.Version))
+	}
 	if x.LLType != llmTypeClaude {
-		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not claude")
+		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not claude", goerr.V("expected", llmTypeClaude), goerr.V("actual", x.LLType))
 	}
 	return toClaudeMessages(x.Claude)
 }
 
 func (x *History) ToGPT() ([]openai.ChatCompletionMessage, error) {
+	if x.Version != HistoryVersion {
+		return nil, goerr.Wrap(ErrHistoryVersionMismatch, "history version is not supported", goerr.V("expected", HistoryVersion), goerr.V("actual", x.Version))
+	}
+	if x.LLType != llmTypeGPT {
+		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not gpt", goerr.V("expected", llmTypeGPT), goerr.V("actual", x.LLType))
+	}
 	return x.GPT, nil
 }
 
@@ -92,8 +114,9 @@ type geminiPart struct {
 
 func NewHistoryFromGPT(messages []openai.ChatCompletionMessage) *History {
 	return &History{
-		LLType: llmTypeGPT,
-		GPT:    messages,
+		LLType:  llmTypeGPT,
+		Version: HistoryVersion,
+		GPT:     messages,
 	}
 }
 
@@ -146,8 +169,9 @@ func NewHistoryFromClaude(messages []anthropic.MessageParam) *History {
 	}
 
 	return &History{
-		LLType: llmTypeClaude,
-		Claude: claudeMessages,
+		LLType:  llmTypeClaude,
+		Version: HistoryVersion,
+		Claude:  claudeMessages,
 	}
 }
 
@@ -273,8 +297,9 @@ func NewHistoryFromGemini(messages []*genai.Content) *History {
 		}
 	}
 	return &History{
-		LLType: llmTypeGemini,
-		Gemini: converted,
+		LLType:  llmTypeGemini,
+		Version: HistoryVersion,
+		Gemini:  converted,
 	}
 }
 
