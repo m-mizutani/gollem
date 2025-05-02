@@ -15,6 +15,7 @@ gollam lets you:
 - Use built-in tools to enhance LLM features
 - Connect with MCP servers for external tools
 - Build applications that run actions based on text input
+- Store and restore conversation history for stateless applications
 
 ## Supported LLMs
 
