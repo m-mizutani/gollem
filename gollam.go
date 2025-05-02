@@ -2,7 +2,6 @@ package gollam
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -78,7 +77,7 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 			loopLimit:    DefaultLoopLimit,
 			retryLimit:   DefaultRetryLimit,
 			initPrompt:   "",
-			systemPrompt: DefaultSystemPrompt,
+			systemPrompt: "",
 
 			msgCallback:  defaultMsgCallback,
 			toolCallback: defaultToolCallback,
@@ -119,11 +118,7 @@ func WithInitPrompt(initPrompt string) Option {
 	}
 }
 
-const (
-	DefaultSystemPrompt = `When you determine that the task for user prompt is completed, call the exit tool.`
-)
-
-// WithSystemPrompt replaces the system prompt with default one. You can see the default system prompt in DefaultSystemPrompt. Please note that the default system prompt includes the exit tool to stop the session loop. It's recommended to merge the default system prompt with your system prompt.
+// WithSystemPrompt sets the system prompt for the gollam instance. Default is no system prompt.
 func WithSystemPrompt(systemPrompt string) Option {
 	return func(s *gollamConfig) {
 		s.systemPrompt = systemPrompt
@@ -206,7 +201,7 @@ func WithHistory(history *History) Option {
 	}
 }
 
-// Instruct is the main function to start the gollam instance. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until the exit tool is called or the LoopLimit is reached.
+// Prompt is the main function to start the gollam instance. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until no tool call from LLM or the LoopLimit is reached.
 func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*History, error) {
 	cfg := g.gollamConfig.Clone()
 	for _, opt := range options {
@@ -218,8 +213,7 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 	ctx = ctxWithLogger(ctx, logger)
 	logger.Info("start order", "prompt", prompt)
 
-	tools := append(cfg.tools, &exitTool{})
-	toolMap, err := buildToolMap(ctx, tools, cfg.toolSets)
+	toolMap, err := buildToolMap(ctx, cfg.tools, cfg.toolSets)
 	if err != nil {
 		return nil, err
 	}
@@ -252,9 +246,7 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 		return nil, err
 	}
 
-	exitToolCalled := false
-
-	for i := 0; !exitToolCalled && len(input) > 0; i++ {
+	for i := 0; len(input) > 0; i++ {
 		if i > cfg.loopLimit {
 			return nil, goerr.Wrap(ErrLoopLimitExceeded, "order stopped", goerr.V("loop_limit", cfg.loopLimit))
 		}
@@ -270,10 +262,7 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 
 			newInput, err := handleResponse(ctx, *cfg, output, toolMap)
 			if err != nil {
-				if !errors.Is(err, errExitToolCalled) {
-					return nil, err
-				}
-				exitToolCalled = true
+				return nil, err
 			}
 			input = newInput
 
@@ -288,10 +277,7 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 				logger.Debug("recv response", "output", output)
 				newInput, err := handleResponse(ctx, *cfg, output, toolMap)
 				if err != nil {
-					if !errors.Is(err, errExitToolCalled) {
-						return nil, err
-					}
-					exitToolCalled = true
+					return nil, err
 				}
 				input = append(input, newInput...)
 			}
@@ -300,8 +286,6 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 
 	return ssn.History(), nil
 }
-
-var errExitToolCalled = goerr.New("exit tool called")
 
 func handleResponse(ctx context.Context, cfg gollamConfig, output *Response, toolMap map[string]Tool) ([]Input, error) {
 	newInput := make([]Input, 0)
@@ -316,11 +300,6 @@ func handleResponse(ctx context.Context, cfg gollamConfig, output *Response, too
 
 	// Call the toolCallback for all tool calls
 	for _, toolCall := range output.FunctionCalls {
-		if toolCall.Name == ExitToolName {
-			retErr = errExitToolCalled
-			continue
-		}
-
 		if err := cfg.toolCallback(ctx, *toolCall); err != nil {
 			return nil, goerr.Wrap(err, "failed to call toolCallback")
 		}
@@ -402,21 +381,4 @@ func buildToolMap(ctx context.Context, tools []Tool, toolSets []ToolSet) (map[st
 	}
 
 	return toolMap, nil
-}
-
-type exitTool struct{}
-
-const (
-	ExitToolName = "exit"
-)
-
-func (x *exitTool) Spec() ToolSpec {
-	return ToolSpec{
-		Name:        ExitToolName,
-		Description: "When you determine that the task for user prompt is completed, call this tool.",
-	}
-}
-
-func (x *exitTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	return nil, nil
 }
