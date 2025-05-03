@@ -1,4 +1,4 @@
-package gollam
+package gollem
 
 import "context"
 
@@ -13,7 +13,7 @@ type FunctionCall struct {
 	Arguments map[string]any
 }
 
-// Response is a general response type for each gollam.
+// Response is a general response type for each gollem.
 type Response struct {
 	Texts         []string
 	FunctionCalls []*FunctionCall
@@ -34,7 +34,7 @@ type restrictedValue struct{}
 
 // Text is a text input as prompt.
 // Usage:
-// input := gollam.Text("Hello, world!")
+// input := gollem.Text("Hello, world!")
 type Text string
 
 func (t Text) isInput() restrictedValue {
@@ -44,7 +44,7 @@ func (t Text) isInput() restrictedValue {
 // FunctionResponse is a function response.
 // Usage:
 //
-//	input := gollam.FunctionResponse{
+//	input := gollem.FunctionResponse{
 //		Name:      "function_name",
 //		Arguments: map[string]any{"key": "value"},
 //	}

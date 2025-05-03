@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollam"
+	"github.com/m-mizutani/gollem"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -50,7 +50,7 @@ type Client struct {
 	systemPrompt string
 
 	// contentType is the type of content to be generated.
-	contentType gollam.ContentType
+	contentType gollem.ContentType
 }
 
 // Option is a function that configures a Client.
@@ -114,7 +114,7 @@ func WithSystemPrompt(prompt string) Option {
 
 // WithContentType sets the content type for text generation.
 // This determines the format of the generated content.
-func WithContentType(contentType gollam.ContentType) Option {
+func WithContentType(contentType gollem.ContentType) Option {
 	return func(c *Client) {
 		c.contentType = contentType
 	}
@@ -126,7 +126,7 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 	client := &Client{
 		defaultModel: "gpt-4-turbo-preview",
 		params:       generationParameters{},
-		contentType:  gollam.ContentTypeText,
+		contentType:  gollem.ContentTypeText,
 	}
 
 	for _, option := range options {
@@ -157,15 +157,15 @@ type Session struct {
 	// generation parameters
 	params generationParameters
 
-	cfg gollam.SessionConfig
+	cfg gollem.SessionConfig
 }
 
 // NewSession creates a new session for the GPT API.
 // It converts the provided tools to OpenAI's tool format and initializes a new chat session.
-func (c *Client) NewSession(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error) {
-	cfg := gollam.NewSessionConfig(options...)
+func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+	cfg := gollem.NewSessionConfig(options...)
 
-	// Convert gollam.Tool to openai.Tool
+	// Convert gollem.Tool to openai.Tool
 	openaiTools := make([]openai.Tool, len(cfg.Tools()))
 	for i, tool := range cfg.Tools() {
 		openaiTools[i] = convertTool(tool)
@@ -198,20 +198,20 @@ func (c *Client) NewSession(ctx context.Context, options ...gollam.SessionOption
 	return session, nil
 }
 
-func (s *Session) History() *gollam.History {
-	return gollam.NewHistoryFromGPT(s.messages)
+func (s *Session) History() *gollem.History {
+	return gollem.NewHistoryFromGPT(s.messages)
 }
 
-// convertInputs converts gollam.Input to OpenAI messages
-func (s *Session) convertInputs(input ...gollam.Input) error {
+// convertInputs converts gollem.Input to OpenAI messages
+func (s *Session) convertInputs(input ...gollem.Input) error {
 	for _, in := range input {
 		switch v := in.(type) {
-		case gollam.Text:
+		case gollem.Text:
 			s.messages = append(s.messages, openai.ChatCompletionMessage{
 				Role:    openai.ChatMessageRoleUser,
 				Content: string(v),
 			})
-		case gollam.FunctionResponse:
+		case gollem.FunctionResponse:
 			response, err := json.Marshal(v.Data)
 			if err != nil {
 				return goerr.Wrap(err, "failed to marshal function response")
@@ -222,7 +222,7 @@ func (s *Session) convertInputs(input ...gollam.Input) error {
 				ToolCallID: v.ID,
 			})
 		default:
-			return goerr.Wrap(gollam.ErrInvalidParameter, "invalid input")
+			return goerr.Wrap(gollem.ErrInvalidParameter, "invalid input")
 		}
 	}
 	return nil
@@ -243,7 +243,7 @@ func (s *Session) createRequest(stream bool) openai.ChatCompletionRequest {
 	}
 
 	// Add content type to the request
-	if s.cfg.ContentType() == gollam.ContentTypeJSON {
+	if s.cfg.ContentType() == gollem.ContentTypeJSON {
 		req.ResponseFormat = &openai.ChatCompletionResponseFormat{
 			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
 		}
@@ -254,7 +254,7 @@ func (s *Session) createRequest(stream bool) openai.ChatCompletionRequest {
 
 // GenerateContent processes the input and generates a response.
 // It handles both text messages and function responses.
-func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 	if err := s.convertInputs(input...); err != nil {
 		return nil, err
 	}
@@ -266,12 +266,12 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*
 	}
 
 	if len(resp.Choices) == 0 {
-		return &gollam.Response{}, nil
+		return &gollem.Response{}, nil
 	}
 
-	response := &gollam.Response{
+	response := &gollem.Response{
 		Texts:         make([]string, 0),
-		FunctionCalls: make([]*gollam.FunctionCall, 0),
+		FunctionCalls: make([]*gollem.FunctionCall, 0),
 	}
 
 	message := resp.Choices[0].Message
@@ -290,7 +290,7 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*
 				return nil, goerr.Wrap(err, "failed to unmarshal tool arguments")
 			}
 
-			response.FunctionCalls = append(response.FunctionCalls, &gollam.FunctionCall{
+			response.FunctionCalls = append(response.FunctionCalls, &gollem.FunctionCall{
 				ID:        toolCall.ID,
 				Name:      toolCall.Function.Name,
 				Arguments: args,
@@ -329,9 +329,9 @@ func (a *accumulator) addFunctionCall(toolCall *openai.ToolCall) {
 	}
 }
 
-func (a *accumulator) accumulate() (*openai.ToolCall, *gollam.FunctionCall, error) {
+func (a *accumulator) accumulate() (*openai.ToolCall, *gollem.FunctionCall, error) {
 	if a.ID == "" || a.Name == "" || a.Args == "" {
-		return nil, nil, goerr.Wrap(gollam.ErrInvalidParameter, "function call is not complete")
+		return nil, nil, goerr.Wrap(gollem.ErrInvalidParameter, "function call is not complete")
 	}
 
 	var args map[string]any
@@ -346,7 +346,7 @@ func (a *accumulator) accumulate() (*openai.ToolCall, *gollam.FunctionCall, erro
 				Name:      a.Name,
 				Arguments: a.Args,
 			},
-		}, &gollam.FunctionCall{
+		}, &gollem.FunctionCall{
 			ID:        a.ID,
 			Name:      a.Name,
 			Arguments: args,
@@ -355,7 +355,7 @@ func (a *accumulator) accumulate() (*openai.ToolCall, *gollam.FunctionCall, erro
 
 // GenerateStream processes the input and generates a response stream.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
-func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-chan *gollam.Response, error) {
+func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
 	if err := s.convertInputs(input...); err != nil {
 		return nil, err
 	}
@@ -366,7 +366,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-
 		return nil, goerr.Wrap(err, "failed to create chat completion stream")
 	}
 
-	responseChan := make(chan *gollam.Response)
+	responseChan := make(chan *gollem.Response)
 	acc := newAccumulator()
 
 	callHistory := make([]openai.ToolCall, 0)
@@ -397,7 +397,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-
 				if err == io.EOF {
 					return
 				}
-				responseChan <- &gollam.Response{
+				responseChan <- &gollem.Response{
 					Error: goerr.Wrap(err, "failed to receive chat completion stream"),
 				}
 				return
@@ -410,7 +410,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-
 			for _, choice := range resp.Choices {
 				if choice.Delta.Content != "" {
 					// Send text immediately for each delta.Content
-					responseChan <- &gollam.Response{
+					responseChan <- &gollem.Response{
 						Texts: []string{choice.Delta.Content},
 					}
 				}
@@ -424,15 +424,15 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-
 				if choice.FinishReason == openai.FinishReasonToolCalls {
 					openaiCall, funcCall, err := acc.accumulate()
 					if err != nil {
-						responseChan <- &gollam.Response{
+						responseChan <- &gollem.Response{
 							Error: err,
 						}
 						return
 					}
 
 					callHistory = append(callHistory, *openaiCall)
-					responseChan <- &gollam.Response{
-						FunctionCalls: []*gollam.FunctionCall{funcCall},
+					responseChan <- &gollem.Response{
+						FunctionCalls: []*gollem.FunctionCall{funcCall},
 					}
 
 					acc = newAccumulator()

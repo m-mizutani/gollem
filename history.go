@@ -1,5 +1,5 @@
-// Package gollam provides a unified interface for interacting with various LLM services.
-package gollam
+// Package gollem provides a unified interface for interacting with various LLM services.
+package gollem
 
 import (
 	"cloud.google.com/go/vertexai/genai"

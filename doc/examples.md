@@ -1,6 +1,6 @@
 # Practical Examples
 
-This guide provides practical examples of using gollam in various scenarios.
+This guide provides practical examples of using gollem in various scenarios.
 
 ## Calculator Tool
 
@@ -9,26 +9,26 @@ A more complex example using a calculator tool:
 ```go
 type CalculatorTool struct{}
 
-func (t *CalculatorTool) Spec() gollam.ToolSpec {
-    return gollam.ToolSpec{
+func (t *CalculatorTool) Spec() gollem.ToolSpec {
+    return gollem.ToolSpec{
         Name:        "calculator",
         Description: "Performs basic arithmetic operations",
-        Parameters: map[string]*gollam.Parameter{
+        Parameters: map[string]*gollem.Parameter{
             "operation": {
                 Name:        "operation",
-                Type:        gollam.TypeString,
+                Type:        gollem.TypeString,
                 Description: "The operation to perform (add, subtract, multiply, divide)",
                 Required:    true,
             },
             "a": {
                 Name:        "a",
-                Type:        gollam.TypeNumber,
+                Type:        gollem.TypeNumber,
                 Description: "First number",
                 Required:    true,
             },
             "b": {
                 Name:        "b",
-                Type:        gollam.TypeNumber,
+                Type:        gollem.TypeNumber,
                 Description: "Second number",
                 Required:    true,
             },
@@ -88,13 +88,13 @@ An example of a weather tool using MCP:
 ```go
 type WeatherTool struct{}
 
-func (t *WeatherTool) Spec() gollam.ToolSpec {
-    return gollam.ToolSpec{
+func (t *WeatherTool) Spec() gollem.ToolSpec {
+    return gollem.ToolSpec{
         Name:        "weather",
         Description: "Gets weather information for a location",
-        Parameters: map[string]*gollam.Parameter{
+        Parameters: map[string]*gollem.Parameter{
             "location": {
-                Type:        gollam.TypeString,
+                Type:        gollem.TypeString,
                 Description: "City name or coordinates",
                 Required:    true,
             },

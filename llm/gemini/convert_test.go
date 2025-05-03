@@ -5,36 +5,36 @@ import (
 	"testing"
 
 	"cloud.google.com/go/vertexai/genai"
-	"github.com/m-mizutani/gollam"
-	"github.com/m-mizutani/gollam/llm/gemini"
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/llm/gemini"
 	"github.com/m-mizutani/gt"
 )
 
 type complexTool struct{}
 
-func (t *complexTool) Spec() gollam.ToolSpec {
-	return gollam.ToolSpec{
+func (t *complexTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
 		Name:        "complex_tool",
 		Description: "A tool with complex parameter structure",
 		Required:    []string{"user", "items"},
-		Parameters: map[string]*gollam.Parameter{
+		Parameters: map[string]*gollem.Parameter{
 			"user": {
-				Type:     gollam.TypeObject,
+				Type:     gollem.TypeObject,
 				Required: []string{"name"},
-				Properties: map[string]*gollam.Parameter{
+				Properties: map[string]*gollem.Parameter{
 					"name": {
-						Type:        gollam.TypeString,
+						Type:        gollem.TypeString,
 						Description: "User's name",
 					},
 					"address": {
-						Type: gollam.TypeObject,
-						Properties: map[string]*gollam.Parameter{
+						Type: gollem.TypeObject,
+						Properties: map[string]*gollem.Parameter{
 							"street": {
-								Type:        gollam.TypeString,
+								Type:        gollem.TypeString,
 								Description: "Street address",
 							},
 							"city": {
-								Type:        gollam.TypeString,
+								Type:        gollem.TypeString,
 								Description: "City name",
 							},
 						},
@@ -42,16 +42,16 @@ func (t *complexTool) Spec() gollam.ToolSpec {
 				},
 			},
 			"items": {
-				Type: gollam.TypeArray,
-				Items: &gollam.Parameter{
-					Type: gollam.TypeObject,
-					Properties: map[string]*gollam.Parameter{
+				Type: gollem.TypeArray,
+				Items: &gollem.Parameter{
+					Type: gollem.TypeObject,
+					Properties: map[string]*gollem.Parameter{
 						"id": {
-							Type:        gollam.TypeString,
+							Type:        gollem.TypeString,
 							Description: "Item ID",
 						},
 						"quantity": {
-							Type:        gollam.TypeNumber,
+							Type:        gollem.TypeNumber,
 							Description: "Item quantity",
 						},
 					},
@@ -99,8 +99,8 @@ func TestConvertTool(t *testing.T) {
 
 func TestConvertParameterToSchema(t *testing.T) {
 	t.Run("number constraints", func(t *testing.T) {
-		p := &gollam.Parameter{
-			Type:    gollam.TypeNumber,
+		p := &gollem.Parameter{
+			Type:    gollem.TypeNumber,
 			Minimum: ptr(1.0),
 			Maximum: ptr(10.0),
 		}
@@ -110,8 +110,8 @@ func TestConvertParameterToSchema(t *testing.T) {
 	})
 
 	t.Run("string constraints", func(t *testing.T) {
-		p := &gollam.Parameter{
-			Type:      gollam.TypeString,
+		p := &gollem.Parameter{
+			Type:      gollem.TypeString,
 			MinLength: ptr(1),
 			MaxLength: ptr(10),
 			Pattern:   "^[a-z]+$",
@@ -123,9 +123,9 @@ func TestConvertParameterToSchema(t *testing.T) {
 	})
 
 	t.Run("array constraints", func(t *testing.T) {
-		p := &gollam.Parameter{
-			Type:     gollam.TypeArray,
-			Items:    &gollam.Parameter{Type: gollam.TypeString},
+		p := &gollem.Parameter{
+			Type:     gollem.TypeArray,
+			Items:    &gollem.Parameter{Type: gollem.TypeString},
 			MinItems: ptr(1),
 			MaxItems: ptr(10),
 		}

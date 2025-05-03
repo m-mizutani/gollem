@@ -5,7 +5,7 @@ import (
 
 	"cloud.google.com/go/vertexai/genai"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollam"
+	"github.com/m-mizutani/gollem"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
@@ -31,7 +31,7 @@ type Client struct {
 	systemPrompt string
 
 	// contentType is the type of content to be generated.
-	contentType gollam.ContentType
+	contentType gollem.ContentType
 }
 
 // Option is a function that configures a Client.
@@ -106,7 +106,7 @@ func WithSystemPrompt(prompt string) Option {
 
 // WithContentType sets the content type for text generation.
 // This determines the format of the generated content.
-func WithContentType(contentType gollam.ContentType) Option {
+func WithContentType(contentType gollem.ContentType) Option {
 	return func(c *Client) {
 		c.contentType = contentType
 	}
@@ -124,7 +124,7 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 
 	client := &Client{
 		defaultModel: "gemini-2.0-flash",
-		contentType:  gollam.ContentTypeText,
+		contentType:  gollem.ContentTypeText,
 	}
 
 	for _, option := range options {
@@ -143,10 +143,10 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 
 // NewSession creates a new session for the Gemini API.
 // It converts the provided tools to Gemini's tool format and initializes a new chat session.
-func (c *Client) NewSession(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error) {
-	cfg := gollam.NewSessionConfig(options...)
+func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+	cfg := gollem.NewSessionConfig(options...)
 
-	// Convert gollam.Tool to *genai.Tool
+	// Convert gollem.Tool to *genai.Tool
 	genaiFunctions := make([]*genai.FunctionDeclaration, len(cfg.Tools()))
 	for i, tool := range cfg.Tools() {
 		genaiFunctions[i] = convertTool(tool)
@@ -166,9 +166,9 @@ func (c *Client) NewSession(ctx context.Context, options ...gollam.SessionOption
 	model.GenerationConfig = c.generationConfig
 
 	switch cfg.ContentType() {
-	case gollam.ContentTypeJSON:
+	case gollem.ContentTypeJSON:
 		model.GenerationConfig.ResponseMIMEType = "application/json"
-	case gollam.ContentTypeText:
+	case gollem.ContentTypeText:
 		model.GenerationConfig.ResponseMIMEType = "text/plain"
 	}
 
@@ -197,8 +197,8 @@ func (c *Client) NewSession(ctx context.Context, options ...gollam.SessionOption
 	return session, nil
 }
 
-func (s *Session) History() *gollam.History {
-	return gollam.NewHistoryFromGemini(s.session.History)
+func (s *Session) History() *gollem.History {
+	return gollem.NewHistoryFromGemini(s.session.History)
 }
 
 // Session is a session for the Gemini chat.
@@ -208,14 +208,14 @@ type Session struct {
 	session *genai.ChatSession
 }
 
-// convertInputs converts gollam.Input to Gemini parts
-func (s *Session) convertInputs(input ...gollam.Input) ([]genai.Part, error) {
+// convertInputs converts gollem.Input to Gemini parts
+func (s *Session) convertInputs(input ...gollem.Input) ([]genai.Part, error) {
 	parts := make([]genai.Part, len(input))
 	for i, in := range input {
 		switch v := in.(type) {
-		case gollam.Text:
+		case gollem.Text:
 			parts[i] = genai.Text(string(v))
-		case gollam.FunctionResponse:
+		case gollem.FunctionResponse:
 			if v.Error != nil {
 				parts[i] = genai.FunctionResponse{
 					Name: v.Name,
@@ -230,21 +230,21 @@ func (s *Session) convertInputs(input ...gollam.Input) ([]genai.Part, error) {
 				}
 			}
 		default:
-			return nil, goerr.Wrap(gollam.ErrInvalidParameter, "invalid input")
+			return nil, goerr.Wrap(gollem.ErrInvalidParameter, "invalid input")
 		}
 	}
 	return parts, nil
 }
 
-// processResponse converts Gemini response to gollam.Response
-func processResponse(resp *genai.GenerateContentResponse) *gollam.Response {
+// processResponse converts Gemini response to gollem.Response
+func processResponse(resp *genai.GenerateContentResponse) *gollem.Response {
 	if len(resp.Candidates) == 0 {
-		return &gollam.Response{}
+		return &gollem.Response{}
 	}
 
-	response := &gollam.Response{
+	response := &gollem.Response{
 		Texts:         make([]string, 0),
-		FunctionCalls: make([]*gollam.FunctionCall, 0),
+		FunctionCalls: make([]*gollem.FunctionCall, 0),
 	}
 
 	for _, candidate := range resp.Candidates {
@@ -253,7 +253,7 @@ func processResponse(resp *genai.GenerateContentResponse) *gollam.Response {
 			case genai.Text:
 				response.Texts = append(response.Texts, string(v))
 			case genai.FunctionCall:
-				response.FunctionCalls = append(response.FunctionCalls, &gollam.FunctionCall{
+				response.FunctionCalls = append(response.FunctionCalls, &gollem.FunctionCall{
 					Name:      v.Name,
 					Arguments: v.Args,
 				})
@@ -266,7 +266,7 @@ func processResponse(resp *genai.GenerateContentResponse) *gollam.Response {
 
 // GenerateContent processes the input and generates a response.
 // It handles both text messages and function responses.
-func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 	parts, err := s.convertInputs(input...)
 	if err != nil {
 		return nil, err
@@ -282,14 +282,14 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*
 
 // GenerateStream processes the input and generates a response stream.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
-func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-chan *gollam.Response, error) {
+func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
 	parts, err := s.convertInputs(input...)
 	if err != nil {
 		return nil, err
 	}
 
 	iter := s.session.SendMessageStream(ctx, parts...)
-	responseChan := make(chan *gollam.Response)
+	responseChan := make(chan *gollem.Response)
 
 	go func() {
 		defer close(responseChan)
@@ -300,7 +300,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-
 				if err == iterator.Done {
 					return
 				}
-				responseChan <- &gollam.Response{
+				responseChan <- &gollem.Response{
 					Error: goerr.Wrap(err, "failed to generate stream"),
 				}
 				return

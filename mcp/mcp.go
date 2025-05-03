@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollam"
+	"github.com/m-mizutani/gollem"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -32,14 +32,14 @@ type Client struct {
 	initMutex  sync.Mutex
 }
 
-// Specs implements gollam.ToolSet interface
-func (c *Client) Specs(ctx context.Context) ([]gollam.ToolSpec, error) {
+// Specs implements gollem.ToolSet interface
+func (c *Client) Specs(ctx context.Context) ([]gollem.ToolSpec, error) {
 	tools, err := c.listTools(ctx)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list tools")
 	}
 
-	specs := make([]gollam.ToolSpec, len(tools))
+	specs := make([]gollem.ToolSpec, len(tools))
 	for i, tool := range tools {
 		param, err := inputSchemaToParameter(tool.InputSchema)
 		if err != nil {
@@ -50,7 +50,7 @@ func (c *Client) Specs(ctx context.Context) ([]gollam.ToolSpec, error) {
 			)
 		}
 
-		specs[i] = gollam.ToolSpec{
+		specs[i] = gollem.ToolSpec{
 			Name:        tool.Name,
 			Description: tool.Description,
 			Parameters:  param.Properties,
@@ -61,7 +61,7 @@ func (c *Client) Specs(ctx context.Context) ([]gollam.ToolSpec, error) {
 	return specs, nil
 }
 
-// Run implements gollam.ToolSet interface
+// Run implements gollem.ToolSet interface
 func (c *Client) Run(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
 	resp, err := c.callTool(ctx, name, args)
 	if err != nil {
@@ -158,7 +158,7 @@ func (c *Client) init(ctx context.Context) error {
 	var initRequest mcp.InitializeRequest
 	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
 	initRequest.Params.ClientInfo = mcp.Implementation{
-		Name:    "gollam",
+		Name:    "gollem",
 		Version: "0.0.1",
 	}
 
@@ -200,8 +200,8 @@ func (c *Client) Close() error {
 	return nil
 }
 
-func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (*gollam.Parameter, error) {
-	parameters := map[string]*gollam.Parameter{}
+func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (*gollem.Parameter, error) {
+	parameters := map[string]*gollem.Parameter{}
 	jsonSchema, err := json.Marshal(inputSchema)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to marshal input schema")
@@ -223,15 +223,15 @@ func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (*gollam.Parameter,
 
 	schemaType := schema.Types.ToStrings()
 	if len(schemaType) != 1 || schemaType[0] != "object" {
-		return nil, goerr.Wrap(gollam.ErrInvalidTool, "invalid input schema", goerr.V("schema", schema))
+		return nil, goerr.Wrap(gollem.ErrInvalidTool, "invalid input schema", goerr.V("schema", schema))
 	}
 
 	for name, property := range schema.Properties {
 		parameters[name] = jsonSchemaToParameter(property)
 	}
 
-	return &gollam.Parameter{
-		Type:        gollam.ParameterType(schema.Types.ToStrings()[0]),
+	return &gollem.Parameter{
+		Type:        gollem.ParameterType(schema.Types.ToStrings()[0]),
 		Title:       schema.Title,
 		Description: schema.Description,
 		Required:    schema.Required,
@@ -239,7 +239,7 @@ func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (*gollam.Parameter,
 	}, nil
 }
 
-func jsonSchemaToParameter(schema *jsonschema.Schema) *gollam.Parameter {
+func jsonSchemaToParameter(schema *jsonschema.Schema) *gollem.Parameter {
 	var enum []string
 	if schema.Enum != nil {
 		for _, v := range schema.Enum.Values {
@@ -247,12 +247,12 @@ func jsonSchemaToParameter(schema *jsonschema.Schema) *gollam.Parameter {
 		}
 	}
 
-	properties := map[string]*gollam.Parameter{}
+	properties := map[string]*gollem.Parameter{}
 	for name, property := range schema.Properties {
 		properties[name] = jsonSchemaToParameter(property)
 	}
 
-	var items *gollam.Parameter
+	var items *gollem.Parameter
 	if schema.Items != nil {
 		switch v := schema.Items.(type) {
 		case *jsonschema.Schema:
@@ -260,8 +260,8 @@ func jsonSchemaToParameter(schema *jsonschema.Schema) *gollam.Parameter {
 		}
 	}
 
-	return &gollam.Parameter{
-		Type:        gollam.ParameterType(schema.Types.ToStrings()[0]),
+	return &gollem.Parameter{
+		Type:        gollem.ParameterType(schema.Types.ToStrings()[0]),
 		Title:       schema.Title,
 		Description: schema.Description,
 		Required:    schema.Required,

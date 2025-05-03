@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/m-mizutani/gollam/mcp"
+	"github.com/m-mizutani/gollem/mcp"
 	"github.com/m-mizutani/gt"
 )
 
