@@ -7,32 +7,17 @@ GO for Large LanguagE Model
 </p>
 
 
-`gollem` is a Go framework for building agentic applications of Large Language Models (LLMs) with MCP (Model Context Protocol) server and your built-in tools.
-
-## Overview
-
-gollem lets you:
-- Connect with LLM providers (Gemini, Anthropic, OpenAI)
-- Use built-in tools to enhance LLM features
-- Connect with MCP servers for external tools
-- Build applications that run actions based on text input
-- Store and restore conversation history for stateless applications
+`gollem` provides:
+- Common interface to query prompt to Large Language Model (LLM) services
+- Framework for building agentic applications of LLMs with
+  - Tools by MCP (Model Context Protocol) server and your built-in tools
+  - Conversational memory with history
 
 ## Supported LLMs
 
 - [x] Gemini (see [models](https://ai.google.dev/gemini-api/docs/models?hl=ja))
 - [x] Anthropic (see [models](https://docs.anthropic.com/en/docs/about-claude/models/all-models))
 - [x] OpenAI (see [models](https://platform.openai.com/docs/models))
-
-## Features
-
-### Tools and Actions
-
-- Built-in Tools: Common operation tools
-- MCP Server Integration
-  - [x] Tool: Custom tools
-  - [ ] Resource: External resources
-  - [ ] Prompt: LLM prompts
 
 ## Quick Start
 
@@ -43,6 +28,15 @@ go get github.com/m-mizutani/gollem
 ```
 
 ### Example
+
+#### Query to LLM
+
+```go
+
+```
+
+#### Agentic application with MCP server
+
 Here's a simple example of creating a custom tool and using it with an LLM:
 
 ```go
