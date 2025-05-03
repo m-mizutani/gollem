@@ -19,33 +19,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	llm := os.Args[1]
+	llmProvider := os.Args[1]
 	model := os.Args[2]
 	prompt := os.Args[3]
 
 	var client gollem.LLMClient
+	var err error
 
-	switch llm {
+	switch llmProvider {
 	case "gemini":
-		c, err := gemini.New(ctx, os.Getenv("GEMINI_PROJECT_ID"), os.Getenv("GEMINI_LOCATION"), gemini.WithModel(model))
-		if err != nil {
-			panic(err)
-		}
-		client = c
-
+		client, err = gemini.New(ctx, os.Getenv("GEMINI_PROJECT_ID"), os.Getenv("GEMINI_LOCATION"), gemini.WithModel(model))
 	case "claude":
-		c, err := claude.New(ctx, os.Getenv("ANTHROPIC_API_KEY"), claude.WithModel(model))
-		if err != nil {
-			panic(err)
-		}
-		client = c
-
+		client, err = claude.New(ctx, os.Getenv("ANTHROPIC_API_KEY"), claude.WithModel(model))
 	case "openai":
-		c, err := openai.New(ctx, os.Getenv("OPENAI_API_KEY"), openai.WithModel(model))
-		if err != nil {
-			panic(err)
-		}
-		client = c
+		client, err = openai.New(ctx, os.Getenv("OPENAI_API_KEY"), openai.WithModel(model))
+	}
+
+	if err != nil {
+		panic(err)
 	}
 
 	ssn, err := client.NewSession(ctx)
