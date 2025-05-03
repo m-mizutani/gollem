@@ -14,4 +14,4 @@ tasks:
         -pkg mock
         -rm -skip-ensure -stub
         .
-        LLMClient Session
+        LLMClient Session Tool

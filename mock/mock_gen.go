@@ -246,3 +246,115 @@ func (mock *SessionMock) HistoryCalls() []struct {
 	mock.lockHistory.RUnlock()
 	return calls
 }
+
+// ToolMock is a mock implementation of gollam.Tool.
+//
+//	func TestSomethingThatUsesTool(t *testing.T) {
+//
+//		// make and configure a mocked gollam.Tool
+//		mockedTool := &ToolMock{
+//			RunFunc: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+//				panic("mock out the Run method")
+//			},
+//			SpecFunc: func() gollam.ToolSpec {
+//				panic("mock out the Spec method")
+//			},
+//		}
+//
+//		// use mockedTool in code that requires gollam.Tool
+//		// and then make assertions.
+//
+//	}
+type ToolMock struct {
+	// RunFunc mocks the Run method.
+	RunFunc func(ctx context.Context, args map[string]any) (map[string]any, error)
+
+	// SpecFunc mocks the Spec method.
+	SpecFunc func() gollam.ToolSpec
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Run holds details about calls to the Run method.
+		Run []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Args is the args argument value.
+			Args map[string]any
+		}
+		// Spec holds details about calls to the Spec method.
+		Spec []struct {
+		}
+	}
+	lockRun  sync.RWMutex
+	lockSpec sync.RWMutex
+}
+
+// Run calls RunFunc.
+func (mock *ToolMock) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	callInfo := struct {
+		Ctx  context.Context
+		Args map[string]any
+	}{
+		Ctx:  ctx,
+		Args: args,
+	}
+	mock.lockRun.Lock()
+	mock.calls.Run = append(mock.calls.Run, callInfo)
+	mock.lockRun.Unlock()
+	if mock.RunFunc == nil {
+		var (
+			stringToVOut map[string]any
+			errOut       error
+		)
+		return stringToVOut, errOut
+	}
+	return mock.RunFunc(ctx, args)
+}
+
+// RunCalls gets all the calls that were made to Run.
+// Check the length with:
+//
+//	len(mockedTool.RunCalls())
+func (mock *ToolMock) RunCalls() []struct {
+	Ctx  context.Context
+	Args map[string]any
+} {
+	var calls []struct {
+		Ctx  context.Context
+		Args map[string]any
+	}
+	mock.lockRun.RLock()
+	calls = mock.calls.Run
+	mock.lockRun.RUnlock()
+	return calls
+}
+
+// Spec calls SpecFunc.
+func (mock *ToolMock) Spec() gollam.ToolSpec {
+	callInfo := struct {
+	}{}
+	mock.lockSpec.Lock()
+	mock.calls.Spec = append(mock.calls.Spec, callInfo)
+	mock.lockSpec.Unlock()
+	if mock.SpecFunc == nil {
+		var (
+			toolSpecOut gollam.ToolSpec
+		)
+		return toolSpecOut
+	}
+	return mock.SpecFunc()
+}
+
+// SpecCalls gets all the calls that were made to Spec.
+// Check the length with:
+//
+//	len(mockedTool.SpecCalls())
+func (mock *ToolMock) SpecCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockSpec.RLock()
+	calls = mock.calls.Spec
+	mock.lockSpec.RUnlock()
+	return calls
+}
