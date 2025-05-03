@@ -26,7 +26,7 @@ func main() {
 
 	servant := gollam.New(client,
 		gollam.WithTools(tools...),
-		gollam.WithMsgCallback(func(ctx context.Context, msg string) error {
+		gollam.WithMessageHook(func(ctx context.Context, msg string) error {
 			log.Printf("Response: %s", msg)
 			return nil
 		}),

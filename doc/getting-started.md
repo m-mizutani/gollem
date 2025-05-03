@@ -44,7 +44,7 @@ func main() {
     // Create gollam instance
     s := gollam.New(client,
         gollam.WithToolSets(mcpClient),
-        gollam.WithMsgCallback(func(ctx context.Context, msg string) error {
+        gollam.WithMessageHook(func(ctx context.Context, msg string) error {
             fmt.Println(msg)
             return nil
         }),

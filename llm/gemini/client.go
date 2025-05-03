@@ -57,6 +57,7 @@ func WithGoogleCloudOptions(options ...option.ClientOption) Option {
 // WithTemperature sets the temperature parameter for text generation.
 // Higher values make the output more random, lower values make it more focused.
 // Range: 0.0 to 1.0
+// Default: 0.7
 func WithTemperature(temp float32) Option {
 	return func(c *Client) {
 		c.generationConfig.Temperature = &temp
@@ -66,6 +67,7 @@ func WithTemperature(temp float32) Option {
 // WithTopP sets the top_p parameter for text generation.
 // Controls diversity via nucleus sampling.
 // Range: 0.0 to 1.0
+// Default: 1.0
 func WithTopP(topP float32) Option {
 	return func(c *Client) {
 		c.generationConfig.TopP = &topP

@@ -50,11 +50,11 @@ func main() {
 	g := gollam.New(llmModel,
 		gollam.WithResponseMode(gollam.ResponseModeStreaming),
 		gollam.WithTools(&WeatherTool{}),
-		gollam.WithMsgCallback(func(ctx context.Context, msg string) error {
+		gollam.WithMessageHook(func(ctx context.Context, msg string) error {
 			fmt.Printf("%s", msg)
 			return nil
 		}),
-		gollam.WithToolCallback(func(ctx context.Context, tool gollam.FunctionCall) error {
+		gollam.WithToolRequestHook(func(ctx context.Context, tool gollam.FunctionCall) error {
 			fmt.Printf("⚡ Call: %s\n", tool.Name)
 			return nil
 		}),

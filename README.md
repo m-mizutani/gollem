@@ -72,7 +72,7 @@ func main() {
 	agent := gollam.New(client,
 		gollam.WithToolSets(mcpLocal, mcpRemote),
 		gollam.WithTools(&MyTool{}),
-		gollam.WithMsgCallback(func(ctx context.Context, msg string) error {
+		gollam.WithMessageHook(func(ctx context.Context, msg string) error {
 			fmt.Printf("🤖 %s\n", msg)
 			return nil
 		}),

@@ -66,6 +66,8 @@ func WithModel(modelName string) Option {
 
 // WithTemperature sets the temperature parameter for text generation.
 // Higher values make the output more random, lower values make it more focused.
+// Range: 0.0 to 1.0
+// Default: 0.7
 func WithTemperature(temp float32) Option {
 	return func(c *Client) {
 		c.params.Temperature = temp

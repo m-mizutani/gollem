@@ -64,7 +64,7 @@ func TestGollamWithTool(t *testing.T) {
 				toolCalled := false
 				s := gollam.New(client,
 					gollam.WithTools(&RandomNumberTool{}),
-					gollam.WithToolCallback(func(ctx context.Context, tool gollam.FunctionCall) error {
+					gollam.WithToolRequestHook(func(ctx context.Context, tool gollam.FunctionCall) error {
 						toolCalled = true
 						gt.Equal(t, tool.Name, "random_number")
 						return nil
