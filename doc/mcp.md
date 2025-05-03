@@ -59,4 +59,7 @@ mcpClient, err := mcp.NewSSE(context.Background(), "http://localhost:8080",
 ## Next Steps
 
 - Learn more about [tool creation](tools.md)
-- Check out [practical examples](examples.md) of MCP integration 
+- Check out [practical examples](examples.md) of MCP integration
+- Review the [getting started guide](getting-started.md) for basic usage
+- Understand [history management](history.md) for conversation context
+- Explore the [complete documentation](README.md)

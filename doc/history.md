@@ -101,3 +101,11 @@ Note: The History returned from Prompt contains the complete conversation histor
 3. **Security**
    - Implement proper access controls
 
+## Next Steps
+
+- Learn more about [tool creation](tools.md)
+- Explore [MCP server integration](mcp.md)
+- Check out [practical examples](examples.md)
+- Review the [getting started guide](getting-started.md)
+- Explore the [complete documentation](README.md)
+

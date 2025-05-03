@@ -178,3 +178,5 @@ func (t *CalculatorTool) Run(ctx context.Context, args map[string]any) (map[stri
 - Learn more about [tool creation](tools.md)
 - Explore [MCP server integration](mcp.md)
 - Check out the [getting started guide](getting-started.md)
+- Understand [history management](history.md) for conversation context
+- Review the [complete documentation](README.md)

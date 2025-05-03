@@ -74,9 +74,10 @@ Each provider has its own client implementation in the `llm` package. See the re
 ## Key Concepts
 
 1. **LLM Client**: The interface to communicate with LLM providers
-2. **Tools**: Custom functions that LLMs can use to perform actions
-3. **MCP Server**: External tool integration through Model Context Protocol
+2. **Tools**: Custom functions that LLMs can use to perform actions (see [Tools](tools.md))
+3. **MCP Server**: External tool integration through Model Context Protocol (see [MCP Server Integration](mcp.md))
 4. **Natural Language Interface**: Interact with your application using natural language
+5. **History Management**: Maintain conversation context across sessions (see [History](history.md))
 
 ## Error Handling
 
@@ -139,3 +140,5 @@ history = newHistory
 - Learn how to create and use [custom tools](tools.md)
 - Explore [MCP server integration](mcp.md)
 - Check out [practical examples](examples.md)
+- Understand [history management](history.md) for conversation context
+- Review the [complete documentation](README.md)
