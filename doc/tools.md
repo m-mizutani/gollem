@@ -1,6 +1,6 @@
-# Tools in gollam
+# Tools in gollem
 
-Tools are your own custom built-in functions that LLMs can use to perform specific actions in your application. This guide explains how to create and use tools with gollam.
+Tools are your own custom built-in functions that LLMs can use to perform specific actions in your application. This guide explains how to create and use tools with gollem.
 
 ## Creating a Tool
 
@@ -18,13 +18,13 @@ Here's an example of a simple tool:
 ```go
 type HelloTool struct{}
 
-func (t *HelloTool) Spec() gollam.ToolSpec {
-    return gollam.ToolSpec{
+func (t *HelloTool) Spec() gollem.ToolSpec {
+    return gollem.ToolSpec{
         Name:        "hello",
         Description: "Returns a greeting",
-        Parameters: map[string]*gollam.Parameter{
+        Parameters: map[string]*gollem.Parameter{
             "name": {
-                Type:        gollam.TypeString,
+                Type:        gollem.TypeString,
                 Description: "Name of the person to greet",
             },
         },
@@ -71,16 +71,16 @@ Each parameter specification includes:
 To use tools with your LLM:
 
 ```go
-s := gollam.New(client,
-    gollam.WithTools(&HelloTool{}),
+s := gollem.New(client,
+    gollem.WithTools(&HelloTool{}),
 )
 ```
 
 You can add multiple tools:
 
 ```go
-s := gollam.New(client,
-    gollam.WithTools(&HelloTool{}, &CalculatorTool{}, &WeatherTool{}),
+s := gollem.New(client,
+    gollem.WithTools(&HelloTool{}, &CalculatorTool{}, &WeatherTool{}),
 )
 ```
 

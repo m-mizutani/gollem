@@ -1,4 +1,4 @@
-package gollam_test
+package gollem_test
 
 import (
 	"context"
@@ -7,27 +7,27 @@ import (
 	"testing"
 
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollam"
-	"github.com/m-mizutani/gollam/llm/claude"
-	"github.com/m-mizutani/gollam/llm/gemini"
-	"github.com/m-mizutani/gollam/llm/gpt"
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/llm/claude"
+	"github.com/m-mizutani/gollem/llm/gemini"
+	"github.com/m-mizutani/gollem/llm/gpt"
 	"github.com/m-mizutani/gt"
 )
 
 // Sample tool implementation for testing
 type randomNumberTool struct{}
 
-func (t *randomNumberTool) Spec() gollam.ToolSpec {
-	return gollam.ToolSpec{
+func (t *randomNumberTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
 		Name:        "random_number",
 		Description: "A tool for generating random numbers within a specified range",
-		Parameters: map[string]*gollam.Parameter{
+		Parameters: map[string]*gollem.Parameter{
 			"min": {
-				Type:        gollam.TypeNumber,
+				Type:        gollem.TypeNumber,
 				Description: "Minimum value of the random number",
 			},
 			"max": {
-				Type:        gollam.TypeNumber,
+				Type:        gollem.TypeNumber,
 				Description: "Maximum value of the random number",
 			},
 		},
@@ -62,11 +62,11 @@ func (t *randomNumberTool) Run(ctx context.Context, args map[string]any) (map[st
 	return map[string]any{"result": result}, nil
 }
 
-func testGenerateContent(t *testing.T, session gollam.Session) {
+func testGenerateContent(t *testing.T, session gollem.Session) {
 	ctx := t.Context()
 
 	// Test case 1: Generate random number
-	resp1, err := session.GenerateContent(ctx, gollam.Text("Please generate a random number between 1 and 10"))
+	resp1, err := session.GenerateContent(ctx, gollem.Text("Please generate a random number between 1 and 10"))
 	gt.NoError(t, err)
 	gt.Array(t, resp1.FunctionCalls).Length(1).Required()
 	gt.Value(t, resp1.FunctionCalls[0].Name).Equal("random_number")
@@ -75,7 +75,7 @@ func testGenerateContent(t *testing.T, session gollam.Session) {
 	gt.Value(t, args["min"]).Equal(1.0)
 	gt.Value(t, args["max"]).Equal(10.0)
 
-	resp2, err := session.GenerateContent(ctx, gollam.FunctionResponse{
+	resp2, err := session.GenerateContent(ctx, gollem.FunctionResponse{
 		ID:   resp1.FunctionCalls[0].ID,
 		Name: "random_number",
 		Data: map[string]any{"result": 5.5},
@@ -84,11 +84,11 @@ func testGenerateContent(t *testing.T, session gollam.Session) {
 	gt.Array(t, resp2.Texts).Length(1).Required()
 }
 
-func testGenerateStream(t *testing.T, session gollam.Session) {
+func testGenerateStream(t *testing.T, session gollem.Session) {
 	ctx := t.Context()
 
 	t.Run("generate random number", func(t *testing.T) {
-		stream, err := session.GenerateStream(ctx, gollam.Text("Please generate a random number between 1 and 10"))
+		stream, err := session.GenerateStream(ctx, gollem.Text("Please generate a random number between 1 and 10"))
 		gt.NoError(t, err).Required()
 
 		var id string
@@ -104,7 +104,7 @@ func testGenerateStream(t *testing.T, session gollam.Session) {
 			}
 		}
 
-		stream, err = session.GenerateStream(ctx, gollam.FunctionResponse{
+		stream, err = session.GenerateStream(ctx, gollem.FunctionResponse{
 			ID:   id,
 			Name: "random_number",
 			Data: map[string]any{"result": 5.5},
@@ -116,7 +116,7 @@ func testGenerateStream(t *testing.T, session gollam.Session) {
 	})
 }
 
-func newGeminiClient(t *testing.T) gollam.LLMClient {
+func newGeminiClient(t *testing.T) gollem.LLMClient {
 	var testProjectID, testLocation string
 	v, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
 	if !ok {
@@ -138,7 +138,7 @@ func newGeminiClient(t *testing.T) gollam.LLMClient {
 	return client
 }
 
-func newGPTClient(t *testing.T) gollam.LLMClient {
+func newGPTClient(t *testing.T) gollem.LLMClient {
 	apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
 	if !ok {
 		t.Skip("TEST_OPENAI_API_KEY is not set")
@@ -150,7 +150,7 @@ func newGPTClient(t *testing.T) gollam.LLMClient {
 	return client
 }
 
-func newClaudeClient(t *testing.T) gollam.LLMClient {
+func newClaudeClient(t *testing.T) gollem.LLMClient {
 	apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
 	if !ok {
 		t.Skip("TEST_CLAUDE_API_KEY is not set")
@@ -165,8 +165,8 @@ func TestGemini(t *testing.T) {
 	client := newGeminiClient(t)
 
 	// Setup tools
-	tools := []gollam.Tool{&randomNumberTool{}}
-	session, err := client.NewSession(t.Context(), gollam.WithSessionTools(tools...))
+	tools := []gollem.Tool{&randomNumberTool{}}
+	session, err := client.NewSession(t.Context(), gollem.WithSessionTools(tools...))
 	gt.NoError(t, err)
 
 	t.Run("generate content", func(t *testing.T) {
@@ -181,8 +181,8 @@ func TestGPT(t *testing.T) {
 	client := newGPTClient(t)
 
 	// Setup tools
-	tools := []gollam.Tool{&randomNumberTool{}}
-	session, err := client.NewSession(t.Context(), gollam.WithSessionTools(tools...))
+	tools := []gollem.Tool{&randomNumberTool{}}
+	session, err := client.NewSession(t.Context(), gollem.WithSessionTools(tools...))
 	gt.NoError(t, err)
 
 	t.Run("generate content", func(t *testing.T) {
@@ -196,7 +196,7 @@ func TestGPT(t *testing.T) {
 func TestClaude(t *testing.T) {
 	client := newClaudeClient(t)
 
-	session, err := client.NewSession(context.Background(), gollam.WithSessionTools(&randomNumberTool{}))
+	session, err := client.NewSession(context.Background(), gollem.WithSessionTools(&randomNumberTool{}))
 	gt.NoError(t, err)
 
 	t.Run("generate content", func(t *testing.T) {
@@ -211,13 +211,13 @@ type weatherTool struct {
 	name string
 }
 
-func (x *weatherTool) Spec() gollam.ToolSpec {
-	return gollam.ToolSpec{
+func (x *weatherTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
 		Name:        x.name,
 		Description: "get weather information of a region",
-		Parameters: map[string]*gollam.Parameter{
+		Parameters: map[string]*gollem.Parameter{
 			"region": {
-				Type:        gollam.TypeString,
+				Type:        gollem.TypeString,
 				Description: "Region name",
 			},
 		},
@@ -235,7 +235,7 @@ func TestCallToolNameConvention(t *testing.T) {
 		t.Skip("TEST_FLAG_TOOL_NAME_CONVENTION is not set")
 	}
 
-	testFunc := func(t *testing.T, client gollam.LLMClient) {
+	testFunc := func(t *testing.T, client gollem.LLMClient) {
 		testCases := map[string]struct {
 			name    string
 			isError bool
@@ -286,17 +286,17 @@ func TestCallToolNameConvention(t *testing.T) {
 				ctx := t.Context()
 				tool := &weatherTool{name: tc.name}
 
-				session, err := client.NewSession(ctx, gollam.WithSessionTools(tool))
+				session, err := client.NewSession(ctx, gollem.WithSessionTools(tool))
 				gt.NoError(t, err)
 
-				resp, err := session.GenerateContent(ctx, gollam.Text("What is the weather in Tokyo?"))
+				resp, err := session.GenerateContent(ctx, gollem.Text("What is the weather in Tokyo?"))
 				if tc.isError {
 					gt.Error(t, err)
 					return
 				}
 				gt.NoError(t, err).Required()
 				if len(resp.FunctionCalls) > 0 {
-					gt.A(t, resp.FunctionCalls).Length(1).At(0, func(t testing.TB, v *gollam.FunctionCall) {
+					gt.A(t, resp.FunctionCalls).Length(1).At(0, func(t testing.TB, v *gollem.FunctionCall) {
 						gt.Equal(t, v.Name, tc.name)
 					})
 				}
@@ -347,18 +347,18 @@ func TestCallToolNameConvention(t *testing.T) {
 }
 
 func TestSessionHistory(t *testing.T) {
-	testFn := func(t *testing.T, client gollam.LLMClient) {
+	testFn := func(t *testing.T, client gollem.LLMClient) {
 		ctx := t.Context()
-		session, err := client.NewSession(ctx, gollam.WithSessionTools(&weatherTool{name: "weather"}))
+		session, err := client.NewSession(ctx, gollem.WithSessionTools(&weatherTool{name: "weather"}))
 		gt.NoError(t, err).Required()
 
-		resp1, err := session.GenerateContent(ctx, gollam.Text("What is the weather in Tokyo?"))
+		resp1, err := session.GenerateContent(ctx, gollem.Text("What is the weather in Tokyo?"))
 		gt.NoError(t, err).Required()
-		gt.A(t, resp1.FunctionCalls).Length(1).At(0, func(t testing.TB, v *gollam.FunctionCall) {
+		gt.A(t, resp1.FunctionCalls).Length(1).At(0, func(t testing.TB, v *gollem.FunctionCall) {
 			gt.Equal(t, v.Name, "weather")
 		})
 
-		resp2, err := session.GenerateContent(ctx, gollam.FunctionResponse{
+		resp2, err := session.GenerateContent(ctx, gollem.FunctionResponse{
 			ID:   resp1.FunctionCalls[0].ID,
 			Name: "weather",
 			Data: map[string]any{"weather": "sunny"},
@@ -372,13 +372,13 @@ func TestSessionHistory(t *testing.T) {
 		rawData, err := json.Marshal(history)
 		gt.NoError(t, err).Required()
 
-		var restored gollam.History
+		var restored gollem.History
 		gt.NoError(t, json.Unmarshal(rawData, &restored))
 
-		newSession, err := client.NewSession(ctx, gollam.WithSessionHistory(&restored))
+		newSession, err := client.NewSession(ctx, gollem.WithSessionHistory(&restored))
 		gt.NoError(t, err)
 
-		resp3, err := newSession.GenerateContent(ctx, gollam.Text("Do you remember the weather in Tokyo?"))
+		resp3, err := newSession.GenerateContent(ctx, gollem.Text("Do you remember the weather in Tokyo?"))
 		gt.NoError(t, err).Required()
 
 		gt.A(t, resp3.Texts).Longer(0).At(0, func(t testing.TB, v string) {

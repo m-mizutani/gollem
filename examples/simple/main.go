@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/m-mizutani/gollam"
-	"github.com/m-mizutani/gollam/llm/gpt"
-	"github.com/m-mizutani/gollam/mcp"
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/llm/gpt"
+	"github.com/m-mizutani/gollem/mcp"
 )
 
 func main() {
@@ -27,10 +27,10 @@ func main() {
 	}
 	defer mcpLocal.Close()
 
-	// Create gollam instance
-	agent := gollam.New(client,
-		gollam.WithToolSets(mcpLocal),
-		gollam.WithMessageHook(func(ctx context.Context, msg string) error {
+	// Create gollem instance
+	agent := gollem.New(client,
+		gollem.WithToolSets(mcpLocal),
+		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
 			fmt.Printf("🤖 %s\n", msg)
 			return nil
 		}),

@@ -2,11 +2,11 @@ package gemini
 
 import (
 	"cloud.google.com/go/vertexai/genai"
-	"github.com/m-mizutani/gollam"
+	"github.com/m-mizutani/gollem"
 )
 
-// convertTool converts gollam.Tool to Gemini tool
-func convertTool(tool gollam.Tool) *genai.FunctionDeclaration {
+// convertTool converts gollem.Tool to Gemini tool
+func convertTool(tool gollem.Tool) *genai.FunctionDeclaration {
 	spec := tool.Spec()
 	parameters := &genai.Schema{
 		Type:       genai.TypeObject,
@@ -25,8 +25,8 @@ func convertTool(tool gollam.Tool) *genai.FunctionDeclaration {
 	}
 }
 
-// convertParameterToSchema converts gollam.Parameter to Gemini schema
-func convertParameterToSchema(param *gollam.Parameter) *genai.Schema {
+// convertParameterToSchema converts gollem.Parameter to Gemini schema
+func convertParameterToSchema(param *gollem.Parameter) *genai.Schema {
 	schema := &genai.Schema{
 		Type:        getGeminiType(param.Type),
 		Description: param.Description,
@@ -52,7 +52,7 @@ func convertParameterToSchema(param *gollam.Parameter) *genai.Schema {
 	}
 
 	// Add number constraints
-	if param.Type == gollam.TypeNumber || param.Type == gollam.TypeInteger {
+	if param.Type == gollem.TypeNumber || param.Type == gollem.TypeInteger {
 		if param.Minimum != nil {
 			schema.Minimum = *param.Minimum
 		}
@@ -62,7 +62,7 @@ func convertParameterToSchema(param *gollam.Parameter) *genai.Schema {
 	}
 
 	// Add string constraints
-	if param.Type == gollam.TypeString {
+	if param.Type == gollem.TypeString {
 		if param.MinLength != nil {
 			schema.MinLength = int64(*param.MinLength)
 		}
@@ -75,7 +75,7 @@ func convertParameterToSchema(param *gollam.Parameter) *genai.Schema {
 	}
 
 	// Add array constraints
-	if param.Type == gollam.TypeArray {
+	if param.Type == gollem.TypeArray {
 		if param.MinItems != nil {
 			schema.MinItems = int64(*param.MinItems)
 		}
@@ -89,19 +89,19 @@ func convertParameterToSchema(param *gollam.Parameter) *genai.Schema {
 	return schema
 }
 
-func getGeminiType(paramType gollam.ParameterType) genai.Type {
+func getGeminiType(paramType gollem.ParameterType) genai.Type {
 	switch paramType {
-	case gollam.TypeString:
+	case gollem.TypeString:
 		return genai.TypeString
-	case gollam.TypeNumber:
+	case gollem.TypeNumber:
 		return genai.TypeNumber
-	case gollam.TypeInteger:
+	case gollem.TypeInteger:
 		return genai.TypeInteger
-	case gollam.TypeBoolean:
+	case gollem.TypeBoolean:
 		return genai.TypeBoolean
-	case gollam.TypeArray:
+	case gollem.TypeArray:
 		return genai.TypeArray
-	case gollam.TypeObject:
+	case gollem.TypeObject:
 		return genai.TypeObject
 	default:
 		return genai.TypeString

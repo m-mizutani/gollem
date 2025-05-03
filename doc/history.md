@@ -50,8 +50,8 @@ Each History instance is tied to a specific LLM type (GPT, Claude, or Gemini). I
 
 1. Get History from Prompt response:
    ```go
-   // Create a new gollam instance
-   g := gollam.New(llmClient)
+   // Create a new gollem instance
+   g := gollem.New(llmClient)
 
    // Get response from Prompt
    history, err := g.Prompt(ctx, "What is the weather?")
@@ -78,7 +78,7 @@ Each History instance is tied to a specific LLM type (GPT, Claude, or Gemini). I
    }
 
    // Use history in next Prompt call
-   newHistory, err := g.Prompt(ctx, "What about tomorrow?", gollam.WithHistory(&restoredHistory))
+   newHistory, err := g.Prompt(ctx, "What about tomorrow?", gollem.WithHistory(&restoredHistory))
    if err != nil {
        return nil, fmt.Errorf("failed to get prompt response: %w", err)
    }

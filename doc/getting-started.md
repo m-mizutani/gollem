@@ -1,18 +1,18 @@
-# Getting Started with gollam
+# Getting Started with gollem
 
-gollam is a Go framework for building applications with Large Language Models (LLMs). This guide will help you get started with the framework.
+gollem is a Go framework for building applications with Large Language Models (LLMs). This guide will help you get started with the framework.
 
 ## Installation
 
-Install gollam using Go modules:
+Install gollem using Go modules:
 
 ```bash
-go get github.com/m-mizutani/gollam
+go get github.com/m-mizutani/gollem
 ```
 
 ## Basic Usage
 
-Here's a simple example of how to use gollam with OpenAI's GPT model:
+Here's a simple example of how to use gollem with OpenAI's GPT model:
 
 ```go
 package main
@@ -22,9 +22,9 @@ import (
     "fmt"
     "os"
 
-    "github.com/m-mizutani/gollam"
-    "github.com/m-mizutani/gollam/llm/gpt"
-    "github.com/m-mizutani/gollam/mcp"
+    "github.com/m-mizutani/gollem"
+    "github.com/m-mizutani/gollem/llm/gpt"
+    "github.com/m-mizutani/gollem/mcp"
 )
 
 func main() {
@@ -41,10 +41,10 @@ func main() {
     }
     defer mcpClient.Close()
 
-    // Create gollam instance
-    s := gollam.New(client,
-        gollam.WithToolSets(mcpClient),
-        gollam.WithMessageHook(func(ctx context.Context, msg string) error {
+    // Create gollem instance
+    s := gollem.New(client,
+        gollem.WithToolSets(mcpClient),
+        gollem.WithMessageHook(func(ctx context.Context, msg string) error {
             fmt.Println(msg)
             return nil
         }),
@@ -63,7 +63,7 @@ For information on how to integrate with Tools and MCP servers, please refer to 
 
 ## Supported LLM Providers
 
-gollam supports multiple LLM providers:
+gollem supports multiple LLM providers:
 
 - Gemini
 - Anthropic (Claude)
@@ -80,7 +80,7 @@ Each provider has its own client implementation in the `llm` package. See the re
 
 ## Error Handling
 
-gollam provides robust error handling capabilities to help you build reliable applications:
+gollem provides robust error handling capabilities to help you build reliable applications:
 
 ### Error Types
 - **LLM Errors**: Errors from the LLM provider (e.g., rate limits, invalid requests)
@@ -105,7 +105,7 @@ if err != nil {
 
 ## Context Management
 
-gollam provides a history-based context management system to maintain conversation state:
+gollem provides a history-based context management system to maintain conversation state:
 
 ### History Object
 The `History` object maintains the conversation context, including:
@@ -122,7 +122,7 @@ The `History` object maintains the conversation context, including:
 Example of history management:
 ```go
 // Initialize history
-var history *gollam.History
+var history *gollem.History
 
 // Process user input with history
 newHistory, err := s.Prompt(ctx, userInput, history)

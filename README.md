@@ -1,16 +1,17 @@
-# 🤖 gollam [![Go Reference](https://pkg.go.dev/badge/github.com/m-mizutani/gollam.svg)](https://pkg.go.dev/github.com/m-mizutani/gollam) [![Test](https://github.com/m-mizutani/gollam/actions/workflows/test.yml/badge.svg)](https://github.com/m-mizutani/gollam/actions/workflows/test.yml) [![Lint](https://github.com/m-mizutani/gollam/actions/workflows/lint.yml/badge.svg)](https://github.com/m-mizutani/gollam/actions/workflows/lint.yml) [![Gosec](https://github.com/m-mizutani/gollam/actions/workflows/gosec.yml/badge.svg)](https://github.com/m-mizutani/gollam/actions/workflows/gosec.yml) [![Trivy](https://github.com/m-mizutani/gollam/actions/workflows/trivy.yml/badge.svg)](https://github.com/m-mizutani/gollam/actions/workflows/trivy.yml)
+# 🤖 gollem [![Go Reference](https://pkg.go.dev/badge/github.com/m-mizutani/gollem.svg)](https://pkg.go.dev/github.com/m-mizutani/gollem) [![Test](https://github.com/m-mizutani/gollem/actions/workflows/test.yml/badge.svg)](https://github.com/m-mizutani/gollem/actions/workflows/test.yml) [![Lint](https://github.com/m-mizutani/gollem/actions/workflows/lint.yml/badge.svg)](https://github.com/m-mizutani/gollem/actions/workflows/lint.yml) [![Gosec](https://github.com/m-mizutani/gollem/actions/workflows/gosec.yml/badge.svg)](https://github.com/m-mizutani/gollem/actions/workflows/gosec.yml) [![Trivy](https://github.com/m-mizutani/gollem/actions/workflows/trivy.yml/badge.svg)](https://github.com/m-mizutani/gollem/actions/workflows/trivy.yml)
 
+GO for Large LanguagE Model
 
 <p align="center">
   <img src="./doc/images/logo.png" height="128" />
 </p>
 
 
-`gollam` is a Go framework for building agentic applications of Large Language Models (LLMs) with MCP (Model Context Protocol) server and your built-in tools.
+`gollem` is a Go framework for building agentic applications of Large Language Models (LLMs) with MCP (Model Context Protocol) server and your built-in tools.
 
 ## Overview
 
-gollam lets you:
+gollem lets you:
 - Connect with LLM providers (Gemini, Anthropic, OpenAI)
 - Use built-in tools to enhance LLM features
 - Connect with MCP servers for external tools
@@ -38,7 +39,7 @@ gollam lets you:
 ### Install
 
 ```bash
-go get github.com/m-mizutani/gollam
+go get github.com/m-mizutani/gollem
 ```
 
 ### Example
@@ -68,17 +69,17 @@ func main() {
 	}
 	defer mcpRemote.Close()
 
-	// Create gollam instance
-	agent := gollam.New(client,
-		gollam.WithToolSets(mcpLocal, mcpRemote),
-		gollam.WithTools(&MyTool{}),
-		gollam.WithMessageHook(func(ctx context.Context, msg string) error {
+	// Create gollem instance
+	agent := gollem.New(client,
+		gollem.WithToolSets(mcpLocal, mcpRemote),
+		gollem.WithTools(&MyTool{}),
+		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
 			fmt.Printf("🤖 %s\n", msg)
 			return nil
 		}),
 	)
 
-	var history *gollam.History
+	var history *gollem.History
 	for {
 		fmt.Print("> ")
 		scanner := bufio.NewScanner(os.Stdin)
@@ -93,11 +94,11 @@ func main() {
 }
 ```
 
-See the full example in [examples/basic](https://github.com/m-mizutani/gollam/tree/main/examples/basic), and more examples in [examples](https://github.com/m-mizutani/gollam/tree/main/examples).
+See the full example in [examples/basic](https://github.com/m-mizutani/gollem/tree/main/examples/basic), and more examples in [examples](https://github.com/m-mizutani/gollem/tree/main/examples).
 
 ## Documentation
 
-For more details and examples, visit our [documentation site](https://github.com/m-mizutani/gollam/tree/main/doc).
+For more details and examples, visit our [documentation site](https://github.com/m-mizutani/gollem/tree/main/doc).
 
 ## License
 
