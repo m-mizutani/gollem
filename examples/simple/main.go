@@ -30,7 +30,7 @@ func main() {
 	// Create gollam instance
 	agent := gollam.New(client,
 		gollam.WithToolSets(mcpLocal),
-		gollam.WithMsgCallback(func(ctx context.Context, msg string) error {
+		gollam.WithMessageHook(func(ctx context.Context, msg string) error {
 			fmt.Printf("🤖 %s\n", msg)
 			return nil
 		}),

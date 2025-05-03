@@ -187,7 +187,7 @@ type Tool interface {
 	Spec() ToolSpec
 
 	// Run is the execution of the tool.
-	// It's called when receiving a tool call from the LLM. Even if the method returns an error, the tool execution is not aborted. Error will be passed to LLM as a response. If you want to abort the tool execution, you need to return an error from the callback function of WithErrCallback().
+	// It's called when receiving a tool call from the LLM. Even if the method returns an error, the tool execution is not aborted. Error will be passed to LLM as a response. If you want to abort the tool execution, you need to return an error from the callback function of WithToolErrorHook().
 	Run(ctx context.Context, args map[string]any) (map[string]any, error)
 }
 

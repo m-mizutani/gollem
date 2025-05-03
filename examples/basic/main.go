@@ -63,7 +63,7 @@ func main() {
 		// But also you can use your own built-in tools
 		gollam.WithTools(&MyTool{}),
 		// You can customize the callback function for each message and tool call.
-		gollam.WithMsgCallback(func(ctx context.Context, msg string) error {
+		gollam.WithMessageHook(func(ctx context.Context, msg string) error {
 			fmt.Printf("🤖 %s\n", msg)
 			return nil
 		}),

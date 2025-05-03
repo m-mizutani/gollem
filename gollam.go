@@ -8,13 +8,18 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 )
 
+// ResponseMode is the type for the response mode of the gollam agent.
 type ResponseMode int
 
 const (
+	// ResponseModeBlocking is the response mode that blocks the prompt until the LLM generates a response. The agent will wait until all responses are ready.
 	ResponseModeBlocking ResponseMode = iota
+
+	// ResponseModeStreaming is the response mode that streams the response from the LLM. The agent receives responses token by token.
 	ResponseModeStreaming
 )
 
+// String returns the string representation of the response mode.
 func (x ResponseMode) String() string {
 	return []string{"blocking", "streaming"}[x]
 }
@@ -40,11 +45,12 @@ type gollamConfig struct {
 	tools    []Tool
 	toolSets []ToolSet
 
-	msgCallback  MsgCallback
-	toolCallback ToolCallback
-	errCallback  ErrCallback
-	responseMode ResponseMode
-	logger       *slog.Logger
+	messageHook      MessageHook
+	toolRequestHook  ToolRequestHook
+	toolResponseHook ToolResponseHook
+	toolErrorHook    ToolErrorHook
+	responseMode     ResponseMode
+	logger           *slog.Logger
 
 	history *History
 }
@@ -59,17 +65,18 @@ func (c *gollamConfig) Clone() *gollamConfig {
 		tools:    c.tools[:],
 		toolSets: c.toolSets[:],
 
-		msgCallback:  c.msgCallback,
-		toolCallback: c.toolCallback,
-		errCallback:  c.errCallback,
-		responseMode: c.responseMode,
-		logger:       c.logger,
+		messageHook:      c.messageHook,
+		toolRequestHook:  c.toolRequestHook,
+		toolResponseHook: c.toolResponseHook,
+		toolErrorHook:    c.toolErrorHook,
+		responseMode:     c.responseMode,
+		logger:           c.logger,
 
 		history: c.history,
 	}
 }
 
-// New creates a new gollam instance.
+// New creates a new gollam agent.
 func New(llmClient LLMClient, options ...Option) *Agent {
 	s := &Agent{
 		llm: llmClient,
@@ -79,11 +86,12 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 			initPrompt:   "",
 			systemPrompt: "",
 
-			msgCallback:  defaultMsgCallback,
-			toolCallback: defaultToolCallback,
-			errCallback:  defaultErrCallback,
-			responseMode: ResponseModeBlocking,
-			logger:       slog.New(slog.DiscardHandler),
+			messageHook:      defaultMessageHook,
+			toolRequestHook:  defaultToolRequestHook,
+			toolResponseHook: defaultToolResponseHook,
+			toolErrorHook:    defaultToolErrorHook,
+			responseMode:     ResponseModeBlocking,
+			logger:           slog.New(slog.DiscardHandler),
 		},
 	}
 
@@ -94,7 +102,7 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 	return s
 }
 
-// Option is the type for the options of the gollam instance.
+// Option is the type for the options of the gollam agent.
 type Option func(*gollamConfig)
 
 // WithLoopLimit sets the maximum number of loops for the gollam session iteration (ask LLM and execute tools is one loop).
@@ -111,97 +119,110 @@ func WithRetryLimit(retryLimit int) Option {
 	}
 }
 
-// WithInitPrompt sets the initial prompt for the gollam instance. The initial prompt is used when there is no history. If you want to use the system prompt, use WithSystemPrompt instead.a
+// WithInitPrompt sets the initial prompt for the gollam agent. The initial prompt is used when there is no history. If you want to use the system prompt, use WithSystemPrompt instead.
 func WithInitPrompt(initPrompt string) Option {
 	return func(s *gollamConfig) {
 		s.initPrompt = initPrompt
 	}
 }
 
-// WithSystemPrompt sets the system prompt for the gollam instance. Default is no system prompt.
+// WithSystemPrompt sets the system prompt for the gollam agent. Default is no system prompt.
 func WithSystemPrompt(systemPrompt string) Option {
 	return func(s *gollamConfig) {
 		s.systemPrompt = systemPrompt
 	}
 }
 
-// WithTools sets the tools for the gollam instance.
+// WithTools sets the tools for the gollam agent.
 func WithTools(tools ...Tool) Option {
 	return func(s *gollamConfig) {
 		s.tools = append(s.tools, tools...)
 	}
 }
 
-// WithToolSets sets the tool sets for the gollam instance.
+// WithToolSets sets the tool sets for the gollam agent.
 func WithToolSets(toolSets ...ToolSet) Option {
 	return func(s *gollamConfig) {
 		s.toolSets = append(s.toolSets, toolSets...)
 	}
 }
 
-// WithMsgCallback sets a callback function for the message. The callback function is called when receiving a generated text message from the LLM.
+// WithMessageHook sets a callback function for the message. The callback function is called when receiving a generated text message from the LLM. If the function returns an error, the Prompt() method will be aborted immediately.
 // Usage:
 //
-//	gollam.WithMsgCallback(func(ctx context.Context, msg string) error {
+//	gollam.WithMessageHook(func(ctx context.Context, msg string) error {
 //		println(msg)
 //		return nil
 //	})
-func WithMsgCallback(callback func(ctx context.Context, msg string) error) Option {
+func WithMessageHook(callback func(ctx context.Context, msg string) error) Option {
 	return func(s *gollamConfig) {
-		s.msgCallback = callback
+		s.messageHook = callback
 	}
 }
 
-// WithToolCallback sets a callback function for the tool. The callback function is called just before executing the tool. If you want to abort the tool execution, return an error.
+// WithToolRequestHook sets a callback function for the tool. The callback function is called just before executing the tool. If the function returns an error, the Prompt() method will be aborted immediately.
 // Usage:
 //
-//	gollam.WithToolCallback(func(ctx context.Context, tool gollam.Tool) error {
+//	gollam.WithToolRequestHook(func(ctx context.Context, tool gollam.Tool) error {
 //		println("running tool: " + tool.Spec().Name)
 //		return nil
 //	})
-func WithToolCallback(callback func(ctx context.Context, tool FunctionCall) error) Option {
+func WithToolRequestHook(callback func(ctx context.Context, tool FunctionCall) error) Option {
 	return func(s *gollamConfig) {
-		s.toolCallback = callback
+		s.toolRequestHook = callback
 	}
 }
 
-// WithErrCallback sets a callback function for the error of the tool execution. If the callback returns an error (can be same as argument of the callback), the tool execution is aborted. If the callback returns nil, the tool execution is continued.
+// WithToolResponseHook sets a callback function for the response of the tool execution. The callback function is called when receiving a response from the tool. If the function returns an error, the Prompt() method will be aborted immediately.
 // Usage:
 //
-//	gollam.WithErrCallback(func(ctx context.Context, err error, tool gollam.Tool) error {
+//	gollam.WithToolResponseHook(func(ctx context.Context, tool gollam.Tool, response map[string]any) error {
+//		println("tool response: " + tool.Spec().Name)
+//		return nil
+//	})
+func WithToolResponseHook(callback func(ctx context.Context, tool FunctionCall, response map[string]any) error) Option {
+	return func(s *gollamConfig) {
+		s.toolResponseHook = callback
+	}
+}
+
+// WithToolErrorHook sets a callback function for the error of the tool execution. If you want to stop Prompt(), return the same error as the original error.
+// Usage:
+//
+//	gollam.WithToolErrorHook(func(ctx context.Context, err error, tool gollam.Tool) error {
 //		if errors.Is(err, someErrorYouKnow) {
 //			return err // Abort the tool execution
 //		}
 //		return nil // Continue the tool execution
 //	})
-func WithErrCallback(callback func(ctx context.Context, err error, tool FunctionCall) error) Option {
+func WithToolErrorHook(callback func(ctx context.Context, err error, tool FunctionCall) error) Option {
 	return func(s *gollamConfig) {
-		s.errCallback = callback
+		s.toolErrorHook = callback
 	}
 }
 
-// WithResponseMode sets the response mode for the gollam instance. Default is ResponseModeBlocking.
+// WithResponseMode sets the response mode for the gollam agent. Default is ResponseModeBlocking.
 func WithResponseMode(responseMode ResponseMode) Option {
 	return func(s *gollamConfig) {
 		s.responseMode = responseMode
 	}
 }
 
-// WithLogger sets the logger for the gollam instance. Default is discard logger.
+// WithLogger sets the logger for the gollam agent. Default is discard logger.
 func WithLogger(logger *slog.Logger) Option {
 	return func(s *gollamConfig) {
 		s.logger = logger
 	}
 }
 
-// WithHistory sets the history for the gollam instance.
+// WithHistory sets the history for the gollam agent.
 func WithHistory(history *History) Option {
 	return func(s *gollamConfig) {
 		s.history = history
 	}
 }
 
-// Prompt is the main function to start the gollam instance. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until no tool call from LLM or the LoopLimit is reached.
+// Prompt is the main function to start the gollam agent. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until no tool call from LLM or the LoopLimit is reached.
 func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*History, error) {
 	cfg := g.gollamConfig.Clone()
 	for _, opt := range options {
@@ -289,19 +310,19 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 
 func handleResponse(ctx context.Context, cfg gollamConfig, output *Response, toolMap map[string]Tool) ([]Input, error) {
 	newInput := make([]Input, 0)
-	// Call the msgCallback for all texts
+	// Call the MessageHook for all texts
 	for _, text := range output.Texts {
-		if err := cfg.msgCallback(ctx, text); err != nil {
-			return nil, goerr.Wrap(err, "failed to call msgCallback")
+		if err := cfg.messageHook(ctx, text); err != nil {
+			return nil, goerr.Wrap(err, "failed to call MessageHook")
 		}
 	}
 
 	var retErr error
 
-	// Call the toolCallback for all tool calls
+	// Call the ToolRequestHook for all tool calls
 	for _, toolCall := range output.FunctionCalls {
-		if err := cfg.toolCallback(ctx, *toolCall); err != nil {
-			return nil, goerr.Wrap(err, "failed to call toolCallback")
+		if err := cfg.toolRequestHook(ctx, *toolCall); err != nil {
+			return nil, goerr.Wrap(err, "failed to call ToolRequestHook")
 		}
 
 		tool, ok := toolMap[toolCall.Name]
@@ -316,8 +337,8 @@ func handleResponse(ctx context.Context, cfg gollamConfig, output *Response, too
 
 		result, err := tool.Run(ctx, toolCall.Arguments)
 		if err != nil {
-			if cbErr := cfg.errCallback(ctx, err, *toolCall); cbErr != nil {
-				return nil, goerr.Wrap(cbErr, "failed to call errCallback")
+			if cbErr := cfg.toolErrorHook(ctx, err, *toolCall); cbErr != nil {
+				return nil, goerr.Wrap(cbErr, "failed to call ToolErrorHook")
 			}
 
 			newInput = append(newInput, FunctionResponse{
@@ -326,6 +347,10 @@ func handleResponse(ctx context.Context, cfg gollamConfig, output *Response, too
 				Error: goerr.Wrap(err, toolCall.Name+" failed to run", goerr.V("call", toolCall)),
 			})
 			continue
+		}
+
+		if cbErr := cfg.toolResponseHook(ctx, *toolCall, result); cbErr != nil {
+			return nil, goerr.Wrap(cbErr, "failed to call ToolResponseHook")
 		}
 
 		newInput = append(newInput, FunctionResponse{
