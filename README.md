@@ -53,7 +53,7 @@ go get github.com/m-mizutani/gollem
 		}
 		client = c
 
-	case "OpenAI":
+	case "openai":
 		c, err := openai.New(ctx, os.Getenv("OPENAI_API_KEY"), openai.WithModel(model))
 		if err != nil {
 			panic(err)

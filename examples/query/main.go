@@ -15,7 +15,7 @@ func main() {
 	ctx := context.Background()
 
 	if len(os.Args) != 4 {
-		fmt.Println("Usage: go run main.go <gemini|claude|OpenAI> <model_name> <prompt>")
+		fmt.Println("Usage: go run main.go <gemini|claude|openai> <model_name> <prompt>")
 		os.Exit(1)
 	}
 
@@ -40,7 +40,7 @@ func main() {
 		}
 		client = c
 
-	case "OpenAI":
+	case "openai":
 		c, err := openai.New(ctx, os.Getenv("OPENAI_API_KEY"), openai.WithModel(model))
 		if err != nil {
 			panic(err)
