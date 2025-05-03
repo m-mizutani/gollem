@@ -10,7 +10,7 @@ import (
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
 	"github.com/m-mizutani/gollem/llm/gemini"
-	"github.com/m-mizutani/gollem/llm/gpt"
+	"github.com/m-mizutani/gollem/llm/openai"
 	"github.com/m-mizutani/gt"
 )
 
@@ -138,14 +138,14 @@ func newGeminiClient(t *testing.T) gollem.LLMClient {
 	return client
 }
 
-func newGPTClient(t *testing.T) gollem.LLMClient {
+func newOpenAIClient(t *testing.T) gollem.LLMClient {
 	apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
 	if !ok {
 		t.Skip("TEST_OPENAI_API_KEY is not set")
 	}
 
 	ctx := t.Context()
-	client, err := gpt.New(ctx, apiKey)
+	client, err := openai.New(ctx, apiKey)
 	gt.NoError(t, err)
 	return client
 }
@@ -177,8 +177,8 @@ func TestGemini(t *testing.T) {
 	})
 }
 
-func TestGPT(t *testing.T) {
-	client := newGPTClient(t)
+func TestOpenAI(t *testing.T) {
+	client := newOpenAIClient(t)
 
 	// Setup tools
 	tools := []gollem.Tool{&randomNumberTool{}}
@@ -304,14 +304,14 @@ func TestCallToolNameConvention(t *testing.T) {
 		}
 	}
 
-	t.Run("gpt", func(t *testing.T) {
+	t.Run("OpenAI", func(t *testing.T) {
 		ctx := t.Context()
 		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
 		if !ok {
 			t.Skip("TEST_OPENAI_API_KEY is not set")
 		}
 
-		client, err := gpt.New(ctx, apiKey)
+		client, err := openai.New(ctx, apiKey)
 		gt.NoError(t, err)
 		testFunc(t, client)
 	})
@@ -386,8 +386,8 @@ func TestSessionHistory(t *testing.T) {
 		})
 	}
 
-	t.Run("gpt", func(t *testing.T) {
-		client := newGPTClient(t)
+	t.Run("OpenAI", func(t *testing.T) {
+		client := newOpenAIClient(t)
 		testFn(t, client)
 	})
 

@@ -43,8 +43,8 @@ Here's a simple example of creating a custom tool and using it with an LLM:
 func main() {
 	ctx := context.Background()
 
-	// Create GPT client
-	client, err := gpt.New(ctx, os.Getenv("OPENAI_API_KEY"))
+	// Create OpenAI client
+	client, err := OpenAI.New(ctx, os.Getenv("OPENAI_API_KEY"))
 	if err != nil {
 		panic(err)
 	}

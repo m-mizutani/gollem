@@ -1,4 +1,4 @@
-package gpt
+package openai
 
 import (
 	"context"
@@ -33,8 +33,8 @@ type generationParameters struct {
 	FrequencyPenalty float32
 }
 
-// Client is a client for the GPT API.
-// It provides methods to interact with OpenAI's GPT models.
+// Client is a client for the OpenAI API.
+// It provides methods to interact with OpenAI's OpenAI models.
 type Client struct {
 	// client is the underlying OpenAI client.
 	client *openai.Client
@@ -53,11 +53,16 @@ type Client struct {
 	contentType gollem.ContentType
 }
 
+const (
+	DefaultModel = "gpt-4.1"
+)
+
 // Option is a function that configures a Client.
 type Option func(*Client)
 
 // WithModel sets the default model to use for chat completions.
 // The model name should be a valid OpenAI model identifier.
+// See default model in [DefaultModel].
 func WithModel(modelName string) Option {
 	return func(c *Client) {
 		c.defaultModel = modelName
@@ -120,11 +125,11 @@ func WithContentType(contentType gollem.ContentType) Option {
 	}
 }
 
-// New creates a new client for the GPT API.
+// New creates a new client for the OpenAI API.
 // It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
 	client := &Client{
-		defaultModel: "gpt-4-turbo-preview",
+		defaultModel: DefaultModel,
 		params:       generationParameters{},
 		contentType:  gollem.ContentTypeText,
 	}
@@ -139,7 +144,7 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 	return client, nil
 }
 
-// Session is a session for the GPT chat.
+// Session is a session for the OpenAI chat.
 // It maintains the conversation state and handles message generation.
 type Session struct {
 	// client is the underlying OpenAI client.
@@ -160,7 +165,7 @@ type Session struct {
 	cfg gollem.SessionConfig
 }
 
-// NewSession creates a new session for the GPT API.
+// NewSession creates a new session for the OpenAI API.
 // It converts the provided tools to OpenAI's tool format and initializes a new chat session.
 func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 	cfg := gollem.NewSessionConfig(options...)
@@ -179,7 +184,7 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		})
 	}
 	if cfg.History() != nil {
-		history, err := cfg.History().ToGPT()
+		history, err := cfg.History().ToOpenAI()
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history to openai.ChatCompletionMessage")
 		}
@@ -199,7 +204,7 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 }
 
 func (s *Session) History() *gollem.History {
-	return gollem.NewHistoryFromGPT(s.messages)
+	return gollem.NewHistoryFromOpenAI(s.messages)
 }
 
 // convertInputs converts gollem.Input to OpenAI messages

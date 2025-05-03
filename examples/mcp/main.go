@@ -6,15 +6,15 @@ import (
 	"os"
 
 	"github.com/m-mizutani/gollem"
-	"github.com/m-mizutani/gollem/llm/gpt"
+	"github.com/m-mizutani/gollem/llm/openai"
 	"github.com/m-mizutani/gollem/mcp"
 )
 
 func main() {
 	ctx := context.Background()
 
-	// Create GPT client
-	client, err := gpt.New(ctx, os.Getenv("OPENAI_API_KEY"))
+	// Create OpenAI client
+	client, err := openai.New(ctx, os.Getenv("OPENAI_API_KEY"))
 	if err != nil {
 		panic(err)
 	}

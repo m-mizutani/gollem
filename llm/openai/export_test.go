@@ -1,4 +1,4 @@
-package gpt
+package openai
 
 // Export convert functions for testing
 var (

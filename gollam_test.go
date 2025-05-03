@@ -10,7 +10,7 @@ import (
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
 	"github.com/m-mizutani/gollem/llm/gemini"
-	"github.com/m-mizutani/gollem/llm/gpt"
+	"github.com/m-mizutani/gollem/llm/openai"
 	"github.com/m-mizutani/gt"
 )
 
@@ -79,13 +79,13 @@ func TestGollemWithTool(t *testing.T) {
 		}
 	}
 
-	t.Run("GPT", func(t *testing.T) {
+	t.Run("OpenAI", func(t *testing.T) {
 		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
 		if !ok {
 			t.Skip("TEST_OPENAI_API_KEY is not set")
 		}
 		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
-			return gpt.New(context.Background(), apiKey)
+			return openai.New(context.Background(), apiKey)
 		})
 	})
 

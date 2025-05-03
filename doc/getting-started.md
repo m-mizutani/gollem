@@ -12,7 +12,7 @@ go get github.com/m-mizutani/gollem
 
 ## Basic Usage
 
-Here's a simple example of how to use gollem with OpenAI's GPT model:
+Here's a simple example of how to use gollem with OpenAI's OpenAI model:
 
 ```go
 package main
@@ -23,13 +23,13 @@ import (
     "os"
 
     "github.com/m-mizutani/gollem"
-    "github.com/m-mizutani/gollem/llm/gpt"
+    "github.com/m-mizutani/gollem/llm/openai"
     "github.com/m-mizutani/gollem/mcp"
 )
 
 func main() {
-    // Create GPT client
-    client, err := gpt.New(context.Background(), os.Getenv("OPENAI_API_KEY"))
+    // Create OpenAI client
+    client, err := OpenAI.New(context.Background(), os.Getenv("OPENAI_API_KEY"))
     if err != nil {
         panic(err)
     }
@@ -57,7 +57,7 @@ func main() {
 }
 ```
 
-This code uses the OpenAI GPT model to receive a message from the user and send it to the LLM. Here, we are not specifying a Tool or MCP server, so the LLM is expected to return only a message.
+This code uses the OpenAI OpenAI model to receive a message from the user and send it to the LLM. Here, we are not specifying a Tool or MCP server, so the LLM is expected to return only a message.
 
 For information on how to integrate with Tools and MCP servers, please refer to [tools](tools.md) and [mcp](mcp.md) documents.
 
@@ -67,7 +67,7 @@ gollem supports multiple LLM providers:
 
 - Gemini
 - Anthropic (Claude)
-- OpenAI (GPT)
+- OpenAI (OpenAI)
 
 Each provider has its own client implementation in the `llm` package. See the respective documentation for configuration options.
 
