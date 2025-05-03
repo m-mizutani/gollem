@@ -11,7 +11,7 @@ GO for Large LanguagE Model
 - Common interface to query prompt to Large Language Model (LLM) services
 - Framework for building agentic applications of LLMs with
   - Tools by MCP (Model Context Protocol) server and your built-in tools
-  - Conversational memory with history
+  - Portable conversational memory with history for stateless/distributed applications
 
 ## Supported LLMs
 
