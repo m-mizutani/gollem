@@ -5,16 +5,16 @@ import (
 	"log"
 	"os"
 
-	"github.com/m-mizutani/gollam"
-	"github.com/m-mizutani/gollam/llm/gpt"
-	"github.com/m-mizutani/gollam/mcp"
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/llm/openai"
+	"github.com/m-mizutani/gollem/mcp"
 )
 
 func main() {
 	ctx := context.Background()
 
-	// Create GPT client
-	client, err := gpt.New(ctx, os.Getenv("OPENAI_API_KEY"))
+	// Create OpenAI client
+	client, err := openai.New(ctx, os.Getenv("OPENAI_API_KEY"))
 	if err != nil {
 		panic(err)
 	}
@@ -33,9 +33,9 @@ func main() {
 	}
 	defer stdioClient.Close()
 
-	// Create gollam instance with MCP tools
-	g := gollam.New(client,
-		gollam.WithToolSets(sseClient, stdioClient),
+	// Create gollem instance with MCP tools
+	g := gollem.New(client,
+		gollem.WithToolSets(sseClient, stdioClient),
 	)
 
 	// Send a message

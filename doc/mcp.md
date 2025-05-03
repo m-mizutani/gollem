@@ -1,6 +1,6 @@
 # MCP Server Integration
 
-gollam supports integration with MCP (Model Context Protocol) servers, allowing you to extend LLM capabilities with external tools and resources.
+gollem supports integration with MCP (Model Context Protocol) servers, allowing you to extend LLM capabilities with external tools and resources.
 
 ## What is MCP?
 
@@ -12,7 +12,7 @@ MCP is a protocol that enables LLMs to interact with external tools and resource
 
 ## Connecting to an MCP Server
 
-To connect your gollam application to an MCP server, you can use either HTTP SSE or stdio transport:
+To connect your gollem application to an MCP server, you can use either HTTP SSE or stdio transport:
 
 ```go
 // Using HTTP SSE transport
@@ -22,8 +22,8 @@ if err != nil {
 }
 defer mcpClient.Close()
 
-s := gollam.New(client,
-    gollam.WithToolSets(mcpClient),
+s := gollem.New(client,
+    gollem.WithToolSets(mcpClient),
 )
 
 // Using stdio transport
@@ -33,8 +33,8 @@ if err != nil {
 }
 defer mcpClient.Close()
 
-s := gollam.New(client,
-    gollam.WithToolSets(mcpClient),
+s := gollem.New(client,
+    gollem.WithToolSets(mcpClient),
 )
 ```
 
@@ -59,4 +59,7 @@ mcpClient, err := mcp.NewSSE(context.Background(), "http://localhost:8080",
 ## Next Steps
 
 - Learn more about [tool creation](tools.md)
-- Check out [practical examples](examples.md) of MCP integration 
+- Check out [practical examples](examples.md) of MCP integration
+- Review the [getting started guide](getting-started.md) for basic usage
+- Understand [history management](history.md) for conversation context
+- Explore the [complete documentation](README.md)

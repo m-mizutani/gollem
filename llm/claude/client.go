@@ -8,7 +8,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollam"
+	"github.com/m-mizutani/gollem"
 )
 
 // generationParameters represents the parameters for text generation.
@@ -131,15 +131,15 @@ type Session struct {
 	// generation parameters
 	params generationParameters
 
-	cfg gollam.SessionConfig
+	cfg gollem.SessionConfig
 }
 
 // NewSession creates a new session for the Claude API.
 // It converts the provided tools to Claude's tool format and initializes a new chat session.
-func (c *Client) NewSession(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error) {
-	cfg := gollam.NewSessionConfig(options...)
+func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+	cfg := gollem.NewSessionConfig(options...)
 
-	// Convert gollam.Tool to anthropic.ToolUnionParam
+	// Convert gollem.Tool to anthropic.ToolUnionParam
 	claudeTools := make([]anthropic.ToolUnionParam, len(cfg.Tools()))
 	for i, tool := range cfg.Tools() {
 		claudeTools[i] = convertTool(tool)
@@ -166,23 +166,23 @@ func (c *Client) NewSession(ctx context.Context, options ...gollam.SessionOption
 	return session, nil
 }
 
-func (s *Session) History() *gollam.History {
-	return gollam.NewHistoryFromClaude(s.messages)
+func (s *Session) History() *gollem.History {
+	return gollem.NewHistoryFromClaude(s.messages)
 }
 
-// convertInputs converts gollam.Input to Claude messages and tool results
-func (s *Session) convertInputs(input ...gollam.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
+// convertInputs converts gollem.Input to Claude messages and tool results
+func (s *Session) convertInputs(input ...gollem.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
 	var toolResults []anthropic.ContentBlockParamUnion
 	var messages []anthropic.MessageParam
 
 	for _, in := range input {
 		switch v := in.(type) {
-		case gollam.Text:
+		case gollem.Text:
 			messages = append(messages, anthropic.NewUserMessage(
 				anthropic.NewTextBlock(string(v)),
 			))
 
-		case gollam.FunctionResponse:
+		case gollem.FunctionResponse:
 			response, err := json.Marshal(v.Data)
 			if err != nil {
 				return nil, nil, goerr.Wrap(err, "failed to marshal function response")
@@ -190,7 +190,7 @@ func (s *Session) convertInputs(input ...gollam.Input) ([]anthropic.MessageParam
 			toolResults = append(toolResults, anthropic.NewToolResultBlock(v.ID, string(response), v.Error != nil))
 
 		default:
-			return nil, nil, goerr.Wrap(gollam.ErrInvalidParameter, "invalid input")
+			return nil, nil, goerr.Wrap(gollem.ErrInvalidParameter, "invalid input")
 		}
 	}
 
@@ -213,7 +213,7 @@ func (s *Session) createRequest() anthropic.MessageNewParams {
 	}
 
 	// Add content type instruction to system prompt
-	if s.cfg.ContentType() == gollam.ContentTypeJSON {
+	if s.cfg.ContentType() == gollem.ContentTypeJSON {
 		if len(systemPrompt) > 0 {
 			systemPrompt[0].Text += "\nPlease format your response as valid JSON."
 		} else {
@@ -236,15 +236,15 @@ func (s *Session) createRequest() anthropic.MessageNewParams {
 	}
 }
 
-// processResponse converts Claude response to gollam.Response
-func processResponse(resp *anthropic.Message) *gollam.Response {
+// processResponse converts Claude response to gollem.Response
+func processResponse(resp *anthropic.Message) *gollem.Response {
 	if len(resp.Content) == 0 {
-		return &gollam.Response{}
+		return &gollem.Response{}
 	}
 
-	response := &gollam.Response{
+	response := &gollem.Response{
 		Texts:         make([]string, 0),
-		FunctionCalls: make([]*gollam.FunctionCall, 0),
+		FunctionCalls: make([]*gollem.FunctionCall, 0),
 	}
 
 	for _, content := range resp.Content {
@@ -261,7 +261,7 @@ func processResponse(resp *anthropic.Message) *gollam.Response {
 				return response
 			}
 
-			response.FunctionCalls = append(response.FunctionCalls, &gollam.FunctionCall{
+			response.FunctionCalls = append(response.FunctionCalls, &gollem.FunctionCall{
 				ID:        toolUseBlock.ID,
 				Name:      toolUseBlock.Name,
 				Arguments: args,
@@ -274,7 +274,7 @@ func processResponse(resp *anthropic.Message) *gollam.Response {
 
 // GenerateContent processes the input and generates a response.
 // It handles both text messages and function responses.
-func (s *Session) GenerateContent(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 	messages, _, err := s.convertInputs(input...)
 	if err != nil {
 		return nil, err
@@ -307,9 +307,9 @@ func newFunctionCallAccumulator() *FunctionCallAccumulator {
 	}
 }
 
-func (a *FunctionCallAccumulator) accumulate() (*gollam.FunctionCall, error) {
+func (a *FunctionCallAccumulator) accumulate() (*gollem.FunctionCall, error) {
 	if a.ID == "" || a.Name == "" {
-		return nil, goerr.Wrap(gollam.ErrInvalidParameter, "function call is not complete")
+		return nil, goerr.Wrap(gollem.ErrInvalidParameter, "function call is not complete")
 	}
 
 	var args map[string]any
@@ -319,7 +319,7 @@ func (a *FunctionCallAccumulator) accumulate() (*gollam.FunctionCall, error) {
 		}
 	}
 
-	return &gollam.FunctionCall{
+	return &gollem.FunctionCall{
 		ID:        a.ID,
 		Name:      a.Name,
 		Arguments: args,
@@ -328,7 +328,7 @@ func (a *FunctionCallAccumulator) accumulate() (*gollam.FunctionCall, error) {
 
 // GenerateStream processes the input and generates a response stream.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
-func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-chan *gollam.Response, error) {
+func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
 	messages, _, err := s.convertInputs(input...)
 	if err != nil {
 		return nil, err
@@ -342,7 +342,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-
 		return nil, goerr.New("failed to create message stream")
 	}
 
-	responseChan := make(chan *gollam.Response)
+	responseChan := make(chan *gollem.Response)
 
 	// Accumulate text and tool calls for message history
 	var textContent strings.Builder
@@ -367,9 +367,9 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollam.Input) (<-
 			}
 
 			event := stream.Current()
-			response := &gollam.Response{
+			response := &gollem.Response{
 				Texts:         make([]string, 0),
-				FunctionCalls: make([]*gollam.FunctionCall, 0),
+				FunctionCalls: make([]*gollem.FunctionCall, 0),
 			}
 
 			switch event.Type {

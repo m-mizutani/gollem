@@ -1,4 +1,4 @@
-package gollam
+package gollem
 
 import "context"
 
@@ -51,7 +51,7 @@ type SessionOption func(cfg *SessionConfig)
 
 // WithSessionHistory sets the history for the session.
 // Usage:
-// session, err := llmClient.NewSession(ctx, gollam.WithSessionHistory(history))
+// session, err := llmClient.NewSession(ctx, gollem.WithSessionHistory(history))
 func WithSessionHistory(history *History) SessionOption {
 	return func(cfg *SessionConfig) {
 		cfg.history = history
@@ -60,7 +60,7 @@ func WithSessionHistory(history *History) SessionOption {
 
 // WithSessionContentType sets the content type for the session.
 // Usage:
-// session, err := llmClient.NewSession(ctx, gollam.WithSessionContentType(gollam.ContentTypeJSON))
+// session, err := llmClient.NewSession(ctx, gollem.WithSessionContentType(gollem.ContentTypeJSON))
 func WithSessionContentType(contentType ContentType) SessionOption {
 	return func(cfg *SessionConfig) {
 		cfg.contentType = contentType
@@ -69,7 +69,7 @@ func WithSessionContentType(contentType ContentType) SessionOption {
 
 // WithSessionTools sets the tools for the session.
 // Usage:
-// session, err := llmClient.NewSession(ctx, gollam.WithSessionTools(tools))
+// session, err := llmClient.NewSession(ctx, gollem.WithSessionTools(tools))
 func WithSessionTools(tools ...Tool) SessionOption {
 	return func(cfg *SessionConfig) {
 		cfg.tools = append(cfg.tools, tools...)
@@ -78,7 +78,7 @@ func WithSessionTools(tools ...Tool) SessionOption {
 
 // WithSessionSystemPrompt sets the system prompt for the session.
 // Usage:
-// session, err := llmClient.NewSession(ctx, gollam.WithSessionSystemPrompt("You are a helpful assistant."))
+// session, err := llmClient.NewSession(ctx, gollem.WithSessionSystemPrompt("You are a helpful assistant."))
 func WithSessionSystemPrompt(systemPrompt string) SessionOption {
 	return func(cfg *SessionConfig) {
 		cfg.systemPrompt = systemPrompt

@@ -1,4 +1,4 @@
-module github.com/m-mizutani/gollam
+module github.com/m-mizutani/gollem
 
 go 1.24
 

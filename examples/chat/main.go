@@ -8,20 +8,20 @@ import (
 	"io"
 	"os"
 
-	"github.com/m-mizutani/gollam"
-	"github.com/m-mizutani/gollam/llm/gemini"
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/llm/gemini"
 )
 
 // WeatherTool is a simple tool that returns a weather
 type WeatherTool struct{}
 
-func (t *WeatherTool) Spec() gollam.ToolSpec {
-	return gollam.ToolSpec{
+func (t *WeatherTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
 		Name:        "weather",
 		Description: "Returns a weather",
-		Parameters: map[string]*gollam.Parameter{
+		Parameters: map[string]*gollem.Parameter{
 			"city": {
-				Type:        gollam.TypeString,
+				Type:        gollem.TypeString,
 				Description: "City name",
 			},
 		},
@@ -47,20 +47,20 @@ func main() {
 		panic(err)
 	}
 
-	g := gollam.New(llmModel,
-		gollam.WithResponseMode(gollam.ResponseModeStreaming),
-		gollam.WithTools(&WeatherTool{}),
-		gollam.WithMessageHook(func(ctx context.Context, msg string) error {
+	g := gollem.New(llmModel,
+		gollem.WithResponseMode(gollem.ResponseModeStreaming),
+		gollem.WithTools(&WeatherTool{}),
+		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
 			fmt.Printf("%s", msg)
 			return nil
 		}),
-		gollam.WithToolRequestHook(func(ctx context.Context, tool gollam.FunctionCall) error {
+		gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
 			fmt.Printf("⚡ Call: %s\n", tool.Name)
 			return nil
 		}),
 	)
 
-	tmpFile, err := os.CreateTemp("", "gollam-chat-*.txt")
+	tmpFile, err := os.CreateTemp("", "gollem-chat-*.txt")
 	if err != nil {
 		panic(err)
 	}
@@ -81,7 +81,7 @@ func main() {
 		text := scanner.Text()
 
 		fmt.Printf("🤖 ")
-		newHistory, err := g.Prompt(ctx, text, gollam.WithHistory(history))
+		newHistory, err := g.Prompt(ctx, text, gollem.WithHistory(history))
 		if err != nil {
 			panic(err)
 		}
@@ -94,7 +94,7 @@ func main() {
 	}
 }
 
-func dumpHistory(history *gollam.History, path string) error {
+func dumpHistory(history *gollem.History, path string) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
@@ -108,7 +108,7 @@ func dumpHistory(history *gollam.History, path string) error {
 	return nil
 }
 
-func loadHistory(path string) (*gollam.History, error) {
+func loadHistory(path string) (*gollem.History, error) {
 	if st, err := os.Stat(path); err != nil || st.Size() == 0 {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func loadHistory(path string) (*gollam.History, error) {
 		return nil, err
 	}
 
-	var history gollam.History
+	var history gollem.History
 	if err := json.Unmarshal(data, &history); err != nil {
 		return nil, err
 	}

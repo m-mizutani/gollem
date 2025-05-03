@@ -1,4 +1,4 @@
-package gollam_test
+package gollem_test
 
 import (
 	"context"
@@ -7,27 +7,27 @@ import (
 	"os"
 	"testing"
 
-	"github.com/m-mizutani/gollam"
-	"github.com/m-mizutani/gollam/llm/claude"
-	"github.com/m-mizutani/gollam/llm/gemini"
-	"github.com/m-mizutani/gollam/llm/gpt"
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/llm/claude"
+	"github.com/m-mizutani/gollem/llm/gemini"
+	"github.com/m-mizutani/gollem/llm/openai"
 	"github.com/m-mizutani/gt"
 )
 
 // RandomNumberTool is a tool that generates a random number within a specified range
 type RandomNumberTool struct{}
 
-func (t *RandomNumberTool) Spec() gollam.ToolSpec {
-	return gollam.ToolSpec{
+func (t *RandomNumberTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
 		Name:        "random_number",
 		Description: "Generates a random number within a specified range",
-		Parameters: map[string]*gollam.Parameter{
+		Parameters: map[string]*gollem.Parameter{
 			"min": {
-				Type:        gollam.TypeNumber,
+				Type:        gollem.TypeNumber,
 				Description: "Minimum value of the range",
 			},
 			"max": {
-				Type:        gollam.TypeNumber,
+				Type:        gollem.TypeNumber,
 				Description: "Maximum value of the range",
 			},
 		},
@@ -49,27 +49,27 @@ func (t *RandomNumberTool) Run(ctx context.Context, args map[string]any) (map[st
 	}, nil
 }
 
-func TestGollamWithTool(t *testing.T) {
-	respModes := []gollam.ResponseMode{
-		gollam.ResponseModeBlocking,
-		gollam.ResponseModeStreaming,
+func TestGollemWithTool(t *testing.T) {
+	respModes := []gollem.ResponseMode{
+		gollem.ResponseModeBlocking,
+		gollem.ResponseModeStreaming,
 	}
 
-	testFn := func(t *testing.T, newClient func(t *testing.T) (gollam.LLMClient, error)) {
+	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
 		for _, respMode := range respModes {
 			t.Run(fmt.Sprintf("ResponseMode=%s", respMode), func(t *testing.T) {
 				client, err := newClient(t)
 				gt.NoError(t, err)
 
 				toolCalled := false
-				s := gollam.New(client,
-					gollam.WithTools(&RandomNumberTool{}),
-					gollam.WithToolRequestHook(func(ctx context.Context, tool gollam.FunctionCall) error {
+				s := gollem.New(client,
+					gollem.WithTools(&RandomNumberTool{}),
+					gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
 						toolCalled = true
 						gt.Equal(t, tool.Name, "random_number")
 						return nil
 					}),
-					gollam.WithResponseMode(respMode),
+					gollem.WithResponseMode(respMode),
 				)
 
 				_, err = s.Prompt(t.Context(), "Generate a random number between 1 and 100.")
@@ -79,13 +79,13 @@ func TestGollamWithTool(t *testing.T) {
 		}
 	}
 
-	t.Run("GPT", func(t *testing.T) {
+	t.Run("OpenAI", func(t *testing.T) {
 		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
 		if !ok {
 			t.Skip("TEST_OPENAI_API_KEY is not set")
 		}
-		testFn(t, func(t *testing.T) (gollam.LLMClient, error) {
-			return gpt.New(context.Background(), apiKey)
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return openai.New(context.Background(), apiKey)
 		})
 	})
 
@@ -94,7 +94,7 @@ func TestGollamWithTool(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_CLAUDE_API_KEY is not set")
 		}
-		testFn(t, func(t *testing.T) (gollam.LLMClient, error) {
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
 			return claude.New(context.Background(), apiKey)
 		})
 	})
@@ -108,7 +108,7 @@ func TestGollamWithTool(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_GCP_LOCATION is not set")
 		}
-		testFn(t, func(t *testing.T) (gollam.LLMClient, error) {
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
 			return gemini.New(context.Background(), projectID, location)
 		})
 	})

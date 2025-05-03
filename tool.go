@@ -1,4 +1,4 @@
-package gollam
+package gollem
 
 import (
 	"context"
