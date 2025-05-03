@@ -10,13 +10,13 @@ import (
 )
 
 // History represents a conversation history that can be used across different LLM sessions.
-// It stores messages in a format specific to each LLM type (GPT, Claude, or Gemini).
+// It stores messages in a format specific to each LLM type (OpenAI, Claude, or Gemini).
 //
 // For detailed documentation, see doc/history.md
 type llmType string
 
 const (
-	llmTypeGPT    llmType = "gpt"
+	llmTypeOpenAI llmType = "OpenAI"
 	llmTypeGemini llmType = "gemini"
 	llmTypeClaude llmType = "claude"
 )
@@ -30,7 +30,7 @@ type History struct {
 	Version int     `json:"version"`
 
 	Claude []claudeMessage                `json:"claude,omitempty"`
-	GPT    []openai.ChatCompletionMessage `json:"gpt,omitempty"`
+	OpenAI []openai.ChatCompletionMessage `json:"OpenAI,omitempty"`
 	Gemini []geminiMessage                `json:"gemini,omitempty"`
 }
 
@@ -54,14 +54,14 @@ func (x *History) ToClaude() ([]anthropic.MessageParam, error) {
 	return toClaudeMessages(x.Claude)
 }
 
-func (x *History) ToGPT() ([]openai.ChatCompletionMessage, error) {
+func (x *History) ToOpenAI() ([]openai.ChatCompletionMessage, error) {
 	if x.Version != HistoryVersion {
 		return nil, goerr.Wrap(ErrHistoryVersionMismatch, "history version is not supported", goerr.V("expected", HistoryVersion), goerr.V("actual", x.Version))
 	}
-	if x.LLType != llmTypeGPT {
-		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not gpt", goerr.V("expected", llmTypeGPT), goerr.V("actual", x.LLType))
+	if x.LLType != llmTypeOpenAI {
+		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not OpenAI", goerr.V("expected", llmTypeOpenAI), goerr.V("actual", x.LLType))
 	}
-	return x.GPT, nil
+	return x.OpenAI, nil
 }
 
 type claudeMessage struct {
@@ -112,11 +112,11 @@ type geminiPart struct {
 	Response map[string]interface{} `json:"response,omitempty"`
 }
 
-func NewHistoryFromGPT(messages []openai.ChatCompletionMessage) *History {
+func NewHistoryFromOpenAI(messages []openai.ChatCompletionMessage) *History {
 	return &History{
-		LLType:  llmTypeGPT,
+		LLType:  llmTypeOpenAI,
 		Version: HistoryVersion,
-		GPT:     messages,
+		OpenAI:  messages,
 	}
 }
 

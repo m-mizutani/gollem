@@ -12,8 +12,8 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-func TestHistoryGPT(t *testing.T) {
-	// Create GPT messages with various content types
+func TestHistoryOpenAI(t *testing.T) {
+	// Create OpenAI messages with various content types
 	messages := []openai.ChatCompletionMessage{
 		{
 			Role:    "system",
@@ -51,7 +51,7 @@ func TestHistoryGPT(t *testing.T) {
 	}
 
 	// Create History object
-	history := gollem.NewHistoryFromGPT(messages)
+	history := gollem.NewHistoryFromOpenAI(messages)
 
 	// Convert to JSON
 	data, err := json.Marshal(history)
@@ -61,7 +61,7 @@ func TestHistoryGPT(t *testing.T) {
 	var restored gollem.History
 	gt.NoError(t, json.Unmarshal(data, &restored))
 
-	restoredMessages, err := restored.ToGPT()
+	restoredMessages, err := restored.ToOpenAI()
 	gt.NoError(t, err)
 
 	gt.Equal(t, messages, restoredMessages)

@@ -1,4 +1,4 @@
-package gpt
+package openai
 
 import (
 	"context"
