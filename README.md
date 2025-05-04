@@ -122,7 +122,7 @@ See the full example in [examples/basic](https://github.com/m-mizutani/gollem/tr
 
 ## Documentation
 
-For more details and examples, visit our [documentation site](https://github.com/m-mizutani/gollem/tree/main/doc).
+For more details and examples, visit our [document](https://github.com/m-mizutani/gollem/tree/main/doc) and [godoc](https://pkg.go.dev/github.com/m-mizutani/gollem).
 
 ## License
 
