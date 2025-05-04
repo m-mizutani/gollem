@@ -27,7 +27,6 @@ func (x *Client) CallTool(ctx context.Context, name string, args map[string]any)
 
 var (
 	InputSchemaToParameter = inputSchemaToParameter
+	MCPContentToMap        = mcpContentToMap
+	JSONSchemaToParameter  = jsonSchemaToParameter
 )
-
-// Export for testing
-var MCPContentToMap = mcpContentToMap
