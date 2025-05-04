@@ -34,6 +34,13 @@ type History struct {
 	Gemini []geminiMessage                `json:"gemini,omitempty"`
 }
 
+func (x *History) ToCount() int {
+	if x == nil {
+		return 0
+	}
+	return len(x.Claude) + len(x.OpenAI) + len(x.Gemini)
+}
+
 func (x *History) ToGemini() ([]*genai.Content, error) {
 	if x.Version != HistoryVersion {
 		return nil, goerr.Wrap(ErrHistoryVersionMismatch, "history version is not supported", goerr.V("expected", HistoryVersion), goerr.V("actual", x.Version))

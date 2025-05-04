@@ -34,13 +34,19 @@ type Client struct {
 
 // Specs implements gollem.ToolSet interface
 func (c *Client) Specs(ctx context.Context) ([]gollem.ToolSpec, error) {
+	logger := gollem.LoggerFromContext(ctx)
+
 	tools, err := c.listTools(ctx)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list tools")
 	}
 
 	specs := make([]gollem.ToolSpec, len(tools))
+	toolNames := make([]string, len(tools))
+
 	for i, tool := range tools {
+		toolNames[i] = tool.Name
+
 		param, err := inputSchemaToParameter(tool.InputSchema)
 		if err != nil {
 			return nil, goerr.Wrap(err,
@@ -58,11 +64,17 @@ func (c *Client) Specs(ctx context.Context) ([]gollem.ToolSpec, error) {
 		}
 	}
 
+	logger.Debug("found MCP tools", "names", toolNames)
+
 	return specs, nil
 }
 
 // Run implements gollem.ToolSet interface
 func (c *Client) Run(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
+	logger := gollem.LoggerFromContext(ctx)
+
+	logger.Debug("call MCP tool", "name", name, "args", args)
+
 	resp, err := c.callTool(ctx, name, args)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to call tool")
@@ -128,6 +140,8 @@ func (c *Client) init(ctx context.Context) error {
 	c.initMutex.Lock()
 	defer c.initMutex.Unlock()
 
+	logger := gollem.LoggerFromContext(ctx)
+
 	if c.initResult != nil {
 		return nil
 	}
@@ -151,6 +165,7 @@ func (c *Client) init(ctx context.Context) error {
 
 	c.client = client.NewClient(tp)
 
+	logger.Debug("starting MCP client", "path", c.path, "url", c.baseURL)
 	if err := c.client.Start(ctx); err != nil {
 		return goerr.Wrap(err, "failed to start MCP client")
 	}
@@ -162,6 +177,7 @@ func (c *Client) init(ctx context.Context) error {
 		Version: "0.0.1",
 	}
 
+	logger.Debug("initializing MCP client")
 	if resp, err := c.client.Initialize(ctx, initRequest); err != nil {
 		return goerr.Wrap(err, "failed to initialize MCP client")
 	} else {

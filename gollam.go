@@ -99,6 +99,21 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 		opt(&s.gollemConfig)
 	}
 
+	s.logger.Info("gollem agent created",
+		"loop_limit", s.gollemConfig.loopLimit,
+		"retry_limit", s.gollemConfig.retryLimit,
+		"init_prompt", s.gollemConfig.initPrompt,
+		"system_prompt", s.gollemConfig.systemPrompt,
+		"tools_count", len(s.gollemConfig.tools),
+		"tool_sets_count", len(s.gollemConfig.toolSets),
+		"response_mode", s.gollemConfig.responseMode,
+		"has_message_hook", s.gollemConfig.messageHook != nil,
+		"has_tool_request_hook", s.gollemConfig.toolRequestHook != nil,
+		"has_tool_response_hook", s.gollemConfig.toolResponseHook != nil,
+		"has_tool_error_hook", s.gollemConfig.toolErrorHook != nil,
+		"has_history", s.gollemConfig.history != nil,
+	)
+
 	return s
 }
 
@@ -229,10 +244,12 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 		opt(cfg)
 	}
 
-	orderID := uuid.New().String()
-	logger := cfg.logger.With("gollem.order_id", orderID)
+	logger := cfg.logger.With("gollem.request_id", uuid.New().String())
 	ctx = ctxWithLogger(ctx, logger)
-	logger.Info("start order", "prompt", prompt)
+	logger.Info("starting gollem session",
+		"prompt", prompt,
+		"history_count", cfg.history.ToCount(),
+	)
 
 	toolMap, err := buildToolMap(ctx, cfg.tools, cfg.toolSets)
 	if err != nil {
@@ -245,7 +262,7 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 		toolList = append(toolList, tool)
 		toolNames = append(toolNames, tool.Spec().Name)
 	}
-	logger.Debug("tool list", "names", toolNames)
+	logger.Debug("gollem tool list", "names", toolNames)
 
 	input := []Input{Text(prompt)}
 
@@ -272,7 +289,7 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 			return nil, goerr.Wrap(ErrLoopLimitExceeded, "order stopped", goerr.V("loop_limit", cfg.loopLimit))
 		}
 
-		logger.Debug("send request", "count", i, "input", input)
+		logger.Debug("gollem sending request", "loop", i, "input", input)
 
 		switch cfg.responseMode {
 		case ResponseModeBlocking:
@@ -309,6 +326,8 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 }
 
 func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, toolMap map[string]Tool) ([]Input, error) {
+	logger := LoggerFromContext(ctx)
+
 	newInput := make([]Input, 0)
 	// Call the MessageHook for all texts
 	for _, text := range output.Texts {
@@ -321,12 +340,15 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 
 	// Call the ToolRequestHook for all tool calls
 	for _, toolCall := range output.FunctionCalls {
+		logger.Debug("gollem received tool request", "tool", toolCall.Name, "args", toolCall.Arguments)
+
 		if err := cfg.toolRequestHook(ctx, *toolCall); err != nil {
 			return nil, goerr.Wrap(err, "failed to call ToolRequestHook")
 		}
 
 		tool, ok := toolMap[toolCall.Name]
 		if !ok {
+			logger.Info("gollem tool not found", "call", toolCall)
 			newInput = append(newInput, FunctionResponse{
 				Name:  toolCall.Name,
 				ID:    toolCall.ID,
@@ -336,10 +358,13 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 		}
 
 		result, err := tool.Run(ctx, toolCall.Arguments)
+		logger.Debug("gollem tool result", "tool", toolCall.Name, "result", result)
 		if err != nil {
 			if cbErr := cfg.toolErrorHook(ctx, err, *toolCall); cbErr != nil {
 				return nil, goerr.Wrap(cbErr, "failed to call ToolErrorHook")
 			}
+
+			logger.Info("gollem tool error", "call", toolCall, "error", err)
 
 			newInput = append(newInput, FunctionResponse{
 				ID:    toolCall.ID,
@@ -352,6 +377,8 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 		if cbErr := cfg.toolResponseHook(ctx, *toolCall, result); cbErr != nil {
 			return nil, goerr.Wrap(cbErr, "failed to call ToolResponseHook")
 		}
+
+		logger.Info("gollem tool response", "call", toolCall, "result", result)
 
 		newInput = append(newInput, FunctionResponse{
 			ID:   toolCall.ID,
