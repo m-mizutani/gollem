@@ -276,6 +276,41 @@ func jsonSchemaToParameter(schema *jsonschema.Schema) *gollem.Parameter {
 		}
 	}
 
+	var minimum, maximum *float64
+	if schema.Minimum != nil {
+		min, _ := (*schema.Minimum).Float64()
+		minimum = &min
+	}
+	if schema.Maximum != nil {
+		max, _ := (*schema.Maximum).Float64()
+		maximum = &max
+	}
+
+	var minLength, maxLength *int
+	if schema.MinLength != nil {
+		min := int(*schema.MinLength)
+		minLength = &min
+	}
+	if schema.MaxLength != nil {
+		max := int(*schema.MaxLength)
+		maxLength = &max
+	}
+
+	var minItems, maxItems *int
+	if schema.MinItems != nil {
+		min := int(*schema.MinItems)
+		minItems = &min
+	}
+	if schema.MaxItems != nil {
+		max := int(*schema.MaxItems)
+		maxItems = &max
+	}
+
+	var pattern string
+	if schema.Pattern != nil {
+		pattern = schema.Pattern.String()
+	}
+
 	return &gollem.Parameter{
 		Type:        gollem.ParameterType(schema.Types.ToStrings()[0]),
 		Title:       schema.Title,
@@ -284,29 +319,42 @@ func jsonSchemaToParameter(schema *jsonschema.Schema) *gollem.Parameter {
 		Enum:        enum,
 		Properties:  properties,
 		Items:       items,
+		Minimum:     minimum,
+		Maximum:     maximum,
+		MinLength:   minLength,
+		MaxLength:   maxLength,
+		Pattern:     pattern,
+		MinItems:    minItems,
+		MaxItems:    maxItems,
+		Default:     schema.Default,
 	}
 }
 
 func mcpContentToMap(contents []mcp.Content) map[string]any {
-	for _, c := range contents {
-		if txt, ok := c.(*mcp.TextContent); ok {
+	if len(contents) == 0 {
+		return nil
+	}
+
+	if len(contents) == 1 {
+		if content, ok := contents[0].(mcp.TextContent); ok {
 			var v any
-			if err := json.Unmarshal([]byte(txt.Text), &v); err == nil {
+			if err := json.Unmarshal([]byte(content.Text), &v); err == nil {
 				if mapData, ok := v.(map[string]any); ok {
 					return mapData
 				}
-
-				return map[string]any{
-					"result": v,
-				}
 			}
-
 			return map[string]any{
-				"result": txt.Text,
+				"result": content.Text,
 			}
 		}
+		return nil
 	}
 
-	// No appropriate content found
-	return map[string]any{}
+	result := map[string]any{}
+	for i, c := range contents {
+		if content, ok := c.(mcp.TextContent); ok {
+			result[fmt.Sprintf("content_%d", i+1)] = content.Text
+		}
+	}
+	return result
 }
