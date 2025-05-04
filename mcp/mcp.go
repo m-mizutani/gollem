@@ -288,25 +288,30 @@ func jsonSchemaToParameter(schema *jsonschema.Schema) *gollem.Parameter {
 }
 
 func mcpContentToMap(contents []mcp.Content) map[string]any {
-	for _, c := range contents {
-		if txt, ok := c.(*mcp.TextContent); ok {
+	if len(contents) == 0 {
+		return nil
+	}
+
+	if len(contents) == 1 {
+		if content, ok := contents[0].(mcp.TextContent); ok {
 			var v any
-			if err := json.Unmarshal([]byte(txt.Text), &v); err == nil {
+			if err := json.Unmarshal([]byte(content.Text), &v); err == nil {
 				if mapData, ok := v.(map[string]any); ok {
 					return mapData
 				}
-
-				return map[string]any{
-					"result": v,
-				}
 			}
-
 			return map[string]any{
-				"result": txt.Text,
+				"result": content.Text,
 			}
 		}
+		return nil
 	}
 
-	// No appropriate content found
-	return map[string]any{}
+	result := map[string]any{}
+	for i, c := range contents {
+		if content, ok := c.(mcp.TextContent); ok {
+			result[fmt.Sprintf("content_%d", i+1)] = content.Text
+		}
+	}
+	return result
 }
