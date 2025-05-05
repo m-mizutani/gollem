@@ -5,28 +5,28 @@ package mock
 
 import (
 	"context"
-	"github.com/m-mizutani/gollam"
+	"github.com/m-mizutani/gollem"
 	"sync"
 )
 
-// LLMClientMock is a mock implementation of gollam.LLMClient.
+// LLMClientMock is a mock implementation of gollem.LLMClient.
 //
 //	func TestSomethingThatUsesLLMClient(t *testing.T) {
 //
-//		// make and configure a mocked gollam.LLMClient
+//		// make and configure a mocked gollem.LLMClient
 //		mockedLLMClient := &LLMClientMock{
-//			NewSessionFunc: func(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error) {
+//			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 //				panic("mock out the NewSession method")
 //			},
 //		}
 //
-//		// use mockedLLMClient in code that requires gollam.LLMClient
+//		// use mockedLLMClient in code that requires gollem.LLMClient
 //		// and then make assertions.
 //
 //	}
 type LLMClientMock struct {
 	// NewSessionFunc mocks the NewSession method.
-	NewSessionFunc func(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error)
+	NewSessionFunc func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -35,17 +35,17 @@ type LLMClientMock struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Options is the options argument value.
-			Options []gollam.SessionOption
+			Options []gollem.SessionOption
 		}
 	}
 	lockNewSession sync.RWMutex
 }
 
 // NewSession calls NewSessionFunc.
-func (mock *LLMClientMock) NewSession(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error) {
+func (mock *LLMClientMock) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 	callInfo := struct {
 		Ctx     context.Context
-		Options []gollam.SessionOption
+		Options []gollem.SessionOption
 	}{
 		Ctx:     ctx,
 		Options: options,
@@ -55,7 +55,7 @@ func (mock *LLMClientMock) NewSession(ctx context.Context, options ...gollam.Ses
 	mock.lockNewSession.Unlock()
 	if mock.NewSessionFunc == nil {
 		var (
-			sessionOut gollam.Session
+			sessionOut gollem.Session
 			errOut     error
 		)
 		return sessionOut, errOut
@@ -69,11 +69,11 @@ func (mock *LLMClientMock) NewSession(ctx context.Context, options ...gollam.Ses
 //	len(mockedLLMClient.NewSessionCalls())
 func (mock *LLMClientMock) NewSessionCalls() []struct {
 	Ctx     context.Context
-	Options []gollam.SessionOption
+	Options []gollem.SessionOption
 } {
 	var calls []struct {
 		Ctx     context.Context
-		Options []gollam.SessionOption
+		Options []gollem.SessionOption
 	}
 	mock.lockNewSession.RLock()
 	calls = mock.calls.NewSession
@@ -81,36 +81,36 @@ func (mock *LLMClientMock) NewSessionCalls() []struct {
 	return calls
 }
 
-// SessionMock is a mock implementation of gollam.Session.
+// SessionMock is a mock implementation of gollem.Session.
 //
 //	func TestSomethingThatUsesSession(t *testing.T) {
 //
-//		// make and configure a mocked gollam.Session
+//		// make and configure a mocked gollem.Session
 //		mockedSession := &SessionMock{
-//			GenerateContentFunc: func(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+//			GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 //				panic("mock out the GenerateContent method")
 //			},
-//			GenerateStreamFunc: func(ctx context.Context, input ...gollam.Input) (<-chan *gollam.Response, error) {
+//			GenerateStreamFunc: func(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
 //				panic("mock out the GenerateStream method")
 //			},
-//			HistoryFunc: func() *gollam.History {
+//			HistoryFunc: func() *gollem.History {
 //				panic("mock out the History method")
 //			},
 //		}
 //
-//		// use mockedSession in code that requires gollam.Session
+//		// use mockedSession in code that requires gollem.Session
 //		// and then make assertions.
 //
 //	}
 type SessionMock struct {
 	// GenerateContentFunc mocks the GenerateContent method.
-	GenerateContentFunc func(ctx context.Context, input ...gollam.Input) (*gollam.Response, error)
+	GenerateContentFunc func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error)
 
 	// GenerateStreamFunc mocks the GenerateStream method.
-	GenerateStreamFunc func(ctx context.Context, input ...gollam.Input) (<-chan *gollam.Response, error)
+	GenerateStreamFunc func(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error)
 
 	// HistoryFunc mocks the History method.
-	HistoryFunc func() *gollam.History
+	HistoryFunc func() *gollem.History
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -119,14 +119,14 @@ type SessionMock struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Input is the input argument value.
-			Input []gollam.Input
+			Input []gollem.Input
 		}
 		// GenerateStream holds details about calls to the GenerateStream method.
 		GenerateStream []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Input is the input argument value.
-			Input []gollam.Input
+			Input []gollem.Input
 		}
 		// History holds details about calls to the History method.
 		History []struct {
@@ -138,10 +138,10 @@ type SessionMock struct {
 }
 
 // GenerateContent calls GenerateContentFunc.
-func (mock *SessionMock) GenerateContent(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+func (mock *SessionMock) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 	callInfo := struct {
 		Ctx   context.Context
-		Input []gollam.Input
+		Input []gollem.Input
 	}{
 		Ctx:   ctx,
 		Input: input,
@@ -151,7 +151,7 @@ func (mock *SessionMock) GenerateContent(ctx context.Context, input ...gollam.In
 	mock.lockGenerateContent.Unlock()
 	if mock.GenerateContentFunc == nil {
 		var (
-			responseOut *gollam.Response
+			responseOut *gollem.Response
 			errOut      error
 		)
 		return responseOut, errOut
@@ -165,11 +165,11 @@ func (mock *SessionMock) GenerateContent(ctx context.Context, input ...gollam.In
 //	len(mockedSession.GenerateContentCalls())
 func (mock *SessionMock) GenerateContentCalls() []struct {
 	Ctx   context.Context
-	Input []gollam.Input
+	Input []gollem.Input
 } {
 	var calls []struct {
 		Ctx   context.Context
-		Input []gollam.Input
+		Input []gollem.Input
 	}
 	mock.lockGenerateContent.RLock()
 	calls = mock.calls.GenerateContent
@@ -178,10 +178,10 @@ func (mock *SessionMock) GenerateContentCalls() []struct {
 }
 
 // GenerateStream calls GenerateStreamFunc.
-func (mock *SessionMock) GenerateStream(ctx context.Context, input ...gollam.Input) (<-chan *gollam.Response, error) {
+func (mock *SessionMock) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
 	callInfo := struct {
 		Ctx   context.Context
-		Input []gollam.Input
+		Input []gollem.Input
 	}{
 		Ctx:   ctx,
 		Input: input,
@@ -191,7 +191,7 @@ func (mock *SessionMock) GenerateStream(ctx context.Context, input ...gollam.Inp
 	mock.lockGenerateStream.Unlock()
 	if mock.GenerateStreamFunc == nil {
 		var (
-			responseChOut <-chan *gollam.Response
+			responseChOut <-chan *gollem.Response
 			errOut        error
 		)
 		return responseChOut, errOut
@@ -205,11 +205,11 @@ func (mock *SessionMock) GenerateStream(ctx context.Context, input ...gollam.Inp
 //	len(mockedSession.GenerateStreamCalls())
 func (mock *SessionMock) GenerateStreamCalls() []struct {
 	Ctx   context.Context
-	Input []gollam.Input
+	Input []gollem.Input
 } {
 	var calls []struct {
 		Ctx   context.Context
-		Input []gollam.Input
+		Input []gollem.Input
 	}
 	mock.lockGenerateStream.RLock()
 	calls = mock.calls.GenerateStream
@@ -218,7 +218,7 @@ func (mock *SessionMock) GenerateStreamCalls() []struct {
 }
 
 // History calls HistoryFunc.
-func (mock *SessionMock) History() *gollam.History {
+func (mock *SessionMock) History() *gollem.History {
 	callInfo := struct {
 	}{}
 	mock.lockHistory.Lock()
@@ -226,7 +226,7 @@ func (mock *SessionMock) History() *gollam.History {
 	mock.lockHistory.Unlock()
 	if mock.HistoryFunc == nil {
 		var (
-			historyOut *gollam.History
+			historyOut *gollem.History
 		)
 		return historyOut
 	}
@@ -247,21 +247,21 @@ func (mock *SessionMock) HistoryCalls() []struct {
 	return calls
 }
 
-// ToolMock is a mock implementation of gollam.Tool.
+// ToolMock is a mock implementation of gollem.Tool.
 //
 //	func TestSomethingThatUsesTool(t *testing.T) {
 //
-//		// make and configure a mocked gollam.Tool
+//		// make and configure a mocked gollem.Tool
 //		mockedTool := &ToolMock{
 //			RunFunc: func(ctx context.Context, args map[string]any) (map[string]any, error) {
 //				panic("mock out the Run method")
 //			},
-//			SpecFunc: func() gollam.ToolSpec {
+//			SpecFunc: func() gollem.ToolSpec {
 //				panic("mock out the Spec method")
 //			},
 //		}
 //
-//		// use mockedTool in code that requires gollam.Tool
+//		// use mockedTool in code that requires gollem.Tool
 //		// and then make assertions.
 //
 //	}
@@ -270,7 +270,7 @@ type ToolMock struct {
 	RunFunc func(ctx context.Context, args map[string]any) (map[string]any, error)
 
 	// SpecFunc mocks the Spec method.
-	SpecFunc func() gollam.ToolSpec
+	SpecFunc func() gollem.ToolSpec
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -330,7 +330,7 @@ func (mock *ToolMock) RunCalls() []struct {
 }
 
 // Spec calls SpecFunc.
-func (mock *ToolMock) Spec() gollam.ToolSpec {
+func (mock *ToolMock) Spec() gollem.ToolSpec {
 	callInfo := struct {
 	}{}
 	mock.lockSpec.Lock()
@@ -338,7 +338,7 @@ func (mock *ToolMock) Spec() gollam.ToolSpec {
 	mock.lockSpec.Unlock()
 	if mock.SpecFunc == nil {
 		var (
-			toolSpecOut gollam.ToolSpec
+			toolSpecOut gollem.ToolSpec
 		)
 		return toolSpecOut
 	}
