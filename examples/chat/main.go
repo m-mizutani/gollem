@@ -114,7 +114,7 @@ func loadHistory(path string) (*gollem.History, error) {
 		return nil, err
 	}
 
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, err
 	}
