@@ -1,0 +1,17 @@
+# https://taskfile.dev
+
+version: '3'
+
+tasks:
+  default:
+    deps:
+      - mock
+  mock:
+    desc: Generate mock files
+    cmds:
+      - go run github.com/matryer/moq@v0.5.3
+        -out ./mock/mock_gen.go
+        -pkg mock
+        -rm -skip-ensure -stub
+        .
+        LLMClient Session Tool
