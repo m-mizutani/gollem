@@ -12,11 +12,11 @@ import (
 
 	"log/slog"
 
-	"github.com/m-mizutani/gollam"
-	"github.com/m-mizutani/gollam/llm/claude"
-	"github.com/m-mizutani/gollam/llm/gemini"
-	"github.com/m-mizutani/gollam/llm/gpt"
-	"github.com/m-mizutani/gollam/mock"
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/llm/claude"
+	"github.com/m-mizutani/gollem/llm/gemini"
+	"github.com/m-mizutani/gollem/llm/openai"
+	"github.com/m-mizutani/gollem/mock"
 	"github.com/m-mizutani/gt"
 )
 
@@ -120,23 +120,23 @@ func TestGollemWithTool(t *testing.T) {
 	})
 }
 
-func TestGollamWithHooks(t *testing.T) {
+func TestGollemWithHooks(t *testing.T) {
 	mockClient := &mock.LLMClientMock{
-		NewSessionFunc: func(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error) {
+		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 			mockSession := &mock.SessionMock{
-				GenerateContentFunc: func(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+				GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 					// Check if the input is a function response
 					if len(input) > 0 {
-						if _, ok := input[0].(gollam.FunctionResponse); ok {
+						if _, ok := input[0].(gollem.FunctionResponse); ok {
 							// Return empty response to stop the loop
-							return &gollam.Response{}, nil
+							return &gollem.Response{}, nil
 						}
 					}
 
 					// Return response with function call
-					return &gollam.Response{
+					return &gollem.Response{
 						Texts: []string{"test response"},
-						FunctionCalls: []*gollam.FunctionCall{
+						FunctionCalls: []*gollem.FunctionCall{
 							{
 								Name: "test_tool",
 								Arguments: map[string]any{
@@ -153,15 +153,15 @@ func TestGollamWithHooks(t *testing.T) {
 
 	t.Run("ToolRequestHook", func(t *testing.T) {
 		toolRequestCalled := false
-		s := gollam.New(mockClient,
-			gollam.WithTools(&RandomNumberTool{}),
-			gollam.WithToolRequestHook(func(ctx context.Context, tool gollam.FunctionCall) error {
+		s := gollem.New(mockClient,
+			gollem.WithTools(&RandomNumberTool{}),
+			gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
 				toolRequestCalled = true
 				gt.Equal(t, tool.Name, "test_tool")
 				gt.Equal(t, tool.Arguments["arg1"], "value1")
 				return nil
 			}),
-			gollam.WithLoopLimit(1),
+			gollem.WithLoopLimit(1),
 		)
 
 		_, err := s.Prompt(t.Context(), "test message")
@@ -172,7 +172,7 @@ func TestGollamWithHooks(t *testing.T) {
 	t.Run("ToolResponseHook", func(t *testing.T) {
 		// Create a tool that returns a test result
 		testTool := &mockTool{
-			spec: gollam.ToolSpec{
+			spec: gollem.ToolSpec{
 				Name:        "test_tool",
 				Description: "A test tool",
 			},
@@ -184,15 +184,15 @@ func TestGollamWithHooks(t *testing.T) {
 		}
 
 		toolResponseCalled := false
-		s := gollam.New(mockClient,
-			gollam.WithTools(testTool),
-			gollam.WithToolResponseHook(func(ctx context.Context, tool gollam.FunctionCall, response map[string]any) error {
+		s := gollem.New(mockClient,
+			gollem.WithTools(testTool),
+			gollem.WithToolResponseHook(func(ctx context.Context, tool gollem.FunctionCall, response map[string]any) error {
 				toolResponseCalled = true
 				gt.Equal(t, tool.Name, "test_tool")
 				gt.Equal(t, response["result"], "test_result")
 				return nil
 			}),
-			gollam.WithLoopLimit(1),
+			gollem.WithLoopLimit(1),
 		)
 
 		_, err := s.Prompt(t.Context(), "test message")
@@ -203,7 +203,7 @@ func TestGollamWithHooks(t *testing.T) {
 	t.Run("ToolErrorHook", func(t *testing.T) {
 		// Create a tool that always returns an error
 		errorTool := &mockTool{
-			spec: gollam.ToolSpec{
+			spec: gollem.ToolSpec{
 				Name:        "test_tool", // Match the name in the mock response
 				Description: "A tool that always returns an error",
 			},
@@ -213,15 +213,15 @@ func TestGollamWithHooks(t *testing.T) {
 		}
 
 		toolErrorCalled := false
-		s := gollam.New(mockClient,
-			gollam.WithTools(errorTool),
-			gollam.WithToolErrorHook(func(ctx context.Context, err error, tool gollam.FunctionCall) error {
+		s := gollem.New(mockClient,
+			gollem.WithTools(errorTool),
+			gollem.WithToolErrorHook(func(ctx context.Context, err error, tool gollem.FunctionCall) error {
 				toolErrorCalled = true
 				gt.Equal(t, err.Error(), "test error")
 				gt.Equal(t, tool.Name, "test_tool")
 				return nil
 			}),
-			gollam.WithLoopLimit(1),
+			gollem.WithLoopLimit(1),
 		)
 
 		_, err := s.Prompt(t.Context(), "test message")
@@ -231,13 +231,13 @@ func TestGollamWithHooks(t *testing.T) {
 
 	t.Run("MessageHook", func(t *testing.T) {
 		messageHookCalled := false
-		s := gollam.New(mockClient,
-			gollam.WithMessageHook(func(ctx context.Context, msg string) error {
+		s := gollem.New(mockClient,
+			gollem.WithMessageHook(func(ctx context.Context, msg string) error {
 				messageHookCalled = true
 				gt.Equal(t, msg, "test response")
 				return nil
 			}),
-			gollam.WithLoopLimit(1),
+			gollem.WithLoopLimit(1),
 		)
 
 		_, err := s.Prompt(t.Context(), "test message")
@@ -246,13 +246,13 @@ func TestGollamWithHooks(t *testing.T) {
 	})
 }
 
-// mockTool is a mock implementation of gollam.Tool
+// mockTool is a mock implementation of gollem.Tool
 type mockTool struct {
-	spec gollam.ToolSpec
+	spec gollem.ToolSpec
 	run  func(ctx context.Context, args map[string]any) (map[string]any, error)
 }
 
-func (t *mockTool) Spec() gollam.ToolSpec {
+func (t *mockTool) Spec() gollem.ToolSpec {
 	return t.spec
 }
 
@@ -261,9 +261,9 @@ func (t *mockTool) Run(ctx context.Context, args map[string]any) (map[string]any
 }
 
 // newMockClient creates a new LLMClientMock with the given GenerateContentFunc
-func newMockClient(generateContentFunc func(ctx context.Context, input ...gollam.Input) (*gollam.Response, error)) *mock.LLMClientMock {
+func newMockClient(generateContentFunc func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error)) *mock.LLMClientMock {
 	return &mock.LLMClientMock{
-		NewSessionFunc: func(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error) {
+		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 			mockSession := &mock.SessionMock{
 				GenerateContentFunc: generateContentFunc,
 			}
@@ -272,14 +272,14 @@ func newMockClient(generateContentFunc func(ctx context.Context, input ...gollam
 	}
 }
 
-func TestGollamWithOptions(t *testing.T) {
+func TestGollemWithOptions(t *testing.T) {
 	t.Run("WithLoopLimit", func(t *testing.T) {
 		loopCount := 0
-		mockClient := newMockClient(func(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+		mockClient := newMockClient(func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 			loopCount++
-			return &gollam.Response{
+			return &gollem.Response{
 				Texts: []string{"test response"},
-				FunctionCalls: []*gollam.FunctionCall{
+				FunctionCalls: []*gollem.FunctionCall{
 					{
 						Name: "test_tool",
 						Arguments: map[string]any{
@@ -291,8 +291,8 @@ func TestGollamWithOptions(t *testing.T) {
 		})
 
 		tool := &mock.ToolMock{
-			SpecFunc: func() gollam.ToolSpec {
-				return gollam.ToolSpec{
+			SpecFunc: func() gollem.ToolSpec {
+				return gollem.ToolSpec{
 					Name:        "test_tool",
 					Description: "A test tool",
 				}
@@ -302,23 +302,23 @@ func TestGollamWithOptions(t *testing.T) {
 			},
 		}
 
-		s := gollam.New(mockClient, gollam.WithLoopLimit(10), gollam.WithTools(tool))
+		s := gollem.New(mockClient, gollem.WithLoopLimit(10), gollem.WithTools(tool))
 		_, err := s.Prompt(t.Context(), "test message")
 		gt.Error(t, err)
-		gt.True(t, errors.Is(err, gollam.ErrLoopLimitExceeded))
+		gt.True(t, errors.Is(err, gollem.ErrLoopLimitExceeded))
 		gt.Equal(t, loopCount, 11) // 10回のループ + 1回の制限チェック
 	})
 
 	t.Run("WithRetryLimit", func(t *testing.T) {
 		retryCount := 0
-		mockClient := newMockClient(func(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+		mockClient := newMockClient(func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 			// If input is a function response with error, continue the loop
 			if len(input) > 0 {
-				if resp, ok := input[0].(gollam.FunctionResponse); ok {
+				if resp, ok := input[0].(gollem.FunctionResponse); ok {
 					if resp.Error != nil {
-						return &gollam.Response{
+						return &gollem.Response{
 							Texts: []string{"retrying..."},
-							FunctionCalls: []*gollam.FunctionCall{
+							FunctionCalls: []*gollem.FunctionCall{
 								{
 									Name: "test_tool",
 									Arguments: map[string]any{
@@ -328,15 +328,15 @@ func TestGollamWithOptions(t *testing.T) {
 							},
 						}, nil
 					}
-					return &gollam.Response{
+					return &gollem.Response{
 						Texts: []string{"success"},
 					}, nil
 				}
 			}
 
-			return &gollam.Response{
+			return &gollem.Response{
 				Texts: []string{"test response"},
-				FunctionCalls: []*gollam.FunctionCall{
+				FunctionCalls: []*gollem.FunctionCall{
 					{
 						Name: "test_tool",
 						Arguments: map[string]any{
@@ -348,8 +348,8 @@ func TestGollamWithOptions(t *testing.T) {
 		})
 
 		tool := &mock.ToolMock{
-			SpecFunc: func() gollam.ToolSpec {
-				return gollam.ToolSpec{
+			SpecFunc: func() gollem.ToolSpec {
+				return gollem.ToolSpec{
 					Name:        "test_tool",
 					Description: "A test tool",
 				}
@@ -363,41 +363,41 @@ func TestGollamWithOptions(t *testing.T) {
 			},
 		}
 
-		s := gollam.New(mockClient, gollam.WithRetryLimit(5), gollam.WithLoopLimit(5), gollam.WithTools(tool))
+		s := gollem.New(mockClient, gollem.WithRetryLimit(5), gollem.WithLoopLimit(5), gollem.WithTools(tool))
 		_, err := s.Prompt(t.Context(), "test message")
 		gt.NoError(t, err)
 		gt.Equal(t, retryCount, 3)
 	})
 
 	t.Run("WithInitPrompt", func(t *testing.T) {
-		mockClient := newMockClient(func(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+		mockClient := newMockClient(func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 			// Check if the first input is initial prompt
 			if len(input) > 1 {
-				if text, ok := input[0].(gollam.Text); ok {
+				if text, ok := input[0].(gollem.Text); ok {
 					gt.Equal(t, string(text), "initial prompt")
 				}
-				if text, ok := input[1].(gollam.Text); ok {
+				if text, ok := input[1].(gollem.Text); ok {
 					gt.Equal(t, string(text), "test message")
 				}
 			}
-			return &gollam.Response{
+			return &gollem.Response{
 				Texts: []string{"test response"},
 			}, nil
 		})
 
-		s := gollam.New(mockClient, gollam.WithInitPrompt("initial prompt"))
+		s := gollem.New(mockClient, gollem.WithInitPrompt("initial prompt"))
 		_, err := s.Prompt(t.Context(), "test message")
 		gt.NoError(t, err)
 	})
 
 	t.Run("WithSystemPrompt", func(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
-			NewSessionFunc: func(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error) {
-				cfg := gollam.NewSessionConfig(options...)
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				cfg := gollem.NewSessionConfig(options...)
 				gt.Equal(t, cfg.SystemPrompt(), "system prompt")
 				mockSession := &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
-						return &gollam.Response{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						return &gollem.Response{
 							Texts: []string{"test response"},
 						}, nil
 					},
@@ -406,23 +406,23 @@ func TestGollamWithOptions(t *testing.T) {
 			},
 		}
 
-		s := gollam.New(mockClient, gollam.WithSystemPrompt("system prompt"))
+		s := gollem.New(mockClient, gollem.WithSystemPrompt("system prompt"))
 		_, err := s.Prompt(t.Context(), "test message")
 		gt.NoError(t, err)
 	})
 
 	t.Run("WithTools", func(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
-			NewSessionFunc: func(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error) {
-				cfg := gollam.NewSessionConfig(options...)
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				cfg := gollem.NewSessionConfig(options...)
 				tools := cfg.Tools()
 				gt.Equal(t, len(tools), 1)
 				gt.Equal(t, tools[0].Spec().Name, "test_tool")
 				gt.Equal(t, tools[0].Spec().Description, "A test tool")
 
 				mockSession := &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
-						return &gollam.Response{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						return &gollem.Response{
 							Texts: []string{"test response"},
 						}, nil
 					},
@@ -432,7 +432,7 @@ func TestGollamWithOptions(t *testing.T) {
 		}
 
 		tool := &mockTool{
-			spec: gollam.ToolSpec{
+			spec: gollem.ToolSpec{
 				Name:        "test_tool",
 				Description: "A test tool",
 			},
@@ -440,21 +440,21 @@ func TestGollamWithOptions(t *testing.T) {
 				return map[string]any{"result": "test"}, nil
 			},
 		}
-		s := gollam.New(mockClient, gollam.WithTools(tool), gollam.WithLoopLimit(1))
+		s := gollem.New(mockClient, gollem.WithTools(tool), gollem.WithLoopLimit(1))
 		_, err := s.Prompt(t.Context(), "test message")
 		gt.NoError(t, err)
 	})
 
 	t.Run("WithToolSets", func(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
-			NewSessionFunc: func(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error) {
-				cfg := gollam.NewSessionConfig(options...)
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				cfg := gollem.NewSessionConfig(options...)
 				tools := cfg.Tools()
 				gt.Equal(t, len(tools), 1) // ToolSets are converted to Tools in SessionConfig
 
 				mockSession := &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
-						return &gollam.Response{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						return &gollem.Response{
 							Texts: []string{"test response"},
 						}, nil
 					},
@@ -464,7 +464,7 @@ func TestGollamWithOptions(t *testing.T) {
 		}
 
 		toolSet := &mockToolSet{
-			specs: []gollam.ToolSpec{
+			specs: []gollem.ToolSpec{
 				{
 					Name:        "test_tool",
 					Description: "A test tool",
@@ -474,26 +474,26 @@ func TestGollamWithOptions(t *testing.T) {
 				return map[string]any{"result": "test"}, nil
 			},
 		}
-		s := gollam.New(mockClient, gollam.WithToolSets(toolSet), gollam.WithLoopLimit(1))
+		s := gollem.New(mockClient, gollem.WithToolSets(toolSet), gollem.WithLoopLimit(1))
 		_, err := s.Prompt(t.Context(), "test message")
 		gt.NoError(t, err)
 	})
 
 	t.Run("WithResponseMode", func(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
-			NewSessionFunc: func(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error) {
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				mockSession := &mock.SessionMock{
-					GenerateStreamFunc: func(ctx context.Context, input ...gollam.Input) (<-chan *gollam.Response, error) {
-						ch := make(chan *gollam.Response)
+					GenerateStreamFunc: func(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+						ch := make(chan *gollem.Response)
 						go func() {
 							defer close(ch)
-							ch <- &gollam.Response{
+							ch <- &gollem.Response{
 								Texts: []string{"test response 1"},
 							}
-							ch <- &gollam.Response{
+							ch <- &gollem.Response{
 								Texts: []string{"test response 2"},
 							}
-							ch <- &gollam.Response{
+							ch <- &gollem.Response{
 								Texts: []string{"test response 3"},
 							}
 						}()
@@ -505,9 +505,9 @@ func TestGollamWithOptions(t *testing.T) {
 		}
 
 		receivedMessages := []string{}
-		s := gollam.New(mockClient,
-			gollam.WithResponseMode(gollam.ResponseModeStreaming),
-			gollam.WithMessageHook(func(ctx context.Context, msg string) error {
+		s := gollem.New(mockClient,
+			gollem.WithResponseMode(gollem.ResponseModeStreaming),
+			gollem.WithMessageHook(func(ctx context.Context, msg string) error {
 				receivedMessages = append(receivedMessages, msg)
 				return nil
 			}),
@@ -526,13 +526,13 @@ func TestGollamWithOptions(t *testing.T) {
 			Level: slog.LevelDebug,
 		}))
 
-		mockClient := newMockClient(func(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
-			return &gollam.Response{
+		mockClient := newMockClient(func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+			return &gollem.Response{
 				Texts: []string{"test response"},
 			}, nil
 		})
 
-		s := gollam.New(mockClient, gollam.WithLogger(logger))
+		s := gollem.New(mockClient, gollem.WithLogger(logger))
 		_, err := s.Prompt(t.Context(), "test message")
 		gt.NoError(t, err)
 
@@ -542,24 +542,24 @@ func TestGollamWithOptions(t *testing.T) {
 
 	t.Run("CombineOptions", func(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
-			NewSessionFunc: func(ctx context.Context, options ...gollam.SessionOption) (gollam.Session, error) {
-				cfg := gollam.NewSessionConfig(options...)
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				cfg := gollem.NewSessionConfig(options...)
 				gt.Equal(t, cfg.SystemPrompt(), "system prompt")
 				gt.Equal(t, len(cfg.Tools()), 1)
 				gt.Equal(t, cfg.Tools()[0].Spec().Name, "test_tool")
 
 				mockSession := &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollam.Input) (*gollam.Response, error) {
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 						// Check if the first input is initial prompt
 						if len(input) > 1 {
-							if text, ok := input[0].(gollam.Text); ok {
+							if text, ok := input[0].(gollem.Text); ok {
 								gt.Equal(t, string(text), "initial prompt")
 							}
-							if text, ok := input[1].(gollam.Text); ok {
+							if text, ok := input[1].(gollem.Text); ok {
 								gt.Equal(t, string(text), "test message")
 							}
 						}
-						return &gollam.Response{
+						return &gollem.Response{
 							Texts: []string{"test response"},
 						}, nil
 					},
@@ -569,7 +569,7 @@ func TestGollamWithOptions(t *testing.T) {
 		}
 
 		tool := &mockTool{
-			spec: gollam.ToolSpec{
+			spec: gollem.ToolSpec{
 				Name:        "test_tool",
 				Description: "A test tool",
 			},
@@ -579,27 +579,27 @@ func TestGollamWithOptions(t *testing.T) {
 		}
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-		s := gollam.New(mockClient,
-			gollam.WithLoopLimit(1),
-			gollam.WithRetryLimit(5),
-			gollam.WithInitPrompt("initial prompt"),
-			gollam.WithSystemPrompt("system prompt"),
-			gollam.WithTools(tool),
-			gollam.WithResponseMode(gollam.ResponseModeBlocking),
-			gollam.WithLogger(logger),
+		s := gollem.New(mockClient,
+			gollem.WithLoopLimit(1),
+			gollem.WithRetryLimit(5),
+			gollem.WithInitPrompt("initial prompt"),
+			gollem.WithSystemPrompt("system prompt"),
+			gollem.WithTools(tool),
+			gollem.WithResponseMode(gollem.ResponseModeBlocking),
+			gollem.WithLogger(logger),
 		)
 		_, err := s.Prompt(t.Context(), "test message")
 		gt.NoError(t, err)
 	})
 }
 
-// mockToolSet is a mock implementation of gollam.ToolSet
+// mockToolSet is a mock implementation of gollem.ToolSet
 type mockToolSet struct {
-	specs []gollam.ToolSpec
+	specs []gollem.ToolSpec
 	run   func(ctx context.Context, name string, args map[string]any) (map[string]any, error)
 }
 
-func (t *mockToolSet) Specs(ctx context.Context) ([]gollam.ToolSpec, error) {
+func (t *mockToolSet) Specs(ctx context.Context) ([]gollem.ToolSpec, error) {
 	return t.specs, nil
 }
 
