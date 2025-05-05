@@ -1,21 +1,17 @@
-# 🤖 gollam [![Go Reference](https://pkg.go.dev/badge/github.com/m-mizutani/gollam.svg)](https://pkg.go.dev/github.com/m-mizutani/gollam) [![Test](https://github.com/m-mizutani/gollam/actions/workflows/test.yml/badge.svg)](https://github.com/m-mizutani/gollam/actions/workflows/test.yml) [![Lint](https://github.com/m-mizutani/gollam/actions/workflows/lint.yml/badge.svg)](https://github.com/m-mizutani/gollam/actions/workflows/lint.yml) [![Gosec](https://github.com/m-mizutani/gollam/actions/workflows/gosec.yml/badge.svg)](https://github.com/m-mizutani/gollam/actions/workflows/gosec.yml) [![Trivy](https://github.com/m-mizutani/gollam/actions/workflows/trivy.yml/badge.svg)](https://github.com/m-mizutani/gollam/actions/workflows/trivy.yml)
+# 🤖 gollem [![Go Reference](https://pkg.go.dev/badge/github.com/m-mizutani/gollem.svg)](https://pkg.go.dev/github.com/m-mizutani/gollem) [![Test](https://github.com/m-mizutani/gollem/actions/workflows/test.yml/badge.svg)](https://github.com/m-mizutani/gollem/actions/workflows/test.yml) [![Lint](https://github.com/m-mizutani/gollem/actions/workflows/lint.yml/badge.svg)](https://github.com/m-mizutani/gollem/actions/workflows/lint.yml) [![Gosec](https://github.com/m-mizutani/gollem/actions/workflows/gosec.yml/badge.svg)](https://github.com/m-mizutani/gollem/actions/workflows/gosec.yml) [![Trivy](https://github.com/m-mizutani/gollem/actions/workflows/trivy.yml/badge.svg)](https://github.com/m-mizutani/gollem/actions/workflows/trivy.yml)
 
+GO for Large LanguagE Model (GOLLEM)
 
 <p align="center">
   <img src="./doc/images/logo.png" height="128" />
 </p>
 
 
-`gollam` is a Go framework for building agentic applications of Large Language Models (LLMs) with MCP (Model Context Protocol) server and your built-in tools.
-
-## Overview
-
-gollam lets you:
-- Connect with LLM providers (Gemini, Anthropic, OpenAI)
-- Use built-in tools to enhance LLM features
-- Connect with MCP servers for external tools
-- Build applications that run actions based on text input
-- Store and restore conversation history for stateless applications
+`gollem` provides:
+- Common interface to query prompt to Large Language Model (LLM) services
+- Framework for building agentic applications of LLMs with
+  - Tools by MCP (Model Context Protocol) server and your built-in tools
+  - Portable conversational memory with history for stateless/distributed applications
 
 ## Supported LLMs
 
@@ -23,33 +19,62 @@ gollam lets you:
 - [x] Anthropic (see [models](https://docs.anthropic.com/en/docs/about-claude/models/all-models))
 - [x] OpenAI (see [models](https://platform.openai.com/docs/models))
 
-## Features
-
-### Tools and Actions
-
-- Built-in Tools: Common operation tools
-- MCP Server Integration
-  - [x] Tool: Custom tools
-  - [ ] Resource: External resources
-  - [ ] Prompt: LLM prompts
-
 ## Quick Start
 
 ### Install
 
 ```bash
-go get github.com/m-mizutani/gollam
+go get github.com/m-mizutani/gollem
 ```
 
 ### Example
+
+#### Query to LLM
+
+```go
+llmProvider := os.Args[1]
+model := os.Args[2]
+prompt := os.Args[3]
+
+var client gollem.LLMClient
+var err error
+
+switch llmProvider {
+case "gemini":
+	client, err = gemini.New(ctx, os.Getenv("GEMINI_PROJECT_ID"), os.Getenv("GEMINI_LOCATION"), gemini.WithModel(model))
+case "claude":
+	client, err = claude.New(ctx, os.Getenv("ANTHROPIC_API_KEY"), claude.WithModel(model))
+case "openai":
+	client, err = openai.New(ctx, os.Getenv("OPENAI_API_KEY"), openai.WithModel(model))
+}
+
+if err != nil {
+	panic(err)
+}
+
+ssn, err := client.NewSession(ctx)
+if err != nil {
+	panic(err)
+}
+
+result, err := ssn.GenerateContent(ctx, gollem.Text(prompt))
+if err != nil {
+	panic(err)
+}
+
+fmt.Println(result.Texts)
+```
+
+#### Agentic application with MCP server
+
 Here's a simple example of creating a custom tool and using it with an LLM:
 
 ```go
 func main() {
 	ctx := context.Background()
 
-	// Create GPT client
-	client, err := gpt.New(ctx, os.Getenv("OPENAI_API_KEY"))
+	// Create OpenAI client
+	client, err := OpenAI.New(ctx, os.Getenv("OPENAI_API_KEY"))
 	if err != nil {
 		panic(err)
 	}
@@ -68,17 +93,17 @@ func main() {
 	}
 	defer mcpRemote.Close()
 
-	// Create gollam instance
-	agent := gollam.New(client,
-		gollam.WithToolSets(mcpLocal, mcpRemote),
-		gollam.WithTools(&MyTool{}),
-		gollam.WithMessageHook(func(ctx context.Context, msg string) error {
+	// Create gollem instance
+	agent := gollem.New(client,
+		gollem.WithToolSets(mcpLocal, mcpRemote),
+		gollem.WithTools(&MyTool{}),
+		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
 			fmt.Printf("🤖 %s\n", msg)
 			return nil
 		}),
 	)
 
-	var history *gollam.History
+	var history *gollem.History
 	for {
 		fmt.Print("> ")
 		scanner := bufio.NewScanner(os.Stdin)
@@ -93,11 +118,11 @@ func main() {
 }
 ```
 
-See the full example in [examples/basic](https://github.com/m-mizutani/gollam/tree/main/examples/basic), and more examples in [examples](https://github.com/m-mizutani/gollam/tree/main/examples).
+See the full example in [examples/basic](https://github.com/m-mizutani/gollem/tree/main/examples/basic), and more examples in [examples](https://github.com/m-mizutani/gollem/tree/main/examples).
 
 ## Documentation
 
-For more details and examples, visit our [documentation site](https://github.com/m-mizutani/gollam/tree/main/doc).
+For more details and examples, visit our [document](https://github.com/m-mizutani/gollem/tree/main/doc) and [godoc](https://pkg.go.dev/github.com/m-mizutani/gollem).
 
 ## License
 

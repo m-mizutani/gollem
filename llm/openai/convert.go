@@ -1,12 +1,12 @@
-package gpt
+package openai
 
 import (
-	"github.com/m-mizutani/gollam"
+	"github.com/m-mizutani/gollem"
 	"github.com/sashabaranov/go-openai"
 )
 
-// convertTool converts gollam.Tool to openai.Tool
-func convertTool(tool gollam.Tool) openai.Tool {
+// convertTool converts gollem.Tool to openai.Tool
+func convertTool(tool gollem.Tool) openai.Tool {
 	parameters := make(map[string]interface{})
 	properties := make(map[string]interface{})
 	spec := tool.Spec()
@@ -33,8 +33,8 @@ func convertTool(tool gollam.Tool) openai.Tool {
 	}
 }
 
-// convertParameterToSchema converts gollam.Parameter to OpenAI schema
-func convertParameterToSchema(param *gollam.Parameter) map[string]interface{} {
+// convertParameterToSchema converts gollem.Parameter to OpenAI schema
+func convertParameterToSchema(param *gollem.Parameter) map[string]interface{} {
 	schema := map[string]interface{}{
 		"type":        getOpenAIType(param.Type),
 		"description": param.Description,
@@ -61,7 +61,7 @@ func convertParameterToSchema(param *gollam.Parameter) map[string]interface{} {
 	}
 
 	// Add number constraints
-	if param.Type == gollam.TypeNumber || param.Type == gollam.TypeInteger {
+	if param.Type == gollem.TypeNumber || param.Type == gollem.TypeInteger {
 		if param.Minimum != nil {
 			schema["minimum"] = *param.Minimum
 		}
@@ -71,7 +71,7 @@ func convertParameterToSchema(param *gollam.Parameter) map[string]interface{} {
 	}
 
 	// Add string constraints
-	if param.Type == gollam.TypeString {
+	if param.Type == gollem.TypeString {
 		if param.MinLength != nil {
 			schema["minLength"] = *param.MinLength
 		}
@@ -84,7 +84,7 @@ func convertParameterToSchema(param *gollam.Parameter) map[string]interface{} {
 	}
 
 	// Add array constraints
-	if param.Type == gollam.TypeArray {
+	if param.Type == gollem.TypeArray {
 		if param.MinItems != nil {
 			schema["minItems"] = *param.MinItems
 		}
@@ -101,19 +101,19 @@ func convertParameterToSchema(param *gollam.Parameter) map[string]interface{} {
 	return schema
 }
 
-func getOpenAIType(paramType gollam.ParameterType) string {
+func getOpenAIType(paramType gollem.ParameterType) string {
 	switch paramType {
-	case gollam.TypeString:
+	case gollem.TypeString:
 		return "string"
-	case gollam.TypeNumber:
+	case gollem.TypeNumber:
 		return "number"
-	case gollam.TypeInteger:
+	case gollem.TypeInteger:
 		return "integer"
-	case gollam.TypeBoolean:
+	case gollem.TypeBoolean:
 		return "boolean"
-	case gollam.TypeArray:
+	case gollem.TypeArray:
 		return "array"
-	case gollam.TypeObject:
+	case gollem.TypeObject:
 		return "object"
 	default:
 		return "string"

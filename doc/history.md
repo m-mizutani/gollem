@@ -1,6 +1,6 @@
 # History
 
-History represents a conversation history that can be used across different LLM sessions. It stores messages in a format specific to each LLM type (GPT, Claude, or Gemini).
+History represents a conversation history that can be used across different LLM sessions. It stores messages in a format specific to each LLM type (OpenAI, Claude, or Gemini).
 
 ## Version Management
 
@@ -41,7 +41,7 @@ History can be easily serialized/deserialized using standard JSON marshaling. Th
 
 ## LLM Type Compatibility
 
-Each History instance is tied to a specific LLM type (GPT, Claude, or Gemini). Important notes:
+Each History instance is tied to a specific LLM type (OpenAI, Claude, or Gemini). Important notes:
 
 - Direct conversion between different LLM types is not supported
 - Each LLM type has its own message format and capabilities
@@ -50,8 +50,8 @@ Each History instance is tied to a specific LLM type (GPT, Claude, or Gemini). I
 
 1. Get History from Prompt response:
    ```go
-   // Create a new gollam instance
-   g := gollam.New(llmClient)
+   // Create a new gollem instance
+   g := gollem.New(llmClient)
 
    // Get response from Prompt
    history, err := g.Prompt(ctx, "What is the weather?")
@@ -78,7 +78,7 @@ Each History instance is tied to a specific LLM type (GPT, Claude, or Gemini). I
    }
 
    // Use history in next Prompt call
-   newHistory, err := g.Prompt(ctx, "What about tomorrow?", gollam.WithHistory(&restoredHistory))
+   newHistory, err := g.Prompt(ctx, "What about tomorrow?", gollem.WithHistory(&restoredHistory))
    if err != nil {
        return nil, fmt.Errorf("failed to get prompt response: %w", err)
    }
@@ -100,4 +100,12 @@ Note: The History returned from Prompt contains the complete conversation histor
 
 3. **Security**
    - Implement proper access controls
+
+## Next Steps
+
+- Learn more about [tool creation](tools.md)
+- Explore [MCP server integration](mcp.md)
+- Check out [practical examples](examples.md)
+- Review the [getting started guide](getting-started.md)
+- Explore the [complete documentation](README.md)
 

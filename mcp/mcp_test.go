@@ -5,8 +5,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/m-mizutani/gollam/mcp"
+	"github.com/m-mizutani/gollem/mcp"
 	"github.com/m-mizutani/gt"
+	mcpgo "github.com/mark3labs/mcp-go/mcp"
 )
 
 func TestMCPLocalDryRun(t *testing.T) {
@@ -38,4 +39,35 @@ func TestMCPLocalDryRun(t *testing.T) {
 	gt.NoError(t, err)
 
 	t.Log("callTool:", callTool)
+}
+
+func TestMCPContentToMap(t *testing.T) {
+	t.Run("when content is empty", func(t *testing.T) {
+		result := mcp.MCPContentToMap([]mcpgo.Content{})
+		gt.Nil(t, result)
+	})
+
+	t.Run("when text content is JSON", func(t *testing.T) {
+		content := mcpgo.TextContent{Text: `{"key": "value"}`}
+		result := mcp.MCPContentToMap([]mcpgo.Content{content})
+		gt.Equal(t, map[string]any{"key": "value"}, result)
+	})
+
+	t.Run("when text content is not JSON", func(t *testing.T) {
+		content := mcpgo.TextContent{Text: "plain text"}
+		result := mcp.MCPContentToMap([]mcpgo.Content{content})
+		gt.Equal(t, map[string]any{"result": "plain text"}, result)
+	})
+
+	t.Run("when multiple contents exist", func(t *testing.T) {
+		contents := []mcpgo.Content{
+			mcpgo.TextContent{Text: "first"},
+			mcpgo.TextContent{Text: "second"},
+		}
+		result := mcp.MCPContentToMap(contents)
+		gt.Equal(t, map[string]any{
+			"content_1": "first",
+			"content_2": "second",
+		}, result)
+	})
 }

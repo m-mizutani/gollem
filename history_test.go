@@ -1,4 +1,4 @@
-package gollam_test
+package gollem_test
 
 import (
 	"encoding/json"
@@ -7,13 +7,13 @@ import (
 	"cloud.google.com/go/vertexai/genai"
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
-	"github.com/m-mizutani/gollam"
+	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gt"
 	"github.com/sashabaranov/go-openai"
 )
 
-func TestHistoryGPT(t *testing.T) {
-	// Create GPT messages with various content types
+func TestHistoryOpenAI(t *testing.T) {
+	// Create OpenAI messages with various content types
 	messages := []openai.ChatCompletionMessage{
 		{
 			Role:    "system",
@@ -51,17 +51,17 @@ func TestHistoryGPT(t *testing.T) {
 	}
 
 	// Create History object
-	history := gollam.NewHistoryFromGPT(messages)
+	history := gollem.NewHistoryFromOpenAI(messages)
 
 	// Convert to JSON
 	data, err := json.Marshal(history)
 	gt.NoError(t, err)
 
 	// Restore from JSON
-	var restored gollam.History
+	var restored gollem.History
 	gt.NoError(t, json.Unmarshal(data, &restored))
 
-	restoredMessages, err := restored.ToGPT()
+	restoredMessages, err := restored.ToOpenAI()
 	gt.NoError(t, err)
 
 	gt.Equal(t, messages, restoredMessages)
@@ -209,14 +209,14 @@ func TestHistoryClaude(t *testing.T) {
 	}
 
 	// Create History object
-	history := gollam.NewHistoryFromClaude(messages)
+	history := gollem.NewHistoryFromClaude(messages)
 
 	// Convert to JSON
 	data, err := json.Marshal(history)
 	gt.NoError(t, err)
 
 	// Restore from JSON
-	var restored gollam.History
+	var restored gollem.History
 	gt.NoError(t, json.Unmarshal(data, &restored))
 
 	restoredMessages, err := restored.ToClaude()
@@ -286,14 +286,14 @@ func TestHistoryGemini(t *testing.T) {
 	}
 
 	// Create History object
-	history := gollam.NewHistoryFromGemini(messages)
+	history := gollem.NewHistoryFromGemini(messages)
 
 	// Convert to JSON
 	data, err := json.Marshal(history)
 	gt.NoError(t, err)
 
 	// Restore from JSON
-	var restored gollam.History
+	var restored gollem.History
 	gt.NoError(t, json.Unmarshal(data, &restored))
 
 	restoredMessages, err := restored.ToGemini()

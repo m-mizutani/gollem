@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollam"
+	"github.com/m-mizutani/gollem"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -32,15 +32,21 @@ type Client struct {
 	initMutex  sync.Mutex
 }
 
-// Specs implements gollam.ToolSet interface
-func (c *Client) Specs(ctx context.Context) ([]gollam.ToolSpec, error) {
+// Specs implements gollem.ToolSet interface
+func (c *Client) Specs(ctx context.Context) ([]gollem.ToolSpec, error) {
+	logger := gollem.LoggerFromContext(ctx)
+
 	tools, err := c.listTools(ctx)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list tools")
 	}
 
-	specs := make([]gollam.ToolSpec, len(tools))
+	specs := make([]gollem.ToolSpec, len(tools))
+	toolNames := make([]string, len(tools))
+
 	for i, tool := range tools {
+		toolNames[i] = tool.Name
+
 		param, err := inputSchemaToParameter(tool.InputSchema)
 		if err != nil {
 			return nil, goerr.Wrap(err,
@@ -50,7 +56,7 @@ func (c *Client) Specs(ctx context.Context) ([]gollam.ToolSpec, error) {
 			)
 		}
 
-		specs[i] = gollam.ToolSpec{
+		specs[i] = gollem.ToolSpec{
 			Name:        tool.Name,
 			Description: tool.Description,
 			Parameters:  param.Properties,
@@ -58,11 +64,17 @@ func (c *Client) Specs(ctx context.Context) ([]gollam.ToolSpec, error) {
 		}
 	}
 
+	logger.Debug("found MCP tools", "names", toolNames)
+
 	return specs, nil
 }
 
-// Run implements gollam.ToolSet interface
+// Run implements gollem.ToolSet interface
 func (c *Client) Run(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
+	logger := gollem.LoggerFromContext(ctx)
+
+	logger.Debug("call MCP tool", "name", name, "args", args)
+
 	resp, err := c.callTool(ctx, name, args)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to call tool")
@@ -128,6 +140,8 @@ func (c *Client) init(ctx context.Context) error {
 	c.initMutex.Lock()
 	defer c.initMutex.Unlock()
 
+	logger := gollem.LoggerFromContext(ctx)
+
 	if c.initResult != nil {
 		return nil
 	}
@@ -151,6 +165,7 @@ func (c *Client) init(ctx context.Context) error {
 
 	c.client = client.NewClient(tp)
 
+	logger.Debug("starting MCP client", "path", c.path, "url", c.baseURL)
 	if err := c.client.Start(ctx); err != nil {
 		return goerr.Wrap(err, "failed to start MCP client")
 	}
@@ -158,10 +173,11 @@ func (c *Client) init(ctx context.Context) error {
 	var initRequest mcp.InitializeRequest
 	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
 	initRequest.Params.ClientInfo = mcp.Implementation{
-		Name:    "gollam",
+		Name:    "gollem",
 		Version: "0.0.1",
 	}
 
+	logger.Debug("initializing MCP client")
 	if resp, err := c.client.Initialize(ctx, initRequest); err != nil {
 		return goerr.Wrap(err, "failed to initialize MCP client")
 	} else {
@@ -200,8 +216,8 @@ func (c *Client) Close() error {
 	return nil
 }
 
-func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (*gollam.Parameter, error) {
-	parameters := map[string]*gollam.Parameter{}
+func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (*gollem.Parameter, error) {
+	parameters := map[string]*gollem.Parameter{}
 	jsonSchema, err := json.Marshal(inputSchema)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to marshal input schema")
@@ -223,15 +239,15 @@ func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (*gollam.Parameter,
 
 	schemaType := schema.Types.ToStrings()
 	if len(schemaType) != 1 || schemaType[0] != "object" {
-		return nil, goerr.Wrap(gollam.ErrInvalidTool, "invalid input schema", goerr.V("schema", schema))
+		return nil, goerr.Wrap(gollem.ErrInvalidTool, "invalid input schema", goerr.V("schema", schema))
 	}
 
 	for name, property := range schema.Properties {
 		parameters[name] = jsonSchemaToParameter(property)
 	}
 
-	return &gollam.Parameter{
-		Type:        gollam.ParameterType(schema.Types.ToStrings()[0]),
+	return &gollem.Parameter{
+		Type:        gollem.ParameterType(schema.Types.ToStrings()[0]),
 		Title:       schema.Title,
 		Description: schema.Description,
 		Required:    schema.Required,
@@ -239,7 +255,7 @@ func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (*gollam.Parameter,
 	}, nil
 }
 
-func jsonSchemaToParameter(schema *jsonschema.Schema) *gollam.Parameter {
+func jsonSchemaToParameter(schema *jsonschema.Schema) *gollem.Parameter {
 	var enum []string
 	if schema.Enum != nil {
 		for _, v := range schema.Enum.Values {
@@ -247,12 +263,12 @@ func jsonSchemaToParameter(schema *jsonschema.Schema) *gollam.Parameter {
 		}
 	}
 
-	properties := map[string]*gollam.Parameter{}
+	properties := map[string]*gollem.Parameter{}
 	for name, property := range schema.Properties {
 		properties[name] = jsonSchemaToParameter(property)
 	}
 
-	var items *gollam.Parameter
+	var items *gollem.Parameter
 	if schema.Items != nil {
 		switch v := schema.Items.(type) {
 		case *jsonschema.Schema:
@@ -260,37 +276,85 @@ func jsonSchemaToParameter(schema *jsonschema.Schema) *gollam.Parameter {
 		}
 	}
 
-	return &gollam.Parameter{
-		Type:        gollam.ParameterType(schema.Types.ToStrings()[0]),
+	var minimum, maximum *float64
+	if schema.Minimum != nil {
+		min, _ := (*schema.Minimum).Float64()
+		minimum = &min
+	}
+	if schema.Maximum != nil {
+		max, _ := (*schema.Maximum).Float64()
+		maximum = &max
+	}
+
+	var minLength, maxLength *int
+	if schema.MinLength != nil {
+		min := int(*schema.MinLength)
+		minLength = &min
+	}
+	if schema.MaxLength != nil {
+		max := int(*schema.MaxLength)
+		maxLength = &max
+	}
+
+	var minItems, maxItems *int
+	if schema.MinItems != nil {
+		min := int(*schema.MinItems)
+		minItems = &min
+	}
+	if schema.MaxItems != nil {
+		max := int(*schema.MaxItems)
+		maxItems = &max
+	}
+
+	var pattern string
+	if schema.Pattern != nil {
+		pattern = schema.Pattern.String()
+	}
+
+	return &gollem.Parameter{
+		Type:        gollem.ParameterType(schema.Types.ToStrings()[0]),
 		Title:       schema.Title,
 		Description: schema.Description,
 		Required:    schema.Required,
 		Enum:        enum,
 		Properties:  properties,
 		Items:       items,
+		Minimum:     minimum,
+		Maximum:     maximum,
+		MinLength:   minLength,
+		MaxLength:   maxLength,
+		Pattern:     pattern,
+		MinItems:    minItems,
+		MaxItems:    maxItems,
+		Default:     schema.Default,
 	}
 }
 
 func mcpContentToMap(contents []mcp.Content) map[string]any {
-	for _, c := range contents {
-		if txt, ok := c.(*mcp.TextContent); ok {
+	if len(contents) == 0 {
+		return nil
+	}
+
+	if len(contents) == 1 {
+		if content, ok := contents[0].(mcp.TextContent); ok {
 			var v any
-			if err := json.Unmarshal([]byte(txt.Text), &v); err == nil {
+			if err := json.Unmarshal([]byte(content.Text), &v); err == nil {
 				if mapData, ok := v.(map[string]any); ok {
 					return mapData
 				}
-
-				return map[string]any{
-					"result": v,
-				}
 			}
-
 			return map[string]any{
-				"result": txt.Text,
+				"result": content.Text,
 			}
 		}
+		return nil
 	}
 
-	// No appropriate content found
-	return map[string]any{}
+	result := map[string]any{}
+	for i, c := range contents {
+		if content, ok := c.(mcp.TextContent); ok {
+			result[fmt.Sprintf("content_%d", i+1)] = content.Text
+		}
+	}
+	return result
 }
