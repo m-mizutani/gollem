@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 
@@ -216,14 +217,19 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 				Role:    openai.ChatMessageRoleUser,
 				Content: string(v),
 			})
+
 		case gollem.FunctionResponse:
-			response, err := json.Marshal(v.Data)
+			data, err := json.Marshal(v.Data)
 			if err != nil {
 				return goerr.Wrap(err, "failed to marshal function response")
 			}
+			response := string(data)
+			if v.Error != nil {
+				response = fmt.Sprintf(`Error message: %+v`, v.Error)
+			}
 			s.messages = append(s.messages, openai.ChatCompletionMessage{
 				Role:       openai.ChatMessageRoleTool,
-				Content:    string(response),
+				Content:    response,
 				ToolCallID: v.ID,
 			})
 		default:
