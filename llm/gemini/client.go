@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"context"
+	"fmt"
 
 	"cloud.google.com/go/vertexai/genai"
 	"github.com/m-mizutani/goerr/v2"
@@ -220,7 +221,7 @@ func (s *Session) convertInputs(input ...gollem.Input) ([]genai.Part, error) {
 				parts[i] = genai.FunctionResponse{
 					Name: v.Name,
 					Response: map[string]any{
-						"error_message": v.Error.Error(),
+						"error_message": fmt.Sprintf("%+v", v.Error),
 					},
 				}
 			} else {

@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -183,11 +184,15 @@ func (s *Session) convertInputs(input ...gollem.Input) ([]anthropic.MessageParam
 			))
 
 		case gollem.FunctionResponse:
-			response, err := json.Marshal(v.Data)
+			data, err := json.Marshal(v.Data)
 			if err != nil {
 				return nil, nil, goerr.Wrap(err, "failed to marshal function response")
 			}
-			toolResults = append(toolResults, anthropic.NewToolResultBlock(v.ID, string(response), v.Error != nil))
+			response := string(data)
+			if v.Error != nil {
+				response = fmt.Sprintf(`Error message: %+v`, v.Error)
+			}
+			toolResults = append(toolResults, anthropic.NewToolResultBlock(v.ID, response, v.Error != nil))
 
 		default:
 			return nil, nil, goerr.Wrap(gollem.ErrInvalidParameter, "invalid input")
