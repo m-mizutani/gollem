@@ -67,6 +67,23 @@ if err != nil {
 fmt.Println(result.Texts)
 ```
 
+#### Generate embedding
+```go
+// Create OpenAI client
+client, err := openai.New(ctx, os.Getenv("OPENAI_API_KEY"))
+if err != nil {
+	panic(err)
+}
+
+embedding, err := client.GenerateEmbedding(ctx, 100, []string{"Hello, world!", "This is a test"})
+if err != nil {
+	panic(err)
+}
+
+// Print two embedding arrays, each containing 100-dimensional vectors
+fmt.Println("embedding:", embedding)
+```
+
 #### Agentic application with MCP server
 
 Here's a simple example of creating a custom tool and using it with an LLM:
