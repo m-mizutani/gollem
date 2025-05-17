@@ -9,6 +9,8 @@ GO for Large LanguagE Model (GOLLEM)
 
 `gollem` provides:
 - Common interface to query prompt to Large Language Model (LLM) services
+  - GenerateContent: Generate text content from prompt
+  - GenerateEmbedding: Generate embedding vector from text (OpenAI and Gemini)
 - Framework for building agentic applications of LLMs with
   - Tools by MCP (Model Context Protocol) server and your built-in tools
   - Portable conversational memory with history for stateless/distributed applications
