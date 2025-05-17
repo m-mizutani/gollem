@@ -11,9 +11,17 @@ import (
 	"google.golang.org/api/option"
 )
 
+const (
+	DefaultModel          = "gemini-2.0-flash"
+	DefaultEmbeddingModel = "text-embedding-004"
+)
+
 // Client is a client for the Gemini API.
 // It provides methods to interact with Google's Gemini models.
 type Client struct {
+	projectID string
+	location  string
+
 	// client is the underlying Gemini client.
 	client *genai.Client
 
@@ -117,6 +125,14 @@ func WithContentType(contentType gollem.ContentType) Option {
 	}
 }
 
+// WithEmbeddingModel sets the model to use for embeddings.
+// Default: "textembedding-gecko@latest"
+func WithEmbeddingModel(modelName string) Option {
+	return func(c *Client) {
+		c.embeddingModel = modelName
+	}
+}
+
 // New creates a new client for the Gemini API.
 // It requires a project ID and location, and can be configured with additional options.
 func New(ctx context.Context, projectID, location string, options ...Option) (*Client, error) {
@@ -128,7 +144,9 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 	}
 
 	client := &Client{
-		defaultModel:   "gemini-2.0-flash",
+		projectID:      projectID,
+		location:       location,
+		defaultModel:   DefaultModel,
 		embeddingModel: DefaultEmbeddingModel,
 		contentType:    gollem.ContentTypeText,
 	}

@@ -8,10 +8,27 @@ import (
 )
 
 // GenerateEmbedding generates embeddings for the given input text.
-func (c *Client) GenerateEmbedding(ctx context.Context, input string) ([]float64, error) {
+func (c *Client) GenerateEmbedding(ctx context.Context, dimension int, input []string) ([][]float64, error) {
+	/*
+			AdaEmbeddingV2  EmbeddingModel = "text-embedding-ada-002"
+		SmallEmbedding3 EmbeddingModel = "text-embedding-3-small"
+		LargeEmbedding3 EmbeddingModel = "text-embedding-3-large"
+	*/
+	modelMap := map[string]openai.EmbeddingModel{
+		"text-embedding-ada-002": openai.AdaEmbeddingV2,
+		"text-embedding-3-small": openai.SmallEmbedding3,
+		"text-embedding-3-large": openai.LargeEmbedding3,
+	}
+
+	model, ok := modelMap[c.embeddingModel]
+	if !ok {
+		return nil, goerr.New("invalid or unsupported embedding model. See https://platform.openai.com/docs/guides/embeddings#embedding-models", goerr.V("model", c.embeddingModel))
+	}
+
 	req := openai.EmbeddingRequest{
-		Input: input,
-		Model: openai.AdaEmbeddingV2,
+		Input:      input,
+		Model:      model,
+		Dimensions: dimension,
 	}
 
 	resp, err := c.client.CreateEmbeddings(ctx, req)
@@ -23,11 +40,13 @@ func (c *Client) GenerateEmbedding(ctx context.Context, input string) ([]float64
 		return nil, goerr.New("no embedding data returned")
 	}
 
-	// Convert []float32 to []float64
-	embedding := make([]float64, len(resp.Data[0].Embedding))
-	for i, v := range resp.Data[0].Embedding {
-		embedding[i] = float64(v)
+	embeddings := make([][]float64, len(resp.Data))
+	for i, data := range resp.Data {
+		embeddings[i] = make([]float64, len(data.Embedding))
+		for j, v := range data.Embedding {
+			embeddings[i][j] = float64(v)
+		}
 	}
 
-	return embedding, nil
+	return embeddings, nil
 }

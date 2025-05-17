@@ -5,7 +5,7 @@ import "context"
 // LLMClient is a client for each LLM service.
 type LLMClient interface {
 	NewSession(ctx context.Context, options ...SessionOption) (Session, error)
-	GenerateEmbedding(ctx context.Context, input string) ([]float64, error)
+	GenerateEmbedding(ctx context.Context, dimension int, input []string) ([][]float64, error)
 }
 
 type FunctionCall struct {

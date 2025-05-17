@@ -15,7 +15,7 @@ import (
 //
 //		// make and configure a mocked gollem.LLMClient
 //		mockedLLMClient := &LLMClientMock{
-//			GenerateEmbeddingFunc: func(ctx context.Context, input string) ([]float64, error) {
+//			GenerateEmbeddingFunc: func(ctx context.Context, dimension int, input []string) ([][]float64, error) {
 //				panic("mock out the GenerateEmbedding method")
 //			},
 //			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
@@ -29,7 +29,7 @@ import (
 //	}
 type LLMClientMock struct {
 	// GenerateEmbeddingFunc mocks the GenerateEmbedding method.
-	GenerateEmbeddingFunc func(ctx context.Context, input string) ([]float64, error)
+	GenerateEmbeddingFunc func(ctx context.Context, dimension int, input []string) ([][]float64, error)
 
 	// NewSessionFunc mocks the NewSession method.
 	NewSessionFunc func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error)
@@ -40,8 +40,10 @@ type LLMClientMock struct {
 		GenerateEmbedding []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
+			// Dimension is the dimension argument value.
+			Dimension int
 			// Input is the input argument value.
-			Input string
+			Input []string
 		}
 		// NewSession holds details about calls to the NewSession method.
 		NewSession []struct {
@@ -56,25 +58,27 @@ type LLMClientMock struct {
 }
 
 // GenerateEmbedding calls GenerateEmbeddingFunc.
-func (mock *LLMClientMock) GenerateEmbedding(ctx context.Context, input string) ([]float64, error) {
+func (mock *LLMClientMock) GenerateEmbedding(ctx context.Context, dimension int, input []string) ([][]float64, error) {
 	callInfo := struct {
-		Ctx   context.Context
-		Input string
+		Ctx       context.Context
+		Dimension int
+		Input     []string
 	}{
-		Ctx:   ctx,
-		Input: input,
+		Ctx:       ctx,
+		Dimension: dimension,
+		Input:     input,
 	}
 	mock.lockGenerateEmbedding.Lock()
 	mock.calls.GenerateEmbedding = append(mock.calls.GenerateEmbedding, callInfo)
 	mock.lockGenerateEmbedding.Unlock()
 	if mock.GenerateEmbeddingFunc == nil {
 		var (
-			float64sOut []float64
-			errOut      error
+			float64ssOut [][]float64
+			errOut       error
 		)
-		return float64sOut, errOut
+		return float64ssOut, errOut
 	}
-	return mock.GenerateEmbeddingFunc(ctx, input)
+	return mock.GenerateEmbeddingFunc(ctx, dimension, input)
 }
 
 // GenerateEmbeddingCalls gets all the calls that were made to GenerateEmbedding.
@@ -82,12 +86,14 @@ func (mock *LLMClientMock) GenerateEmbedding(ctx context.Context, input string) 
 //
 //	len(mockedLLMClient.GenerateEmbeddingCalls())
 func (mock *LLMClientMock) GenerateEmbeddingCalls() []struct {
-	Ctx   context.Context
-	Input string
+	Ctx       context.Context
+	Dimension int
+	Input     []string
 } {
 	var calls []struct {
-		Ctx   context.Context
-		Input string
+		Ctx       context.Context
+		Dimension int
+		Input     []string
 	}
 	mock.lockGenerateEmbedding.RLock()
 	calls = mock.calls.GenerateEmbedding

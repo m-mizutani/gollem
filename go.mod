@@ -3,6 +3,7 @@ module github.com/m-mizutani/gollem
 go 1.24
 
 require (
+	cloud.google.com/go/aiplatform v1.69.0
 	cloud.google.com/go/vertexai v0.13.3
 	github.com/anthropics/anthropic-sdk-go v0.2.0-beta.3
 	github.com/google/uuid v1.6.0
@@ -12,11 +13,11 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.1
 	github.com/sashabaranov/go-openai v1.38.2
 	google.golang.org/api v0.211.0
+	google.golang.org/protobuf v1.35.2
 )
 
 require (
 	cloud.google.com/go v0.116.0 // indirect
-	cloud.google.com/go/aiplatform v1.69.0 // indirect
 	cloud.google.com/go/auth v0.12.1 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.6 // indirect
 	cloud.google.com/go/compute/metadata v0.5.2 // indirect
@@ -54,5 +55,4 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20241118233622-e639e219e697 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20241206012308-a4fef0638583 // indirect
 	google.golang.org/grpc v1.67.3 // indirect
-	google.golang.org/protobuf v1.35.2 // indirect
 )
