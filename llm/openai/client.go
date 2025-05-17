@@ -44,6 +44,10 @@ type Client struct {
 	// It can be overridden using WithModel option.
 	defaultModel string
 
+	// embeddingModel is the model to use for embeddings.
+	// It can be overridden using WithEmbeddingModel option.
+	embeddingModel string
+
 	// generation parameters
 	params generationParameters
 
@@ -55,7 +59,8 @@ type Client struct {
 }
 
 const (
-	DefaultModel = "gpt-4.1"
+	DefaultModel          = "gpt-4.1"
+	DefaultEmbeddingModel = "text-embedding-3-small"
 )
 
 // Option is a function that configures a Client.
@@ -67,6 +72,16 @@ type Option func(*Client)
 func WithModel(modelName string) Option {
 	return func(c *Client) {
 		c.defaultModel = modelName
+	}
+}
+
+// WithEmbeddingModel sets the embedding model to use for embeddings.
+// The model name should be a valid OpenAI model identifier.
+// See default embedding model in [DefaultEmbeddingModel].
+// Model list is at https://platform.openai.com/docs/guides/embeddings#embedding-models
+func WithEmbeddingModel(modelName string) Option {
+	return func(c *Client) {
+		c.embeddingModel = modelName
 	}
 }
 
@@ -130,9 +145,10 @@ func WithContentType(contentType gollem.ContentType) Option {
 // It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
 	client := &Client{
-		defaultModel: DefaultModel,
-		params:       generationParameters{},
-		contentType:  gollem.ContentTypeText,
+		defaultModel:   DefaultModel,
+		embeddingModel: DefaultEmbeddingModel,
+		params:         generationParameters{},
+		contentType:    gollem.ContentTypeText,
 	}
 
 	for _, option := range options {
