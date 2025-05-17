@@ -21,6 +21,10 @@ type Client struct {
 	// It can be overridden using WithModel option.
 	defaultModel string
 
+	// embeddingModel is the model to use for embeddings.
+	// It can be overridden using WithEmbeddingModel option.
+	embeddingModel string
+
 	// gcpOptions are additional options for Google Cloud Platform.
 	// They can be set using WithGoogleCloudOptions.
 	gcpOptions []option.ClientOption
@@ -124,8 +128,9 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 	}
 
 	client := &Client{
-		defaultModel: "gemini-2.0-flash",
-		contentType:  gollem.ContentTypeText,
+		defaultModel:   "gemini-2.0-flash",
+		embeddingModel: DefaultEmbeddingModel,
+		contentType:    gollem.ContentTypeText,
 	}
 
 	for _, option := range options {

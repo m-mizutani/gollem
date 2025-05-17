@@ -12,6 +12,10 @@ import (
 	"github.com/m-mizutani/gollem"
 )
 
+const (
+	DefaultEmbeddingModel = "claude-3-sonnet-20240229"
+)
+
 // generationParameters represents the parameters for text generation.
 type generationParameters struct {
 	// Temperature controls randomness in the output.
@@ -36,6 +40,13 @@ type Client struct {
 	// It can be overridden using WithModel option.
 	defaultModel string
 
+	// embeddingModel is the model to use for embeddings.
+	// It can be overridden using WithEmbeddingModel option.
+	embeddingModel string
+
+	// apiKey is the API key for authentication.
+	apiKey string
+
 	// generation parameters
 	params generationParameters
 
@@ -52,6 +63,15 @@ type Option func(*Client)
 func WithModel(modelName string) Option {
 	return func(c *Client) {
 		c.defaultModel = modelName
+	}
+}
+
+// WithEmbeddingModel sets the embedding model to use for embeddings.
+// The model name should be a valid Claude model identifier.
+// Default: DefaultEmbeddingModel
+func WithEmbeddingModel(modelName string) Option {
+	return func(c *Client) {
+		c.embeddingModel = modelName
 	}
 }
 
@@ -94,7 +114,9 @@ func WithSystemPrompt(prompt string) Option {
 // It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
 	client := &Client{
-		defaultModel: anthropic.ModelClaude3_5SonnetLatest,
+		defaultModel:   anthropic.ModelClaude3_5SonnetLatest,
+		embeddingModel: DefaultEmbeddingModel,
+		apiKey:         apiKey,
 		params: generationParameters{
 			Temperature: 0.7,
 			TopP:        1.0,

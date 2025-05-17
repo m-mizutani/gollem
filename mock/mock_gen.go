@@ -15,6 +15,9 @@ import (
 //
 //		// make and configure a mocked gollem.LLMClient
 //		mockedLLMClient := &LLMClientMock{
+//			GenerateEmbeddingFunc: func(ctx context.Context, input string) ([]float64, error) {
+//				panic("mock out the GenerateEmbedding method")
+//			},
 //			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 //				panic("mock out the NewSession method")
 //			},
@@ -25,11 +28,21 @@ import (
 //
 //	}
 type LLMClientMock struct {
+	// GenerateEmbeddingFunc mocks the GenerateEmbedding method.
+	GenerateEmbeddingFunc func(ctx context.Context, input string) ([]float64, error)
+
 	// NewSessionFunc mocks the NewSession method.
 	NewSessionFunc func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// GenerateEmbedding holds details about calls to the GenerateEmbedding method.
+		GenerateEmbedding []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Input is the input argument value.
+			Input string
+		}
 		// NewSession holds details about calls to the NewSession method.
 		NewSession []struct {
 			// Ctx is the ctx argument value.
@@ -38,7 +51,48 @@ type LLMClientMock struct {
 			Options []gollem.SessionOption
 		}
 	}
-	lockNewSession sync.RWMutex
+	lockGenerateEmbedding sync.RWMutex
+	lockNewSession        sync.RWMutex
+}
+
+// GenerateEmbedding calls GenerateEmbeddingFunc.
+func (mock *LLMClientMock) GenerateEmbedding(ctx context.Context, input string) ([]float64, error) {
+	callInfo := struct {
+		Ctx   context.Context
+		Input string
+	}{
+		Ctx:   ctx,
+		Input: input,
+	}
+	mock.lockGenerateEmbedding.Lock()
+	mock.calls.GenerateEmbedding = append(mock.calls.GenerateEmbedding, callInfo)
+	mock.lockGenerateEmbedding.Unlock()
+	if mock.GenerateEmbeddingFunc == nil {
+		var (
+			float64sOut []float64
+			errOut      error
+		)
+		return float64sOut, errOut
+	}
+	return mock.GenerateEmbeddingFunc(ctx, input)
+}
+
+// GenerateEmbeddingCalls gets all the calls that were made to GenerateEmbedding.
+// Check the length with:
+//
+//	len(mockedLLMClient.GenerateEmbeddingCalls())
+func (mock *LLMClientMock) GenerateEmbeddingCalls() []struct {
+	Ctx   context.Context
+	Input string
+} {
+	var calls []struct {
+		Ctx   context.Context
+		Input string
+	}
+	mock.lockGenerateEmbedding.RLock()
+	calls = mock.calls.GenerateEmbedding
+	mock.lockGenerateEmbedding.RUnlock()
+	return calls
 }
 
 // NewSession calls NewSessionFunc.
