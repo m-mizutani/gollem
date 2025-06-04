@@ -3,10 +3,17 @@ package gollem
 import "context"
 
 type (
-	MessageHook      func(ctx context.Context, msg string) error
-	ToolRequestHook  func(ctx context.Context, tool FunctionCall) error
+	// MessageHook is a hook for the message. If you want to display or record the message, you can use this hook.
+	MessageHook func(ctx context.Context, msg string) error
+
+	// ToolRequestHook is a hook for the tool request. If you want to display or record the tool request, you can use this hook. If you want to abort the tool execution, you can return an error.
+	ToolRequestHook func(ctx context.Context, tool FunctionCall) error
+
+	// ToolResponseHook is a hook for the tool response. If you want to display or record the tool response, you can use this hook. If you want to abort the tool execution, you can return an error.
 	ToolResponseHook func(ctx context.Context, tool FunctionCall, response map[string]any) error
-	ToolErrorHook    func(ctx context.Context, err error, tool FunctionCall) error
+
+	// ToolErrorHook is a hook for the tool error. If you want to record the tool error, you can use this hook.
+	ToolErrorHook func(ctx context.Context, err error, tool FunctionCall) error
 )
 
 func defaultMessageHook(ctx context.Context, msg string) error {

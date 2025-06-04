@@ -284,11 +284,7 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 		return nil, err
 	}
 
-	for i := 0; len(input) > 0; i++ {
-		if i > cfg.loopLimit {
-			return nil, goerr.Wrap(ErrLoopLimitExceeded, "order stopped", goerr.V("loop_limit", cfg.loopLimit))
-		}
-
+	for i := 0; i < cfg.loopLimit; i++ {
 		logger.Debug("gollem sending request", "loop", i, "input", input)
 
 		switch cfg.responseMode {
@@ -322,7 +318,7 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 		}
 	}
 
-	return ssn.History(), nil
+	return ssn.History(), goerr.Wrap(ErrLoopLimitExceeded, "order stopped", goerr.V("loop_limit", cfg.loopLimit))
 }
 
 func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, toolMap map[string]Tool) ([]Input, error) {
@@ -335,8 +331,6 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 			return nil, goerr.Wrap(err, "failed to call MessageHook")
 		}
 	}
-
-	var retErr error
 
 	// Call the ToolRequestHook for all tool calls
 	for _, toolCall := range output.FunctionCalls {
@@ -387,7 +381,7 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 		})
 	}
 
-	return newInput, retErr
+	return newInput, nil
 }
 
 type toolWrapper struct {
