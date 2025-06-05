@@ -397,16 +397,16 @@ func TestSessionHistory(t *testing.T) {
 	})
 }
 
-func TestExitTool(t *testing.T) {
+func TestFacilitator(t *testing.T) {
 	testFn := func(t *testing.T, newClient func(t *testing.T) gollem.LLMClient) {
 		client := newClient(t)
 
-		exitTool := &gollem.DefaultExitTool{}
+		facilitator := &gollem.DefaultFacilitator{}
 		loopCount := 0
-		exitToolCalled := false
+		facilitatorCalled := false
 
 		s := gollem.New(client,
-			gollem.WithExitTool(exitTool),
+			gollem.WithFacilitator(facilitator),
 			gollem.WithTools(&randomNumberTool{}),
 			gollem.WithSystemPrompt("You are an assistant that can use tools. When asked to complete a task and end the session, you must use the finalize_task tool to properly end the session."),
 			gollem.WithLoopHook(func(ctx context.Context, loop int, input []gollem.Input) error {
@@ -429,10 +429,10 @@ func TestExitTool(t *testing.T) {
 		_, err := s.Prompt(ctx, "Get a random number between 1 and 10")
 		gt.NoError(t, err)
 
-		t.Logf("Test completed: exitToolCalled=%v, isCompleted=%v, loopCount=%d", exitToolCalled, exitTool.IsCompleted(), loopCount)
+		t.Logf("Test completed: facilitatorCalled=%v, isCompleted=%v, loopCount=%d", facilitatorCalled, facilitator.IsCompleted(), loopCount)
 
-		// Verify that the exit tool was called
-		gt.True(t, exitTool.IsCompleted())
+		// Verify that the facilitator was called
+		gt.True(t, facilitator.IsCompleted())
 
 		// Verify that loops occurred (should be more than 0 but less than loop limit)
 		gt.N(t, loopCount).Greater(0).Less(10)
