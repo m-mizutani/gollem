@@ -36,17 +36,12 @@ func (t *randomNumberTool) Spec() gollem.ToolSpec {
 }
 
 func (t *randomNumberTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	params, ok := args["params"].(map[string]any)
-	if !ok {
-		return nil, goerr.New("params is required")
-	}
-
-	min, ok := params["min"].(float64)
+	min, ok := args["min"].(float64)
 	if !ok {
 		return nil, goerr.New("min is required")
 	}
 
-	max, ok := params["max"].(float64)
+	max, ok := args["max"].(float64)
 	if !ok {
 		return nil, goerr.New("max is required")
 	}
@@ -399,5 +394,59 @@ func TestSessionHistory(t *testing.T) {
 	t.Run("claude", func(t *testing.T) {
 		client := newClaudeClient(t)
 		testFn(t, client)
+	})
+}
+
+func TestExitTool(t *testing.T) {
+	testFn := func(t *testing.T, newClient func(t *testing.T) gollem.LLMClient) {
+		client := newClient(t)
+
+		exitTool := &gollem.DefaultExitTool{}
+		loopCount := 0
+		exitToolCalled := false
+
+		s := gollem.New(client,
+			gollem.WithExitTool(exitTool),
+			gollem.WithTools(&randomNumberTool{}),
+			gollem.WithSystemPrompt("You are an assistant that can use tools. When asked to complete a task and end the session, you must use the finalize_task tool to properly end the session."),
+			gollem.WithLoopHook(func(ctx context.Context, loop int, input []gollem.Input) error {
+				loopCount++
+				t.Logf("Loop called: %d", loop)
+				return nil
+			}),
+			gollem.WithMessageHook(func(ctx context.Context, msg string) error {
+				t.Logf("[Message received]: %s", msg)
+				return nil
+			}),
+			gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
+				t.Logf("[Tool request received]: %s (%v)", tool.Name, tool.Arguments)
+				return nil
+			}),
+			gollem.WithLoopLimit(10),
+		)
+
+		ctx := t.Context()
+		_, err := s.Prompt(ctx, "Get a random number between 1 and 10")
+		gt.NoError(t, err)
+
+		t.Logf("Test completed: exitToolCalled=%v, isCompleted=%v, loopCount=%d", exitToolCalled, exitTool.IsCompleted(), loopCount)
+
+		// Verify that the exit tool was called
+		gt.True(t, exitTool.IsCompleted())
+
+		// Verify that loops occurred (should be more than 0 but less than loop limit)
+		gt.N(t, loopCount).Greater(0).Less(10)
+	}
+
+	t.Run("OpenAI", func(t *testing.T) {
+		testFn(t, newOpenAIClient)
+	})
+
+	t.Run("Gemini", func(t *testing.T) {
+		testFn(t, newGeminiClient)
+	})
+
+	t.Run("Claude", func(t *testing.T) {
+		testFn(t, newClaudeClient)
 	})
 }

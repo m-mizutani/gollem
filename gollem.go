@@ -1,7 +1,9 @@
 package gollem
 
 import (
+	"bytes"
 	"context"
+	"html/template"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -32,8 +34,9 @@ type Agent struct {
 }
 
 const (
-	DefaultLoopLimit  = 32
-	DefaultRetryLimit = 8
+	DefaultLoopLimit     = 32
+	DefaultRetryLimit    = 8
+	DefaultProceedPrompt = "What is the next action needed to advance the task? If no further actions are required and you are ready to switch to the requested user, no need more message response and please use the `{{ .exit_tool_name }}` function to indicate completion immediately."
 )
 
 type gollemConfig struct {
@@ -45,12 +48,16 @@ type gollemConfig struct {
 	tools    []Tool
 	toolSets []ToolSet
 
+	loopHook         LoopHook
 	messageHook      MessageHook
 	toolRequestHook  ToolRequestHook
 	toolResponseHook ToolResponseHook
 	toolErrorHook    ToolErrorHook
 	responseMode     ResponseMode
 	logger           *slog.Logger
+
+	proceedPrompt string
+	exitTool      ExitTool
 
 	history *History
 }
@@ -65,12 +72,16 @@ func (c *gollemConfig) Clone() *gollemConfig {
 		tools:    c.tools[:],
 		toolSets: c.toolSets[:],
 
+		loopHook:         c.loopHook,
 		messageHook:      c.messageHook,
 		toolRequestHook:  c.toolRequestHook,
 		toolResponseHook: c.toolResponseHook,
 		toolErrorHook:    c.toolErrorHook,
 		responseMode:     c.responseMode,
 		logger:           c.logger,
+
+		proceedPrompt: c.proceedPrompt,
+		exitTool:      c.exitTool,
 
 		history: c.history,
 	}
@@ -86,12 +97,15 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 			initPrompt:   "",
 			systemPrompt: "",
 
+			loopHook:         defaultLoopHook,
 			messageHook:      defaultMessageHook,
 			toolRequestHook:  defaultToolRequestHook,
 			toolResponseHook: defaultToolResponseHook,
 			toolErrorHook:    defaultToolErrorHook,
 			responseMode:     ResponseModeBlocking,
 			logger:           slog.New(slog.DiscardHandler),
+
+			proceedPrompt: DefaultProceedPrompt,
 		},
 	}
 
@@ -159,6 +173,26 @@ func WithTools(tools ...Tool) Option {
 func WithToolSets(toolSets ...ToolSet) Option {
 	return func(s *gollemConfig) {
 		s.toolSets = append(s.toolSets, toolSets...)
+	}
+}
+
+// WithExitTool sets the exit tool for the gollem agent. The exit tool is used to exit the session.
+func WithExitTool(tool ExitTool) Option {
+	return func(s *gollemConfig) {
+		s.exitTool = tool
+	}
+}
+
+// WithLoopHook sets a callback function for the loop. The callback function is called when the loop is started. If the function returns an error, the Prompt() method will be aborted immediately.
+// Usage:
+//
+//	gollem.WithLoopHook(func(ctx context.Context, loop int, input []Input) error {
+//		println("loop: " + strconv.Itoa(loop))
+//		return nil
+//	})
+func WithLoopHook(callback func(ctx context.Context, loop int, input []Input) error) Option {
+	return func(s *gollemConfig) {
+		s.loopHook = callback
 	}
 }
 
@@ -237,6 +271,63 @@ func WithHistory(history *History) Option {
 	}
 }
 
+// WithProceedPrompt sets the proceed prompt for the gollem agent. Default is DefaultProceedPrompt.
+// The template is a Go template that will be executed with the exit tool name.
+// Parameters:
+//
+//	exit_tool_name: The name of the exit tool.
+//
+// Usage:
+//
+//	gollem.WithProceedPrompt("Go next step. `{{ .exit_tool_name }}` should be called when the task is completed")
+func WithProceedPrompt(proceedPromptTemplate string) Option {
+	return func(s *gollemConfig) {
+		s.proceedPrompt = proceedPromptTemplate
+	}
+}
+
+func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool, error) {
+	allTools := cfg.tools[:]
+	if cfg.exitTool != nil {
+		allTools = append(allTools, cfg.exitTool)
+	}
+	toolMap, err := buildToolMap(ctx, allTools, cfg.toolSets)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	toolList := make([]Tool, 0, len(toolMap))
+	toolNames := make([]string, 0, len(toolMap))
+	for _, tool := range toolMap {
+		toolList = append(toolList, tool)
+		toolNames = append(toolNames, tool.Spec().Name)
+	}
+	logger := LoggerFromContext(ctx)
+	logger.Debug("gollem tool list", "names", toolNames)
+
+	return toolMap, toolList, nil
+}
+
+func setupProceedPrompt(_ context.Context, cfg *gollemConfig) (string, error) {
+	if cfg.exitTool == nil {
+		return "", nil
+	}
+
+	tmpl, err := template.New("proceed_prompt").Parse(cfg.proceedPrompt)
+	if err != nil {
+		return "", goerr.Wrap(err, "failed to parse proceed prompt")
+	}
+
+	var proceedPrompt bytes.Buffer
+	if err := tmpl.Execute(&proceedPrompt, map[string]string{
+		"exit_tool_name": cfg.exitTool.Spec().Name,
+	}); err != nil {
+		return "", goerr.Wrap(err, "failed to execute proceed prompt")
+	}
+
+	return proceedPrompt.String(), nil
+}
+
 // Prompt is the main function to start the gollem agent. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until no tool call from LLM or the LoopLimit is reached.
 func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*History, error) {
 	cfg := g.gollemConfig.Clone()
@@ -251,18 +342,10 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 		"history_count", cfg.history.ToCount(),
 	)
 
-	toolMap, err := buildToolMap(ctx, cfg.tools, cfg.toolSets)
+	toolMap, toolList, err := setupTools(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
-
-	toolList := make([]Tool, 0, len(toolMap))
-	toolNames := make([]string, 0, len(toolMap))
-	for _, tool := range toolMap {
-		toolList = append(toolList, tool)
-		toolNames = append(toolNames, tool.Spec().Name)
-	}
-	logger.Debug("gollem tool list", "names", toolNames)
 
 	input := []Input{Text(prompt)}
 
@@ -284,12 +367,20 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 		return nil, err
 	}
 
-	for i := 0; len(input) > 0; i++ {
-		if i > cfg.loopLimit {
-			return nil, goerr.Wrap(ErrLoopLimitExceeded, "order stopped", goerr.V("loop_limit", cfg.loopLimit))
+	proceedPrompt, err := setupProceedPrompt(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := 0; i < cfg.loopLimit; i++ {
+		logger.Debug("gollem sending request", "loop", i, "input", input)
+		if err := cfg.loopHook(ctx, i, input); err != nil {
+			return nil, err
 		}
 
-		logger.Debug("gollem sending request", "loop", i, "input", input)
+		if len(input) == 0 && proceedPrompt != "" {
+			input = []Input{Text(proceedPrompt)}
+		}
 
 		switch cfg.responseMode {
 		case ResponseModeBlocking:
@@ -320,9 +411,24 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 				input = append(input, newInput...)
 			}
 		}
+
+		if cfg.exitTool != nil {
+			if cfg.exitTool.IsCompleted() {
+				if response := cfg.exitTool.Response(); response != "" {
+					if err := cfg.messageHook(ctx, response); err != nil {
+						return ssn.History(), err
+					}
+				}
+				return ssn.History(), nil
+			}
+		} else {
+			if len(input) == 0 {
+				return ssn.History(), nil
+			}
+		}
 	}
 
-	return ssn.History(), nil
+	return ssn.History(), goerr.Wrap(ErrLoopLimitExceeded, "session stopped", goerr.V("loop_limit", cfg.loopLimit))
 }
 
 func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, toolMap map[string]Tool) ([]Input, error) {
@@ -335,8 +441,6 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 			return nil, goerr.Wrap(err, "failed to call MessageHook")
 		}
 	}
-
-	var retErr error
 
 	// Call the ToolRequestHook for all tool calls
 	for _, toolCall := range output.FunctionCalls {
@@ -387,7 +491,7 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 		})
 	}
 
-	return newInput, retErr
+	return newInput, nil
 }
 
 type toolWrapper struct {
