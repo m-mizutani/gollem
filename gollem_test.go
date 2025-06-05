@@ -161,7 +161,7 @@ func TestGollemWithHooks(t *testing.T) {
 				gt.Equal(t, tool.Arguments["arg1"], "value1")
 				return nil
 			}),
-			gollem.WithLoopLimit(1),
+			gollem.WithLoopLimit(2),
 		)
 
 		_, err := s.Prompt(t.Context(), "test message")
@@ -192,7 +192,7 @@ func TestGollemWithHooks(t *testing.T) {
 				gt.Equal(t, response["result"], "test_result")
 				return nil
 			}),
-			gollem.WithLoopLimit(1),
+			gollem.WithLoopLimit(2),
 		)
 
 		_, err := s.Prompt(t.Context(), "test message")
@@ -221,7 +221,7 @@ func TestGollemWithHooks(t *testing.T) {
 				gt.Equal(t, tool.Name, "test_tool")
 				return nil
 			}),
-			gollem.WithLoopLimit(1),
+			gollem.WithLoopLimit(2),
 		)
 
 		_, err := s.Prompt(t.Context(), "test message")
@@ -237,7 +237,7 @@ func TestGollemWithHooks(t *testing.T) {
 				gt.Equal(t, msg, "test response")
 				return nil
 			}),
-			gollem.WithLoopLimit(1),
+			gollem.WithLoopLimit(2),
 		)
 
 		_, err := s.Prompt(t.Context(), "test message")
@@ -306,7 +306,7 @@ func TestGollemWithOptions(t *testing.T) {
 		_, err := s.Prompt(t.Context(), "test message")
 		gt.Error(t, err)
 		gt.True(t, errors.Is(err, gollem.ErrLoopLimitExceeded))
-		gt.Equal(t, loopCount, 11) // 10回のループ + 1回の制限チェック
+		gt.Equal(t, loopCount, 10)
 	})
 
 	t.Run("WithRetryLimit", func(t *testing.T) {
@@ -440,7 +440,7 @@ func TestGollemWithOptions(t *testing.T) {
 				return map[string]any{"result": "test"}, nil
 			},
 		}
-		s := gollem.New(mockClient, gollem.WithTools(tool), gollem.WithLoopLimit(1))
+		s := gollem.New(mockClient, gollem.WithTools(tool), gollem.WithLoopLimit(2))
 		_, err := s.Prompt(t.Context(), "test message")
 		gt.NoError(t, err)
 	})
@@ -474,7 +474,7 @@ func TestGollemWithOptions(t *testing.T) {
 				return map[string]any{"result": "test"}, nil
 			},
 		}
-		s := gollem.New(mockClient, gollem.WithToolSets(toolSet), gollem.WithLoopLimit(1))
+		s := gollem.New(mockClient, gollem.WithToolSets(toolSet), gollem.WithLoopLimit(2))
 		_, err := s.Prompt(t.Context(), "test message")
 		gt.NoError(t, err)
 	})
@@ -580,7 +580,7 @@ func TestGollemWithOptions(t *testing.T) {
 		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 		s := gollem.New(mockClient,
-			gollem.WithLoopLimit(1),
+			gollem.WithLoopLimit(2),
 			gollem.WithRetryLimit(5),
 			gollem.WithInitPrompt("initial prompt"),
 			gollem.WithSystemPrompt("system prompt"),

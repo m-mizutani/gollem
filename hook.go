@@ -3,6 +3,9 @@ package gollem
 import "context"
 
 type (
+	// LoopHook is a hook for the session loop. "loop" is the loop count, it's 0-indexed. "input" is the current input of the loop. If you want to abort the session loop, you can return an error.
+	LoopHook func(ctx context.Context, loop int, input []Input) error
+
 	// MessageHook is a hook for the message. If you want to display or record the message, you can use this hook.
 	MessageHook func(ctx context.Context, msg string) error
 
@@ -15,6 +18,10 @@ type (
 	// ToolErrorHook is a hook for the tool error. If you want to record the tool error, you can use this hook.
 	ToolErrorHook func(ctx context.Context, err error, tool FunctionCall) error
 )
+
+func defaultLoopHook(ctx context.Context, loop int, input []Input) error {
+	return nil
+}
 
 func defaultMessageHook(ctx context.Context, msg string) error {
 	return nil
