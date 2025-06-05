@@ -191,6 +191,12 @@ type Tool interface {
 	Run(ctx context.Context, args map[string]any) (map[string]any, error)
 }
 
+// ExitTool is a tool that can be used to exit the session. IsCompleted() is called before calling a method to generate content every loop. If IsCompleted() returns true, the session will be ended.
+type ExitTool interface {
+	Tool
+	IsCompleted() bool
+}
+
 // ToolSet is a set of tools.
 // It's useful for providing a set of tools to the LLM.
 type ToolSet interface {

@@ -52,6 +52,8 @@ type gollemConfig struct {
 	responseMode     ResponseMode
 	logger           *slog.Logger
 
+	exitTool ExitTool
+
 	history *History
 }
 
@@ -162,6 +164,13 @@ func WithToolSets(toolSets ...ToolSet) Option {
 	}
 }
 
+// WithExitTool sets the exit tool for the gollem agent. The exit tool is used to exit the session.
+func WithExitTool(tool ExitTool) Option {
+	return func(s *gollemConfig) {
+		s.exitTool = tool
+	}
+}
+
 // WithMessageHook sets a callback function for the message. The callback function is called when receiving a generated text message from the LLM. If the function returns an error, the Prompt() method will be aborted immediately.
 // Usage:
 //
@@ -251,7 +260,11 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 		"history_count", cfg.history.ToCount(),
 	)
 
-	toolMap, err := buildToolMap(ctx, cfg.tools, cfg.toolSets)
+	allTools := cfg.tools[:]
+	if cfg.exitTool != nil {
+		allTools = append(allTools, cfg.exitTool)
+	}
+	toolMap, err := buildToolMap(ctx, allTools, cfg.toolSets)
 	if err != nil {
 		return nil, err
 	}
@@ -316,9 +329,19 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 				input = append(input, newInput...)
 			}
 		}
+
+		if cfg.exitTool != nil {
+			if cfg.exitTool.IsCompleted() {
+				return ssn.History(), nil
+			}
+		} else {
+			if len(input) == 0 {
+				return ssn.History(), nil
+			}
+		}
 	}
 
-	return ssn.History(), goerr.Wrap(ErrLoopLimitExceeded, "order stopped", goerr.V("loop_limit", cfg.loopLimit))
+	return ssn.History(), goerr.Wrap(ErrLoopLimitExceeded, "session stopped", goerr.V("loop_limit", cfg.loopLimit))
 }
 
 func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, toolMap map[string]Tool) ([]Input, error) {
