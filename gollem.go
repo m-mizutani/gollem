@@ -31,10 +31,6 @@ type Agent struct {
 	gollemConfig
 }
 
-func (a *Agent) Facilitator() Facilitator {
-	return a.gollemConfig.facilitator
-}
-
 const (
 	DefaultLoopLimit  = 32
 	DefaultRetryLimit = 8
@@ -208,7 +204,7 @@ func WithMessageHook(callback func(ctx context.Context, msg string) error) Optio
 	}
 }
 
-// WithToolRequestHook sets a callback function for the tool. The callback function is called just before executing the tool. If the function returns an error, the Prompt() method will be aborted immediately.
+// WithToolRequestHook sets a callback function that is called just before executing a tool. The callback is invoked even if the requested tool is not found. If the callback returns an error, the Prompt() method will be aborted immediately.
 // Usage:
 //
 //	gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.Tool) error {
@@ -404,8 +400,17 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 	for _, toolCall := range output.FunctionCalls {
 		logger.Debug("gollem received tool request", "tool", toolCall.Name, "args", toolCall.Arguments)
 
-		if err := cfg.toolRequestHook(ctx, *toolCall); err != nil {
-			return nil, goerr.Wrap(err, "failed to call ToolRequestHook")
+		// Check if this tool is a Facilitator by checking the tool name
+		isFacilitator := false
+		if cfg.facilitator != nil {
+			isFacilitator = toolCall.Name == cfg.facilitator.Spec().Name
+		}
+
+		// Call the ToolRequestHook only if this is not a Facilitator tool
+		if !isFacilitator {
+			if err := cfg.toolRequestHook(ctx, *toolCall); err != nil {
+				return nil, goerr.Wrap(err, "failed to call ToolRequestHook")
+			}
 		}
 
 		tool, ok := toolMap[toolCall.Name]
@@ -436,8 +441,11 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 			continue
 		}
 
-		if cbErr := cfg.toolResponseHook(ctx, *toolCall, result); cbErr != nil {
-			return nil, goerr.Wrap(cbErr, "failed to call ToolResponseHook")
+		// Call the ToolResponseHook only if this is not a Facilitator tool
+		if !isFacilitator {
+			if cbErr := cfg.toolResponseHook(ctx, *toolCall, result); cbErr != nil {
+				return nil, goerr.Wrap(cbErr, "failed to call ToolResponseHook")
+			}
 		}
 
 		logger.Info("gollem tool response", "call", toolCall, "result", result)

@@ -11,6 +11,7 @@ import (
 	"github.com/m-mizutani/gollem/llm/claude"
 	"github.com/m-mizutani/gollem/llm/gemini"
 	"github.com/m-mizutani/gollem/llm/openai"
+	"github.com/m-mizutani/gollem/mock"
 	"github.com/m-mizutani/gt"
 )
 
@@ -449,4 +450,95 @@ func TestFacilitator(t *testing.T) {
 	t.Run("Claude", func(t *testing.T) {
 		testFn(t, newClaudeClient)
 	})
+}
+
+func TestFacilitatorHooksNotCalled(t *testing.T) {
+	// Create a mock client that will call the facilitator tool
+	mockClient := &mock.LLMClientMock{
+		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+			mockSession := &mock.SessionMock{
+				GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					// Check if this is the initial prompt
+					if len(input) > 0 {
+						if text, ok := input[0].(gollem.Text); ok && string(text) == "test prompt" {
+							// Call random_number tool first
+							return &gollem.Response{
+								FunctionCalls: []*gollem.FunctionCall{
+									{
+										ID:   "random_call_1",
+										Name: "random_number",
+										Arguments: map[string]any{
+											"min": 1.0,
+											"max": 10.0,
+										},
+									},
+								},
+							}, nil
+						}
+					}
+
+					// Check if this is a function response for random_number
+					if len(input) > 0 {
+						if funcResp, ok := input[0].(gollem.FunctionResponse); ok && funcResp.Name == "random_number" {
+							// After random_number tool, call respond_to_user (facilitator)
+							return &gollem.Response{
+								Texts: []string{"Task completed"},
+								FunctionCalls: []*gollem.FunctionCall{
+									{
+										ID:        "respond_call_1",
+										Name:      "respond_to_user",
+										Arguments: map[string]any{},
+									},
+								},
+							}, nil
+						}
+					}
+
+					// Check if this is a function response for respond_to_user
+					if len(input) > 0 {
+						if funcResp, ok := input[0].(gollem.FunctionResponse); ok && funcResp.Name == "respond_to_user" {
+							// End the session
+							return &gollem.Response{}, nil
+						}
+					}
+
+					return &gollem.Response{}, nil
+				},
+			}
+			return mockSession, nil
+		},
+	}
+
+	// Track which tools triggered the hooks
+	toolRequestCalls := make([]string, 0)
+	toolResponseCalls := make([]string, 0)
+
+	s := gollem.New(mockClient,
+		gollem.WithTools(&randomNumberTool{}),
+		gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
+			toolRequestCalls = append(toolRequestCalls, tool.Name)
+			return nil
+		}),
+		gollem.WithToolResponseHook(func(ctx context.Context, tool gollem.FunctionCall, response map[string]any) error {
+			toolResponseCalls = append(toolResponseCalls, tool.Name)
+			return nil
+		}),
+		gollem.WithLoopLimit(10),
+	)
+
+	ctx := t.Context()
+	_, err := s.Prompt(ctx, "test prompt")
+	gt.NoError(t, err)
+
+	// Verify that only random_number tool triggered hooks, not the facilitator
+	gt.A(t, toolRequestCalls).Length(1).At(0, func(t testing.TB, v string) {
+		gt.Equal(t, v, "random_number")
+	})
+	gt.A(t, toolResponseCalls).Length(1).At(0, func(t testing.TB, v string) {
+		gt.Equal(t, v, "random_number")
+	})
+
+	// Verify facilitator was called (session should be completed)
+	facilitator := s.Facilitator()
+	gt.True(t, facilitator.IsCompleted())
 }
