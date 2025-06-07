@@ -23,7 +23,11 @@ type defaultFacilitator struct {
 	isCompleted bool
 }
 
-var DefaultFacilitator Facilitator = &defaultFacilitator{}
+func newDefaultFacilitator() Facilitator {
+	return &defaultFacilitator{}
+}
+
+var _ Facilitator = &defaultFacilitator{}
 
 func (t *defaultFacilitator) Spec() ToolSpec {
 	return ToolSpec{

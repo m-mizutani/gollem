@@ -31,6 +31,10 @@ type Agent struct {
 	gollemConfig
 }
 
+func (a *Agent) Facilitator() Facilitator {
+	return a.gollemConfig.facilitator
+}
+
 const (
 	DefaultLoopLimit  = 32
 	DefaultRetryLimit = 8
@@ -99,7 +103,7 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 			toolErrorHook:    defaultToolErrorHook,
 			responseMode:     ResponseModeBlocking,
 			logger:           slog.New(slog.DiscardHandler),
-			facilitator:      DefaultFacilitator,
+			facilitator:      newDefaultFacilitator(),
 		},
 	}
 
