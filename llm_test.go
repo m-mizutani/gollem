@@ -401,7 +401,7 @@ func TestFacilitator(t *testing.T) {
 	testFn := func(t *testing.T, newClient func(t *testing.T) gollem.LLMClient) {
 		client := newClient(t)
 
-		facilitator := &gollem.DefaultFacilitator{}
+		facilitator := gollem.DefaultFacilitator
 		loopCount := 0
 		facilitatorCalled := false
 

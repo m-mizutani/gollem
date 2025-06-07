@@ -19,26 +19,28 @@ type Facilitator interface {
 // DefaultFacilitator is the tool to stop the session loop and provide proceed prompts.
 // This tool is used when the agent determines that the session should be ended. The tool name is "respond_to_user".
 // It provides a default proceed prompt that guides the LLM to continue working or use the facilitator tool when the task is completed.
-type DefaultFacilitator struct {
+type defaultFacilitator struct {
 	isCompleted bool
 }
 
-func (t *DefaultFacilitator) Spec() ToolSpec {
+var DefaultFacilitator Facilitator = &defaultFacilitator{}
+
+func (t *defaultFacilitator) Spec() ToolSpec {
 	return ToolSpec{
 		Name:        "respond_to_user",
 		Description: "Call this tool when you have gathered all necessary information, completed all required actions, and already provided the final answer to the user's original request. This signals that your work on the current request is finished.",
 	}
 }
 
-func (t *DefaultFacilitator) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+func (t *defaultFacilitator) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
 	t.isCompleted = true
 	return nil, nil
 }
 
-func (t *DefaultFacilitator) IsCompleted() bool {
+func (t *defaultFacilitator) IsCompleted() bool {
 	return t.isCompleted
 }
 
-func (t *DefaultFacilitator) ProceedPrompt() string {
+func (t *defaultFacilitator) ProceedPrompt() string {
 	return DefaultProceedPrompt
 }

@@ -99,7 +99,7 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 			toolErrorHook:    defaultToolErrorHook,
 			responseMode:     ResponseModeBlocking,
 			logger:           slog.New(slog.DiscardHandler),
-			facilitator:      &DefaultFacilitator{},
+			facilitator:      DefaultFacilitator,
 		},
 	}
 
