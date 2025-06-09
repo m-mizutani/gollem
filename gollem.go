@@ -31,6 +31,10 @@ type Agent struct {
 	gollemConfig
 }
 
+func (x *Agent) Facilitator() Facilitator {
+	return x.gollemConfig.facilitator
+}
+
 const (
 	DefaultLoopLimit  = 32
 	DefaultRetryLimit = 8
