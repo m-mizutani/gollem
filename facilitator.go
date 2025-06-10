@@ -38,7 +38,9 @@ func (t *defaultFacilitator) Spec() ToolSpec {
 
 func (t *defaultFacilitator) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
 	t.isCompleted = true
-	return nil, nil
+	return map[string]any{
+		"message": "The session is completed.",
+	}, nil
 }
 
 func (t *defaultFacilitator) IsCompleted() bool {
