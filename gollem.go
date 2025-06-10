@@ -332,7 +332,6 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 	}
 
 	for i := 0; i < cfg.loopLimit; i++ {
-		logger.Debug("gollem sending request", "loop", i, "input", input)
 		if err := cfg.loopHook(ctx, i, input); err != nil {
 			return nil, err
 		}
@@ -345,7 +344,7 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 			}
 		}
 
-		logger.Debug("gollem input", "input", input)
+		logger.Debug("gollem input", "input", input, "loop", i)
 
 		switch cfg.responseMode {
 		case ResponseModeBlocking:
