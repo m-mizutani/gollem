@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"html/template"
+
+	"github.com/m-mizutani/goerr/v2"
 )
 
 const (
@@ -30,17 +32,13 @@ type defaultFacilitator struct {
 }
 
 func newDefaultFacilitator() Facilitator {
-	tmpl, err := template.New("proceed_prompt").Parse(DefaultProceedPrompt)
-	if err != nil {
-		panic(err)
-	}
+	tmpl := template.Must(template.New("proceed_prompt").Parse(DefaultProceedPrompt))
 
 	var buf bytes.Buffer
-	err = tmpl.Execute(&buf, map[string]any{
+	if err := tmpl.Execute(&buf, map[string]any{
 		"facilitator_tool_name": DefaultFacilitatorName,
-	})
-	if err != nil {
-		panic(err)
+	}); err != nil {
+		panic(goerr.Wrap(err, "failed to execute proceed prompt template"))
 	}
 
 	return &defaultFacilitator{prompt: buf.String()}
