@@ -2,6 +2,7 @@ package gollem
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -454,6 +455,19 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 		}
 
 		logger.Info("gollem tool response", "call", toolCall, "result", result)
+
+		// Remove type information from the result object by encoding and decoding it as JSON.
+		if result != nil {
+			marshaled, err := json.Marshal(result)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to marshal result")
+			}
+			var unmarshaled map[string]any
+			if err := json.Unmarshal(marshaled, &unmarshaled); err != nil {
+				return nil, goerr.Wrap(err, "failed to unmarshal result")
+			}
+			result = unmarshaled
+		}
 
 		newInput = append(newInput, FunctionResponse{
 			ID:   toolCall.ID,
