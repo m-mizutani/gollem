@@ -345,6 +345,8 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 			}
 		}
 
+		logger.Debug("gollem input", "input", input)
+
 		switch cfg.responseMode {
 		case ResponseModeBlocking:
 			output, err := ssn.GenerateContent(ctx, input...)
