@@ -1,9 +1,16 @@
 package gollem
 
-import "context"
+import (
+	"bytes"
+	"context"
+	"html/template"
+
+	"github.com/m-mizutani/goerr/v2"
+)
 
 const (
-	DefaultProceedPrompt = "What is the next action needed to advance the task? If no further actions are required and you are ready to switch to the requested user, no need more message response and please use the `{{ .facilitator_tool_name }}` function to indicate completion immediately."
+	DefaultProceedPrompt   = "What is the next action needed to advance the task? If no further actions are required and you are ready to switch to the requested user, no need more message response and please use the `{{ .facilitator_tool_name }}` function to indicate completion immediately."
+	DefaultFacilitatorName = "respond_to_user"
 )
 
 // Facilitator is a tool that can be used to control the session loop and provide proceed prompts.
@@ -20,18 +27,28 @@ type Facilitator interface {
 // This tool is used when the agent determines that the session should be ended. The tool name is "respond_to_user".
 // It provides a default proceed prompt that guides the LLM to continue working or use the facilitator tool when the task is completed.
 type defaultFacilitator struct {
+	prompt      string
 	isCompleted bool
 }
 
 func newDefaultFacilitator() Facilitator {
-	return &defaultFacilitator{}
+	tmpl := template.Must(template.New("proceed_prompt").Parse(DefaultProceedPrompt))
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, map[string]any{
+		"facilitator_tool_name": DefaultFacilitatorName,
+	}); err != nil {
+		panic(goerr.Wrap(err, "failed to execute proceed prompt template"))
+	}
+
+	return &defaultFacilitator{prompt: buf.String()}
 }
 
 var _ Facilitator = &defaultFacilitator{}
 
 func (t *defaultFacilitator) Spec() ToolSpec {
 	return ToolSpec{
-		Name:        "respond_to_user",
+		Name:        DefaultFacilitatorName,
 		Description: "Call this tool when you have gathered all necessary information, completed all required actions, and already provided the final answer to the user's original request. This signals that your work on the current request is finished.",
 	}
 }
@@ -48,5 +65,5 @@ func (t *defaultFacilitator) IsCompleted() bool {
 }
 
 func (t *defaultFacilitator) ProceedPrompt() string {
-	return DefaultProceedPrompt
+	return t.prompt
 }

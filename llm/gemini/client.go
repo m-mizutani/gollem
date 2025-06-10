@@ -296,12 +296,39 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		return nil, err
 	}
 
+	// Filter out history entries with empty parts before sending message
+	s.filterEmptyHistoryParts(ctx)
+
 	resp, err := s.session.SendMessage(ctx, parts...)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to send message")
 	}
 
 	return processResponse(resp), nil
+}
+
+// filterEmptyHistoryParts removes history entries with empty parts
+func (s *Session) filterEmptyHistoryParts(ctx context.Context) {
+	logger := gollem.LoggerFromContext(ctx)
+	originalCount := len(s.session.History)
+
+	filteredHistory := make([]*genai.Content, 0, len(s.session.History))
+	removedCount := 0
+
+	for i, hist := range s.session.History {
+		if len(hist.Parts) == 0 {
+			logger.Warn("gemini history has empty parts, removing", "hist", hist, "index", i, "total", originalCount)
+			removedCount++
+			continue
+		}
+		filteredHistory = append(filteredHistory, hist)
+	}
+
+	s.session.History = filteredHistory
+
+	if removedCount > 0 {
+		logger.Debug("gemini filtered empty history entries", "removed", removedCount, "original", originalCount, "filtered", len(filteredHistory))
+	}
 }
 
 // GenerateStream processes the input and generates a response stream.
@@ -311,6 +338,9 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	if err != nil {
 		return nil, err
 	}
+
+	// Filter out history entries with empty parts before sending message stream
+	s.filterEmptyHistoryParts(ctx)
 
 	iter := s.session.SendMessageStream(ctx, parts...)
 	responseChan := make(chan *gollem.Response)
