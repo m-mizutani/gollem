@@ -296,6 +296,9 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		return nil, err
 	}
 
+	logger := gollem.LoggerFromContext(ctx)
+	logger.Debug("gemini sending message", "parts", parts)
+
 	resp, err := s.session.SendMessage(ctx, parts...)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to send message")
