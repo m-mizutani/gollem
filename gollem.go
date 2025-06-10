@@ -456,7 +456,7 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 
 		logger.Info("gollem tool response", "call", toolCall, "result", result)
 
-		// Remove type information from the result object by encoding and decoding it as JSON.
+		// Sanitize result to ensure a generic JSON-compatible structure for LLM processing.
 		if result != nil {
 			marshaled, err := json.Marshal(result)
 			if err != nil {
