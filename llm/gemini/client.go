@@ -299,6 +299,12 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	logger := gollem.LoggerFromContext(ctx)
 	logger.Debug("gemini sending message", "parts", parts)
 
+	for i, hist := range s.session.History {
+		if len(hist.Parts) == 0 {
+			logger.Warn("gemini history is empty", "hist", hist, "index", i, "total", len(s.session.History))
+		}
+	}
+
 	resp, err := s.session.SendMessage(ctx, parts...)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to send message")
