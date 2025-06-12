@@ -114,7 +114,7 @@ func WithSystemPrompt(prompt string) Option {
 // It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
 	client := &Client{
-		defaultModel:   anthropic.ModelClaude3_5SonnetLatest,
+		defaultModel:   string(anthropic.ModelClaude3_5SonnetLatest),
 		embeddingModel: DefaultEmbeddingModel,
 		apiKey:         apiKey,
 		params: generationParameters{
@@ -253,7 +253,7 @@ func (s *Session) createRequest() anthropic.MessageNewParams {
 	}
 
 	return anthropic.MessageNewParams{
-		Model:       s.defaultModel,
+		Model:       anthropic.Model(s.defaultModel),
 		MaxTokens:   s.params.MaxTokens,
 		Temperature: anthropic.Float(s.params.Temperature),
 		TopP:        anthropic.Float(s.params.TopP),
@@ -275,15 +275,14 @@ func processResponse(resp *anthropic.Message) *gollem.Response {
 	}
 
 	for _, content := range resp.Content {
-		textBlock := content.AsResponseTextBlock()
-		if textBlock.Type == "text" {
+		switch content.Type {
+		case "text":
+			textBlock := content.AsText()
 			response.Texts = append(response.Texts, textBlock.Text)
-		}
-
-		toolUseBlock := content.AsResponseToolUseBlock()
-		if toolUseBlock.Type == "tool_use" {
+		case "tool_use":
+			toolUseBlock := content.AsToolUse()
 			var args map[string]interface{}
-			if err := json.Unmarshal([]byte(toolUseBlock.Input), &args); err != nil {
+			if err := json.Unmarshal(toolUseBlock.Input, &args); err != nil {
 				response.Error = goerr.Wrap(err, "failed to unmarshal function arguments")
 				return response
 			}
@@ -401,22 +400,22 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 
 			switch event.Type {
 			case "content_block_delta":
-				deltaEvent := event.AsContentBlockDeltaEvent()
+				deltaEvent := event.AsContentBlockDelta()
 				switch deltaEvent.Delta.Type {
 				case "text_delta":
-					textDelta := deltaEvent.Delta.AsTextContentBlockDelta()
+					textDelta := deltaEvent.Delta.AsTextDelta()
 					response.Texts = append(response.Texts, textDelta.Text)
 					textContent.WriteString(textDelta.Text)
 				case "input_json_delta":
-					jsonDelta := deltaEvent.Delta.AsInputJSONContentBlockDelta()
+					jsonDelta := deltaEvent.Delta.AsInputJSONDelta()
 					if jsonDelta.PartialJSON != "" {
 						acc.Arguments += jsonDelta.PartialJSON
 					}
 				}
 			case "content_block_start":
-				startEvent := event.AsContentBlockStartEvent()
+				startEvent := event.AsContentBlockStart()
 				if startEvent.ContentBlock.Type == "tool_use" {
-					toolUseBlock := startEvent.ContentBlock.AsResponseToolUseBlock()
+					toolUseBlock := startEvent.ContentBlock.AsToolUse()
 					acc.ID = toolUseBlock.ID
 					acc.Name = toolUseBlock.Name
 				}
@@ -429,14 +428,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 						return
 					}
 					response.FunctionCalls = append(response.FunctionCalls, funcCall)
-					toolCalls = append(toolCalls, anthropic.ContentBlockParamUnion{
-						OfRequestToolUseBlock: &anthropic.ToolUseBlockParam{
-							ID:    funcCall.ID,
-							Name:  funcCall.Name,
-							Input: funcCall.Arguments,
-							Type:  "tool_use",
-						},
-					})
+					toolCalls = append(toolCalls, anthropic.NewToolUseBlock(funcCall.ID, funcCall.Arguments, funcCall.Name))
 					acc = newFunctionCallAccumulator()
 				}
 			}

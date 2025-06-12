@@ -6,7 +6,6 @@ import (
 
 	"cloud.google.com/go/vertexai/genai"
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gt"
 	"github.com/sashabaranov/go-openai"
@@ -89,121 +88,50 @@ func TestHistoryClaude(t *testing.T) {
 		{
 			Role: anthropic.MessageParamRoleUser,
 			Content: []anthropic.ContentBlockParamUnion{
-				{
-					OfRequestTextBlock: &anthropic.TextBlockParam{
-						Text: "Hello",
-						Type: "text",
-					},
-				},
-				{
-					OfRequestImageBlock: &anthropic.ImageBlockParam{
-						Source: anthropic.ImageBlockParamSourceUnion{
-							OfBase64ImageSource: &anthropic.Base64ImageSourceParam{
-								Type:      "base64",
-								MediaType: "image/jpeg",
-								Data:      "base64encodedimage",
-							},
-						},
-						Type: "image",
-					},
-				},
+				anthropic.NewTextBlock("Hello"),
+				anthropic.NewImageBlockBase64("image/jpeg", "base64encodedimage"),
 			},
 		},
 		{
 			Role: anthropic.MessageParamRoleAssistant,
 			Content: []anthropic.ContentBlockParamUnion{
-				{
-					OfRequestTextBlock: &anthropic.TextBlockParam{
-						Text: "Hi, how can I help you?",
-						Type: "text",
-					},
-				},
+				anthropic.NewTextBlock("Hi, how can I help you?"),
 			},
 		},
 		{
 			Role: anthropic.MessageParamRoleUser,
 			Content: []anthropic.ContentBlockParamUnion{
-				{
-					OfRequestTextBlock: &anthropic.TextBlockParam{
-						Text: "What's the weather like?",
-						Type: "text",
-					},
-				},
+				anthropic.NewTextBlock("What's the weather like?"),
 			},
 		},
 		{
 			Role: anthropic.MessageParamRoleAssistant,
 			Content: []anthropic.ContentBlockParamUnion{
-				{
-					OfRequestToolUseBlock: &anthropic.ToolUseBlockParam{
-						ID:    "tool_1",
-						Name:  "get_weather",
-						Input: `{"location": "Tokyo"}`,
-						Type:  "tool_use",
-					},
-				},
+				anthropic.NewToolUseBlock("tool_1", `{"location": "Tokyo"}`, "get_weather"),
 			},
 		},
 		{
 			Role: anthropic.MessageParamRoleUser,
 			Content: []anthropic.ContentBlockParamUnion{
-				{
-					OfRequestToolResultBlock: &anthropic.ToolResultBlockParam{
-						ToolUseID: "tool_2",
-						Content: []anthropic.ToolResultBlockParamContentUnion{
-							{
-								OfRequestTextBlock: &anthropic.TextBlockParam{
-									Text: `{"temperature": 30, "condition": "cloudy"}`,
-									Type: "text",
-								},
-							},
-						},
-						IsError: param.NewOpt(false),
-						Type:    "tool_result",
-					},
-				},
+				anthropic.NewToolResultBlock("tool_2", `{"temperature": 30, "condition": "cloudy"}`, false),
 			},
 		},
 		{
 			Role: anthropic.MessageParamRoleAssistant,
 			Content: []anthropic.ContentBlockParamUnion{
-				{
-					OfRequestTextBlock: &anthropic.TextBlockParam{
-						Text: "Second message",
-						Type: "text",
-					},
-				},
+				anthropic.NewTextBlock("Second message"),
 			},
 		},
 		{
 			Role: anthropic.MessageParamRoleUser,
 			Content: []anthropic.ContentBlockParamUnion{
-				{
-					OfRequestToolResultBlock: &anthropic.ToolResultBlockParam{
-						ToolUseID: "tool_3",
-						Content: []anthropic.ToolResultBlockParamContentUnion{
-							{
-								OfRequestTextBlock: &anthropic.TextBlockParam{
-									Text: `{"temperature": 35, "condition": "rainy"}`,
-									Type: "text",
-								},
-							},
-						},
-						IsError: param.NewOpt(false),
-						Type:    "tool_result",
-					},
-				},
+				anthropic.NewToolResultBlock("tool_3", `{"temperature": 35, "condition": "rainy"}`, false),
 			},
 		},
 		{
 			Role: anthropic.MessageParamRoleAssistant,
 			Content: []anthropic.ContentBlockParamUnion{
-				{
-					OfRequestTextBlock: &anthropic.TextBlockParam{
-						Text: "The weather in Tokyo is sunny with a temperature of 25°C.",
-						Type: "text",
-					},
-				},
+				anthropic.NewTextBlock("The weather in Tokyo is sunny with a temperature of 25°C."),
 			},
 		},
 	}
@@ -223,18 +151,16 @@ func TestHistoryClaude(t *testing.T) {
 	gt.NoError(t, err)
 
 	// Compare each message individually to make debugging easier
+	gt.Equal(t, len(messages), len(restoredMessages))
 	for i := range messages {
-		gt.Value(t, restoredMessages[i].Role).Equal(messages[i].Role)
-		gt.Value(t, len(restoredMessages[i].Content)).Equal(len(messages[i].Content))
+		gt.Equal(t, messages[i].Role, restoredMessages[i].Role)
+		gt.Equal(t, len(messages[i].Content), len(restoredMessages[i].Content))
 
 		for j := range messages[i].Content {
-			if messages[i].Content[j].OfRequestToolResultBlock != nil {
-				gt.Value(t, restoredMessages[i].Content[j].OfRequestToolResultBlock.ToolUseID).Equal(messages[i].Content[j].OfRequestToolResultBlock.ToolUseID)
-				gt.Value(t, restoredMessages[i].Content[j].OfRequestToolResultBlock.IsError).Equal(messages[i].Content[j].OfRequestToolResultBlock.IsError)
-				gt.Value(t, len(restoredMessages[i].Content[j].OfRequestToolResultBlock.Content)).Equal(len(messages[i].Content[j].OfRequestToolResultBlock.Content))
-				gt.Value(t, restoredMessages[i].Content[j].OfRequestToolResultBlock.Content[0].OfRequestTextBlock.Text).Equal(messages[i].Content[j].OfRequestToolResultBlock.Content[0].OfRequestTextBlock.Text)
-			} else {
-				gt.Value(t, restoredMessages[i].Content[j]).Equal(messages[i].Content[j])
+			// Test specific field access based on type
+			if messages[i].Content[j].OfToolResult != nil {
+				gt.Value(t, restoredMessages[i].Content[j].OfToolResult.ToolUseID).Equal(messages[i].Content[j].OfToolResult.ToolUseID)
+				gt.Value(t, restoredMessages[i].Content[j].OfToolResult.IsError).Equal(messages[i].Content[j].OfToolResult.IsError)
 			}
 		}
 	}
