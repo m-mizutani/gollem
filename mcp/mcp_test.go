@@ -72,7 +72,6 @@ func TestMCPContentToMap(t *testing.T) {
 func TestNewStreamableHTTP(t *testing.T) {
 	type testCase struct {
 		name    string
-		baseURL string
 		headers map[string]string
 	}
 
