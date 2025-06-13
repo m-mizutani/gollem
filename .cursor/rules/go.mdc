@@ -6,6 +6,11 @@ alwaysApply: true
 
 # Development rules
 
+## Design and task
+
+- You can find requirements and tasks in markdown files for implementation in `.task` directory
+- You should check if you completed or satisfied the task or requirement.
+
 ## Comment & Literals
 
 All comment and literals in source code MUST be in English.

@@ -25,6 +25,9 @@ type Client struct {
 	baseURL string
 	headers map[string]string
 
+	// Transport type
+	transportType string // "stdio", "sse", "streamable-http"
+
 	// Common client
 	client *client.Client
 
@@ -96,8 +99,9 @@ func WithEnvVars(envVars []string) StdioOption {
 // NewStdio creates a new MCP client for local MCP executable server via stdio.
 func NewStdio(ctx context.Context, path string, args []string, options ...StdioOption) (*Client, error) {
 	client := &Client{
-		path: path,
-		args: args,
+		path:          path,
+		args:          args,
+		transportType: "stdio",
 	}
 	for _, option := range options {
 		option(client)
@@ -123,7 +127,35 @@ func WithHeaders(headers map[string]string) SSEOption {
 // NewSSE creates a new MCP client for remote MCP server via HTTP SSE.
 func NewSSE(ctx context.Context, baseURL string, options ...SSEOption) (*Client, error) {
 	client := &Client{
-		baseURL: baseURL,
+		baseURL:       baseURL,
+		transportType: "sse",
+	}
+	for _, option := range options {
+		option(client)
+	}
+
+	if err := client.init(ctx); err != nil {
+		return nil, goerr.Wrap(err, "failed to initialize MCP client")
+	}
+
+	return client, nil
+}
+
+// StreamableHTTPOption is the option for the MCP client for remote MCP server via Streamable HTTP.
+type StreamableHTTPOption func(*Client)
+
+// WithStreamableHTTPHeaders sets the headers for the MCP client. It replaces the existing headers setting.
+func WithStreamableHTTPHeaders(headers map[string]string) StreamableHTTPOption {
+	return func(m *Client) {
+		m.headers = headers
+	}
+}
+
+// NewStreamableHTTP creates a new MCP client for remote MCP server via Streamable HTTP.
+func NewStreamableHTTP(ctx context.Context, baseURL string, options ...StreamableHTTPOption) (*Client, error) {
+	client := &Client{
+		baseURL:       baseURL,
+		transportType: "streamable-http",
 	}
 	for _, option := range options {
 		option(client)
@@ -152,11 +184,27 @@ func (c *Client) init(ctx context.Context) error {
 	}
 
 	if c.baseURL != "" {
-		sse, err := transport.NewSSE(c.baseURL, transport.WithHeaders(c.headers))
-		if err != nil {
-			return goerr.Wrap(err, "failed to create SSE transport")
+		switch c.transportType {
+		case "sse":
+			sse, err := transport.NewSSE(c.baseURL, transport.WithHeaders(c.headers))
+			if err != nil {
+				return goerr.Wrap(err, "failed to create SSE transport")
+			}
+			tp = sse
+		case "streamable-http":
+			streamableHttp, err := transport.NewStreamableHTTP(c.baseURL, transport.WithHTTPHeaders(c.headers))
+			if err != nil {
+				return goerr.Wrap(err, "failed to create Streamable HTTP transport")
+			}
+			tp = streamableHttp
+		default:
+			// Default to SSE for backward compatibility
+			sse, err := transport.NewSSE(c.baseURL, transport.WithHeaders(c.headers))
+			if err != nil {
+				return goerr.Wrap(err, "failed to create SSE transport")
+			}
+			tp = sse
 		}
-		tp = sse
 	}
 
 	if tp == nil {

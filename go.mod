@@ -9,7 +9,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/m-mizutani/goerr/v2 v2.0.0-beta.2
 	github.com/m-mizutani/gt v0.0.16
-	github.com/mark3labs/mcp-go v0.23.1
+	github.com/mark3labs/mcp-go v0.32.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.1
 	github.com/sashabaranov/go-openai v1.38.2
 	google.golang.org/api v0.211.0
