@@ -15,6 +15,15 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
+// transportType represents the transport type for MCP client
+type transportType string
+
+const (
+	transportTypeStdio          transportType = "stdio"
+	transportTypeSSE            transportType = "sse"
+	transportTypeStreamableHTTP transportType = "streamable-http"
+)
+
 type Client struct {
 	// For local MCP server
 	path    string
@@ -26,7 +35,7 @@ type Client struct {
 	headers map[string]string
 
 	// Transport type
-	transportType string // "stdio", "sse", "streamable-http"
+	transportType transportType
 
 	// Common client
 	client *client.Client
@@ -101,7 +110,7 @@ func NewStdio(ctx context.Context, path string, args []string, options ...StdioO
 	client := &Client{
 		path:          path,
 		args:          args,
-		transportType: "stdio",
+		transportType: transportTypeStdio,
 	}
 	for _, option := range options {
 		option(client)
@@ -128,7 +137,7 @@ func WithHeaders(headers map[string]string) SSEOption {
 func NewSSE(ctx context.Context, baseURL string, options ...SSEOption) (*Client, error) {
 	client := &Client{
 		baseURL:       baseURL,
-		transportType: "sse",
+		transportType: transportTypeSSE,
 	}
 	for _, option := range options {
 		option(client)
@@ -155,7 +164,7 @@ func WithStreamableHTTPHeaders(headers map[string]string) StreamableHTTPOption {
 func NewStreamableHTTP(ctx context.Context, baseURL string, options ...StreamableHTTPOption) (*Client, error) {
 	client := &Client{
 		baseURL:       baseURL,
-		transportType: "streamable-http",
+		transportType: transportTypeStreamableHTTP,
 	}
 	for _, option := range options {
 		option(client)
@@ -185,13 +194,13 @@ func (c *Client) init(ctx context.Context) error {
 
 	if c.baseURL != "" {
 		switch c.transportType {
-		case "sse":
+		case transportTypeSSE:
 			sse, err := transport.NewSSE(c.baseURL, transport.WithHeaders(c.headers))
 			if err != nil {
 				return goerr.Wrap(err, "failed to create SSE transport")
 			}
 			tp = sse
-		case "streamable-http":
+		case transportTypeStreamableHTTP:
 			streamableHttp, err := transport.NewStreamableHTTP(c.baseURL, transport.WithHTTPHeaders(c.headers))
 			if err != nil {
 				return goerr.Wrap(err, "failed to create Streamable HTTP transport")
