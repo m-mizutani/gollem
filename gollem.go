@@ -3,6 +3,7 @@ package gollem
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -356,6 +357,11 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 
 			newInput, err := handleResponse(ctx, *cfg, output, toolMap)
 			if err != nil {
+				// Check if the error is ErrExitConversation
+				if errors.Is(err, ErrExitConversation) {
+					logger.Info("conversation exited by tool")
+					return ssn.History(), nil
+				}
 				return nil, err
 			}
 			input = newInput
@@ -371,6 +377,11 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 				logger.Debug("recv response", "output", output)
 				newInput, err := handleResponse(ctx, *cfg, output, toolMap)
 				if err != nil {
+					// Check if the error is ErrExitConversation
+					if errors.Is(err, ErrExitConversation) {
+						logger.Info("conversation exited by tool")
+						return ssn.History(), nil
+					}
 					return nil, err
 				}
 				input = append(input, newInput...)
@@ -395,6 +406,8 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 	logger := LoggerFromContext(ctx)
 
 	newInput := make([]Input, 0)
+	var exitConversationErr error
+
 	// Call the MessageHook for all texts
 	for _, text := range output.Texts {
 		if err := cfg.messageHook(ctx, text); err != nil {
@@ -433,6 +446,14 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 		result, err := tool.Run(ctx, toolCall.Arguments)
 		logger.Debug("gollem tool result", "tool", toolCall.Name, "result", result)
 		if err != nil {
+			// Check if the error is ErrExitConversation
+			if errors.Is(err, ErrExitConversation) {
+				// Store the error but continue processing other tools
+				exitConversationErr = goerr.Wrap(ErrExitConversation, "conversation exit requested by tool", goerr.V("tool", toolCall.Name))
+				logger.Info("tool requested conversation exit, continuing to process remaining tools", "tool", toolCall.Name)
+				continue
+			}
+
 			if cbErr := cfg.toolErrorHook(ctx, err, *toolCall); cbErr != nil {
 				return nil, goerr.Wrap(cbErr, "failed to call ToolErrorHook")
 			}
@@ -474,6 +495,11 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 			Name: toolCall.Name,
 			Data: result,
 		})
+	}
+
+	// Return the exit conversation error after processing all tool calls
+	if exitConversationErr != nil {
+		return nil, exitConversationErr
 	}
 
 	return newInput, nil
