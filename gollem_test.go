@@ -339,16 +339,6 @@ func newMockClient(generateContentFunc func(ctx context.Context, input ...gollem
 								if funcResp.Name == "respond_to_user" {
 									return &gollem.Response{}, nil
 								}
-								// For other function responses, call respond_to_user
-								return &gollem.Response{
-									Texts: response.Texts,
-									FunctionCalls: []*gollem.FunctionCall{
-										{
-											Name:      "respond_to_user",
-											Arguments: map[string]any{},
-										},
-									},
-								}, nil
 							}
 						}
 					}
@@ -920,4 +910,286 @@ func (t *mockToolSet) Specs(ctx context.Context) ([]gollem.ToolSpec, error) {
 
 func (t *mockToolSet) Run(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
 	return t.run(ctx, name, args)
+}
+
+func TestErrExitConversation(t *testing.T) {
+	type testCase struct {
+		name string
+		test func(t *testing.T)
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			tc.test(t)
+		}
+	}
+
+	t.Run("single tool returns ErrExitConversation", runTest(testCase{
+		name: "single tool returns ErrExitConversation",
+		test: func(t *testing.T) {
+			toolCalled := false
+			mockClient := &mock.LLMClientMock{
+				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+					mockSession := &mock.SessionMock{
+						GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+							return &gollem.Response{
+								Texts: []string{"Calling exit tool"},
+								FunctionCalls: []*gollem.FunctionCall{
+									{
+										Name:      "exit_tool",
+										Arguments: map[string]any{},
+									},
+								},
+							}, nil
+						},
+						HistoryFunc: func() *gollem.History {
+							return &gollem.History{}
+						},
+					}
+					return mockSession, nil
+				},
+			}
+
+			exitTool := &mockTool{
+				spec: gollem.ToolSpec{
+					Name:        "exit_tool",
+					Description: "Tool that exits conversation",
+				},
+				run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+					toolCalled = true
+					return nil, gollem.ErrExitConversation
+				},
+			}
+
+			s := gollem.New(mockClient, gollem.WithTools(exitTool))
+			history, err := s.Prompt(t.Context(), "test prompt")
+
+			gt.NoError(t, err)
+			gt.True(t, toolCalled)
+			gt.NotNil(t, history)
+		},
+	}))
+
+	t.Run("multiple tools with one returning ErrExitConversation", runTest(testCase{
+		name: "multiple tools with one returning ErrExitConversation",
+		test: func(t *testing.T) {
+			tool1Called := false
+			tool2Called := false
+			mockClient := &mock.LLMClientMock{
+				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+					mockSession := &mock.SessionMock{
+						GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+							return &gollem.Response{
+								Texts: []string{"Calling multiple tools"},
+								FunctionCalls: []*gollem.FunctionCall{
+									{
+										Name:      "normal_tool",
+										Arguments: map[string]any{},
+									},
+									{
+										Name:      "exit_tool",
+										Arguments: map[string]any{},
+									},
+								},
+							}, nil
+						},
+						HistoryFunc: func() *gollem.History {
+							return &gollem.History{}
+						},
+					}
+					return mockSession, nil
+				},
+			}
+
+			normalTool := &mockTool{
+				spec: gollem.ToolSpec{
+					Name:        "normal_tool",
+					Description: "Normal tool that succeeds",
+				},
+				run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+					tool1Called = true
+					return map[string]any{"result": "success"}, nil
+				},
+			}
+
+			exitTool := &mockTool{
+				spec: gollem.ToolSpec{
+					Name:        "exit_tool",
+					Description: "Tool that exits conversation",
+				},
+				run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+					tool2Called = true
+					return nil, gollem.ErrExitConversation
+				},
+			}
+
+			s := gollem.New(mockClient, gollem.WithTools(normalTool, exitTool))
+			history, err := s.Prompt(t.Context(), "test prompt")
+
+			gt.NoError(t, err)
+			gt.True(t, tool1Called)
+			gt.True(t, tool2Called)
+			gt.NotNil(t, history)
+		},
+	}))
+
+	t.Run("ErrExitConversation vs normal error behavior", runTest(testCase{
+		name: "ErrExitConversation vs normal error behavior",
+		test: func(t *testing.T) {
+			// Test normal error continues conversation
+			normalErrorToolCalled := false
+			mockClient1 := &mock.LLMClientMock{
+				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+					mockSession := &mock.SessionMock{
+						GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+							// If input is error response, check and return respond_to_user
+							if len(input) > 0 {
+								if funcResp, ok := input[0].(gollem.FunctionResponse); ok && funcResp.Error != nil {
+									return &gollem.Response{
+										Texts: []string{"Error handled, completing task"},
+										FunctionCalls: []*gollem.FunctionCall{
+											{
+												Name:      "respond_to_user",
+												Arguments: map[string]any{},
+											},
+										},
+									}, nil
+								}
+								if funcResp, ok := input[0].(gollem.FunctionResponse); ok && funcResp.Name == "respond_to_user" {
+									return &gollem.Response{}, nil
+								}
+							}
+							return &gollem.Response{
+								Texts: []string{"Calling error tool"},
+								FunctionCalls: []*gollem.FunctionCall{
+									{
+										Name:      "error_tool",
+										Arguments: map[string]any{},
+									},
+								},
+							}, nil
+						},
+						HistoryFunc: func() *gollem.History {
+							return &gollem.History{}
+						},
+					}
+					return mockSession, nil
+				},
+			}
+
+			errorTool := &mockTool{
+				spec: gollem.ToolSpec{
+					Name:        "error_tool",
+					Description: "Tool that returns normal error",
+				},
+				run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+					normalErrorToolCalled = true
+					return nil, errors.New("normal error")
+				},
+			}
+
+			s1 := gollem.New(mockClient1, gollem.WithTools(errorTool))
+			history1, err1 := s1.Prompt(t.Context(), "test prompt")
+
+			gt.NoError(t, err1) // Normal error doesn't terminate session
+			gt.True(t, normalErrorToolCalled)
+			gt.NotNil(t, history1)
+
+			// Test ErrExitConversation terminates immediately
+			exitToolCalled := false
+			mockClient2 := &mock.LLMClientMock{
+				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+					mockSession := &mock.SessionMock{
+						GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+							return &gollem.Response{
+								Texts: []string{"Calling exit tool"},
+								FunctionCalls: []*gollem.FunctionCall{
+									{
+										Name:      "exit_tool",
+										Arguments: map[string]any{},
+									},
+								},
+							}, nil
+						},
+						HistoryFunc: func() *gollem.History {
+							return &gollem.History{}
+						},
+					}
+					return mockSession, nil
+				},
+			}
+
+			exitTool := &mockTool{
+				spec: gollem.ToolSpec{
+					Name:        "exit_tool",
+					Description: "Tool that exits conversation",
+				},
+				run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+					exitToolCalled = true
+					return nil, gollem.ErrExitConversation
+				},
+			}
+
+			s2 := gollem.New(mockClient2, gollem.WithTools(exitTool))
+			history2, err2 := s2.Prompt(t.Context(), "test prompt")
+
+			gt.NoError(t, err2) // ErrExitConversation is treated as success
+			gt.True(t, exitToolCalled)
+			gt.NotNil(t, history2)
+		},
+	}))
+
+	t.Run("ErrExitConversation with streaming mode", runTest(testCase{
+		name: "ErrExitConversation with streaming mode",
+		test: func(t *testing.T) {
+			toolCalled := false
+			mockClient := &mock.LLMClientMock{
+				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+					mockSession := &mock.SessionMock{
+						GenerateStreamFunc: func(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+							ch := make(chan *gollem.Response, 1)
+							go func() {
+								defer close(ch)
+								ch <- &gollem.Response{
+									Texts: []string{"Calling exit tool"},
+									FunctionCalls: []*gollem.FunctionCall{
+										{
+											Name:      "exit_tool",
+											Arguments: map[string]any{},
+										},
+									},
+								}
+							}()
+							return ch, nil
+						},
+						HistoryFunc: func() *gollem.History {
+							return &gollem.History{}
+						},
+					}
+					return mockSession, nil
+				},
+			}
+
+			exitTool := &mockTool{
+				spec: gollem.ToolSpec{
+					Name:        "exit_tool",
+					Description: "Tool that exits conversation",
+				},
+				run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+					toolCalled = true
+					return nil, gollem.ErrExitConversation
+				},
+			}
+
+			s := gollem.New(mockClient,
+				gollem.WithTools(exitTool),
+				gollem.WithResponseMode(gollem.ResponseModeStreaming),
+			)
+			history, err := s.Prompt(t.Context(), "test prompt")
+
+			gt.NoError(t, err)
+			gt.True(t, toolCalled)
+			gt.NotNil(t, history)
+		},
+	}))
 }

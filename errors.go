@@ -26,4 +26,8 @@ var (
 
 	// ErrHistoryVersionMismatch is returned when the history version is invalid or unsupported.
 	ErrHistoryVersionMismatch = errors.New("history version mismatch")
+
+	// ErrExitConversation is returned when a tool signals that the conversation should be exited.
+	// This error is treated as a successful completion of the conversation loop.
+	ErrExitConversation = errors.New("exit conversation")
 )
