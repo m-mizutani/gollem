@@ -95,7 +95,7 @@ func main() {
 
 		input := scanner.Text()
 		if input == "quit" || input == "exit" {
-			fmt.Println("\n👋 Goodbye!")
+			fmt.Print("\n👋 Goodbye!")
 			break
 		}
 
