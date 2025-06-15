@@ -54,7 +54,6 @@ const (
 type gollemConfig struct {
 	loopLimit    int
 	retryLimit   int
-	initPrompt   string
 	systemPrompt string
 
 	tools    []Tool
@@ -77,7 +76,6 @@ func (c *gollemConfig) Clone() *gollemConfig {
 	return &gollemConfig{
 		loopLimit:    c.loopLimit,
 		retryLimit:   c.retryLimit,
-		initPrompt:   c.initPrompt,
 		systemPrompt: c.systemPrompt,
 
 		tools:    c.tools[:],
@@ -104,7 +102,6 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 		gollemConfig: gollemConfig{
 			loopLimit:    DefaultLoopLimit,
 			retryLimit:   DefaultRetryLimit,
-			initPrompt:   "",
 			systemPrompt: "",
 
 			loopHook:         defaultLoopHook,
@@ -125,7 +122,6 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 	s.logger.Info("gollem agent created",
 		"loop_limit", s.gollemConfig.loopLimit,
 		"retry_limit", s.gollemConfig.retryLimit,
-		"init_prompt", s.gollemConfig.initPrompt,
 		"system_prompt", s.gollemConfig.systemPrompt,
 		"tools_count", len(s.gollemConfig.tools),
 		"tool_sets_count", len(s.gollemConfig.toolSets),
@@ -155,13 +151,6 @@ func WithLoopLimit(loopLimit int) Option {
 func WithRetryLimit(retryLimit int) Option {
 	return func(s *gollemConfig) {
 		s.retryLimit = retryLimit
-	}
-}
-
-// WithInitPrompt sets the initial prompt for the gollem agent. The initial prompt is used when there is no history. If you want to use the system prompt, use WithSystemPrompt instead.
-func WithInitPrompt(initPrompt string) Option {
-	return func(s *gollemConfig) {
-		s.initPrompt = initPrompt
 	}
 }
 
@@ -332,8 +321,6 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 
 	if cfg.history != nil {
 		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
-	} else if cfg.initPrompt != "" {
-		input = append([]Input{Text(cfg.initPrompt)}, input...)
 	}
 	if len(toolList) > 0 {
 		sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
@@ -456,9 +443,6 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 	}
 
 	input := []Input{Text(prompt)}
-	if cfg.initPrompt != "" && cfg.history == nil {
-		input = append([]Input{Text(cfg.initPrompt)}, input...)
-	}
 
 	for i := 0; i < cfg.loopLimit; i++ {
 		if err := cfg.loopHook(ctx, i, input); err != nil {

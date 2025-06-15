@@ -497,27 +497,6 @@ func TestGollemWithOptions(t *testing.T) {
 		gt.Equal(t, retryCount, 3)
 	})
 
-	t.Run("WithInitPrompt", func(t *testing.T) {
-		mockClient := newMockClient(func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-			// Check if the first input is initial prompt
-			if len(input) > 1 {
-				if text, ok := input[0].(gollem.Text); ok {
-					gt.Equal(t, string(text), "initial prompt")
-				}
-				if text, ok := input[1].(gollem.Text); ok {
-					gt.Equal(t, string(text), "test message")
-				}
-			}
-			return &gollem.Response{
-				Texts: []string{"test response"},
-			}, nil
-		})
-
-		s := gollem.New(mockClient, gollem.WithInitPrompt("initial prompt"))
-		_, err := s.Prompt(t.Context(), "test message")
-		gt.NoError(t, err)
-	})
-
 	t.Run("WithSystemPrompt", func(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
@@ -821,16 +800,6 @@ func TestGollemWithOptions(t *testing.T) {
 
 				mockSession := &mock.SessionMock{
 					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-						// Check if the first input is initial prompt
-						if len(input) > 1 {
-							if text, ok := input[0].(gollem.Text); ok {
-								gt.Equal(t, string(text), "initial prompt")
-							}
-							if text, ok := input[1].(gollem.Text); ok {
-								gt.Equal(t, string(text), "test message")
-							}
-						}
-
 						// Check if this is DefaultFacilitator's proceed prompt
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
@@ -887,7 +856,6 @@ func TestGollemWithOptions(t *testing.T) {
 		s := gollem.New(mockClient,
 			gollem.WithLoopLimit(5),
 			gollem.WithRetryLimit(5),
-			gollem.WithInitPrompt("initial prompt"),
 			gollem.WithSystemPrompt("system prompt"),
 			gollem.WithTools(tool),
 			gollem.WithResponseMode(gollem.ResponseModeBlocking),
