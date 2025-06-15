@@ -2,6 +2,53 @@
 
 This guide provides practical examples of using gollem in various scenarios.
 
+## Basic Agent Usage
+
+Here's a simple example using the recommended `Execute` method:
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "os"
+
+    "github.com/m-mizutani/gollem"
+    "github.com/m-mizutani/gollem/llm/openai"
+)
+
+func main() {
+    ctx := context.Background()
+
+    // Create OpenAI client
+    client, err := openai.New(ctx, os.Getenv("OPENAI_API_KEY"))
+    if err != nil {
+        panic(err)
+    }
+
+    // Create agent with automatic session management
+    agent := gollem.New(client,
+        gollem.WithSystemPrompt("You are a helpful assistant."),
+        gollem.WithMessageHook(func(ctx context.Context, msg string) error {
+            fmt.Printf("🤖 %s\n", msg)
+            return nil
+        }),
+    )
+
+    // Execute multiple interactions - history managed automatically
+    err = agent.Execute(ctx, "Hello, I'm working on a Go project.")
+    if err != nil {
+        panic(err)
+    }
+
+    err = agent.Execute(ctx, "Can you help me with error handling best practices?")
+    if err != nil {
+        panic(err)
+    }
+}
+```
+
 ## Calculator Tool
 
 A more complex example using a calculator tool:
@@ -15,24 +62,19 @@ func (t *CalculatorTool) Spec() gollem.ToolSpec {
         Description: "Performs basic arithmetic operations",
         Parameters: map[string]*gollem.Parameter{
             "operation": {
-                Name:        "operation",
                 Type:        gollem.TypeString,
                 Description: "The operation to perform (add, subtract, multiply, divide)",
-                Required:    true,
             },
             "a": {
-                Name:        "a",
                 Type:        gollem.TypeNumber,
                 Description: "First number",
-                Required:    true,
             },
             "b": {
-                Name:        "b",
                 Type:        gollem.TypeNumber,
                 Description: "Second number",
-                Required:    true,
             },
         },
+        Required: []string{"operation", "a", "b"},
     }
 }
 
@@ -78,6 +120,29 @@ func (t *CalculatorTool) Run(ctx context.Context, args map[string]any) (map[stri
     return map[string]any{
         "result": result,
     }, nil
+}
+
+// Usage example
+func main() {
+    ctx := context.Background()
+    client, _ := openai.New(ctx, os.Getenv("OPENAI_API_KEY"))
+
+    agent := gollem.New(client,
+        gollem.WithTools(&CalculatorTool{}),
+        gollem.WithMessageHook(func(ctx context.Context, msg string) error {
+            fmt.Printf("🤖 %s\n", msg)
+            return nil
+        }),
+        gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
+            fmt.Printf("⚡ Executing: %s\n", tool.Name)
+            return nil
+        }),
+    )
+
+    err := agent.Execute(ctx, "Calculate 15 + 27 and then multiply the result by 3")
+    if err != nil {
+        panic(err)
+    }
 }
 ```
 
@@ -96,9 +161,9 @@ func (t *WeatherTool) Spec() gollem.ToolSpec {
             "location": {
                 Type:        gollem.TypeString,
                 Description: "City name or coordinates",
-                Required:    true,
             },
         },
+        Required: []string{"location"},
     }
 }
 
@@ -107,69 +172,216 @@ func (t *WeatherTool) Run(ctx context.Context, args map[string]any) (map[string]
     if !ok {
         return nil, fmt.Errorf("location must be a string")
     }
-    // Implement weather API call here
-    return map[string]any{
+    
+    // Simulate weather API call
+    weatherData := map[string]any{
+        "location":    location,
         "temperature": 25.5,
         "condition":   "sunny",
-    }, nil
+        "humidity":    60,
+        "wind_speed":  10.2,
+    }
+    
+    return weatherData, nil
 }
 ```
 
-## Best Practices
+## Comprehensive Hook Usage
 
-1. **Error Handling**: Always handle errors properly
-2. **Type Safety**: Use appropriate types and validate input
-3. **Documentation**: Document your tools and examples
-4. **Testing**: Write tests for your tools
-5. **Security**: Implement proper security measures
+Example showing all available hooks for monitoring and control:
+
+```go
+func createMonitoredAgent(client gollem.LLMClient) *gollem.Agent {
+    return gollem.New(client,
+        // Message hook for real-time output
+        gollem.WithMessageHook(func(ctx context.Context, msg string) error {
+            fmt.Printf("🤖 LLM: %s\n", msg)
+            // Could stream to WebSocket, save to database, etc.
+            return nil
+        }),
+        
+        // Tool request hook for monitoring and access control
+        gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
+            fmt.Printf("⚡ Executing tool: %s with args: %v\n", tool.Name, tool.Arguments)
+            
+            // Example: Implement rate limiting
+            if isRateLimited(tool.Name) {
+                return fmt.Errorf("rate limit exceeded for tool %s", tool.Name)
+            }
+            
+            return nil
+        }),
+        
+        // Tool response hook for logging successful executions
+        gollem.WithToolResponseHook(func(ctx context.Context, tool gollem.FunctionCall, response map[string]any) error {
+            fmt.Printf("✅ Tool %s completed successfully\n", tool.Name)
+            // Log metrics, update dashboards, etc.
+            return nil
+        }),
+        
+        // Tool error hook for error handling and recovery
+        gollem.WithToolErrorHook(func(ctx context.Context, err error, tool gollem.FunctionCall) error {
+            fmt.Printf("❌ Tool %s failed: %v\n", tool.Name, err)
+            
+            // Example: Implement fallback mechanisms
+            if tool.Name == "external_api" {
+                // Use cached data as fallback
+                if cachedData := getFromCache(tool.Arguments); cachedData != nil {
+                    fmt.Printf("🔄 Using cached data for %s\n", tool.Name)
+                    return nil // Continue execution
+                }
+            }
+            
+            // For critical tools, abort execution
+            if isCriticalTool(tool.Name) {
+                return err
+            }
+            
+            return nil // Continue execution for non-critical tools
+        }),
+        
+        // Loop hook for monitoring conversation progress
+        gollem.WithLoopHook(func(ctx context.Context, loop int, input []gollem.Input) error {
+            fmt.Printf("🔄 Loop %d starting with %d inputs\n", loop, len(input))
+            
+            // Example: Custom loop limits
+            if loop > 20 {
+                return fmt.Errorf("custom loop limit exceeded")
+            }
+            
+            return nil
+        }),
+        
+        // Configure limits
+        gollem.WithLoopLimit(30),
+        gollem.WithRetryLimit(5),
+    )
+}
+
+// Helper functions for the example
+func isRateLimited(toolName string) bool {
+    // Implement your rate limiting logic
+    return false
+}
+
+func getFromCache(args map[string]any) map[string]any {
+    // Implement cache lookup
+    return nil
+}
+
+func isCriticalTool(toolName string) bool {
+    criticalTools := []string{"database_write", "file_delete", "system_command"}
+    for _, critical := range criticalTools {
+        if toolName == critical {
+            return true
+        }
+    }
+    return false
+}
+```
+
+## Error Handling and Recovery
+
+Example of robust error handling:
+
+```go
+func robustAgentExecution(ctx context.Context, agent *gollem.Agent, prompt string) error {
+    // Set timeout for the entire operation
+    ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+    defer cancel()
+    
+    // Execute with error handling
+    err := agent.Execute(ctx, prompt)
+    if err != nil {
+        // Handle specific error types
+        if errors.Is(err, gollem.ErrLoopLimitExceeded) {
+            fmt.Println("⚠️  Conversation took too many steps, but may have completed successfully")
+            return nil // Treat as success
+        }
+        
+        if errors.Is(err, context.DeadlineExceeded) {
+            fmt.Println("⏰ Operation timed out")
+            return fmt.Errorf("operation timed out: %w", err)
+        }
+        
+        // Log error with context
+        fmt.Printf("❌ Agent execution failed: %v\n", err)
+        return fmt.Errorf("agent execution failed: %w", err)
+    }
+    
+    return nil
+}
+```
+
+## Streaming Response Example
+
+Example of handling streaming responses:
+
+```go
+func streamingExample(ctx context.Context, client gollem.LLMClient) error {
+    agent := gollem.New(client,
+        gollem.WithResponseMode(gollem.ResponseModeStreaming),
+        gollem.WithMessageHook(func(ctx context.Context, msg string) error {
+            // Stream each token to the user interface
+            fmt.Print(msg)
+            
+            // Could also send to WebSocket, SSE, etc.
+            return streamToWebSocket(msg)
+        }),
+    )
+    
+    return agent.Execute(ctx, "Write a detailed explanation of Go's concurrency model")
+}
+
+func streamToWebSocket(msg string) error {
+    // Implement WebSocket streaming
+    return nil
+}
+```
+
+
 
 ## Argument Validation
 
 Here's an example of proper argument validation:
 
 ```go
-func (t *CalculatorTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-    // Validate operation
-    op, ok := args["operation"].(string)
-    if !ok {
-        return nil, errors.New("operation must be a string")
+func validateArgs(args map[string]any, spec gollem.ToolSpec) error {
+    // Check required parameters
+    for _, required := range spec.Required {
+        if _, exists := args[required]; !exists {
+            return fmt.Errorf("required parameter '%s' is missing", required)
+        }
     }
-    if op != "add" && op != "subtract" && op != "multiply" && op != "divide" {
-        return nil, errors.New("invalid operation: must be one of add, subtract, multiply, divide")
+    
+    // Validate parameter types
+    for name, param := range spec.Parameters {
+        if value, exists := args[name]; exists {
+            if err := validateParameterType(value, param.Type); err != nil {
+                return fmt.Errorf("parameter '%s': %w", name, err)
+            }
+        }
     }
+    
+    return nil
+}
 
-    // Validate first number
-    a, ok := args["a"].(float64)
-    if !ok {
-        return nil, errors.New("first number must be a number")
+func validateParameterType(value any, expectedType gollem.ParameterType) error {
+    switch expectedType {
+    case gollem.TypeString:
+        if _, ok := value.(string); !ok {
+            return fmt.Errorf("expected string, got %T", value)
+        }
+    case gollem.TypeNumber:
+        if _, ok := value.(float64); !ok {
+            return fmt.Errorf("expected number, got %T", value)
+        }
+    case gollem.TypeBoolean:
+        if _, ok := value.(bool); !ok {
+            return fmt.Errorf("expected boolean, got %T", value)
+        }
     }
-
-    // Validate second number
-    b, ok := args["b"].(float64)
-    if !ok {
-        return nil, errors.New("second number must be a number")
-    }
-
-    // Validate division by zero
-    if op == "divide" && b == 0 {
-        return nil, errors.New("division by zero is not allowed")
-    }
-
-    var result float64
-    switch op {
-    case "add":
-        result = a + b
-    case "subtract":
-        result = a - b
-    case "multiply":
-        result = a * b
-    case "divide":
-        result = a / b
-    }
-
-    return map[string]any{
-        "result": result,
-    }, nil
+    return nil
 }
 ```
 

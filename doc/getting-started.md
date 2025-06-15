@@ -12,7 +12,7 @@ go get github.com/m-mizutani/gollem
 
 ## Basic Usage
 
-Here's a simple example of how to use gollem with OpenAI's OpenAI model:
+Here's a simple example of how to use gollem with OpenAI:
 
 ```go
 package main
@@ -28,36 +28,39 @@ import (
 )
 
 func main() {
+    ctx := context.Background()
+
     // Create OpenAI client
-    client, err := OpenAI.New(context.Background(), os.Getenv("OPENAI_API_KEY"))
+    client, err := openai.New(ctx, os.Getenv("OPENAI_API_KEY"))
     if err != nil {
         panic(err)
     }
 
-    // Create MCP client
-    mcpClient, err := mcp.NewSSE(context.Background(), "http://localhost:8080")
+    // Create MCP client (optional)
+    mcpClient, err := mcp.NewSSE(ctx, "http://localhost:8080")
     if err != nil {
         panic(err)
     }
     defer mcpClient.Close()
 
-    // Create gollem instance
-    s := gollem.New(client,
+    // Create gollem agent with automatic session management
+    agent := gollem.New(client,
         gollem.WithToolSets(mcpClient),
+        gollem.WithSystemPrompt("You are a helpful assistant."),
         gollem.WithMessageHook(func(ctx context.Context, msg string) error {
             fmt.Println(msg)
             return nil
         }),
     )
 
-    // Send a message to the LLM
-    if err := s.Prompt(context.Background(), "Hello, how are you?"); err != nil {
+    // Execute with automatic session management
+    if err := agent.Execute(ctx, "Hello, how are you?"); err != nil {
         panic(err)
     }
 }
 ```
 
-This code uses the OpenAI OpenAI model to receive a message from the user and send it to the LLM. Here, we are not specifying a Tool or MCP server, so the LLM is expected to return only a message.
+This code uses the OpenAI model to receive a message from the user and send it to the LLM. The `Execute` method automatically manages conversation history, making it easy to build conversational applications.
 
 For information on how to integrate with Tools and MCP servers, please refer to [tools](tools.md) and [mcp](mcp.md) documents.
 
@@ -65,19 +68,54 @@ For information on how to integrate with Tools and MCP servers, please refer to 
 
 gollem supports multiple LLM providers:
 
-- Gemini
-- Anthropic (Claude)
-- OpenAI (OpenAI)
+- **Gemini** - Google's Gemini models
+- **Anthropic (Claude)** - Anthropic's Claude models  
+- **OpenAI** - OpenAI's GPT models
 
 Each provider has its own client implementation in the `llm` package. See the respective documentation for configuration options.
 
 ## Key Concepts
 
 1. **LLM Client**: The interface to communicate with LLM providers
-2. **Tools**: Custom functions that LLMs can use to perform actions (see [Tools](tools.md))
-3. **MCP Server**: External tool integration through Model Context Protocol (see [MCP Server Integration](mcp.md))
-4. **Natural Language Interface**: Interact with your application using natural language
-5. **History Management**: Maintain conversation context across sessions (see [History](history.md))
+2. **Agent**: The main interface that manages sessions and provides the `Execute` method
+3. **Tools**: Custom functions that LLMs can use to perform actions (see [Tools](tools.md))
+4. **MCP Server**: External tool integration through Model Context Protocol (see [MCP Server Integration](mcp.md))
+5. **Automatic Session Management**: Built-in conversation history management
+6. **Hooks**: Callback functions for monitoring and controlling agent behavior
+
+## Agent vs Direct Session Usage
+
+gollem provides two main approaches:
+
+### Agent Approach (Recommended)
+Use the `Agent` with `Execute` method for conversational applications:
+
+```go
+agent := gollem.New(client,
+    gollem.WithTools(tools...),
+    gollem.WithSystemPrompt("You are helpful."),
+)
+
+// Automatic history management
+err := agent.Execute(ctx, "Hello")
+err = agent.Execute(ctx, "Continue our conversation") // Remembers previous context
+```
+
+### Direct Session Approach
+Use direct session for simple, one-off queries:
+
+```go
+session, err := client.NewSession(ctx)
+if err != nil {
+    panic(err)
+}
+
+result, err := session.GenerateContent(ctx, gollem.Text("Hello"))
+if err != nil {
+    panic(err)
+}
+fmt.Println(result.Texts)
+```
 
 ## Error Handling
 
@@ -88,51 +126,70 @@ gollem provides robust error handling capabilities to help you build reliable ap
 - **Tool Execution Errors**: Errors during tool execution
 - **MCP Server Errors**: Errors from MCP server communication
 
-### Best Practices
-1. **Graceful Degradation**: Implement fallback mechanisms when LLM or tools fail
-2. **Retry Strategies**: Use exponential backoff for transient errors
-3. **Error Logging**: Log errors with appropriate context for debugging
-4. **User Feedback**: Provide clear error messages to end users
+
 
 Example of error handling:
 ```go
-newHistory, err := s.Prompt(ctx, userInput, history)
-if err != nil {
-    // Handle errors
+if err := agent.Execute(ctx, userInput); err != nil {
+    // Handle errors appropriately
     log.Printf("Error: %v", err)
-    return nil, fmt.Errorf("failed to process request: %w", err)
+    return fmt.Errorf("failed to process request: %w", err)
 }
 ```
 
-## Context Management
+## Session Management
 
-gollem provides a history-based context management system to maintain conversation state:
+### Automatic Session Management (Recommended)
+The `Execute` method automatically manages conversation history:
 
-### History Object
-The `History` object maintains the conversation context, including:
-- Previous messages
-- Tool execution results
-- System prompts
-- Context metadata
-
-### Best Practices
-1. **Memory Management**: Clear old history when it exceeds size limits
-2. **Context Persistence**: Save important context for future sessions
-3. **Context Pruning**: Remove irrelevant information to maintain focus
-
-Example of history management:
 ```go
-// Initialize history
+agent := gollem.New(client, gollem.WithTools(tools...))
+
+// First interaction
+err := agent.Execute(ctx, "Hello, I'm working on a project.")
+
+// Follow-up (automatically remembers previous context)
+err = agent.Execute(ctx, "Can you help me with the next step?")
+
+// Access conversation history if needed
+history := agent.Session().History()
+```
+
+### Manual History Management (Legacy)
+For backward compatibility, manual history management is still supported:
+
+```go
+// Legacy approach (not recommended)
 var history *gollem.History
-
-// Process user input with history
-newHistory, err := s.Prompt(ctx, userInput, history)
+newHistory, err := agent.Prompt(ctx, "Hello", gollem.WithHistory(history))
 if err != nil {
-    return nil, err
+    return err
 }
-
-// Update history
 history = newHistory
+```
+
+## Hook System
+
+gollem provides comprehensive hooks for monitoring and controlling agent behavior:
+
+```go
+agent := gollem.New(client,
+    gollem.WithMessageHook(func(ctx context.Context, msg string) error {
+        // Process each message from the LLM
+        fmt.Printf("🤖 %s\n", msg)
+        return nil
+    }),
+    gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
+        // Monitor tool execution
+        fmt.Printf("⚡ Executing: %s\n", tool.Name)
+        return nil
+    }),
+    gollem.WithToolErrorHook(func(ctx context.Context, err error, tool gollem.FunctionCall) error {
+        // Handle tool errors
+        fmt.Printf("❌ Tool %s failed: %v\n", tool.Name, err)
+        return nil // Continue execution
+    }),
+)
 ```
 
 ## Next Steps

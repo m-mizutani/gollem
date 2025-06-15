@@ -22,9 +22,19 @@ if err != nil {
 }
 defer mcpClient.Close()
 
-s := gollem.New(client,
+agent := gollem.New(client,
     gollem.WithToolSets(mcpClient),
+    gollem.WithMessageHook(func(ctx context.Context, msg string) error {
+        fmt.Printf("🤖 %s\n", msg)
+        return nil
+    }),
 )
+
+// Execute with MCP tools
+err = agent.Execute(ctx, "Use the available MCP tools to help me with my task")
+if err != nil {
+    panic(err)
+}
 
 // Using stdio transport
 mcpClient, err := mcp.NewStdio(context.Background(), "/path/to/mcp/server", []string{"--arg1", "value1"})
@@ -33,9 +43,19 @@ if err != nil {
 }
 defer mcpClient.Close()
 
-s := gollem.New(client,
+agent := gollem.New(client,
     gollem.WithToolSets(mcpClient),
+    gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
+        fmt.Printf("⚡ Executing MCP tool: %s\n", tool.Name)
+        return nil
+    }),
 )
+
+// Execute with automatic session management
+err = agent.Execute(ctx, "Help me analyze this data using your tools")
+if err != nil {
+    panic(err)
+}
 ```
 
 ## Options
