@@ -81,7 +81,7 @@ func TestGollemWithTool(t *testing.T) {
 					gollem.WithResponseMode(respMode),
 				)
 
-				_, err = s.Prompt(t.Context(), "Generate a random number between 1 and 100.")
+				err = s.Execute(t.Context(), "Generate a random number between 1 and 100.")
 				gt.NoError(t, err)
 				gt.True(t, randomNumberToolCalled)
 			})
@@ -199,7 +199,7 @@ func TestGollemWithHooks(t *testing.T) {
 			gollem.WithLoopLimit(5),
 		)
 
-		_, err := s.Prompt(t.Context(), "test message")
+		err := s.Execute(t.Context(), "test message")
 		gt.NoError(t, err)
 		gt.True(t, toolRequestCalled)
 	})
@@ -232,7 +232,7 @@ func TestGollemWithHooks(t *testing.T) {
 			gollem.WithLoopLimit(5),
 		)
 
-		_, err := s.Prompt(t.Context(), "test message")
+		err := s.Execute(t.Context(), "test message")
 		gt.NoError(t, err)
 		gt.True(t, toolResponseCalled)
 	})
@@ -263,7 +263,7 @@ func TestGollemWithHooks(t *testing.T) {
 			gollem.WithLoopLimit(5),
 		)
 
-		_, err := s.Prompt(t.Context(), "test message")
+		err := s.Execute(t.Context(), "test message")
 		gt.NoError(t, err)
 		gt.True(t, toolErrorCalled)
 	})
@@ -281,7 +281,7 @@ func TestGollemWithHooks(t *testing.T) {
 			gollem.WithLoopLimit(5),
 		)
 
-		_, err := s.Prompt(t.Context(), "test message")
+		err := s.Execute(t.Context(), "test message")
 		gt.NoError(t, err)
 		gt.True(t, messageHookCalled)
 	})
