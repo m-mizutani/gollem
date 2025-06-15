@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 
@@ -33,13 +34,30 @@ func main() {
 	}
 	defer stdioClient.Close()
 
-	// Create gollem instance with MCP tools
-	g := gollem.New(client,
+	// Create gollem agent with MCP tools
+	agent := gollem.New(client,
 		gollem.WithToolSets(sseClient, stdioClient),
+		gollem.WithSystemPrompt("You are a helpful assistant with access to various MCP tools for file operations and other tasks."),
+		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
+			fmt.Printf("🤖 %s\n", msg)
+			return nil
+		}),
+		gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
+			fmt.Printf("⚡ Using MCP tool: %s\n", tool.Name)
+			return nil
+		}),
 	)
 
-	// Send a message
-	if _, err := g.Prompt(ctx, "Hello, I want to use MCP tools."); err != nil {
-		panic(err)
+	fmt.Println("🔧 MCP Integration Example")
+	fmt.Println("💡 This agent has access to MCP tools from multiple servers")
+
+	// Execute task with MCP tools
+	task := "Hello, I want to use MCP tools. Please show me what tools are available and help me with file operations."
+	fmt.Printf("📝 Task: %s\n\n", task)
+
+	if err := agent.Execute(ctx, task); err != nil {
+		log.Fatalf("❌ Error executing task: %v", err)
 	}
+
+	fmt.Println("\n✅ MCP integration example completed!")
 }

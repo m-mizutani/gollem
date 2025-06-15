@@ -23,6 +23,7 @@ func (t *MyTool) Spec() gollem.ToolSpec {
 				Description: "Name of the person to greet",
 			},
 		},
+		Required: []string{"name"},
 	}
 }
 
@@ -33,6 +34,7 @@ func (t *MyTool) Run(ctx context.Context, args map[string]any) (map[string]any, 
 	}
 	return map[string]any{"message": fmt.Sprintf("Hello, %s!", name)}, nil
 }
+
 func main() {
 	ctx := context.Background()
 
@@ -56,12 +58,14 @@ func main() {
 	}
 	defer mcpRemote.Close()
 
-	// Create gollem instance
+	// Create gollem agent with automatic session management
 	agent := gollem.New(client,
 		// Not only MCP servers,
 		gollem.WithToolSets(mcpLocal, mcpRemote),
 		// But also you can use your own built-in tools
 		gollem.WithTools(&MyTool{}),
+		// System prompt for better context
+		gollem.WithSystemPrompt("You are a helpful assistant with access to various tools."),
 		// You can customize the callback function for each message and tool call.
 		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
 			fmt.Printf("🤖 %s\n", msg)
@@ -69,16 +73,32 @@ func main() {
 		}),
 	)
 
-	var history *gollem.History
+	fmt.Println("🚀 Gollem Agent started! Type 'quit' to exit.")
+	fmt.Println("💡 The agent automatically manages conversation history.")
+
+	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Print("> ")
-		scanner := bufio.NewScanner(os.Stdin)
-		scanner.Scan()
-
-		newHistory, err := agent.Prompt(ctx, scanner.Text(), gollem.WithHistory(history))
-		if err != nil {
-			panic(err)
+		if !scanner.Scan() {
+			break
 		}
-		history = newHistory
+
+		input := scanner.Text()
+		if input == "quit" || input == "exit" {
+			fmt.Println("👋 Goodbye!")
+			break
+		}
+
+		// Execute with automatic session management
+		// No need to manually handle history - it's managed automatically!
+		if err := agent.Execute(ctx, input); err != nil {
+			fmt.Printf("❌ Error: %v\n", err)
+			continue
+		}
+
+		// Optional: Show conversation statistics
+		if history := agent.Session().History(); history != nil {
+			fmt.Printf("📊 (Conversation has %d messages)\n", history.ToCount())
+		}
 	}
 }

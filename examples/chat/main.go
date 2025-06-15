@@ -3,23 +3,20 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/gemini"
 )
 
-// WeatherTool is a simple tool that returns a weather
+// WeatherTool is a simple tool that returns weather information
 type WeatherTool struct{}
 
 func (t *WeatherTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name:        "weather",
-		Description: "Returns a weather",
+		Description: "Returns weather information for a city",
 		Parameters: map[string]*gollem.Parameter{
 			"city": {
 				Type:        gollem.TypeString,
@@ -36,99 +33,90 @@ func (t *WeatherTool) Run(ctx context.Context, args map[string]any) (map[string]
 		return nil, fmt.Errorf("city is required")
 	}
 
+	// Simulate weather data
+	weather := map[string]string{
+		"tokyo":    "sunny, 25°C",
+		"london":   "cloudy, 18°C",
+		"new york": "rainy, 22°C",
+		"paris":    "partly cloudy, 20°C",
+		"sydney":   "sunny, 28°C",
+	}
+
+	if w, exists := weather[city]; exists {
+		return map[string]any{
+			"city":    city,
+			"weather": w,
+			"message": fmt.Sprintf("The weather in %s is %s.", city, w),
+		}, nil
+	}
+
 	return map[string]any{
-		"message": fmt.Sprintf("The weather in %s is sunny.", city),
+		"city":    city,
+		"weather": "sunny, 23°C",
+		"message": fmt.Sprintf("The weather in %s is sunny, 23°C (default).", city),
 	}, nil
 }
 
 func main() {
 	ctx := context.Background()
-	llmModel, err := gemini.New(ctx, os.Getenv("GEMINI_PROJECT_ID"), os.Getenv("GEMINI_LOCATION"))
+
+	// Initialize Gemini client
+	client, err := gemini.New(ctx, os.Getenv("GEMINI_PROJECT_ID"), os.Getenv("GEMINI_LOCATION"))
 	if err != nil {
 		panic(err)
 	}
 
-	g := gollem.New(llmModel,
+	// Create agent with streaming response and tools
+	agent := gollem.New(client,
 		gollem.WithResponseMode(gollem.ResponseModeStreaming),
 		gollem.WithTools(&WeatherTool{}),
+		gollem.WithSystemPrompt("You are a helpful weather assistant. Use the weather tool to provide accurate weather information."),
 		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
 			fmt.Printf("%s", msg)
 			return nil
 		}),
 		gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
-			fmt.Printf("⚡ Call: %s\n", tool.Name)
+			fmt.Printf("\n⚡ Calling tool: %s\n", tool.Name)
 			return nil
 		}),
 	)
 
-	tmpFile, err := os.CreateTemp("", "gollem-chat-*.txt")
-	if err != nil {
-		panic(err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		panic(err)
-	}
-	println("history file:", tmpFile.Name())
+	fmt.Println("🌤️  Weather Chat Assistant")
+	fmt.Println("💡 Ask me about the weather in any city!")
+	fmt.Println("🔄 Conversation history is automatically managed")
+	fmt.Println("📝 Type 'quit' to exit")
+	fmt.Println("")
 
+	scanner := bufio.NewScanner(os.Stdin)
 	for {
-		history, err := loadHistory(tmpFile.Name())
-		if err != nil {
-			panic(err)
+		fmt.Print("> ")
+		if !scanner.Scan() {
+			break
 		}
 
-		fmt.Print("> ")
-		scanner := bufio.NewScanner(os.Stdin)
-		scanner.Scan()
-		text := scanner.Text()
+		input := scanner.Text()
+		if input == "quit" || input == "exit" {
+			fmt.Print("\n👋 Goodbye!")
+			break
+		}
+
+		if input == "" {
+			continue
+		}
 
 		fmt.Printf("🤖 ")
-		newHistory, err := g.Prompt(ctx, text, gollem.WithHistory(history))
-		if err != nil {
-			panic(err)
+
+		// Execute with automatic session management
+		// No need to manually handle history - it's managed automatically!
+		if err := agent.Execute(ctx, input); err != nil {
+			fmt.Printf("\n❌ Error: %v\n", err)
+			continue
 		}
 
-		if err := dumpHistory(newHistory, tmpFile.Name()); err != nil {
-			panic(err)
+		// Optional: Show conversation statistics
+		if history := agent.Session().History(); history != nil {
+			fmt.Printf("\n📊 (Total messages: %d)\n", history.ToCount())
 		}
-
-		fmt.Printf("\n")
+		fmt.Println()
 	}
-}
-
-func dumpHistory(history *gollem.History, path string) error {
-	f, err := os.Create(filepath.Clean(path))
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	if err := json.NewEncoder(f).Encode(history); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func loadHistory(path string) (*gollem.History, error) {
-	if st, err := os.Stat(path); err != nil || st.Size() == 0 {
-		return nil, err
-	}
-
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil, err
-	}
-
-	var history gollem.History
-	if err := json.Unmarshal(data, &history); err != nil {
-		return nil, err
-	}
-
-	return &history, nil
 }

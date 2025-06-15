@@ -27,20 +27,29 @@ func main() {
 	}
 	defer mcpLocal.Close()
 
-	// Create gollem instance
+	// Create gollem agent with MCP tools
 	agent := gollem.New(client,
 		gollem.WithToolSets(mcpLocal),
+		gollem.WithSystemPrompt("You are a helpful assistant with access to MCP tools."),
 		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
 			fmt.Printf("🤖 %s\n", msg)
 			return nil
 		}),
 	)
 
+	fmt.Println("🚀 Simple Gollem Agent with MCP Tools")
+	fmt.Println("💡 Enter your message below:")
 	fmt.Print("> ")
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
 
-	if _, err = agent.Prompt(ctx, scanner.Text()); err != nil {
-		panic(err)
+	scanner := bufio.NewScanner(os.Stdin)
+	if scanner.Scan() {
+		input := scanner.Text()
+
+		// Execute with automatic session management
+		if err := agent.Execute(ctx, input); err != nil {
+			fmt.Printf("❌ Error: %v\n", err)
+		} else {
+			fmt.Println("✅ Task completed!")
+		}
 	}
 }

@@ -68,28 +68,82 @@ Each parameter specification includes:
 
 ## Using Tools
 
-To use tools with your LLM:
+To use tools with your agent:
 
 ```go
-s := gollem.New(client,
+agent := gollem.New(client,
     gollem.WithTools(&HelloTool{}),
 )
+
+// Execute with automatic session management
+err := agent.Execute(ctx, "Say hello to Alice")
+if err != nil {
+    panic(err)
+}
 ```
 
 You can add multiple tools:
 
 ```go
-s := gollem.New(client,
+agent := gollem.New(client,
     gollem.WithTools(&HelloTool{}, &CalculatorTool{}, &WeatherTool{}),
+    gollem.WithMessageHook(func(ctx context.Context, msg string) error {
+        fmt.Printf("🤖 %s\n", msg)
+        return nil
+    }),
+    gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
+        fmt.Printf("⚡ Executing: %s\n", tool.Name)
+        return nil
+    }),
 )
+
+// Execute multiple interactions with tools
+err := agent.Execute(ctx, "Say hello to Bob and then calculate 15 + 27")
+if err != nil {
+    panic(err)
+}
 ```
 
-## Best Practices
+## Tool Monitoring with Hooks
 
-1. **Clear Descriptions**: Provide clear and concise descriptions for tools and parameters to help the LLM understand their purpose and usage
-2. **Validate Input**: Always validate that parameters passed by the LLM match the specified types in your tool specification
-3. **Error Handling**: When errors occur, return clear error messages that explain both what went wrong and how to fix it. The Error() message will be passed directly to the LLM, so include actionable guidance
-4. **Nested Results**: For nested tool results with multiple levels of maps, always use `map[string]any`. Other types may cause errors with some LLM SDKs like Gemini
+gollem provides comprehensive hooks for monitoring tool execution:
+
+```go
+agent := gollem.New(client,
+    gollem.WithTools(&HelloTool{}, &CalculatorTool{}),
+    
+    // Monitor tool requests
+    gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
+        fmt.Printf("⚡ Executing tool: %s with args: %v\n", tool.Name, tool.Arguments)
+        
+        // Implement access control
+        if !isToolAllowed(tool.Name) {
+            return fmt.Errorf("tool %s not allowed", tool.Name)
+        }
+        
+        return nil
+    }),
+    
+    // Monitor successful tool responses
+    gollem.WithToolResponseHook(func(ctx context.Context, tool gollem.FunctionCall, response map[string]any) error {
+        fmt.Printf("✅ Tool %s completed: %v\n", tool.Name, response)
+        return nil
+    }),
+    
+    // Handle tool errors
+    gollem.WithToolErrorHook(func(ctx context.Context, err error, tool gollem.FunctionCall) error {
+        fmt.Printf("❌ Tool %s failed: %v\n", tool.Name, err)
+        
+        // Decide whether to continue or abort
+        if isCriticalTool(tool.Name) {
+            return err // Abort execution
+        }
+        
+        return nil // Continue execution
+    }),
+)
+
+
 
 ## Next Steps
 
