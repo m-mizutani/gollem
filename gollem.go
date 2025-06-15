@@ -31,10 +31,19 @@ type Agent struct {
 	llm LLMClient
 
 	gollemConfig
+
+	// currentSession holds the current session for continuous execution
+	currentSession Session
 }
 
 func (x *Agent) Facilitator() Facilitator {
 	return x.gollemConfig.facilitator
+}
+
+// Session returns the current session for the agent.
+// This is the only way to access the session and its history.
+func (x *Agent) Session() Session {
+	return x.currentSession
 }
 
 const (
@@ -45,7 +54,6 @@ const (
 type gollemConfig struct {
 	loopLimit    int
 	retryLimit   int
-	initPrompt   string
 	systemPrompt string
 
 	tools    []Tool
@@ -68,7 +76,6 @@ func (c *gollemConfig) Clone() *gollemConfig {
 	return &gollemConfig{
 		loopLimit:    c.loopLimit,
 		retryLimit:   c.retryLimit,
-		initPrompt:   c.initPrompt,
 		systemPrompt: c.systemPrompt,
 
 		tools:    c.tools[:],
@@ -95,7 +102,6 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 		gollemConfig: gollemConfig{
 			loopLimit:    DefaultLoopLimit,
 			retryLimit:   DefaultRetryLimit,
-			initPrompt:   "",
 			systemPrompt: "",
 
 			loopHook:         defaultLoopHook,
@@ -116,7 +122,6 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 	s.logger.Info("gollem agent created",
 		"loop_limit", s.gollemConfig.loopLimit,
 		"retry_limit", s.gollemConfig.retryLimit,
-		"init_prompt", s.gollemConfig.initPrompt,
 		"system_prompt", s.gollemConfig.systemPrompt,
 		"tools_count", len(s.gollemConfig.tools),
 		"tool_sets_count", len(s.gollemConfig.toolSets),
@@ -146,13 +151,6 @@ func WithLoopLimit(loopLimit int) Option {
 func WithRetryLimit(retryLimit int) Option {
 	return func(s *gollemConfig) {
 		s.retryLimit = retryLimit
-	}
-}
-
-// WithInitPrompt sets the initial prompt for the gollem agent. The initial prompt is used when there is no history. If you want to use the system prompt, use WithSystemPrompt instead.
-func WithInitPrompt(initPrompt string) Option {
-	return func(s *gollemConfig) {
-		s.initPrompt = initPrompt
 	}
 }
 
@@ -295,6 +293,8 @@ func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool
 }
 
 // Prompt is the main function to start the gollem agent. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until no tool call from LLM or the LoopLimit is reached.
+//
+// Deprecated: Use Execute instead. Prompt requires manual history management, while Execute handles session state automatically.
 func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*History, error) {
 	cfg := g.gollemConfig.Clone()
 	for _, opt := range options {
@@ -321,8 +321,6 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 
 	if cfg.history != nil {
 		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
-	} else if cfg.initPrompt != "" {
-		input = append([]Input{Text(cfg.initPrompt)}, input...)
 	}
 	if len(toolList) > 0 {
 		sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
@@ -400,6 +398,119 @@ func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*
 	}
 
 	return ssn.History(), goerr.Wrap(ErrLoopLimitExceeded, "session stopped", goerr.V("loop_limit", cfg.loopLimit))
+}
+
+// Execute performs the agent task with the given prompt. This method manages the session state internally,
+// allowing for continuous conversation without manual history management.
+// Use this method instead of Prompt for better agent-like behavior.
+func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) error {
+	cfg := g.gollemConfig.Clone()
+	for _, opt := range options {
+		opt(cfg)
+	}
+
+	logger := cfg.logger.With("gollem.request_id", uuid.New().String())
+	ctx = ctxWithLogger(ctx, logger)
+	logger.Info("starting gollem execution",
+		"prompt", prompt,
+		"has_existing_session", g.currentSession != nil,
+	)
+
+	// Setup tools for the current execution
+	toolMap, toolList, err := setupTools(ctx, cfg)
+	if err != nil {
+		return err
+	}
+
+	// If no current session exists, create a new one
+	if g.currentSession == nil {
+		sessionOptions := []SessionOption{
+			WithSessionSystemPrompt(cfg.systemPrompt),
+		}
+
+		if cfg.history != nil {
+			sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
+		}
+		if len(toolList) > 0 {
+			sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
+		}
+
+		ssn, err := g.llm.NewSession(ctx, sessionOptions...)
+		if err != nil {
+			return err
+		}
+		g.currentSession = ssn
+	}
+
+	input := []Input{Text(prompt)}
+
+	for i := 0; i < cfg.loopLimit; i++ {
+		if err := cfg.loopHook(ctx, i, input); err != nil {
+			return err
+		}
+
+		if len(input) == 0 {
+			if cfg.facilitator != nil {
+				if proceedPrompt := cfg.facilitator.ProceedPrompt(); proceedPrompt != "" {
+					input = []Input{Text(proceedPrompt)}
+				}
+			}
+		}
+
+		logger.Debug("gollem input", "input", input, "loop", i)
+
+		switch cfg.responseMode {
+		case ResponseModeBlocking:
+			output, err := g.currentSession.GenerateContent(ctx, input...)
+			if err != nil {
+				return err
+			}
+
+			newInput, err := handleResponse(ctx, *cfg, output, toolMap)
+			if err != nil {
+				// Check if the error is ErrExitConversation
+				if errors.Is(err, ErrExitConversation) {
+					logger.Info("conversation exited by tool")
+					return nil
+				}
+				return err
+			}
+			input = newInput
+
+		case ResponseModeStreaming:
+			stream, err := g.currentSession.GenerateStream(ctx, input...)
+			if err != nil {
+				return err
+			}
+			input = make([]Input, 0)
+
+			for output := range stream {
+				logger.Debug("recv response", "output", output)
+				newInput, err := handleResponse(ctx, *cfg, output, toolMap)
+				if err != nil {
+					// Check if the error is ErrExitConversation
+					if errors.Is(err, ErrExitConversation) {
+						logger.Info("conversation exited by tool")
+						return nil
+					}
+					return err
+				}
+				input = append(input, newInput...)
+			}
+		}
+
+		if cfg.facilitator != nil {
+			if cfg.facilitator.IsCompleted() {
+				return nil
+			}
+		} else {
+			if len(input) == 0 {
+				return nil
+			}
+		}
+	}
+
+	return goerr.Wrap(ErrLoopLimitExceeded, "session stopped", goerr.V("loop_limit", cfg.loopLimit))
 }
 
 func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, toolMap map[string]Tool) ([]Input, error) {
