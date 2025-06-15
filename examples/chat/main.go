@@ -84,7 +84,8 @@ func main() {
 	fmt.Println("🌤️  Weather Chat Assistant")
 	fmt.Println("💡 Ask me about the weather in any city!")
 	fmt.Println("🔄 Conversation history is automatically managed")
-	fmt.Println("📝 Type 'quit' to exit\n")
+	fmt.Println("📝 Type 'quit' to exit")
+	fmt.Println("")
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
