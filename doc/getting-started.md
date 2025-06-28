@@ -37,7 +37,7 @@ func main() {
     }
 
     // Create MCP client (optional)
-    mcpClient, err := mcp.NewSSE(ctx, "http://localhost:8080")
+    mcpClient, err := mcp.NewStreamableHTTP(ctx, "http://localhost:8080")
     if err != nil {
         panic(err)
     }

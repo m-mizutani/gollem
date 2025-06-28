@@ -26,7 +26,7 @@ This directory contains various examples demonstrating the usage of Gollem with 
 **[MCP Example](mcp/main.go)** - Demonstrates integration with Model Context Protocol servers for external tool access.
 
 **Features:**
-- Multiple MCP server connections (SSE and Stdio)
+- Multiple MCP server connections (HTTP and Stdio)
 - Tool request monitoring
 - File operations and external tools
 - Comprehensive error handling

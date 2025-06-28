@@ -1,3 +1,5 @@
+//go:build examples
+
 package main
 
 import (
@@ -20,8 +22,9 @@ func main() {
 		panic(err)
 	}
 
-	// Create MCP client with local server
-	mcpLocal, err := mcp.NewStdio(ctx, "./mcp-server", []string{"arg1", "arg2"})
+	// Create MCP client with local server (with custom client info)
+	mcpLocal, err := mcp.NewStdio(ctx, "./mcp-server", []string{"arg1", "arg2"},
+		mcp.WithStdioClientInfo("gollem-simple-example", "1.0.0"))
 	if err != nil {
 		panic(err)
 	}

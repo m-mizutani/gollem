@@ -216,18 +216,26 @@ func main() {
 		panic(err)
 	}
 
-	// Create MCP clients
-	mcpLocal, err := mcp.NewStdio(ctx, "./mcp-server", []string{})
+	// Create MCP clients with custom client info
+	// Stdio transport for local MCP servers
+	mcpLocal, err := mcp.NewStdio(ctx, "./mcp-server", []string{},
+		mcp.WithStdioClientInfo("my-app", "1.0.0"),
+		mcp.WithEnvVars([]string{"MCP_ENV=production"}))
 	if err != nil {
 		panic(err)
 	}
 	defer mcpLocal.Close()
 
-	mcpRemote, err := mcp.NewSSE(ctx, "http://localhost:8080")
+	// StreamableHTTP transport for remote MCP servers (recommended)
+	mcpRemote, err := mcp.NewStreamableHTTP(ctx, "http://localhost:8080",
+		mcp.WithStreamableHTTPClientInfo("my-app-client", "1.0.0"))
 	if err != nil {
 		panic(err)
 	}
 	defer mcpRemote.Close()
+
+	// Note: NewSSE is also available but deprecated in favor of NewStreamableHTTP
+	// See doc/mcp.md for complete transport options and configuration
 
 	// Create agent with MCP tools
 	agent := gollem.New(client,
