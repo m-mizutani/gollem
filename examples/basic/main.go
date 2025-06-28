@@ -44,15 +44,18 @@ func main() {
 		panic(err)
 	}
 
-	// Create MCP client with local server
-	mcpLocal, err := mcp.NewStdio(ctx, "./mcp-server", []string{}, mcp.WithEnvVars([]string{"MCP_ENV=test"}))
+	// Create MCP client with local server (with custom client info)
+	mcpLocal, err := mcp.NewStdio(ctx, "./mcp-server", []string{},
+		mcp.WithEnvVars([]string{"MCP_ENV=test"}),
+		mcp.WithStdioClientInfo("gollem-basic-example", "1.0.0"))
 	if err != nil {
 		panic(err)
 	}
 	defer mcpLocal.Close()
 
-	// Create MCP client with remote server
-	mcpRemote, err := mcp.NewSSE(ctx, "http://localhost:8080")
+	// Create MCP client with remote server (with custom client info)
+	mcpRemote, err := mcp.NewSSE(ctx, "http://localhost:8080",
+		mcp.WithSSEClientInfo("gollem-remote-client", "1.0.0"))
 	if err != nil {
 		panic(err)
 	}

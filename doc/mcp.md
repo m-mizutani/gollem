@@ -15,8 +15,9 @@ MCP is a protocol that enables LLMs to interact with external tools and resource
 To connect your gollem application to an MCP server, you can use either HTTP SSE or stdio transport:
 
 ```go
-// Using HTTP SSE transport
-mcpClient, err := mcp.NewSSE(context.Background(), "http://localhost:8080")
+// Using HTTP SSE transport with custom client info
+mcpClient, err := mcp.NewSSE(context.Background(), "http://localhost:8080",
+    mcp.WithSSEClientInfo("my-app", "1.0.0"))
 if err != nil {
     panic(err)
 }
@@ -36,8 +37,10 @@ if err != nil {
     panic(err)
 }
 
-// Using stdio transport
-mcpClient, err := mcp.NewStdio(context.Background(), "/path/to/mcp/server", []string{"--arg1", "value1"})
+// Using stdio transport with custom client info and environment variables
+mcpClient, err := mcp.NewStdio(context.Background(), "/path/to/mcp/server", []string{"--arg1", "value1"},
+    mcp.WithStdioClientInfo("my-app", "1.0.0"),
+    mcp.WithEnvVars([]string{"MCP_ENV=production"}))
 if err != nil {
     panic(err)
 }
@@ -60,19 +63,46 @@ if err != nil {
 
 ## Options
 
-1. **Environment Variables**: Set environment variables for the MCP client
+1. **Client Information**: Customize client name and version (defaults to "gollem" and "")
 ```go
+// For stdio transport
 mcpClient, err := mcp.NewStdio(context.Background(), "/path/to/mcp/server", []string{},
-    mcp.WithEnvVars([]string{"MCP_ENV=test"}),
+    mcp.WithStdioClientInfo("my-application", "1.2.3"),
+)
+
+// For SSE transport
+mcpClient, err := mcp.NewSSE(context.Background(), "http://localhost:8080",
+    mcp.WithSSEClientInfo("my-web-app", "2.0.0"),
+)
+
+// For StreamableHTTP transport
+mcpClient, err := mcp.NewStreamableHTTP(context.Background(), "http://localhost:8080",
+    mcp.WithStreamableHTTPClientInfo("my-streaming-app", "1.5.0"),
 )
 ```
 
-2. **HTTP Headers**: Set custom HTTP headers for SSE transport
+2. **Environment Variables**: Set environment variables for the MCP client
+```go
+mcpClient, err := mcp.NewStdio(context.Background(), "/path/to/mcp/server", []string{},
+    mcp.WithEnvVars([]string{"MCP_ENV=test", "DEBUG=true"}),
+)
+```
+
+3. **HTTP Headers**: Set custom HTTP headers for SSE transport
 ```go
 mcpClient, err := mcp.NewSSE(context.Background(), "http://localhost:8080",
     mcp.WithHeaders(map[string]string{
         "Authorization": "Bearer token",
+        "User-Agent": "MyApp/1.0",
     }),
+)
+```
+
+4. **Combining Options**: You can combine multiple options
+```go
+mcpClient, err := mcp.NewStdio(context.Background(), "/path/to/mcp/server", []string{},
+    mcp.WithStdioClientInfo("my-app", "1.0.0"),
+    mcp.WithEnvVars([]string{"MCP_ENV=production", "LOG_LEVEL=info"}),
 )
 ```
 

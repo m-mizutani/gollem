@@ -1,47 +1,43 @@
 package mcp
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"sync"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
-	"github.com/mark3labs/mcp-go/client"
-	"github.com/mark3labs/mcp-go/client/transport"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// transportType represents the transport type for MCP client
-type transportType string
-
 const (
-	transportTypeStdio          transportType = "stdio"
-	transportTypeSSE            transportType = "sse"
-	transportTypeStreamableHTTP transportType = "streamable-http"
+	// DefaultClientName is the default name for MCP client
+	DefaultClientName = "gollem"
+	// DefaultClientVersion is the default version for MCP client
+	// Empty string means no specific version is advertised
+	DefaultClientVersion = ""
 )
 
 type Client struct {
-	// For local MCP server
-	path    string
-	args    []string
-	envVars []string
+	// 公式SDKクライアント
+	mcpClient *mcp.Client
+	session   *mcp.ClientSession
 
-	// For remote MCP server
-	baseURL string
+	// 設定保持
+	name    string
+	version string
+
+	// トランスポート関連
+	transport mcp.Transport
+
+	// オプション
+	envVars []string
 	headers map[string]string
 
-	// Transport type
-	transportType transportType
-
-	// Common client
-	client *client.Client
-
-	initResult *mcp.InitializeResult
-	initMutex  sync.Mutex
+	// 接続管理
+	initMutex sync.Mutex
 }
 
 // Specs implements gollem.ToolSet interface
@@ -59,21 +55,15 @@ func (c *Client) Specs(ctx context.Context) ([]gollem.ToolSpec, error) {
 	for i, tool := range tools {
 		toolNames[i] = tool.Name
 
-		param, err := inputSchemaToParameter(tool.InputSchema)
+		param, err := convertToolToSpec(tool)
 		if err != nil {
 			return nil, goerr.Wrap(err,
-				"failed to convert input schema to parameter",
+				"failed to convert tool to spec",
 				goerr.V("tool.name", tool.Name),
-				goerr.V("tool.inputSchema", tool.InputSchema),
 			)
 		}
 
-		specs[i] = gollem.ToolSpec{
-			Name:        tool.Name,
-			Description: tool.Description,
-			Parameters:  param.Properties,
-			Required:    param.Required,
-		}
+		specs[i] = param
 	}
 
 	logger.Debug("found MCP tools", "names", toolNames)
@@ -92,7 +82,7 @@ func (c *Client) Run(ctx context.Context, name string, args map[string]any) (map
 		return nil, goerr.Wrap(err, "failed to call tool")
 	}
 
-	return mcpContentToMap(resp.Content), nil
+	return convertContentToMap(resp.Content), nil
 }
 
 // StdioOption is the option for the MCP client for local MCP executable server via stdio.
@@ -105,18 +95,35 @@ func WithEnvVars(envVars []string) StdioOption {
 	}
 }
 
+// WithStdioClientInfo sets the client name and version for the MCP client.
+func WithStdioClientInfo(name, version string) StdioOption {
+	return func(m *Client) {
+		m.name = name
+		m.version = version
+	}
+}
+
 // NewStdio creates a new MCP client for local MCP executable server via stdio.
 func NewStdio(ctx context.Context, path string, args []string, options ...StdioOption) (*Client, error) {
 	client := &Client{
-		path:          path,
-		args:          args,
-		transportType: transportTypeStdio,
+		name:    DefaultClientName,
+		version: DefaultClientVersion,
 	}
 	for _, option := range options {
 		option(client)
 	}
 
-	if err := client.init(ctx); err != nil {
+	// Create command with environment variables
+	cmd := exec.Command(path, args...)
+	if len(client.envVars) > 0 {
+		cmd.Env = append(cmd.Env, client.envVars...)
+	}
+
+	// Create transport
+	transport := mcp.NewStdioTransport()
+	client.transport = transport
+
+	if err := client.init(ctx, cmd); err != nil {
 		return nil, goerr.Wrap(err, "failed to initialize MCP client")
 	}
 
@@ -133,21 +140,27 @@ func WithHeaders(headers map[string]string) SSEOption {
 	}
 }
 
+// WithSSEClientInfo sets the client name and version for the MCP client.
+func WithSSEClientInfo(name, version string) SSEOption {
+	return func(m *Client) {
+		m.name = name
+		m.version = version
+	}
+}
+
 // NewSSE creates a new MCP client for remote MCP server via HTTP SSE.
 func NewSSE(ctx context.Context, baseURL string, options ...SSEOption) (*Client, error) {
 	client := &Client{
-		baseURL:       baseURL,
-		transportType: transportTypeSSE,
+		name:    DefaultClientName,
+		version: DefaultClientVersion,
+		headers: make(map[string]string),
 	}
 	for _, option := range options {
 		option(client)
 	}
 
-	if err := client.init(ctx); err != nil {
-		return nil, goerr.Wrap(err, "failed to initialize MCP client")
-	}
-
-	return client, nil
+	// TODO: SSE transport implementation when available in official SDK
+	return nil, goerr.New("SSE transport not yet implemented with official SDK")
 }
 
 // StreamableHTTPOption is the option for the MCP client for remote MCP server via Streamable HTTP.
@@ -160,93 +173,63 @@ func WithStreamableHTTPHeaders(headers map[string]string) StreamableHTTPOption {
 	}
 }
 
+// WithStreamableHTTPClientInfo sets the client name and version for the MCP client.
+func WithStreamableHTTPClientInfo(name, version string) StreamableHTTPOption {
+	return func(m *Client) {
+		m.name = name
+		m.version = version
+	}
+}
+
 // NewStreamableHTTP creates a new MCP client for remote MCP server via Streamable HTTP.
 func NewStreamableHTTP(ctx context.Context, baseURL string, options ...StreamableHTTPOption) (*Client, error) {
 	client := &Client{
-		baseURL:       baseURL,
-		transportType: transportTypeStreamableHTTP,
+		name:    DefaultClientName,
+		version: DefaultClientVersion,
+		headers: make(map[string]string),
 	}
 	for _, option := range options {
 		option(client)
 	}
 
-	if err := client.init(ctx); err != nil {
-		return nil, goerr.Wrap(err, "failed to initialize MCP client")
-	}
-
-	return client, nil
+	// TODO: StreamableHTTP transport implementation when available in official SDK
+	return nil, goerr.New("StreamableHTTP transport not yet implemented with official SDK")
 }
 
-func (c *Client) init(ctx context.Context) error {
+func (c *Client) init(ctx context.Context, cmd *exec.Cmd) error {
 	c.initMutex.Lock()
 	defer c.initMutex.Unlock()
 
 	logger := gollem.LoggerFromContext(ctx)
 
-	if c.initResult != nil {
+	if c.session != nil {
 		return nil
 	}
 
-	var tp transport.Interface
-	if c.path != "" {
-		tp = transport.NewStdio(c.path, c.envVars, c.args...)
-	}
+	// Create client with official SDK
+	c.mcpClient = mcp.NewClient(c.name, c.version, nil)
 
-	if c.baseURL != "" {
-		switch c.transportType {
-		case transportTypeSSE:
-			sse, err := transport.NewSSE(c.baseURL, transport.WithHeaders(c.headers))
-			if err != nil {
-				return goerr.Wrap(err, "failed to create SSE transport")
-			}
-			tp = sse
-		case transportTypeStreamableHTTP:
-			streamableHttp, err := transport.NewStreamableHTTP(c.baseURL, transport.WithHTTPHeaders(c.headers))
-			if err != nil {
-				return goerr.Wrap(err, "failed to create Streamable HTTP transport")
-			}
-			tp = streamableHttp
-		default:
-			// Default to SSE for backward compatibility
-			sse, err := transport.NewSSE(c.baseURL, transport.WithHeaders(c.headers))
-			if err != nil {
-				return goerr.Wrap(err, "failed to create SSE transport")
-			}
-			tp = sse
+	// Connect using stdio transport with command
+	if cmd != nil {
+		transport := mcp.NewCommandTransport(cmd)
+		session, err := c.mcpClient.Connect(ctx, transport)
+		if err != nil {
+			return goerr.Wrap(err, "failed to connect to MCP server")
 		}
+		c.session = session
 	}
 
-	if tp == nil {
-		return goerr.New("no transport")
-	}
-
-	c.client = client.NewClient(tp)
-
-	logger.Debug("starting MCP client", "path", c.path, "url", c.baseURL)
-	if err := c.client.Start(ctx); err != nil {
-		return goerr.Wrap(err, "failed to start MCP client")
-	}
-
-	var initRequest mcp.InitializeRequest
-	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
-	initRequest.Params.ClientInfo = mcp.Implementation{
-		Name:    "gollem",
-		Version: "0.0.1",
-	}
-
-	logger.Debug("initializing MCP client")
-	if resp, err := c.client.Initialize(ctx, initRequest); err != nil {
-		return goerr.Wrap(err, "failed to initialize MCP client")
-	} else {
-		c.initResult = resp
-	}
+	logger.Debug("MCP client initialized", "name", c.name, "version", c.version)
 
 	return nil
 }
 
-func (c *Client) listTools(ctx context.Context) ([]mcp.Tool, error) {
-	// ListTools is thread safe
-	resp, err := c.client.ListTools(ctx, mcp.ListToolsRequest{})
+func (c *Client) listTools(ctx context.Context) ([]*mcp.Tool, error) {
+	if c.session == nil {
+		return nil, goerr.New("session not initialized")
+	}
+
+	resp, err := c.session.ListTools(ctx, &mcp.ListToolsParams{})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list tools")
 	}
@@ -255,10 +238,16 @@ func (c *Client) listTools(ctx context.Context) ([]mcp.Tool, error) {
 }
 
 func (c *Client) callTool(ctx context.Context, name string, args map[string]any) (*mcp.CallToolResult, error) {
-	req := mcp.CallToolRequest{}
-	req.Params.Name = name
-	req.Params.Arguments = args
-	resp, err := c.client.CallTool(ctx, req)
+	if c.session == nil {
+		return nil, goerr.New("session not initialized")
+	}
+
+	params := &mcp.CallToolParams{
+		Name:      name,
+		Arguments: args,
+	}
+
+	resp, err := c.session.CallTool(ctx, params)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to call tool")
 	}
@@ -267,141 +256,138 @@ func (c *Client) callTool(ctx context.Context, name string, args map[string]any)
 }
 
 func (c *Client) Close() error {
-	if err := c.client.Close(); err != nil {
-		return goerr.Wrap(err, "failed to close MCP client")
+	if c.session != nil {
+		if err := c.session.Close(); err != nil {
+			return goerr.Wrap(err, "failed to close MCP session")
+		}
 	}
 	return nil
 }
 
-func inputSchemaToParameter(inputSchema mcp.ToolInputSchema) (*gollem.Parameter, error) {
-	parameters := map[string]*gollem.Parameter{}
-	jsonSchema, err := json.Marshal(inputSchema)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to marshal input schema")
+// convertToolToSpec converts MCP Tool to gollem.ToolSpec
+func convertToolToSpec(tool *mcp.Tool) (gollem.ToolSpec, error) {
+	spec := gollem.ToolSpec{
+		Name:        tool.Name,
+		Description: tool.Description,
+		Parameters:  make(map[string]*gollem.Parameter),
+		Required:    []string{},
 	}
 
-	rawSchema, err := jsonschema.UnmarshalJSON(bytes.NewReader(jsonSchema))
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to compile input schema")
+	// Convert input schema if available
+	if tool.InputSchema != nil {
+		param, err := convertInputSchemaToParameter(tool.InputSchema)
+		if err != nil {
+			return spec, goerr.Wrap(err, "failed to convert input schema")
+		}
+		spec.Parameters = param.Properties
+		spec.Required = param.Required
 	}
 
-	c := jsonschema.NewCompiler()
-	if err := c.AddResource("schema.json", rawSchema); err != nil {
-		return nil, goerr.Wrap(err, "failed to add resource to compiler")
-	}
-	schema, err := c.Compile("schema.json")
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to compile input schema")
-	}
-
-	schemaType := schema.Types.ToStrings()
-	if len(schemaType) != 1 || schemaType[0] != "object" {
-		return nil, goerr.Wrap(gollem.ErrInvalidTool, "invalid input schema", goerr.V("schema", schema))
-	}
-
-	for name, property := range schema.Properties {
-		parameters[name] = jsonSchemaToParameter(property)
-	}
-
-	return &gollem.Parameter{
-		Type:        gollem.ParameterType(schema.Types.ToStrings()[0]),
-		Title:       schema.Title,
-		Description: schema.Description,
-		Required:    schema.Required,
-		Properties:  parameters,
-	}, nil
+	return spec, nil
 }
 
-func jsonSchemaToParameter(schema *jsonschema.Schema) *gollem.Parameter {
-	var enum []string
-	if schema.Enum != nil {
-		for _, v := range schema.Enum.Values {
-			enum = append(enum, fmt.Sprintf("%v", v))
+// convertInputSchemaToParameter converts MCP input schema to gollem Parameter
+func convertInputSchemaToParameter(schema any) (*gollem.Parameter, error) {
+	// Convert schema to JSON and back to map for processing
+	schemaBytes, err := json.Marshal(schema)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to marshal schema")
+	}
+
+	var schemaMap map[string]any
+	if err := json.Unmarshal(schemaBytes, &schemaMap); err != nil {
+		return nil, goerr.Wrap(err, "failed to unmarshal schema")
+	}
+
+	param := &gollem.Parameter{
+		Type:       gollem.TypeObject,
+		Properties: make(map[string]*gollem.Parameter),
+		Required:   []string{},
+	}
+
+	// Extract properties
+	if props, ok := schemaMap["properties"].(map[string]any); ok {
+		for name, propSchema := range props {
+			propParam, err := convertSchemaProperty(propSchema)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to convert property", goerr.V("property", name))
+			}
+			param.Properties[name] = propParam
 		}
 	}
 
-	properties := map[string]*gollem.Parameter{}
-	for name, property := range schema.Properties {
-		properties[name] = jsonSchemaToParameter(property)
-	}
-
-	var items *gollem.Parameter
-	if schema.Items != nil {
-		switch v := schema.Items.(type) {
-		case *jsonschema.Schema:
-			items = jsonSchemaToParameter(v)
+	// Extract required fields
+	if required, ok := schemaMap["required"].([]any); ok {
+		for _, req := range required {
+			if reqStr, ok := req.(string); ok {
+				param.Required = append(param.Required, reqStr)
+			}
 		}
 	}
 
-	var minimum, maximum *float64
-	if schema.Minimum != nil {
-		min, _ := (*schema.Minimum).Float64()
-		minimum = &min
-	}
-	if schema.Maximum != nil {
-		max, _ := (*schema.Maximum).Float64()
-		maximum = &max
-	}
-
-	var minLength, maxLength *int
-	if schema.MinLength != nil {
-		min := int(*schema.MinLength)
-		minLength = &min
-	}
-	if schema.MaxLength != nil {
-		max := int(*schema.MaxLength)
-		maxLength = &max
-	}
-
-	var minItems, maxItems *int
-	if schema.MinItems != nil {
-		min := int(*schema.MinItems)
-		minItems = &min
-	}
-	if schema.MaxItems != nil {
-		max := int(*schema.MaxItems)
-		maxItems = &max
-	}
-
-	var pattern string
-	if schema.Pattern != nil {
-		pattern = schema.Pattern.String()
-	}
-
-	return &gollem.Parameter{
-		Type:        gollem.ParameterType(schema.Types.ToStrings()[0]),
-		Title:       schema.Title,
-		Description: schema.Description,
-		Required:    schema.Required,
-		Enum:        enum,
-		Properties:  properties,
-		Items:       items,
-		Minimum:     minimum,
-		Maximum:     maximum,
-		MinLength:   minLength,
-		MaxLength:   maxLength,
-		Pattern:     pattern,
-		MinItems:    minItems,
-		MaxItems:    maxItems,
-		Default:     schema.Default,
-	}
+	return param, nil
 }
 
-func mcpContentToMap(contents []mcp.Content) map[string]any {
+// convertSchemaProperty converts a single schema property to gollem Parameter
+func convertSchemaProperty(propSchema any) (*gollem.Parameter, error) {
+	propBytes, err := json.Marshal(propSchema)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to marshal property schema")
+	}
+
+	var propMap map[string]any
+	if err := json.Unmarshal(propBytes, &propMap); err != nil {
+		return nil, goerr.Wrap(err, "failed to unmarshal property schema")
+	}
+
+	param := &gollem.Parameter{}
+
+	// Type
+	if typeVal, ok := propMap["type"].(string); ok {
+		param.Type = gollem.ParameterType(typeVal)
+	}
+
+	// Description
+	if desc, ok := propMap["description"].(string); ok {
+		param.Description = desc
+	}
+
+	// Title
+	if title, ok := propMap["title"].(string); ok {
+		param.Title = title
+	}
+
+	// Default value
+	if defaultVal, ok := propMap["default"]; ok {
+		param.Default = defaultVal
+	}
+
+	// Handle enum
+	if enumVal, ok := propMap["enum"].([]any); ok {
+		for _, e := range enumVal {
+			param.Enum = append(param.Enum, fmt.Sprintf("%v", e))
+		}
+	}
+
+	return param, nil
+}
+
+// convertContentToMap converts MCP Content to map[string]any
+func convertContentToMap(contents []mcp.Content) map[string]any {
 	if len(contents) == 0 {
 		return nil
 	}
 
 	if len(contents) == 1 {
-		if content, ok := contents[0].(mcp.TextContent); ok {
+		if textContent, ok := contents[0].(*mcp.TextContent); ok {
 			var v any
-			if err := json.Unmarshal([]byte(content.Text), &v); err == nil {
+			if err := json.Unmarshal([]byte(textContent.Text), &v); err == nil {
 				if mapData, ok := v.(map[string]any); ok {
 					return mapData
 				}
 			}
 			return map[string]any{
-				"result": content.Text,
+				"result": textContent.Text,
 			}
 		}
 		return nil
@@ -409,8 +395,8 @@ func mcpContentToMap(contents []mcp.Content) map[string]any {
 
 	result := map[string]any{}
 	for i, c := range contents {
-		if content, ok := c.(mcp.TextContent); ok {
-			result[fmt.Sprintf("content_%d", i+1)] = content.Text
+		if textContent, ok := c.(*mcp.TextContent); ok {
+			result[fmt.Sprintf("content_%d", i+1)] = textContent.Text
 		}
 	}
 	return result

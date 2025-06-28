@@ -216,14 +216,17 @@ func main() {
 		panic(err)
 	}
 
-	// Create MCP clients
-	mcpLocal, err := mcp.NewStdio(ctx, "./mcp-server", []string{})
+	// Create MCP clients with custom client info
+	mcpLocal, err := mcp.NewStdio(ctx, "./mcp-server", []string{},
+		mcp.WithStdioClientInfo("my-app", "1.0.0"),
+		mcp.WithEnvVars([]string{"MCP_ENV=production"}))
 	if err != nil {
 		panic(err)
 	}
 	defer mcpLocal.Close()
 
-	mcpRemote, err := mcp.NewSSE(ctx, "http://localhost:8080")
+	mcpRemote, err := mcp.NewSSE(ctx, "http://localhost:8080",
+		mcp.WithSSEClientInfo("my-app-client", "1.0.0"))
 	if err != nil {
 		panic(err)
 	}

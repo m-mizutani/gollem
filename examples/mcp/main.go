@@ -20,15 +20,18 @@ func main() {
 		panic(err)
 	}
 
-	// Create MCP client (SSE)
-	sseClient, err := mcp.NewSSE(ctx, "http://localhost:8080")
+	// Create MCP client (SSE) with custom client info
+	sseClient, err := mcp.NewSSE(ctx, "http://localhost:8080",
+		mcp.WithSSEClientInfo("gollem-mcp-sse-client", "1.0.0"))
 	if err != nil {
 		log.Fatalf("Failed to create SSE client: %v", err)
 	}
 	defer sseClient.Close()
 
-	// Create MCP client (Stdio)
-	stdioClient, err := mcp.NewStdio(ctx, "./mcp-server", []string{}, mcp.WithEnvVars([]string{"MCP_ENV=test"}))
+	// Create MCP client (Stdio) with custom client info
+	stdioClient, err := mcp.NewStdio(ctx, "./mcp-server", []string{},
+		mcp.WithEnvVars([]string{"MCP_ENV=test"}),
+		mcp.WithStdioClientInfo("gollem-mcp-stdio-client", "1.0.0"))
 	if err != nil {
 		log.Fatalf("Failed to create Stdio client: %v", err)
 	}
