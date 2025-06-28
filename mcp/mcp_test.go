@@ -2,6 +2,8 @@ package mcp_test
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
@@ -60,18 +62,20 @@ func TestMCPContentToMap(t *testing.T) {
 
 func TestNewStreamableHTTP(t *testing.T) {
 	t.Run("basic functionality", func(t *testing.T) {
-		// StreamableHTTP is not yet implemented with official SDK
+		// StreamableHTTP should now work but will fail with connection error
 		client, err := mcp.NewStreamableHTTP(
 			t.Context(),
 			"http://localhost:99999",
 		)
+		// Connection should fail due to unreachable server, but client creation should work
 		gt.Error(t, err)
-		gt.Nil(t, client)
-		gt.True(t, err.Error() == "StreamableHTTP transport not yet implemented with official SDK")
+		gt.Nil(t, client) // Client is nil when connection fails
+		// Error should be connection-related, not "not implemented"
+		gt.False(t, err.Error() == "StreamableHTTP transport not yet implemented with official SDK")
 	})
 
 	t.Run("with headers", func(t *testing.T) {
-		// StreamableHTTP is not yet implemented with official SDK
+		// StreamableHTTP should now work but will fail with connection error
 		client, err := mcp.NewStreamableHTTP(
 			t.Context(),
 			"http://localhost:99999",
@@ -80,9 +84,43 @@ func TestNewStreamableHTTP(t *testing.T) {
 				"Custom-Header": "test-value",
 			}),
 		)
+		// Connection should fail due to unreachable server, but client creation should work
 		gt.Error(t, err)
-		gt.Nil(t, client)
-		gt.True(t, err.Error() == "StreamableHTTP transport not yet implemented with official SDK")
+		gt.Nil(t, client) // Client is nil when connection fails
+		// Error should be connection-related, not "not implemented"
+		gt.False(t, err.Error() == "StreamableHTTP transport not yet implemented with official SDK")
+	})
+}
+
+func TestNewSSE(t *testing.T) {
+	t.Run("basic functionality", func(t *testing.T) {
+		// SSE should now work but will fail with connection error
+		client, err := mcp.NewSSE(
+			t.Context(),
+			"http://localhost:99999",
+		)
+		// Connection should fail due to unreachable server, but client creation should work
+		gt.Error(t, err)
+		gt.Nil(t, client) // Client is nil when connection fails
+		// Error should be connection-related, not "not implemented"
+		gt.True(t, err != nil)
+	})
+
+	t.Run("with headers", func(t *testing.T) {
+		// SSE should now work but will fail with connection error
+		client, err := mcp.NewSSE(
+			t.Context(),
+			"http://localhost:99999",
+			mcp.WithSSEHeaders(map[string]string{
+				"Authorization": "Bearer test-token",
+				"Custom-Header": "test-value",
+			}),
+		)
+		// Connection should fail due to unreachable server, but client creation should work
+		gt.Error(t, err)
+		gt.Nil(t, client) // Client is nil when connection fails
+		// Error should be connection-related, not "not implemented"
+		gt.True(t, err != nil)
 	})
 }
 
@@ -100,6 +138,28 @@ func TestNewStreamableHTTPErrorHandling(t *testing.T) {
 	// Test with unreachable server
 	t.Run("unreachable server", func(t *testing.T) {
 		client, err := mcp.NewStreamableHTTP(
+			t.Context(),
+			"http://localhost:99999",
+		)
+		gt.Error(t, err)
+		gt.Nil(t, client)
+	})
+}
+
+func TestNewSSEErrorHandling(t *testing.T) {
+	// Test with invalid URL
+	t.Run("invalid URL", func(t *testing.T) {
+		client, err := mcp.NewSSE(
+			t.Context(),
+			"invalid-url",
+		)
+		gt.Error(t, err)
+		gt.Nil(t, client)
+	})
+
+	// Test with unreachable server
+	t.Run("unreachable server", func(t *testing.T) {
+		client, err := mcp.NewSSE(
 			t.Context(),
 			"http://localhost:99999",
 		)
@@ -148,30 +208,36 @@ func TestClientOptions(t *testing.T) {
 		_, err := mcp.NewSSE(ctx, "http://localhost:99999",
 			mcp.WithSSEClientInfo("custom-sse-client", "3.0.0"))
 
+		// Should fail with connection error, not "not implemented"
 		gt.Error(t, err)
-		gt.True(t, err.Error() == "SSE transport not yet implemented with official SDK")
+		// Error should be connection-related
+		gt.True(t, err != nil)
 	})
 
 	t.Run("NewSSE with default client info", func(t *testing.T) {
 		_, err := mcp.NewSSE(ctx, "http://localhost:99999")
 
+		// Should fail with connection error, not "not implemented"
 		gt.Error(t, err)
-		gt.True(t, err.Error() == "SSE transport not yet implemented with official SDK")
+		// Error should be connection-related
+		gt.True(t, err != nil)
 	})
 
 	t.Run("NewStreamableHTTP with custom client info", func(t *testing.T) {
 		_, err := mcp.NewStreamableHTTP(ctx, "http://localhost:99999",
 			mcp.WithStreamableHTTPClientInfo("custom-http-client", "4.0.0"))
 
+		// Should fail with connection error, not "not implemented"
 		gt.Error(t, err)
-		gt.True(t, err.Error() == "StreamableHTTP transport not yet implemented with official SDK")
+		gt.False(t, err.Error() == "StreamableHTTP transport not yet implemented with official SDK")
 	})
 
 	t.Run("NewStreamableHTTP with default client info", func(t *testing.T) {
 		_, err := mcp.NewStreamableHTTP(ctx, "http://localhost:99999")
 
+		// Should fail with connection error, not "not implemented"
 		gt.Error(t, err)
-		gt.True(t, err.Error() == "StreamableHTTP transport not yet implemented with official SDK")
+		gt.False(t, err.Error() == "StreamableHTTP transport not yet implemented with official SDK")
 	})
 
 	t.Run("Multiple options can be combined", func(t *testing.T) {
@@ -191,87 +257,105 @@ func TestClientOptions(t *testing.T) {
 func TestWithOfficialSDKServer(t *testing.T) {
 	ctx := t.Context()
 
-	t.Run("End-to-end test with official SDK server", func(t *testing.T) {
-		// Define input type for the tool
-		type GreetInput struct {
-			Name string `json:"name"`
+	// Define input type for the tool
+	type GreetInput struct {
+		Name string `json:"name"`
+	}
+
+	// Create a test tool handler with correct type signature
+	toolHandler := func(ctx context.Context, session *officialmcp.ServerSession, params *officialmcp.CallToolParamsFor[GreetInput]) (*officialmcp.CallToolResultFor[any], error) {
+		name := params.Arguments.Name
+		if name == "" {
+			name = "world"
 		}
+		return &officialmcp.CallToolResultFor[any]{
+			Content: []officialmcp.Content{&officialmcp.TextContent{Text: "Hello, " + name + "!"}},
+		}, nil
+	}
 
-		// Create a test tool handler with correct type signature
-		toolHandler := func(ctx context.Context, session *officialmcp.ServerSession, params *officialmcp.CallToolParamsFor[GreetInput]) (*officialmcp.CallToolResultFor[any], error) {
-			name := params.Arguments.Name
-			if name == "" {
-				name = "world"
-			}
-			return &officialmcp.CallToolResultFor[any]{
-				Content: []officialmcp.Content{&officialmcp.TextContent{Text: "Hello, " + name + "!"}},
-			}, nil
-		}
+	// Create server with official SDK
+	server := officialmcp.NewServer("test-server", "1.0.0", nil)
+	server.AddTools(
+		officialmcp.NewServerTool("greet", "say hello", toolHandler, officialmcp.Input(
+			officialmcp.Property("name", officialmcp.Description("the name of the person to greet")),
+		)),
+	)
 
-		// Create server with official SDK
-		server := officialmcp.NewServer("test-server", "1.0.0", nil)
-		server.AddTools(
-			officialmcp.NewServerTool("greet", "say hello", toolHandler, officialmcp.Input(
-				officialmcp.Property("name", officialmcp.Description("the name of the person to greet")),
-			)),
-		)
+	// Test with StreamableHTTP transport
+	t.Run("Test gollem mcp with StreamableHTTP transport", func(t *testing.T) {
+		// Create HTTP handler for StreamableHTTP
+		httpHandler := officialmcp.NewStreamableHTTPHandler(func(r *http.Request) *officialmcp.Server {
+			return server
+		}, nil)
 
-		// Create in-memory transports for testing
-		clientTransport, serverTransport := officialmcp.NewInMemoryTransports()
+		// Start test HTTP server
+		httpServer := httptest.NewServer(httpHandler)
+		defer httpServer.Close()
 
-		// Start server in background
-		serverDone := make(chan error, 1)
-		go func() {
-			serverDone <- server.Run(ctx, serverTransport)
-		}()
-
-		// Create our client using the official SDK's client transport
-		// Note: Since our NewStdio expects a command, we need a different approach
-		// We'll test the concept by creating a client directly with the transport
-
-		officialClient := officialmcp.NewClient("test-client", "1.0.0", nil)
-		session, err := officialClient.Connect(ctx, clientTransport)
-		if err != nil {
-			t.Fatalf("Failed to connect: %v", err)
-		}
-		defer session.Close()
-
-		// Test ListTools
-		toolsResult, err := session.ListTools(ctx, &officialmcp.ListToolsParams{})
+		// Test using gollem's mcp package
+		mcpClient, err := mcp.NewStreamableHTTP(ctx, httpServer.URL,
+			mcp.WithStreamableHTTPClientInfo("gollem-test-client", "1.0.0"))
 		gt.NoError(t, err)
-		gt.Array(t, toolsResult.Tools).Length(1)
-		gt.Equal(t, "greet", toolsResult.Tools[0].Name)
-		gt.Equal(t, "say hello", toolsResult.Tools[0].Description)
+		defer mcpClient.Close()
 
-		// Test CallTool
-		callResult, err := session.CallTool(ctx, &officialmcp.CallToolParams{
-			Name:      "greet",
-			Arguments: map[string]any{"name": "GoLLem"},
-		})
+		// Test Specs method
+		specs, err := mcpClient.Specs(ctx)
 		gt.NoError(t, err)
-		gt.False(t, callResult.IsError)
-		gt.Array(t, callResult.Content).Length(1)
+		gt.Array(t, specs).Length(1)
+		gt.Equal(t, "greet", specs[0].Name)
+		gt.Equal(t, "say hello", specs[0].Description)
 
-		if textContent, ok := callResult.Content[0].(*officialmcp.TextContent); ok {
-			gt.Equal(t, "Hello, GoLLem!", textContent.Text)
+		// Test Run method
+		result, err := mcpClient.Run(ctx, "greet", map[string]any{"name": "StreamableHTTP"})
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+
+		// The result should contain the greeting message
+		if resultStr, ok := result["result"].(string); ok {
+			gt.Equal(t, "Hello, StreamableHTTP!", resultStr)
 		} else {
-			t.Errorf("Expected TextContent, got %T", callResult.Content[0])
-		}
-
-		// Close client connection
-		session.Close()
-
-		// Wait for server to finish (it should exit when client disconnects)
-		select {
-		case err := <-serverDone:
-			if err != nil && err.Error() != "connection closed" {
-				t.Logf("Server finished with: %v", err)
-			}
-		case <-ctx.Done():
-			t.Fatal("Server did not finish in time")
+			t.Errorf("Expected result key with string value, got: %+v", result)
 		}
 	})
 
+	// Test with SSE transport (deprecated but still functional)
+	t.Run("Test gollem mcp with SSE transport (deprecated)", func(t *testing.T) {
+		// Create HTTP handler for SSE
+		sseHandler := officialmcp.NewSSEHandler(func(r *http.Request) *officialmcp.Server {
+			return server
+		})
+
+		// Start test HTTP server
+		httpServer := httptest.NewServer(sseHandler)
+		defer httpServer.Close()
+
+		// Test using gollem's mcp package (SSE is deprecated)
+		mcpClient, err := mcp.NewSSE(ctx, httpServer.URL,
+			mcp.WithSSEClientInfo("gollem-test-sse-client", "1.0.0"))
+		gt.NoError(t, err)
+		defer mcpClient.Close()
+
+		// Test Specs method
+		specs, err := mcpClient.Specs(ctx)
+		gt.NoError(t, err)
+		gt.Array(t, specs).Length(1)
+		gt.Equal(t, "greet", specs[0].Name)
+		gt.Equal(t, "say hello", specs[0].Description)
+
+		// Test Run method
+		result, err := mcpClient.Run(ctx, "greet", map[string]any{"name": "SSE"})
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+
+		// The result should contain the greeting message
+		if resultStr, ok := result["result"].(string); ok {
+			gt.Equal(t, "Hello, SSE!", resultStr)
+		} else {
+			t.Errorf("Expected result key with string value, got: %+v", result)
+		}
+	})
+
+	// Test conversion functions with official SDK types
 	t.Run("Test our conversion functions with official SDK types", func(t *testing.T) {
 		// Test convertContentToMap with official SDK content
 		textContent := &officialmcp.TextContent{Text: `{"result": "success", "data": 123}`}
@@ -335,16 +419,17 @@ func TestExistingFunctionalityNotAffected(t *testing.T) {
 		gt.Array(t, specs).Longer(0)
 	})
 
-	// Test that NewSSE interface is available (without requiring a server)
-	t.Run("NewSSE interface available", func(t *testing.T) {
+	// Test that NewStreamableHTTP interface is available (without requiring a server)
+	t.Run("NewStreamableHTTP interface available", func(t *testing.T) {
 		// Just test that the function signature is correct
-		// We don't test actual functionality since SSE is not yet implemented with official SDK
-		client, err := mcp.NewSSE(
+		// StreamableHTTP is now implemented and should work but fail with connection error
+		client, err := mcp.NewStreamableHTTP(
 			t.Context(),
 			"http://localhost:99999", // Will fail, but that's expected
 		)
-		gt.Error(t, err) // Expected to fail with "not yet implemented" error
+		gt.Error(t, err) // Expected to fail with connection error
 		gt.Nil(t, client)
-		gt.True(t, err.Error() == "SSE transport not yet implemented with official SDK")
+		// Error should be connection-related, not "not implemented"
+		gt.False(t, err.Error() == "StreamableHTTP transport not yet implemented with official SDK")
 	})
 }

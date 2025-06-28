@@ -36,7 +36,7 @@ Tests may require API keys for integration testing:
 
 **History Management** (`history.go`) - Cross-provider conversation history with versioning and portable serialization for stateless applications.
 
-**MCP Integration** (`mcp/`) - Model Context Protocol support for connecting to external tool servers via stdio or HTTP SSE.
+**MCP Integration** (`mcp/`) - Model Context Protocol support for connecting to external tool servers via stdio or Streamable HTTP.
 
 **Facilitator** (`facilitator.go`) - Controls session termination and provides the default `respond_to_user` tool for conversation completion.
 

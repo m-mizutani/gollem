@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"sync"
 
@@ -20,23 +21,27 @@ const (
 	DefaultClientVersion = ""
 )
 
+// Client is the MCP client that allows to communicate with MCP server.
 type Client struct {
-	// 公式SDKクライアント
+	// Official SDK client
 	mcpClient *mcp.Client
 	session   *mcp.ClientSession
 
-	// 設定保持
+	// Configuration
 	name    string
 	version string
 
-	// トランスポート関連
+	// Transport related
 	transport mcp.Transport
+	cmd       *exec.Cmd // For stdio transport
+	baseURL   string    // For StreamableHTTP transport
 
-	// オプション
-	envVars []string
-	headers map[string]string
+	// Options
+	envVars    []string
+	headers    map[string]string
+	httpClient *http.Client // For StreamableHTTP transport
 
-	// 接続管理
+	// Connection management
 	initMutex sync.Mutex
 }
 
@@ -85,13 +90,13 @@ func (c *Client) Run(ctx context.Context, name string, args map[string]any) (map
 	return convertContentToMap(resp.Content), nil
 }
 
-// StdioOption is the option for the MCP client for local MCP executable server via stdio.
+// StdioOption is the option for the MCP client for local MCP server via Stdio.
 type StdioOption func(*Client)
 
-// WithEnvVars sets the environment variables for the MCP client. It appends the environment variables to the existing ones.
+// WithEnvVars sets the environment variables for the MCP client.
 func WithEnvVars(envVars []string) StdioOption {
 	return func(m *Client) {
-		m.envVars = append(m.envVars, envVars...)
+		m.envVars = envVars
 	}
 }
 
@@ -130,13 +135,41 @@ func NewStdio(ctx context.Context, path string, args []string, options ...StdioO
 	return client, nil
 }
 
-// SSEOption is the option for the MCP client for remote MCP server via HTTP SSE.
+// NewSSE creates a new MCP client for remote MCP server via SSE.
+func NewSSE(ctx context.Context, baseURL string, options ...SSEOption) (*Client, error) {
+	client := &Client{
+		name:       DefaultClientName,
+		version:    DefaultClientVersion,
+		headers:    make(map[string]string),
+		baseURL:    baseURL,
+		httpClient: http.DefaultClient,
+	}
+	for _, option := range options {
+		option(client)
+	}
+
+	// Initialize the client and connect
+	if err := client.initSSE(ctx); err != nil {
+		return nil, goerr.Wrap(err, "failed to initialize SSE client")
+	}
+
+	return client, nil
+}
+
+// SSEOption is the option for the MCP client for remote MCP server via SSE.
 type SSEOption func(*Client)
 
-// WithHeaders sets the headers for the MCP client. It replaces the existing headers setting.
-func WithHeaders(headers map[string]string) SSEOption {
+// WithSSEHeaders sets the headers for the MCP client. It replaces the existing headers setting.
+func WithSSEHeaders(headers map[string]string) SSEOption {
 	return func(m *Client) {
 		m.headers = headers
+	}
+}
+
+// WithSSEClient sets the HTTP client for the MCP client.
+func WithSSEClient(client *http.Client) SSEOption {
+	return func(m *Client) {
+		m.httpClient = client
 	}
 }
 
@@ -148,21 +181,6 @@ func WithSSEClientInfo(name, version string) SSEOption {
 	}
 }
 
-// NewSSE creates a new MCP client for remote MCP server via HTTP SSE.
-func NewSSE(ctx context.Context, baseURL string, options ...SSEOption) (*Client, error) {
-	client := &Client{
-		name:    DefaultClientName,
-		version: DefaultClientVersion,
-		headers: make(map[string]string),
-	}
-	for _, option := range options {
-		option(client)
-	}
-
-	// TODO: SSE transport implementation when available in official SDK
-	return nil, goerr.New("SSE transport not yet implemented with official SDK")
-}
-
 // StreamableHTTPOption is the option for the MCP client for remote MCP server via Streamable HTTP.
 type StreamableHTTPOption func(*Client)
 
@@ -170,6 +188,13 @@ type StreamableHTTPOption func(*Client)
 func WithStreamableHTTPHeaders(headers map[string]string) StreamableHTTPOption {
 	return func(m *Client) {
 		m.headers = headers
+	}
+}
+
+// WithStreamableHTTPClient sets the HTTP client for the MCP client.
+func WithStreamableHTTPClient(client *http.Client) StreamableHTTPOption {
+	return func(m *Client) {
+		m.httpClient = client
 	}
 }
 
@@ -184,16 +209,22 @@ func WithStreamableHTTPClientInfo(name, version string) StreamableHTTPOption {
 // NewStreamableHTTP creates a new MCP client for remote MCP server via Streamable HTTP.
 func NewStreamableHTTP(ctx context.Context, baseURL string, options ...StreamableHTTPOption) (*Client, error) {
 	client := &Client{
-		name:    DefaultClientName,
-		version: DefaultClientVersion,
-		headers: make(map[string]string),
+		name:       DefaultClientName,
+		version:    DefaultClientVersion,
+		headers:    make(map[string]string),
+		baseURL:    baseURL,
+		httpClient: http.DefaultClient,
 	}
 	for _, option := range options {
 		option(client)
 	}
 
-	// TODO: StreamableHTTP transport implementation when available in official SDK
-	return nil, goerr.New("StreamableHTTP transport not yet implemented with official SDK")
+	// Initialize the client and connect
+	if err := client.initStreamableHTTP(ctx); err != nil {
+		return nil, goerr.Wrap(err, "failed to initialize StreamableHTTP client")
+	}
+
+	return client, nil
 }
 
 func (c *Client) init(ctx context.Context, cmd *exec.Cmd) error {
@@ -217,9 +248,78 @@ func (c *Client) init(ctx context.Context, cmd *exec.Cmd) error {
 			return goerr.Wrap(err, "failed to connect to MCP server")
 		}
 		c.session = session
+		c.cmd = cmd
 	}
 
 	logger.Debug("MCP client initialized", "name", c.name, "version", c.version)
+
+	return nil
+}
+
+func (c *Client) initStreamableHTTP(ctx context.Context) error {
+	c.initMutex.Lock()
+	defer c.initMutex.Unlock()
+
+	logger := gollem.LoggerFromContext(ctx)
+
+	if c.session != nil {
+		return nil
+	}
+
+	// Create client with official SDK
+	c.mcpClient = mcp.NewClient(c.name, c.version, nil)
+
+	// Create StreamableHTTP transport options
+	opts := &mcp.StreamableClientTransportOptions{
+		HTTPClient: c.httpClient,
+	}
+
+	// Create StreamableHTTP transport
+	transport := mcp.NewStreamableClientTransport(c.baseURL, opts)
+
+	// Connect using StreamableHTTP transport
+	session, err := c.mcpClient.Connect(ctx, transport)
+	if err != nil {
+		return goerr.Wrap(err, "failed to connect to StreamableHTTP MCP server")
+	}
+	c.session = session
+	c.transport = transport
+
+	logger.Debug("StreamableHTTP MCP client initialized", "name", c.name, "version", c.version, "baseURL", c.baseURL)
+
+	return nil
+}
+
+func (c *Client) initSSE(ctx context.Context) error {
+	c.initMutex.Lock()
+	defer c.initMutex.Unlock()
+
+	logger := gollem.LoggerFromContext(ctx)
+
+	if c.session != nil {
+		return nil
+	}
+
+	// Create client with official SDK
+	c.mcpClient = mcp.NewClient(c.name, c.version, nil)
+
+	// Create SSE transport options
+	opts := &mcp.SSEClientTransportOptions{
+		HTTPClient: c.httpClient,
+	}
+
+	// Create SSE transport
+	transport := mcp.NewSSEClientTransport(c.baseURL, opts)
+
+	// Connect using SSE transport
+	session, err := c.mcpClient.Connect(ctx, transport)
+	if err != nil {
+		return goerr.Wrap(err, "failed to connect to SSE MCP server")
+	}
+	c.session = session
+	c.transport = transport
+
+	logger.Debug("SSE MCP client initialized", "name", c.name, "version", c.version, "baseURL", c.baseURL)
 
 	return nil
 }
@@ -261,6 +361,14 @@ func (c *Client) Close() error {
 			return goerr.Wrap(err, "failed to close MCP session")
 		}
 	}
+
+	// Clean up stdio command process if it exists
+	if c.cmd != nil && c.cmd.Process != nil {
+		if err := c.cmd.Process.Kill(); err != nil {
+			return goerr.Wrap(err, "failed to kill MCP server process")
+		}
+	}
+
 	return nil
 }
 

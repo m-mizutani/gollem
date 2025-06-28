@@ -20,13 +20,29 @@ func main() {
 		panic(err)
 	}
 
+	// Create MCP client (HTTP) with custom client info
+	// StreamableHTTP is now implemented with the official SDK
+	httpClient, err := mcp.NewStreamableHTTP(ctx, "http://localhost:8080",
+		mcp.WithStreamableHTTPClientInfo("gollem-mcp-http-client", "1.0.0"))
+	if err != nil {
+		fmt.Printf("⚠️  Could not connect to HTTP MCP server: %v\n", err)
+		httpClient = nil
+	}
+	if httpClient != nil {
+		defer httpClient.Close()
+	}
+
 	// Create MCP client (SSE) with custom client info
-	sseClient, err := mcp.NewSSE(ctx, "http://localhost:8080",
+	// SSE is also implemented with the official SDK
+	sseClient, err := mcp.NewSSE(ctx, "http://localhost:8081",
 		mcp.WithSSEClientInfo("gollem-mcp-sse-client", "1.0.0"))
 	if err != nil {
-		log.Fatalf("Failed to create SSE client: %v", err)
+		fmt.Printf("⚠️  Could not connect to SSE MCP server: %v\n", err)
+		sseClient = nil
 	}
-	defer sseClient.Close()
+	if sseClient != nil {
+		defer sseClient.Close()
+	}
 
 	// Create MCP client (Stdio) with custom client info
 	stdioClient, err := mcp.NewStdio(ctx, "./mcp-server", []string{},
@@ -38,8 +54,17 @@ func main() {
 	defer stdioClient.Close()
 
 	// Create gollem agent with MCP tools
+	var toolSets []gollem.ToolSet
+	if httpClient != nil {
+		toolSets = append(toolSets, httpClient)
+	}
+	if sseClient != nil {
+		toolSets = append(toolSets, sseClient)
+	}
+	toolSets = append(toolSets, stdioClient)
+
 	agent := gollem.New(client,
-		gollem.WithToolSets(sseClient, stdioClient),
+		gollem.WithToolSets(toolSets...),
 		gollem.WithSystemPrompt("You are a helpful assistant with access to various MCP tools for file operations and other tasks."),
 		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
 			fmt.Printf("🤖 %s\n", msg)
