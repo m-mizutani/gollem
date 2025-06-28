@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/mcp"
 	"github.com/m-mizutani/gt"
 	officialmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -432,4 +433,308 @@ func TestExistingFunctionalityNotAffected(t *testing.T) {
 		// Error should be connection-related, not "not implemented"
 		gt.False(t, err.Error() == "StreamableHTTP transport not yet implemented with official SDK")
 	})
+}
+
+// TestRecursiveSchemaConversion tests the recursive schema conversion functionality
+// that was missing in the initial implementation
+func TestRecursiveSchemaConversion(t *testing.T) {
+	type testCase struct {
+		name     string
+		schema   map[string]any
+		expected *gollem.Parameter
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			result, err := mcp.ConvertSchemaProperty(tc.schema)
+			gt.NoError(t, err)
+
+			// Compare the result with expected
+			gt.Equal(t, result.Type, tc.expected.Type)
+			gt.Equal(t, result.Description, tc.expected.Description)
+
+			// Test object properties recursively
+			if tc.expected.Type == gollem.TypeObject {
+				gt.NotNil(t, result.Properties)
+				gt.Equal(t, len(result.Properties), len(tc.expected.Properties))
+
+				for name, expectedProp := range tc.expected.Properties {
+					actualProp, exists := result.Properties[name]
+					gt.True(t, exists)
+					gt.Equal(t, actualProp.Type, expectedProp.Type)
+					gt.Equal(t, actualProp.Description, expectedProp.Description)
+
+					// Test nested properties if they exist
+					if expectedProp.Properties != nil {
+						gt.NotNil(t, actualProp.Properties)
+						for nestedName, nestedExpected := range expectedProp.Properties {
+							nestedActual, nestedExists := actualProp.Properties[nestedName]
+							gt.True(t, nestedExists)
+							gt.Equal(t, nestedActual.Type, nestedExpected.Type)
+							gt.Equal(t, nestedActual.Description, nestedExpected.Description)
+						}
+					}
+				}
+
+				gt.Array(t, result.Required).Equal(tc.expected.Required)
+			}
+
+			// Test array items recursively
+			if tc.expected.Type == gollem.TypeArray {
+				gt.NotNil(t, result.Items)
+				gt.Equal(t, result.Items.Type, tc.expected.Items.Type)
+				gt.Equal(t, result.Items.Description, tc.expected.Items.Description)
+
+				// Test nested array item properties
+				if tc.expected.Items.Properties != nil {
+					gt.NotNil(t, result.Items.Properties)
+					for name, expectedProp := range tc.expected.Items.Properties {
+						actualProp, exists := result.Items.Properties[name]
+						gt.True(t, exists)
+						gt.Equal(t, actualProp.Type, expectedProp.Type)
+						gt.Equal(t, actualProp.Description, expectedProp.Description)
+					}
+				}
+			}
+
+			// Test constraints
+			if tc.expected.Minimum != nil {
+				gt.NotNil(t, result.Minimum)
+				gt.Equal(t, *result.Minimum, *tc.expected.Minimum)
+			}
+			if tc.expected.Maximum != nil {
+				gt.NotNil(t, result.Maximum)
+				gt.Equal(t, *result.Maximum, *tc.expected.Maximum)
+			}
+			if tc.expected.MinLength != nil {
+				gt.NotNil(t, result.MinLength)
+				gt.Equal(t, *result.MinLength, *tc.expected.MinLength)
+			}
+			if tc.expected.MaxLength != nil {
+				gt.NotNil(t, result.MaxLength)
+				gt.Equal(t, *result.MaxLength, *tc.expected.MaxLength)
+			}
+			if tc.expected.Pattern != "" {
+				gt.Equal(t, result.Pattern, tc.expected.Pattern)
+			}
+			if tc.expected.MinItems != nil {
+				gt.NotNil(t, result.MinItems)
+				gt.Equal(t, *result.MinItems, *tc.expected.MinItems)
+			}
+			if tc.expected.MaxItems != nil {
+				gt.NotNil(t, result.MaxItems)
+				gt.Equal(t, *result.MaxItems, *tc.expected.MaxItems)
+			}
+		}
+	}
+
+	t.Run("nested object with multiple levels", runTest(testCase{
+		name: "nested object with multiple levels",
+		schema: map[string]any{
+			"type":        "object",
+			"description": "A nested object example",
+			"properties": map[string]any{
+				"user": map[string]any{
+					"type":        "object",
+					"description": "User information",
+					"properties": map[string]any{
+						"name": map[string]any{
+							"type":        "string",
+							"description": "User name",
+							"minLength":   1.0,
+							"maxLength":   100.0,
+						},
+						"age": map[string]any{
+							"type":        "integer",
+							"description": "User age",
+							"minimum":     0.0,
+							"maximum":     150.0,
+						},
+						"address": map[string]any{
+							"type":        "object",
+							"description": "User address",
+							"properties": map[string]any{
+								"street": map[string]any{
+									"type":        "string",
+									"description": "Street address",
+								},
+								"city": map[string]any{
+									"type":        "string",
+									"description": "City name",
+								},
+							},
+							"required": []any{"street", "city"},
+						},
+					},
+					"required": []any{"name", "age"},
+				},
+				"preferences": map[string]any{
+					"type":        "object",
+					"description": "User preferences",
+					"properties": map[string]any{
+						"theme": map[string]any{
+							"type":        "string",
+							"description": "UI theme",
+							"enum":        []any{"light", "dark"},
+						},
+					},
+				},
+			},
+			"required": []any{"user"},
+		},
+		expected: &gollem.Parameter{
+			Type:        gollem.TypeObject,
+			Description: "A nested object example",
+			Required:    []string{"user"},
+			Properties: map[string]*gollem.Parameter{
+				"user": {
+					Type:        gollem.TypeObject,
+					Description: "User information",
+					Required:    []string{"name", "age"},
+					Properties: map[string]*gollem.Parameter{
+						"name": {
+							Type:        gollem.TypeString,
+							Description: "User name",
+							MinLength:   &[]int{1}[0],
+							MaxLength:   &[]int{100}[0],
+						},
+						"age": {
+							Type:        gollem.TypeInteger,
+							Description: "User age",
+							Minimum:     &[]float64{0.0}[0],
+							Maximum:     &[]float64{150.0}[0],
+						},
+						"address": {
+							Type:        gollem.TypeObject,
+							Description: "User address",
+							Required:    []string{"street", "city"},
+							Properties: map[string]*gollem.Parameter{
+								"street": {
+									Type:        gollem.TypeString,
+									Description: "Street address",
+								},
+								"city": {
+									Type:        gollem.TypeString,
+									Description: "City name",
+								},
+							},
+						},
+					},
+				},
+				"preferences": {
+					Type:        gollem.TypeObject,
+					Description: "User preferences",
+					Properties: map[string]*gollem.Parameter{
+						"theme": {
+							Type:        gollem.TypeString,
+							Description: "UI theme",
+							Enum:        []string{"light", "dark"},
+						},
+					},
+				},
+			},
+		},
+	}))
+
+	t.Run("array with complex object items", runTest(testCase{
+		name: "array with complex object items",
+		schema: map[string]any{
+			"type":        "array",
+			"description": "Array of complex objects",
+			"minItems":    1.0,
+			"maxItems":    10.0,
+			"items": map[string]any{
+				"type":        "object",
+				"description": "Product item",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "integer",
+						"description": "Product ID",
+						"minimum":     1.0,
+					},
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Product name",
+						"pattern":     "^[a-zA-Z0-9\\s]+$",
+					},
+					"tags": map[string]any{
+						"type":        "array",
+						"description": "Product tags",
+						"items": map[string]any{
+							"type":        "string",
+							"description": "Tag name",
+						},
+					},
+				},
+				"required": []any{"id", "name"},
+			},
+		},
+		expected: &gollem.Parameter{
+			Type:        gollem.TypeArray,
+			Description: "Array of complex objects",
+			MinItems:    &[]int{1}[0],
+			MaxItems:    &[]int{10}[0],
+			Items: &gollem.Parameter{
+				Type:        gollem.TypeObject,
+				Description: "Product item",
+				Required:    []string{"id", "name"},
+				Properties: map[string]*gollem.Parameter{
+					"id": {
+						Type:        gollem.TypeInteger,
+						Description: "Product ID",
+						Minimum:     &[]float64{1.0}[0],
+					},
+					"name": {
+						Type:        gollem.TypeString,
+						Description: "Product name",
+						Pattern:     "^[a-zA-Z0-9\\s]+$",
+					},
+					"tags": {
+						Type:        gollem.TypeArray,
+						Description: "Product tags",
+						Items: &gollem.Parameter{
+							Type:        gollem.TypeString,
+							Description: "Tag name",
+						},
+					},
+				},
+			},
+		},
+	}))
+
+	t.Run("array of arrays (nested arrays)", runTest(testCase{
+		name: "array of arrays (nested arrays)",
+		schema: map[string]any{
+			"type":        "array",
+			"description": "Matrix of numbers",
+			"items": map[string]any{
+				"type":        "array",
+				"description": "Row of numbers",
+				"items": map[string]any{
+					"type":        "number",
+					"description": "Number value",
+					"minimum":     -100.0,
+					"maximum":     100.0,
+				},
+				"minItems": 1.0,
+				"maxItems": 5.0,
+			},
+		},
+		expected: &gollem.Parameter{
+			Type:        gollem.TypeArray,
+			Description: "Matrix of numbers",
+			Items: &gollem.Parameter{
+				Type:        gollem.TypeArray,
+				Description: "Row of numbers",
+				MinItems:    &[]int{1}[0],
+				MaxItems:    &[]int{5}[0],
+				Items: &gollem.Parameter{
+					Type:        gollem.TypeNumber,
+					Description: "Number value",
+					Minimum:     &[]float64{-100.0}[0],
+					Maximum:     &[]float64{100.0}[0],
+				},
+			},
+		},
+	}))
 }

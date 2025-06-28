@@ -477,6 +477,77 @@ func convertSchemaProperty(propSchema any) (*gollem.Parameter, error) {
 		}
 	}
 
+	// Handle object type - recursive processing of properties
+	if param.Type == gollem.TypeObject {
+		param.Properties = make(map[string]*gollem.Parameter)
+
+		// Extract and recursively process properties
+		if props, ok := propMap["properties"].(map[string]any); ok {
+			for name, propSchema := range props {
+				nestedParam, err := convertSchemaProperty(propSchema)
+				if err != nil {
+					return nil, goerr.Wrap(err, "failed to convert nested property", goerr.V("property", name))
+				}
+				param.Properties[name] = nestedParam
+			}
+		}
+
+		// Extract required fields
+		if required, ok := propMap["required"].([]any); ok {
+			for _, req := range required {
+				if reqStr, ok := req.(string); ok {
+					param.Required = append(param.Required, reqStr)
+				}
+			}
+		}
+	}
+
+	// Handle array type - recursive processing of items
+	if param.Type == gollem.TypeArray {
+		if items, ok := propMap["items"]; ok {
+			itemParam, err := convertSchemaProperty(items)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to convert array items")
+			}
+			param.Items = itemParam
+		}
+
+		// Array constraints
+		if minItems, ok := propMap["minItems"].(float64); ok {
+			val := int(minItems)
+			param.MinItems = &val
+		}
+		if maxItems, ok := propMap["maxItems"].(float64); ok {
+			val := int(maxItems)
+			param.MaxItems = &val
+		}
+	}
+
+	// Number constraints
+	if param.Type == gollem.TypeNumber || param.Type == gollem.TypeInteger {
+		if minimum, ok := propMap["minimum"].(float64); ok {
+			param.Minimum = &minimum
+		}
+		if maximum, ok := propMap["maximum"].(float64); ok {
+			param.Maximum = &maximum
+		}
+	}
+
+	// String constraints
+	if param.Type == gollem.TypeString {
+		if minLength, ok := propMap["minLength"].(float64); ok {
+			val := int(minLength)
+			param.MinLength = &val
+		}
+		if maxLength, ok := propMap["maxLength"].(float64); ok {
+			val := int(maxLength)
+			param.MaxLength = &val
+		}
+		if pattern, ok := propMap["pattern"].(string); ok {
+			param.Pattern = pattern
+		}
+	}
+
 	return param, nil
 }
 

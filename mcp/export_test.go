@@ -31,4 +31,5 @@ func (x *Client) CallTool(ctx context.Context, name string, args map[string]any)
 var (
 	InputSchemaToParameter = convertInputSchemaToParameter
 	MCPContentToMap        = convertContentToMap
+	ConvertSchemaProperty  = convertSchemaProperty
 )
