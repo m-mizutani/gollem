@@ -151,6 +151,84 @@ func TestDefaultFacilitator_Facilitate(t *testing.T) {
 		expected:     nil,
 		expectError:  true,
 	}))
+
+	// Add validation-specific test cases
+	t.Run("continue without next_step", runTest(testCase{
+		name: "continue without next_step",
+		mockResponse: `{
+			"action": "continue",
+			"reason": "Need to analyze more data"
+		}`,
+		expected:    nil,
+		expectError: true,
+	}))
+
+	t.Run("complete without completion", runTest(testCase{
+		name: "complete without completion",
+		mockResponse: `{
+			"action": "complete",
+			"reason": "Analysis finished successfully"
+		}`,
+		expected:    nil,
+		expectError: true,
+	}))
+
+	t.Run("invalid action", runTest(testCase{
+		name: "invalid action",
+		mockResponse: `{
+			"action": "invalid",
+			"reason": "Some reason"
+		}`,
+		expected:    nil,
+		expectError: true,
+	}))
+
+	t.Run("empty action", runTest(testCase{
+		name: "empty action",
+		mockResponse: `{
+			"action": "",
+			"reason": "Some reason"
+		}`,
+		expected:    nil,
+		expectError: true,
+	}))
+
+	t.Run("continue with empty next_step string", runTest(testCase{
+		name: "continue with empty next_step string",
+		mockResponse: `{
+			"action": "continue",
+			"reason": "Need to analyze more data",
+			"next_step": ""
+		}`,
+		expected:    nil,
+		expectError: true,
+	}))
+
+	t.Run("complete with empty completion string", runTest(testCase{
+		name: "complete with empty completion string",
+		mockResponse: `{
+			"action": "complete",
+			"reason": "Analysis finished successfully",
+			"completion": ""
+		}`,
+		expected:    nil,
+		expectError: true,
+	}))
+
+	t.Run("continue with whitespace-only next_step", runTest(testCase{
+		name: "continue with whitespace-only next_step",
+		mockResponse: `{
+			"action": "continue",
+			"reason": "Need to analyze more data",
+			"next_step": "   "
+		}`,
+		expected: &gollem.Facilitation{
+			Action:   gollem.ActionContinue,
+			Reason:   "Need to analyze more data",
+			NextStep: "   ",
+		},
+		expectError: false, // Current implementation only checks for empty string, not whitespace
+	}))
 }
 
 func TestDefaultFacilitator_IsCompleted(t *testing.T) {
@@ -199,4 +277,122 @@ func TestDefaultProceedPrompt(t *testing.T) {
 	gt.True(t, strings.Contains(gollem.DefaultProceedPrompt, "JSON format"))
 	gt.True(t, strings.Contains(gollem.DefaultProceedPrompt, "continue"))
 	gt.True(t, strings.Contains(gollem.DefaultProceedPrompt, "complete"))
+}
+
+func TestFacilitation_Validate(t *testing.T) {
+	type testCase struct {
+		name         string
+		facilitation gollem.Facilitation
+		expectError  bool
+		errorMsg     string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			err := tc.facilitation.Validate()
+
+			if tc.expectError {
+				gt.Error(t, err)
+				if tc.errorMsg != "" {
+					gt.True(t, strings.Contains(err.Error(), tc.errorMsg))
+				}
+			} else {
+				gt.NoError(t, err)
+			}
+		}
+	}
+
+	t.Run("valid continue", runTest(testCase{
+		name: "valid continue",
+		facilitation: gollem.Facilitation{
+			Action:   gollem.ActionContinue,
+			Reason:   "Need to process more data",
+			NextStep: "Analyze remaining files",
+		},
+		expectError: false,
+	}))
+
+	t.Run("valid complete", runTest(testCase{
+		name: "valid complete",
+		facilitation: gollem.Facilitation{
+			Action:     gollem.ActionComplete,
+			Reason:     "Analysis finished",
+			Completion: "Found 3 security issues",
+		},
+		expectError: false,
+	}))
+
+	t.Run("continue without next_step", runTest(testCase{
+		name: "continue without next_step",
+		facilitation: gollem.Facilitation{
+			Action: gollem.ActionContinue,
+			Reason: "Need to process more data",
+			// NextStep is empty
+		},
+		expectError: true,
+		errorMsg:    "next_step is required when action is continue",
+	}))
+
+	t.Run("complete without completion", runTest(testCase{
+		name: "complete without completion",
+		facilitation: gollem.Facilitation{
+			Action: gollem.ActionComplete,
+			Reason: "Analysis finished",
+			// Completion is empty
+		},
+		expectError: true,
+		errorMsg:    "completion is required when action is complete",
+	}))
+
+	t.Run("invalid action", runTest(testCase{
+		name: "invalid action",
+		facilitation: gollem.Facilitation{
+			Action: "invalid",
+			Reason: "Some reason",
+		},
+		expectError: true,
+		errorMsg:    "invalid action",
+	}))
+
+	t.Run("empty action", runTest(testCase{
+		name: "empty action",
+		facilitation: gollem.Facilitation{
+			Action: "",
+			Reason: "Some reason",
+		},
+		expectError: true,
+		errorMsg:    "invalid action",
+	}))
+
+	t.Run("continue with empty next_step string", runTest(testCase{
+		name: "continue with empty next_step string",
+		facilitation: gollem.Facilitation{
+			Action:   gollem.ActionContinue,
+			Reason:   "Need to process more data",
+			NextStep: "",
+		},
+		expectError: true,
+		errorMsg:    "next_step is required when action is continue",
+	}))
+
+	t.Run("complete with empty completion string", runTest(testCase{
+		name: "complete with empty completion string",
+		facilitation: gollem.Facilitation{
+			Action:     gollem.ActionComplete,
+			Reason:     "Analysis finished",
+			Completion: "",
+		},
+		expectError: true,
+		errorMsg:    "completion is required when action is complete",
+	}))
+
+	t.Run("continue with whitespace-only next_step", runTest(testCase{
+		name: "continue with whitespace-only next_step",
+		facilitation: gollem.Facilitation{
+			Action:   gollem.ActionContinue,
+			Reason:   "Need to process more data",
+			NextStep: "   ",
+		},
+		expectError: false, // Current implementation only checks for empty string, not whitespace
+	}))
 }
