@@ -111,7 +111,7 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 			toolErrorHook:    defaultToolErrorHook,
 			responseMode:     ResponseModeBlocking,
 			logger:           slog.New(slog.DiscardHandler),
-			facilitator:      newDefaultFacilitator(),
+			facilitator:      newDefaultFacilitator(llmClient),
 		},
 	}
 
@@ -292,114 +292,6 @@ func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool
 	return toolMap, toolList, nil
 }
 
-// Prompt is the main function to start the gollem agent. In the first loop, the LLM generates a response with the prompt. After that, the LLM generates a response with the tool call and tool call arguments. The call loop continues until no tool call from LLM or the LoopLimit is reached.
-//
-// Deprecated: Use Execute instead. Prompt requires manual history management, while Execute handles session state automatically.
-func (g *Agent) Prompt(ctx context.Context, prompt string, options ...Option) (*History, error) {
-	cfg := g.gollemConfig.Clone()
-	for _, opt := range options {
-		opt(cfg)
-	}
-
-	logger := cfg.logger.With("gollem.request_id", uuid.New().String())
-	ctx = ctxWithLogger(ctx, logger)
-	logger.Info("starting gollem session",
-		"prompt", prompt,
-		"history_count", cfg.history.ToCount(),
-	)
-
-	toolMap, toolList, err := setupTools(ctx, cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	input := []Input{Text(prompt)}
-
-	sessionOptions := []SessionOption{
-		WithSessionSystemPrompt(cfg.systemPrompt),
-	}
-
-	if cfg.history != nil {
-		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
-	}
-	if len(toolList) > 0 {
-		sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
-	}
-
-	ssn, err := g.llm.NewSession(ctx, sessionOptions...)
-	if err != nil {
-		return nil, err
-	}
-
-	for i := 0; i < cfg.loopLimit; i++ {
-		if err := cfg.loopHook(ctx, i, input); err != nil {
-			return nil, err
-		}
-
-		if len(input) == 0 {
-			if cfg.facilitator != nil {
-				if proceedPrompt := cfg.facilitator.ProceedPrompt(); proceedPrompt != "" {
-					input = []Input{Text(proceedPrompt)}
-				}
-			}
-		}
-
-		logger.Debug("gollem input", "input", input, "loop", i)
-
-		switch cfg.responseMode {
-		case ResponseModeBlocking:
-			output, err := ssn.GenerateContent(ctx, input...)
-			if err != nil {
-				return nil, err
-			}
-
-			newInput, err := handleResponse(ctx, *cfg, output, toolMap)
-			if err != nil {
-				// Check if the error is ErrExitConversation
-				if errors.Is(err, ErrExitConversation) {
-					logger.Info("conversation exited by tool")
-					return ssn.History(), nil
-				}
-				return nil, err
-			}
-			input = newInput
-
-		case ResponseModeStreaming:
-			stream, err := ssn.GenerateStream(ctx, input...)
-			if err != nil {
-				return nil, err
-			}
-			input = make([]Input, 0)
-
-			for output := range stream {
-				logger.Debug("recv response", "output", output)
-				newInput, err := handleResponse(ctx, *cfg, output, toolMap)
-				if err != nil {
-					// Check if the error is ErrExitConversation
-					if errors.Is(err, ErrExitConversation) {
-						logger.Info("conversation exited by tool")
-						return ssn.History(), nil
-					}
-					return nil, err
-				}
-				input = append(input, newInput...)
-			}
-		}
-
-		if cfg.facilitator != nil {
-			if cfg.facilitator.IsCompleted() {
-				return ssn.History(), nil
-			}
-		} else {
-			if len(input) == 0 {
-				return ssn.History(), nil
-			}
-		}
-	}
-
-	return ssn.History(), goerr.Wrap(ErrLoopLimitExceeded, "session stopped", goerr.V("loop_limit", cfg.loopLimit))
-}
-
 // Execute performs the agent task with the given prompt. This method manages the session state internally,
 // allowing for continuous conversation without manual history management.
 // Use this method instead of Prompt for better agent-like behavior.
@@ -450,10 +342,33 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 		}
 
 		if len(input) == 0 {
-			if cfg.facilitator != nil {
-				if proceedPrompt := cfg.facilitator.ProceedPrompt(); proceedPrompt != "" {
-					input = []Input{Text(proceedPrompt)}
+			if cfg.facilitator == nil {
+				// If no facilitator is set, the session is ended when the LLM generates a response with no tool call.
+				return nil
+			}
+
+			resp, err := cfg.facilitator.Facilitate(ctx, g.currentSession.History())
+			if err != nil {
+				return err
+			}
+
+			if cfg.facilitator.IsCompleted() {
+				return nil
+			}
+
+			switch resp.Action {
+			case ActionComplete:
+				return nil
+
+			case ActionContinue:
+				if resp.NextStep == "" {
+					return goerr.Wrap(ErrExitConversation, "conversation exit by no next step", goerr.V("facilitate", resp))
 				}
+
+				input = []Input{Text(resp.NextStep)}
+
+			default:
+				return goerr.Wrap(ErrExitConversation, "conversation exit by invalid action", goerr.V("facilitate", resp))
 			}
 		}
 

@@ -398,7 +398,7 @@ func TestGollemWithOptions(t *testing.T) {
 		}
 
 		s := gollem.New(mockClient, gollem.WithLoopLimit(10), gollem.WithTools(tool))
-		_, err := s.Prompt(t.Context(), "test message")
+		err := s.Execute(t.Context(), "test message")
 		gt.Error(t, err)
 		gt.True(t, errors.Is(err, gollem.ErrLoopLimitExceeded))
 		gt.Equal(t, loopCount, 10)
@@ -492,7 +492,7 @@ func TestGollemWithOptions(t *testing.T) {
 		}
 
 		s := gollem.New(mockClient, gollem.WithRetryLimit(5), gollem.WithLoopLimit(5), gollem.WithTools(tool))
-		_, err := s.Prompt(t.Context(), "test message")
+		err := s.Execute(t.Context(), "test message")
 		gt.NoError(t, err)
 		gt.Equal(t, retryCount, 3)
 	})
@@ -547,7 +547,7 @@ func TestGollemWithOptions(t *testing.T) {
 		}
 
 		s := gollem.New(mockClient, gollem.WithSystemPrompt("system prompt"))
-		_, err := s.Prompt(t.Context(), "test message")
+		err := s.Execute(t.Context(), "test message")
 		gt.NoError(t, err)
 	})
 
@@ -619,7 +619,7 @@ func TestGollemWithOptions(t *testing.T) {
 			},
 		}
 		s := gollem.New(mockClient, gollem.WithTools(tool), gollem.WithLoopLimit(5))
-		_, err := s.Prompt(t.Context(), "test message")
+		err := s.Execute(t.Context(), "test message")
 		gt.NoError(t, err)
 	})
 
@@ -687,7 +687,7 @@ func TestGollemWithOptions(t *testing.T) {
 			},
 		}
 		s := gollem.New(mockClient, gollem.WithToolSets(toolSet), gollem.WithLoopLimit(5))
-		_, err := s.Prompt(t.Context(), "test message")
+		err := s.Execute(t.Context(), "test message")
 		gt.NoError(t, err)
 	})
 
@@ -754,7 +754,7 @@ func TestGollemWithOptions(t *testing.T) {
 				return nil
 			}),
 		)
-		_, err := s.Prompt(t.Context(), "test message")
+		err := s.Execute(t.Context(), "test message")
 		gt.NoError(t, err)
 		// Should receive the 3 test responses plus "Session completed"
 		gt.Equal(t, len(receivedMessages), 4)
@@ -777,7 +777,7 @@ func TestGollemWithOptions(t *testing.T) {
 		})
 
 		s := gollem.New(mockClient, gollem.WithLogger(logger))
-		_, err := s.Prompt(t.Context(), "test message")
+		err := s.Execute(t.Context(), "test message")
 		gt.NoError(t, err)
 
 		logContent := logOutput.String()
@@ -861,7 +861,7 @@ func TestGollemWithOptions(t *testing.T) {
 			gollem.WithResponseMode(gollem.ResponseModeBlocking),
 			gollem.WithLogger(logger),
 		)
-		_, err := s.Prompt(t.Context(), "test message")
+		err := s.Execute(t.Context(), "test message")
 		gt.NoError(t, err)
 	})
 }
@@ -930,10 +930,11 @@ func TestErrExitConversation(t *testing.T) {
 			}
 
 			s := gollem.New(mockClient, gollem.WithTools(exitTool))
-			history, err := s.Prompt(t.Context(), "test prompt")
+			err := s.Execute(t.Context(), "test prompt")
 
 			gt.NoError(t, err)
 			gt.True(t, toolCalled)
+			history := s.Session().History()
 			gt.NotNil(t, history)
 		},
 	}))
@@ -992,11 +993,12 @@ func TestErrExitConversation(t *testing.T) {
 			}
 
 			s := gollem.New(mockClient, gollem.WithTools(normalTool, exitTool))
-			history, err := s.Prompt(t.Context(), "test prompt")
+			err := s.Execute(t.Context(), "test prompt")
 
 			gt.NoError(t, err)
 			gt.True(t, tool1Called)
 			gt.True(t, tool2Called)
+			history := s.Session().History()
 			gt.NotNil(t, history)
 		},
 	}))
@@ -1057,10 +1059,11 @@ func TestErrExitConversation(t *testing.T) {
 			}
 
 			s1 := gollem.New(mockClient1, gollem.WithTools(errorTool))
-			history1, err1 := s1.Prompt(t.Context(), "test prompt")
+			err1 := s1.Execute(t.Context(), "test prompt")
 
 			gt.NoError(t, err1) // Normal error doesn't terminate session
 			gt.True(t, normalErrorToolCalled)
+			history1 := s1.Session().History()
 			gt.NotNil(t, history1)
 
 			// Test ErrExitConversation terminates immediately
@@ -1099,10 +1102,11 @@ func TestErrExitConversation(t *testing.T) {
 			}
 
 			s2 := gollem.New(mockClient2, gollem.WithTools(exitTool))
-			history2, err2 := s2.Prompt(t.Context(), "test prompt")
+			err2 := s2.Execute(t.Context(), "test prompt")
 
 			gt.NoError(t, err2) // ErrExitConversation is treated as success
 			gt.True(t, exitToolCalled)
+			history2 := s2.Session().History()
 			gt.NotNil(t, history2)
 		},
 	}))
@@ -1153,10 +1157,11 @@ func TestErrExitConversation(t *testing.T) {
 				gollem.WithTools(exitTool),
 				gollem.WithResponseMode(gollem.ResponseModeStreaming),
 			)
-			history, err := s.Prompt(t.Context(), "test prompt")
+			err := s.Execute(t.Context(), "test prompt")
 
 			gt.NoError(t, err)
 			gt.True(t, toolCalled)
+			history := s.Session().History()
 			gt.NotNil(t, history)
 		},
 	}))
