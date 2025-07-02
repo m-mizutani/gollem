@@ -64,7 +64,7 @@ func TestDefaultFacilitator_Run(t *testing.T) {
 	gt.Nil(t, result)
 
 	resp, err := facilitator.Facilitate(t.Context(), &gollem.History{})
-	// Should be completed after Run()
+	gt.NoError(t, err)
 	gt.Equal(t, resp.Action, gollem.ActionComplete)
 }
 
@@ -256,7 +256,7 @@ func TestDefaultFacilitator_Facilitate(t *testing.T) {
 
 	t.Run("facilitator with continue action", func(t *testing.T) {
 		history := &gollem.History{}
-		
+
 		// Create a mock that returns continue
 		facilitator := gollem.NewDefaultFacilitator(&mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {

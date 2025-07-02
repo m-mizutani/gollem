@@ -126,6 +126,7 @@ func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (
 	// Clone the history to avoid affecting the original session
 	clonedHistory := history.Clone()
 	ssn, err := x.llmClient.NewSession(ctx,
+		WithSessionSystemPrompt(DefaultProceedPrompt),
 		WithSessionHistory(clonedHistory),
 		WithSessionContentType(ContentTypeJSON),
 	)
@@ -151,7 +152,7 @@ func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (
 
 // updateStatusWithContext generates status with improved prompt
 func (x *defaultFacilitator) updateStatusWithContext(ctx context.Context, ssn Session) (*Facilitation, error) {
-	output, err := ssn.GenerateContent(ctx, Text(DefaultProceedPrompt))
+	output, err := ssn.GenerateContent(ctx, Text("choose your next action or complete"))
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update status")
 	}
