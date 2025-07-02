@@ -107,8 +107,10 @@ func (x *defaultFacilitator) IsCompleted() bool {
 
 // UpdateStatus for Facilitator interface
 func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (*Facilitation, error) {
+	// Clone the history to avoid affecting the original session
+	clonedHistory := history.Clone()
 	ssn, err := x.llmClient.NewSession(ctx,
-		WithSessionHistory(history),
+		WithSessionHistory(clonedHistory),
 		WithSessionContentType(ContentTypeJSON),
 	)
 	if err != nil {
