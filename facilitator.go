@@ -126,7 +126,6 @@ func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (
 	// Clone the history to avoid affecting the original session
 	clonedHistory := history.Clone()
 	ssn, err := x.llmClient.NewSession(ctx,
-		WithSessionSystemPrompt(DefaultProceedPrompt),
 		WithSessionHistory(clonedHistory),
 		WithSessionContentType(ContentTypeJSON),
 	)

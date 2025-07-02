@@ -63,6 +63,7 @@ type gollemConfig struct {
 	messageHook      MessageHook
 	toolRequestHook  ToolRequestHook
 	toolResponseHook ToolResponseHook
+	facilitationHook FacilitationHook
 	toolErrorHook    ToolErrorHook
 	responseMode     ResponseMode
 	logger           *slog.Logger
@@ -85,6 +86,7 @@ func (c *gollemConfig) Clone() *gollemConfig {
 		messageHook:      c.messageHook,
 		toolRequestHook:  c.toolRequestHook,
 		toolResponseHook: c.toolResponseHook,
+		facilitationHook: c.facilitationHook,
 		toolErrorHook:    c.toolErrorHook,
 		responseMode:     c.responseMode,
 		logger:           c.logger,
@@ -108,6 +110,7 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 			messageHook:      defaultMessageHook,
 			toolRequestHook:  defaultToolRequestHook,
 			toolResponseHook: defaultToolResponseHook,
+			facilitationHook: defaultFacilitationHook,
 			toolErrorHook:    defaultToolErrorHook,
 			responseMode:     ResponseModeBlocking,
 			logger:           slog.New(slog.DiscardHandler),
@@ -234,6 +237,19 @@ func WithToolResponseHook(callback func(ctx context.Context, tool FunctionCall, 
 	}
 }
 
+// WithFacilitationHook sets a callback function for facilitation responses. The callback function is called when the facilitator generates a response. If the function returns an error, the execution will be aborted immediately.
+// Usage:
+//
+//	gollem.WithFacilitationHook(func(ctx context.Context, resp *gollem.Facilitation) error {
+//		println("Facilitation action: " + string(resp.Action))
+//		return nil
+//	})
+func WithFacilitationHook(callback func(ctx context.Context, resp *Facilitation) error) Option {
+	return func(s *gollemConfig) {
+		s.facilitationHook = callback
+	}
+}
+
 // WithToolErrorHook sets a callback function for the error of the tool execution. If you want to stop Prompt(), return the same error as the original error.
 // Usage:
 //
@@ -349,6 +365,11 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 
 			resp, err := cfg.facilitator.Facilitate(ctx, g.currentSession.History())
 			if err != nil {
+				return err
+			}
+
+			// Call FacilitationHook
+			if err := cfg.facilitationHook(ctx, resp); err != nil {
 				return err
 			}
 

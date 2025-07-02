@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n -A 30 \"convertInputs\" /Users/mizutani/.ghq/github.com/m-mizutani/gollem/llm/openai/client.go)",
+      "Bash(grep -n -A 30 \"convertInputs\" /Users/mizutani/.ghq/github.com/m-mizutani/gollem/llm/gemini/client.go)",
+      "Bash(rg -n \"func.*GenerateContent\" /Users/mizutani/.ghq/github.com/m-mizutani/gollem/llm/gemini/client.go)",
+      "Bash(go test -v ./facilitator_test.go ./facilitator.go ./tool.go)",
+      "Bash(go test -v ./facilitator_test.go)",
+      "Bash(go test ./...)",
+      "Bash(go build ./...)",
+      "Bash(go test ./... -v -run TestHistoryClone)",
+      "Bash(go test ./... -run TestDefaultFacilitator)",
+      "Bash(go test ./... -run TestGollemWithOptions)",
+      "Bash(go test ./... -run TestGollemWithOptions -v)",
+      "Bash(rg \"newMockClient\" /Users/mizutani/.ghq/github.com/m-mizutani/gollem/gollem_test.go -A 10 -B 2)",
+      "Bash(rg \"CombineOptions\" /Users/mizutani/.ghq/github.com/m-mizutani/gollem/gollem_test.go -A 15)",
+      "Bash(go test ./... -run TestFacilitationHook)",
+      "Bash(go:*)"
+    ],
+    "deny": []
+  }
+}

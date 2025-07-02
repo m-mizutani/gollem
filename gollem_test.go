@@ -353,7 +353,7 @@ func TestGollemWithOptions(t *testing.T) {
 			// Check if input is DefaultFacilitator's proceed prompt and return JSON response
 			if len(input) > 0 {
 				if text, ok := input[0].(gollem.Text); ok {
-					if strings.Contains(string(text), "Respond in JSON format") {
+					if strings.Contains(string(text), "choose your next action or complete") {
 						return &gollem.Response{
 							Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 						}, nil
@@ -430,7 +430,7 @@ func TestGollemWithOptions(t *testing.T) {
 			// Check if input is DefaultFacilitator's proceed prompt and return JSON response
 			if len(input) > 0 {
 				if text, ok := input[0].(gollem.Text); ok {
-					if strings.Contains(string(text), "Respond in JSON format") {
+					if strings.Contains(string(text), "choose your next action or complete") {
 						return &gollem.Response{
 							Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 						}, nil
@@ -483,7 +483,7 @@ func TestGollemWithOptions(t *testing.T) {
 						// Check if this is DefaultFacilitator's proceed prompt
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "Respond in JSON format") {
+								if strings.Contains(string(text), "choose your next action or complete") {
 									// Return JSON response for facilitator
 									return &gollem.Response{
 										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
@@ -540,7 +540,7 @@ func TestGollemWithOptions(t *testing.T) {
 						// Check if this is DefaultFacilitator's proceed prompt
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "Respond in JSON format") {
+								if strings.Contains(string(text), "choose your next action or complete") {
 									// Return JSON response for facilitator
 									return &gollem.Response{
 										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
@@ -600,7 +600,7 @@ func TestGollemWithOptions(t *testing.T) {
 						// Check if this is DefaultFacilitator's proceed prompt
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "Respond in JSON format") {
+								if strings.Contains(string(text), "choose your next action or complete") {
 									// Return JSON response for facilitator
 									return &gollem.Response{
 										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
@@ -680,7 +680,7 @@ func TestGollemWithOptions(t *testing.T) {
 						// Check if this is DefaultFacilitator's proceed prompt
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "Respond in JSON format") {
+								if strings.Contains(string(text), "choose your next action or complete") {
 									// Return JSON response for facilitator
 									return &gollem.Response{
 										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
@@ -727,6 +727,16 @@ func TestGollemWithOptions(t *testing.T) {
 		}))
 
 		mockClient := newMockClient(func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+			// Check if input is DefaultFacilitator's proceed prompt and return JSON response
+			if len(input) > 0 {
+				if text, ok := input[0].(gollem.Text); ok {
+					if strings.Contains(string(text), "choose your next action or complete") {
+						return &gollem.Response{
+							Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
+						}, nil
+					}
+				}
+			}
 			return &gollem.Response{
 				Texts: []string{"test response"},
 			}, nil
@@ -759,7 +769,7 @@ func TestGollemWithOptions(t *testing.T) {
 						// Check if this is DefaultFacilitator's proceed prompt
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "Respond in JSON format") {
+								if strings.Contains(string(text), "choose your next action or complete") {
 									// Return JSON response for facilitator
 									return &gollem.Response{
 										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
@@ -1115,4 +1125,71 @@ func TestErrExitConversation(t *testing.T) {
 			gt.NotNil(t, history)
 		},
 	}))
+}
+
+func TestFacilitationHook(t *testing.T) {
+	t.Run("WithFacilitationHook", func(t *testing.T) {
+		facilitationCalls := []gollem.Facilitation{}
+		
+		mockClient := newMockClient(func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+			// Check if input is DefaultFacilitator's proceed prompt and return JSON response
+			if len(input) > 0 {
+				if text, ok := input[0].(gollem.Text); ok {
+					if strings.Contains(string(text), "choose your next action or complete") {
+						return &gollem.Response{
+							Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
+						}, nil
+					}
+				}
+			}
+			return &gollem.Response{
+				Texts: []string{"test response"},
+			}, nil
+		})
+
+		s := gollem.New(mockClient,
+			gollem.WithFacilitationHook(func(ctx context.Context, resp *gollem.Facilitation) error {
+				facilitationCalls = append(facilitationCalls, *resp)
+				return nil
+			}),
+		)
+		
+		err := s.Execute(t.Context(), "test message")
+		gt.NoError(t, err)
+		
+		// Verify that FacilitationHook was called
+		gt.A(t, facilitationCalls).Length(1)
+		gt.Equal(t, facilitationCalls[0].Action, gollem.ActionComplete)
+		gt.Equal(t, facilitationCalls[0].Reason, "Task completed successfully")
+		gt.Equal(t, facilitationCalls[0].Completion, "All tasks finished")
+	})
+
+	t.Run("WithFacilitationHook error handling", func(t *testing.T) {
+		mockClient := newMockClient(func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+			// Check if input is DefaultFacilitator's proceed prompt and return JSON response
+			if len(input) > 0 {
+				if text, ok := input[0].(gollem.Text); ok {
+					if strings.Contains(string(text), "choose your next action or complete") {
+						return &gollem.Response{
+							Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
+						}, nil
+					}
+				}
+			}
+			return &gollem.Response{
+				Texts: []string{"test response"},
+			}, nil
+		})
+
+		expectedError := fmt.Errorf("facilitation hook error")
+		s := gollem.New(mockClient,
+			gollem.WithFacilitationHook(func(ctx context.Context, resp *gollem.Facilitation) error {
+				return expectedError
+			}),
+		)
+		
+		err := s.Execute(t.Context(), "test message")
+		gt.Error(t, err)
+		gt.Equal(t, err, expectedError)
+	})
 }
