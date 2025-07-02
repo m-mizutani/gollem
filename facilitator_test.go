@@ -55,9 +55,6 @@ func TestDefaultFacilitator_Run(t *testing.T) {
 	})
 	facilitator := gollem.NewDefaultFacilitator(mockClient)
 
-	// Initially not completed
-	gt.False(t, facilitator.IsCompleted())
-
 	args := map[string]any{
 		"summary": "Task completed successfully",
 	}
@@ -66,8 +63,9 @@ func TestDefaultFacilitator_Run(t *testing.T) {
 	gt.NoError(t, err)
 	gt.Nil(t, result)
 
+	resp, err := facilitator.Facilitate(t.Context(), &gollem.History{})
 	// Should be completed after Run()
-	gt.True(t, facilitator.IsCompleted())
+	gt.Equal(t, resp.Action, gollem.ActionComplete)
 }
 
 func TestDefaultFacilitator_Facilitate(t *testing.T) {
@@ -229,22 +227,74 @@ func TestDefaultFacilitator_Facilitate(t *testing.T) {
 		},
 		expectError: false, // Current implementation only checks for empty string, not whitespace
 	}))
+
+	t.Run("prompt should guide away from repetition", func(t *testing.T) {
+		facilitator := gollem.NewDefaultFacilitator(&mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						// Simulate LLM choosing complete based on improved prompt
+						return &gollem.Response{
+							Texts: []string{`{
+								"action": "complete",
+								"reason": "Based on conversation history, I notice repetitive patterns and no new actionable steps",
+								"completion": "Analysis complete - found security context issues in deployment"
+							}`},
+						}, nil
+					},
+				}, nil
+			},
+		})
+
+		history := &gollem.History{}
+
+		resp, err := facilitator.Facilitate(context.Background(), history)
+		gt.NoError(t, err)
+		gt.Equal(t, gollem.ActionComplete, resp.Action)
+		gt.True(t, strings.Contains(resp.Reason, "repetitive") || strings.Contains(resp.Reason, "conversation history"))
+	})
+
+	t.Run("facilitator with continue action", func(t *testing.T) {
+		history := &gollem.History{}
+		
+		// Create a mock that returns continue
+		facilitator := gollem.NewDefaultFacilitator(&mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						return &gollem.Response{
+							Texts: []string{`{
+								"action": "continue",
+								"reason": "Need to analyze more data",
+								"next_step": "Check deployment configuration"
+							}`},
+						}, nil
+					},
+				}, nil
+			},
+		})
+
+		resp, err := facilitator.Facilitate(context.Background(), history)
+		gt.NoError(t, err)
+		gt.Equal(t, gollem.ActionContinue, resp.Action)
+		gt.Equal(t, "Check deployment configuration", resp.NextStep)
+	})
 }
 
-func TestDefaultFacilitator_IsCompleted(t *testing.T) {
-	mockClient := createMockClient(map[string]any{
-		"action": "continue",
-		"reason": "Need to analyze more data",
-	})
-	facilitator := gollem.NewDefaultFacilitator(mockClient)
+func TestDefaultFacilitator_RunAndCompletion(t *testing.T) {
+	// Test that Run method sets completion state
+	facilitator := gollem.NewDefaultFacilitator(&mock.LLMClientMock{})
 
-	// Initially should not be completed
-	gt.False(t, facilitator.IsCompleted())
-
-	// After calling Run, should be completed
-	_, err := facilitator.Run(context.Background(), map[string]any{"summary": "test"})
+	// Run should complete the facilitator
+	result, err := facilitator.Run(context.Background(), map[string]any{"summary": "test"})
 	gt.NoError(t, err)
-	gt.True(t, facilitator.IsCompleted())
+	gt.Nil(t, result)
+
+	// After Run, next Facilitate call should return completion
+	resp, err := facilitator.Facilitate(context.Background(), &gollem.History{})
+	gt.NoError(t, err)
+	gt.Equal(t, gollem.ActionComplete, resp.Action)
+	gt.Equal(t, "done", resp.Completion)
 }
 
 func TestFacilitation_JSONSerialization(t *testing.T) {

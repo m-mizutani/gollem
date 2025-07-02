@@ -352,10 +352,6 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 				return err
 			}
 
-			if cfg.facilitator.IsCompleted() {
-				return nil
-			}
-
 			switch resp.Action {
 			case ActionComplete:
 				return nil
@@ -411,16 +407,6 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 					return err
 				}
 				input = append(input, newInput...)
-			}
-		}
-
-		if cfg.facilitator != nil {
-			if cfg.facilitator.IsCompleted() {
-				return nil
-			}
-		} else {
-			if len(input) == 0 {
-				return nil
 			}
 		}
 	}

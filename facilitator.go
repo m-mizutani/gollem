@@ -8,7 +8,9 @@ import (
 )
 
 const (
-	DefaultProceedPrompt = `Respond in JSON format with the following structure:
+	DefaultProceedPrompt = `Review the conversation history carefully to understand what has already been attempted.
+
+Respond in JSON format with the following structure:
 {
   "action": "continue|complete",
   "reason": "Brief explanation for the chosen action",
@@ -17,9 +19,13 @@ const (
 }
 
 Rules:
-- Use "continue" only if you have a specific, actionable next step
-- Use "complete" when analysis is finished and findings are ready
-- When action is "complete", use the 'respond_to_user' function to indicate completion`
+- Use "continue" ONLY if you have a genuinely NEW and actionable next step that hasn't been tried before
+- Use "complete" when analysis is finished, findings are ready, or no new actionable steps remain
+- If you notice repetitive patterns in the conversation history, choose "complete" instead
+- If you're stuck or can't make meaningful progress, choose "complete"
+- When action is "complete", use the 'respond_to_user' function to indicate completion
+- Prioritize completion over repetitive attempts`
+
 	DefaultFacilitatorName = "respond_to_user"
 )
 
@@ -60,7 +66,6 @@ func (x *Facilitation) Validate() error {
 // IsCompleted() is called before calling a method to generate content every loop. If IsCompleted() returns true, the session will be ended.
 type Facilitator interface {
 	Tool
-	IsCompleted() bool
 
 	// Facilitate is called before calling a method to generate content every loop when there is no next input such as tool results, etc. If Facilitate returns nil, the session will be ended.
 	Facilitate(ctx context.Context, history *History) (*Facilitation, error)
@@ -75,7 +80,10 @@ type defaultFacilitator struct {
 }
 
 func newDefaultFacilitator(llmClient LLMClient) Facilitator {
-	return &defaultFacilitator{llmClient: llmClient, retryLimit: 3}
+	return &defaultFacilitator{
+		llmClient:  llmClient,
+		retryLimit: 3,
+	}
 }
 
 var _ Facilitator = &defaultFacilitator{}
@@ -107,6 +115,14 @@ func (x *defaultFacilitator) IsCompleted() bool {
 
 // UpdateStatus for Facilitator interface
 func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (*Facilitation, error) {
+	if x.isCompleted {
+		x.isCompleted = false
+		return &Facilitation{
+			Action:     ActionComplete,
+			Completion: "done",
+		}, nil
+	}
+
 	// Clone the history to avoid affecting the original session
 	clonedHistory := history.Clone()
 	ssn, err := x.llmClient.NewSession(ctx,
@@ -118,7 +134,7 @@ func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (
 	}
 
 	for i := 0; i < x.retryLimit; i++ {
-		resp, err := updateStatus(ctx, ssn)
+		resp, err := x.updateStatusWithContext(ctx, ssn)
 		if err == nil {
 			if resp.Action == ActionComplete {
 				x.isCompleted = true
@@ -133,7 +149,8 @@ func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (
 	return nil, goerr.New("failed to facilitate")
 }
 
-func updateStatus(ctx context.Context, ssn Session) (*Facilitation, error) {
+// updateStatusWithContext generates status with improved prompt
+func (x *defaultFacilitator) updateStatusWithContext(ctx context.Context, ssn Session) (*Facilitation, error) {
 	output, err := ssn.GenerateContent(ctx, Text(DefaultProceedPrompt))
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update status")
