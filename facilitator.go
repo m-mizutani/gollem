@@ -12,8 +12,8 @@ const (
 {
   "action": "continue|complete",
   "reason": "Brief explanation for the chosen action",
-  "next_step": "Specific action to take next (only for continue, you will be called with the next_step prompt)",
-  "completion": "Brief summary of what was accomplished (only for complete)"
+  "next_step": "Specific action to take next (required for continue, you will be called with the next_step prompt)",
+  "completion": "Brief summary of what was accomplished (required when action is complete)"
 }
 
 Rules:
@@ -37,6 +37,25 @@ type Facilitation struct {
 	Completion string     `json:"completion,omitempty"`
 }
 
+func (x *Facilitation) Validate() error {
+	if x.Action != ActionContinue && x.Action != ActionComplete {
+		return goerr.New("invalid action")
+	}
+
+	switch x.Action {
+	case ActionComplete:
+		if x.Completion == "" {
+			return goerr.New("completion is required when action is complete")
+		}
+	case ActionContinue:
+		if x.NextStep == "" {
+			return goerr.New("next_step is required when action is continue")
+		}
+	}
+
+	return nil
+}
+
 // Facilitator is a tool that can be used to control the session loop.
 // IsCompleted() is called before calling a method to generate content every loop. If IsCompleted() returns true, the session will be ended.
 type Facilitator interface {
@@ -52,10 +71,11 @@ type Facilitator interface {
 type defaultFacilitator struct {
 	isCompleted bool
 	llmClient   LLMClient
+	retryLimit  int
 }
 
 func newDefaultFacilitator(llmClient LLMClient) Facilitator {
-	return &defaultFacilitator{llmClient: llmClient}
+	return &defaultFacilitator{llmClient: llmClient, retryLimit: 3}
 }
 
 var _ Facilitator = &defaultFacilitator{}
@@ -95,6 +115,23 @@ func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (
 		return nil, goerr.Wrap(err, "failed to create session")
 	}
 
+	for i := 0; i < x.retryLimit; i++ {
+		resp, err := updateStatus(ctx, ssn)
+		if err == nil {
+			if resp.Action == ActionComplete {
+				x.isCompleted = true
+			}
+
+			return resp, nil
+		}
+
+		LoggerFromContext(ctx).Error("failed to update status", "error", err)
+	}
+
+	return nil, goerr.New("failed to facilitate")
+}
+
+func updateStatus(ctx context.Context, ssn Session) (*Facilitation, error) {
 	output, err := ssn.GenerateContent(ctx, Text(DefaultProceedPrompt))
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update status")
@@ -107,6 +144,10 @@ func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (
 	var resp Facilitation
 	if err := json.Unmarshal([]byte(output.Texts[0]), &resp); err != nil {
 		return nil, goerr.Wrap(err, "failed to unmarshal response")
+	}
+
+	if err := resp.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "invalid response")
 	}
 
 	return &resp, nil

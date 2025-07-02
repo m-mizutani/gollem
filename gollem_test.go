@@ -318,16 +318,10 @@ func newMockClient(generateContentFunc func(ctx context.Context, input ...gollem
 						// Check if this is already a proceed prompt from DefaultFacilitator
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "What is the next action needed") {
-									// Return respond_to_user call to end session
+								if strings.Contains(string(text), "Respond in JSON format") {
+									// Return JSON response for facilitator
 									return &gollem.Response{
-										Texts: []string{"I will complete the task now."},
-										FunctionCalls: []*gollem.FunctionCall{
-											{
-												Name:      "respond_to_user",
-												Arguments: map[string]any{},
-											},
-										},
+										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 									}, nil
 								}
 							}
@@ -356,18 +350,12 @@ func TestGollemWithOptions(t *testing.T) {
 		loopCount := 0
 		mockClient := newMockClient(func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 			loopCount++
-			// Check if input is DefaultFacilitator's proceed prompt and return respond_to_user call
+			// Check if input is DefaultFacilitator's proceed prompt and return JSON response
 			if len(input) > 0 {
 				if text, ok := input[0].(gollem.Text); ok {
-					if strings.Contains(string(text), "What is the next action needed") {
+					if strings.Contains(string(text), "Respond in JSON format") {
 						return &gollem.Response{
-							Texts: []string{"I will complete the task now."},
-							FunctionCalls: []*gollem.FunctionCall{
-								{
-									Name:      "respond_to_user",
-									Arguments: map[string]any{},
-								},
-							},
+							Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 						}, nil
 					}
 				}
@@ -411,18 +399,12 @@ func TestGollemWithOptions(t *testing.T) {
 			if len(input) > 0 {
 				if resp, ok := input[0].(gollem.FunctionResponse); ok {
 					if resp.Error != nil {
-						// Check if it's DefaultFacilitator's proceed prompt and return respond_to_user call
+						// Check if it's DefaultFacilitator's proceed prompt and return JSON response
 						if len(input) > 1 {
 							if text, ok := input[1].(gollem.Text); ok {
-								if strings.Contains(string(text), "What is the next action needed") {
+								if strings.Contains(string(text), "Respond in JSON format") {
 									return &gollem.Response{
-										Texts: []string{"I will complete the task now."},
-										FunctionCalls: []*gollem.FunctionCall{
-											{
-												Name:      "respond_to_user",
-												Arguments: map[string]any{},
-											},
-										},
+										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 									}, nil
 								}
 							}
@@ -445,18 +427,12 @@ func TestGollemWithOptions(t *testing.T) {
 				}
 			}
 
-			// Check if input is DefaultFacilitator's proceed prompt and return respond_to_user call
+			// Check if input is DefaultFacilitator's proceed prompt and return JSON response
 			if len(input) > 0 {
 				if text, ok := input[0].(gollem.Text); ok {
-					if strings.Contains(string(text), "What is the next action needed") {
+					if strings.Contains(string(text), "Respond in JSON format") {
 						return &gollem.Response{
-							Texts: []string{"I will complete the task now."},
-							FunctionCalls: []*gollem.FunctionCall{
-								{
-									Name:      "respond_to_user",
-									Arguments: map[string]any{},
-								},
-							},
+							Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 						}, nil
 					}
 				}
@@ -507,16 +483,10 @@ func TestGollemWithOptions(t *testing.T) {
 						// Check if this is DefaultFacilitator's proceed prompt
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "What is the next action needed") {
-									// Return respond_to_user call to end session
+								if strings.Contains(string(text), "Respond in JSON format") {
+									// Return JSON response for facilitator
 									return &gollem.Response{
-										Texts: []string{"I will complete the task now."},
-										FunctionCalls: []*gollem.FunctionCall{
-											{
-												Name:      "respond_to_user",
-												Arguments: map[string]any{},
-											},
-										},
+										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 									}, nil
 								}
 							}
@@ -570,16 +540,10 @@ func TestGollemWithOptions(t *testing.T) {
 						// Check if this is DefaultFacilitator's proceed prompt
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "What is the next action needed") {
-									// Return respond_to_user call to end session
+								if strings.Contains(string(text), "Respond in JSON format") {
+									// Return JSON response for facilitator
 									return &gollem.Response{
-										Texts: []string{"I will complete the task now."},
-										FunctionCalls: []*gollem.FunctionCall{
-											{
-												Name:      "respond_to_user",
-												Arguments: map[string]any{},
-											},
-										},
+										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 									}, nil
 								}
 							}
@@ -636,16 +600,10 @@ func TestGollemWithOptions(t *testing.T) {
 						// Check if this is DefaultFacilitator's proceed prompt
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "What is the next action needed") {
-									// Return respond_to_user call to end session
+								if strings.Contains(string(text), "Respond in JSON format") {
+									// Return JSON response for facilitator
 									return &gollem.Response{
-										Texts: []string{"I will complete the task now."},
-										FunctionCalls: []*gollem.FunctionCall{
-											{
-												Name:      "respond_to_user",
-												Arguments: map[string]any{},
-											},
-										},
+										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 									}, nil
 								}
 							}
@@ -694,43 +652,42 @@ func TestGollemWithOptions(t *testing.T) {
 	t.Run("WithResponseMode", func(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				// Check session options to determine if this is for streaming or DefaultFacilitator
+				cfg := gollem.NewSessionConfig(options...)
+				isStreamingSession := cfg.SystemPrompt() == "" // Main session has no specific system prompt for streaming
+
 				mockSession := &mock.SessionMock{
 					GenerateStreamFunc: func(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
 						ch := make(chan *gollem.Response)
 						go func() {
 							defer close(ch)
-							// Check if this is a proceed prompt from DefaultFacilitator
-							if len(input) > 0 {
-								if text, ok := input[0].(gollem.Text); ok {
-									if strings.Contains(string(text), "What is the next action needed") {
-										// End session by calling respond_to_user
-										ch <- &gollem.Response{
-											Texts: []string{"Session completed"},
-											FunctionCalls: []*gollem.FunctionCall{
-												{
-													Name:      "respond_to_user",
-													Arguments: map[string]any{},
-												},
-											},
-										}
-										return
-									}
+							// Only handle streaming for the main session
+							if isStreamingSession {
+								ch <- &gollem.Response{
+									Texts: []string{"test response 1"},
 								}
-							}
-
-							ch <- &gollem.Response{
-								Texts: []string{"test response 1"},
-							}
-							ch <- &gollem.Response{
-								Texts: []string{"test response 2"},
-							}
-							ch <- &gollem.Response{
-								Texts: []string{"test response 3"},
+								ch <- &gollem.Response{
+									Texts: []string{"test response 2"},
+								}
+								ch <- &gollem.Response{
+									Texts: []string{"test response 3"},
+								}
 							}
 						}()
 						return ch, nil
 					},
 					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						// Check if this is DefaultFacilitator's proceed prompt
+						if len(input) > 0 {
+							if text, ok := input[0].(gollem.Text); ok {
+								if strings.Contains(string(text), "Respond in JSON format") {
+									// Return JSON response for facilitator
+									return &gollem.Response{
+										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
+									}, nil
+								}
+							}
+						}
 						// Handle function responses
 						if len(input) > 0 {
 							if funcResp, ok := input[0].(gollem.FunctionResponse); ok {
@@ -756,12 +713,11 @@ func TestGollemWithOptions(t *testing.T) {
 		)
 		err := s.Execute(t.Context(), "test message")
 		gt.NoError(t, err)
-		// Should receive the 3 test responses plus "Session completed"
-		gt.Equal(t, len(receivedMessages), 4)
+		// Should receive only the 3 test responses from streaming (Facilitator's JSON response doesn't go through MessageHook)
+		gt.Equal(t, len(receivedMessages), 3)
 		gt.Equal(t, receivedMessages[0], "test response 1")
 		gt.Equal(t, receivedMessages[1], "test response 2")
 		gt.Equal(t, receivedMessages[2], "test response 3")
-		gt.Equal(t, receivedMessages[3], "Session completed")
 	})
 
 	t.Run("WithLogger", func(t *testing.T) {
@@ -803,16 +759,10 @@ func TestGollemWithOptions(t *testing.T) {
 						// Check if this is DefaultFacilitator's proceed prompt
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "What is the next action needed") {
-									// Return respond_to_user call to end session
+								if strings.Contains(string(text), "Respond in JSON format") {
+									// Return JSON response for facilitator
 									return &gollem.Response{
-										Texts: []string{"I will complete the task now."},
-										FunctionCalls: []*gollem.FunctionCall{
-											{
-												Name:      "respond_to_user",
-												Arguments: map[string]any{},
-											},
-										},
+										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 									}, nil
 								}
 							}
