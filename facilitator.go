@@ -162,11 +162,11 @@ func (x *defaultFacilitator) updateStatusWithContext(ctx context.Context, ssn Se
 
 	var resp Facilitation
 	if err := json.Unmarshal([]byte(output.Texts[0]), &resp); err != nil {
-		return nil, goerr.Wrap(err, "failed to unmarshal response")
+		return nil, goerr.Wrap(err, "failed to unmarshal response", goerr.V("output", output))
 	}
 
 	if err := resp.Validate(); err != nil {
-		return nil, goerr.Wrap(err, "invalid response")
+		return nil, goerr.Wrap(err, "invalid response", goerr.V("Facilitation", resp))
 	}
 
 	return &resp, nil
