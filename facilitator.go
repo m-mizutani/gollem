@@ -115,6 +115,10 @@ func (x *defaultFacilitator) IsCompleted() bool {
 
 // UpdateStatus for Facilitator interface
 func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (*Facilitation, error) {
+	LoggerFromContext(ctx).Debug("run Facilitate",
+		"isComplete", x.isCompleted,
+		"history", history,
+	)
 	if x.isCompleted {
 		x.isCompleted = false
 		return &Facilitation{
@@ -136,10 +140,7 @@ func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (
 	for i := 0; i < x.retryLimit; i++ {
 		resp, err := x.updateStatusWithContext(ctx, ssn)
 		if err == nil {
-			if resp.Action == ActionComplete {
-				x.isCompleted = true
-			}
-
+			LoggerFromContext(ctx).Debug("facilitated", "facilitation", resp)
 			return resp, nil
 		}
 
