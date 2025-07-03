@@ -10,12 +10,44 @@ import (
 const (
 	DefaultProceedPrompt = `Review the conversation history carefully to understand what has already been attempted.
 
-Respond in JSON format with the following structure:
+Respond with JSON that follows this schema:
 {
-  "action": "continue|complete",
-  "reason": "Brief explanation for the chosen action",
-  "next_step": "Specific action to take next (required for continue, you will be called with the next_step prompt)",
-  "completion": "Brief summary of what was accomplished (required when action is complete)"
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["continue", "complete"],
+      "description": "Whether to continue with next step or complete the task"
+    },
+    "reason": {
+      "type": "string",
+      "description": "Brief explanation for the chosen action"
+    },
+    "next_step": {
+      "type": "string",
+      "description": "Specific action to take next (required when action is 'continue')"
+    },
+    "completion": {
+      "type": "string", 
+      "description": "Brief summary of what was accomplished (required when action is 'complete')"
+    }
+  },
+  "required": ["action", "reason"],
+  "if": {
+    "properties": {"action": {"const": "continue"}}
+  },
+  "then": {
+    "required": ["next_step"]
+  },
+  "else": {
+    "if": {
+      "properties": {"action": {"const": "complete"}}
+    },
+    "then": {
+      "required": ["completion"]
+    }
+  }
 }
 
 Rules:
@@ -167,7 +199,7 @@ func (x *defaultFacilitator) updateStatusWithContext(ctx context.Context, ssn Se
 	}
 
 	if err := resp.Validate(); err != nil {
-		return nil, goerr.Wrap(err, "invalid response", goerr.V("Facilitation", resp))
+		return nil, goerr.Wrap(err, "invalid response", goerr.V("Facilitation", resp), goerr.V("output", output))
 	}
 
 	return &resp, nil
