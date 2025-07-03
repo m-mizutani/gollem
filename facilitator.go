@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	DefaultProceedPrompt = `Review the conversation history carefully to understand what has already been attempted.
+	DefaultFacilitatePrompt = `Review the conversation history carefully to understand what has already been attempted.
 
 Respond with JSON that follows this schema:
 {
@@ -29,7 +29,7 @@ Respond with JSON that follows this schema:
       "description": "Specific action to take next (required when action is 'continue')"
     },
     "completion": {
-      "type": "string", 
+      "type": "string",
       "description": "Brief summary of what was accomplished (required when action is 'complete')"
     }
   },
@@ -162,6 +162,7 @@ func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (
 	// Clone the history to avoid affecting the original session
 	clonedHistory := history.Clone()
 	ssn, err := x.llmClient.NewSession(ctx,
+		WithSessionSystemPrompt(DefaultFacilitatePrompt),
 		WithSessionHistory(clonedHistory),
 		WithSessionContentType(ContentTypeJSON),
 	)

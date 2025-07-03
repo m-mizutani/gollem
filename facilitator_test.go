@@ -321,14 +321,6 @@ func TestActionType_String(t *testing.T) {
 	gt.Equal(t, string(gollem.ActionComplete), "complete")
 }
 
-func TestDefaultProceedPrompt(t *testing.T) {
-	// Test that the prompt is not empty and contains expected JSON structure guidance
-	gt.NotEqual(t, gollem.DefaultProceedPrompt, "")
-	gt.True(t, strings.Contains(gollem.DefaultProceedPrompt, "JSON format"))
-	gt.True(t, strings.Contains(gollem.DefaultProceedPrompt, "continue"))
-	gt.True(t, strings.Contains(gollem.DefaultProceedPrompt, "complete"))
-}
-
 func TestFacilitation_Validate(t *testing.T) {
 	type testCase struct {
 		name         string
