@@ -24,9 +24,9 @@ Respond with JSON that follows this schema:
       "type": "string",
       "description": "Brief explanation for the chosen action"
     },
-    "next_step": {
+    "next_prompt": {
       "type": "string",
-      "description": "Specific action to take next (required when action is 'continue')"
+      "description": "The next instruction for you (the agent). Think about what action should be taken and fill it in with specific guidance for the next step (required when action is 'continue')"
     },
     "completion": {
       "type": "string",
@@ -38,7 +38,7 @@ Respond with JSON that follows this schema:
     "properties": {"action": {"const": "continue"}}
   },
   "then": {
-    "required": ["next_step"]
+    "required": ["next_prompt"]
   },
   "else": {
     "if": {
@@ -71,7 +71,7 @@ const (
 type Facilitation struct {
 	Action     ActionType `json:"action"`
 	Reason     string     `json:"reason"`
-	NextStep   string     `json:"next_step,omitempty"`
+	NextPrompt string     `json:"next_prompt,omitempty"`
 	Completion string     `json:"completion,omitempty"`
 }
 
@@ -86,8 +86,8 @@ func (x *Facilitation) Validate() error {
 			return goerr.New("completion is required when action is complete")
 		}
 	case ActionContinue:
-		if x.NextStep == "" {
-			return goerr.New("next_step is required when action is continue")
+		if x.NextPrompt == "" {
+			return goerr.New("next_prompt is required when action is continue")
 		}
 	}
 

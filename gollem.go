@@ -378,11 +378,11 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 				return nil
 
 			case ActionContinue:
-				if resp.NextStep == "" {
+				if resp.NextPrompt == "" {
 					return goerr.Wrap(ErrExitConversation, "conversation exit by no next step", goerr.V("facilitate", resp))
 				}
 
-				input = []Input{Text(resp.NextStep)}
+				input = []Input{Text(resp.NextPrompt)}
 
 			default:
 				return goerr.Wrap(ErrExitConversation, "conversation exit by invalid action", goerr.V("facilitate", resp))

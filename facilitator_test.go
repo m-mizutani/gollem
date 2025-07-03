@@ -108,7 +108,7 @@ func TestDefaultFacilitator_Facilitate(t *testing.T) {
 			gt.NoError(t, err)
 			gt.Equal(t, result.Action, tc.expected.Action)
 			gt.Equal(t, result.Reason, tc.expected.Reason)
-			gt.Equal(t, result.NextStep, tc.expected.NextStep)
+			gt.Equal(t, result.NextPrompt, tc.expected.NextPrompt)
 			gt.Equal(t, result.Completion, tc.expected.Completion)
 		}
 	}
@@ -118,12 +118,12 @@ func TestDefaultFacilitator_Facilitate(t *testing.T) {
 		mockResponse: `{
 			"action": "continue",
 			"reason": "Need to analyze more data",
-			"next_step": "Process remaining files"
+			"next_prompt": "Process remaining files"
 		}`,
 		expected: &gollem.Facilitation{
-			Action:   gollem.ActionContinue,
-			Reason:   "Need to analyze more data",
-			NextStep: "Process remaining files",
+			Action:     gollem.ActionContinue,
+			Reason:     "Need to analyze more data",
+			NextPrompt: "Process remaining files",
 		},
 		expectError: false,
 	}))
@@ -196,7 +196,7 @@ func TestDefaultFacilitator_Facilitate(t *testing.T) {
 		mockResponse: `{
 			"action": "continue",
 			"reason": "Need to analyze more data",
-			"next_step": ""
+			"next_prompt": ""
 		}`,
 		expected:    nil,
 		expectError: true,
@@ -218,12 +218,12 @@ func TestDefaultFacilitator_Facilitate(t *testing.T) {
 		mockResponse: `{
 			"action": "continue",
 			"reason": "Need to analyze more data",
-			"next_step": "   "
+			"next_prompt": "   "
 		}`,
 		expected: &gollem.Facilitation{
-			Action:   gollem.ActionContinue,
-			Reason:   "Need to analyze more data",
-			NextStep: "   ",
+			Action:     gollem.ActionContinue,
+			Reason:     "Need to analyze more data",
+			NextPrompt: "   ",
 		},
 		expectError: false, // Current implementation only checks for empty string, not whitespace
 	}))
@@ -266,7 +266,7 @@ func TestDefaultFacilitator_Facilitate(t *testing.T) {
 							Texts: []string{`{
 								"action": "continue",
 								"reason": "Need to analyze more data",
-								"next_step": "Check deployment configuration"
+								"next_prompt": "Check deployment configuration"
 							}`},
 						}, nil
 					},
@@ -277,7 +277,7 @@ func TestDefaultFacilitator_Facilitate(t *testing.T) {
 		resp, err := facilitator.Facilitate(context.Background(), history)
 		gt.NoError(t, err)
 		gt.Equal(t, gollem.ActionContinue, resp.Action)
-		gt.Equal(t, "Check deployment configuration", resp.NextStep)
+		gt.Equal(t, "Check deployment configuration", resp.NextPrompt)
 	})
 }
 
@@ -347,9 +347,9 @@ func TestFacilitation_Validate(t *testing.T) {
 	t.Run("valid continue", runTest(testCase{
 		name: "valid continue",
 		facilitation: gollem.Facilitation{
-			Action:   gollem.ActionContinue,
-			Reason:   "Need to process more data",
-			NextStep: "Analyze remaining files",
+			Action:     gollem.ActionContinue,
+			Reason:     "Need to process more data",
+			NextPrompt: "Analyze remaining files",
 		},
 		expectError: false,
 	}))
@@ -369,10 +369,10 @@ func TestFacilitation_Validate(t *testing.T) {
 		facilitation: gollem.Facilitation{
 			Action: gollem.ActionContinue,
 			Reason: "Need to process more data",
-			// NextStep is empty
+			// NextPrompt is empty
 		},
 		expectError: true,
-		errorMsg:    "next_step is required when action is continue",
+		errorMsg:    "next_prompt is required when action is continue",
 	}))
 
 	t.Run("complete without completion", runTest(testCase{
@@ -409,12 +409,12 @@ func TestFacilitation_Validate(t *testing.T) {
 	t.Run("continue with empty next_step string", runTest(testCase{
 		name: "continue with empty next_step string",
 		facilitation: gollem.Facilitation{
-			Action:   gollem.ActionContinue,
-			Reason:   "Need to process more data",
-			NextStep: "",
+			Action:     gollem.ActionContinue,
+			Reason:     "Need to process more data",
+			NextPrompt: "",
 		},
 		expectError: true,
-		errorMsg:    "next_step is required when action is continue",
+		errorMsg:    "next_prompt is required when action is continue",
 	}))
 
 	t.Run("complete with empty completion string", runTest(testCase{
@@ -431,9 +431,9 @@ func TestFacilitation_Validate(t *testing.T) {
 	t.Run("continue with whitespace-only next_step", runTest(testCase{
 		name: "continue with whitespace-only next_step",
 		facilitation: gollem.Facilitation{
-			Action:   gollem.ActionContinue,
-			Reason:   "Need to process more data",
-			NextStep: "   ",
+			Action:     gollem.ActionContinue,
+			Reason:     "Need to process more data",
+			NextPrompt: "   ",
 		},
 		expectError: false, // Current implementation only checks for empty string, not whitespace
 	}))
