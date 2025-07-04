@@ -2,6 +2,8 @@
 package gollem
 
 import (
+	"encoding/json"
+
 	"cloud.google.com/go/vertexai/genai"
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
@@ -39,6 +41,35 @@ func (x *History) ToCount() int {
 		return 0
 	}
 	return len(x.Claude) + len(x.OpenAI) + len(x.Gemini)
+}
+
+func (x *History) Clone() *History {
+	if x == nil {
+		return nil
+	}
+
+	// Use JSON marshal/unmarshal for deep copy to avoid field-specific code
+	// This ensures all fields are copied correctly even when structs are modified
+	data, err := json.Marshal(x)
+	if err != nil {
+		// If marshaling fails, return a basic clone with empty messages
+		// This should not happen in practice as History is designed to be JSON-serializable
+		return &History{
+			LLType:  x.LLType,
+			Version: x.Version,
+		}
+	}
+
+	var clone History
+	if err := json.Unmarshal(data, &clone); err != nil {
+		// If unmarshaling fails, return a basic clone with empty messages
+		return &History{
+			LLType:  x.LLType,
+			Version: x.Version,
+		}
+	}
+
+	return &clone
 }
 
 func (x *History) ToGemini() ([]*genai.Content, error) {

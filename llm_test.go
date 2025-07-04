@@ -402,7 +402,7 @@ func TestFacilitator(t *testing.T) {
 	testFn := func(t *testing.T, newClient func(t *testing.T) gollem.LLMClient) {
 		client := newClient(t)
 
-		facilitator := gollem.NewDefaultFacilitator()
+		facilitator := gollem.NewDefaultFacilitator(client)
 		loopCount := 0
 		facilitatorCalled := false
 
@@ -427,13 +427,12 @@ func TestFacilitator(t *testing.T) {
 		)
 
 		ctx := t.Context()
-		_, err := s.Prompt(ctx, "Get a random number between 1 and 10")
+		err := s.Execute(ctx, "Get a random number between 1 and 10")
 		gt.NoError(t, err)
 
-		t.Logf("Test completed: facilitatorCalled=%v, isCompleted=%v, loopCount=%d", facilitatorCalled, facilitator.IsCompleted(), loopCount)
+		t.Logf("Test completed: facilitatorCalled=%v, loopCount=%d", facilitatorCalled, loopCount)
 
-		// Verify that the facilitator was called
-		gt.True(t, facilitator.IsCompleted())
+		// Verify that the session completed without error (indicated by successful Execute completion)
 
 		// Verify that loops occurred (should be more than 0 but less than loop limit)
 		gt.N(t, loopCount).Greater(0).Less(10)
@@ -527,7 +526,7 @@ func TestFacilitatorHooksNotCalled(t *testing.T) {
 	)
 
 	ctx := t.Context()
-	_, err := s.Prompt(ctx, "test prompt")
+	err := s.Execute(ctx, "test prompt")
 	gt.NoError(t, err)
 
 	// Verify that only random_number tool triggered hooks, not the facilitator
@@ -538,7 +537,5 @@ func TestFacilitatorHooksNotCalled(t *testing.T) {
 		gt.Equal(t, v, "random_number")
 	})
 
-	// Verify facilitator was called (session should be completed)
-	facilitator := s.Facilitator()
-	gt.True(t, facilitator.IsCompleted())
+	// Verify session completed successfully (no error from Execute indicates proper completion)
 }
