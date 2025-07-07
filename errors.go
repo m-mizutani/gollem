@@ -30,4 +30,15 @@ var (
 	// ErrExitConversation is returned when a tool signals that the conversation should be exited.
 	// This error is treated as a successful completion of the conversation loop.
 	ErrExitConversation = errors.New("exit conversation")
+
+	// Plan mode specific errors
+
+	// ErrPlanAlreadyExecuted is returned when trying to run an already executed plan
+	ErrPlanAlreadyExecuted = errors.New("plan already executed")
+
+	// ErrPlanNotInitialized is returned when plan is not properly initialized
+	ErrPlanNotInitialized = errors.New("plan not properly initialized")
+
+	// ErrPlanStepFailed is returned when a plan step fails during execution
+	ErrPlanStepFailed = errors.New("plan step execution failed")
 )

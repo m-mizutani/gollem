@@ -170,6 +170,7 @@ func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (
 		return nil, goerr.Wrap(err, "failed to create session")
 	}
 
+	var lastErr error
 	for i := 0; i < x.retryLimit; i++ {
 		resp, err := x.updateStatusWithContext(ctx, ssn)
 		if err == nil {
@@ -177,15 +178,16 @@ func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (
 			return resp, nil
 		}
 
-		LoggerFromContext(ctx).Error("failed to update status", "error", err)
+		lastErr = err
+		LoggerFromContext(ctx).Error("failed to update status", "error", err, "attempt", i+1)
 	}
 
-	return nil, goerr.New("failed to facilitate")
+	return nil, goerr.Wrap(lastErr, "failed to facilitate after retries")
 }
 
 // updateStatusWithContext generates status with improved prompt
 func (x *defaultFacilitator) updateStatusWithContext(ctx context.Context, ssn Session) (*Facilitation, error) {
-	output, err := ssn.GenerateContent(ctx, Text("choose your next action or complete"))
+	output, err := ssn.GenerateContent(ctx, Text("choose your next action or complete. Respond with JSON containing all required fields: action, reason, and either next_prompt (for continue) or completion (for complete)."))
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update status")
 	}
@@ -194,13 +196,19 @@ func (x *defaultFacilitator) updateStatusWithContext(ctx context.Context, ssn Se
 		return nil, goerr.New("no response from LLM")
 	}
 
+	// Add detailed error information for debugging
+	responseText := output.Texts[0]
 	var resp Facilitation
-	if err := json.Unmarshal([]byte(output.Texts[0]), &resp); err != nil {
-		return nil, goerr.Wrap(err, "failed to unmarshal response", goerr.V("output", output))
+	if err := json.Unmarshal([]byte(responseText), &resp); err != nil {
+		return nil, goerr.Wrap(err, "failed to unmarshal response", 
+			goerr.V("response_text", responseText),
+			goerr.V("response_length", len(responseText)))
 	}
 
 	if err := resp.Validate(); err != nil {
-		return nil, goerr.Wrap(err, "invalid response", goerr.V("Facilitation", resp), goerr.V("output", output))
+		return nil, goerr.Wrap(err, "invalid response",
+			goerr.V("facilitation", resp),
+			goerr.V("response_text", responseText))
 	}
 
 	return &resp, nil
