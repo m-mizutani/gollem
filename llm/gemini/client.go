@@ -203,6 +203,12 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		}
 	}
 
+	var tools []string
+	for _, tool := range cfg.Tools() {
+		tools = append(tools, tool.Spec().Name)
+	}
+	gollem.LoggerFromContext(ctx).Debug("gemini tools", "tools", tools)
+
 	if len(genaiFunctions) > 0 {
 		model.Tools = []*genai.Tool{
 			{
