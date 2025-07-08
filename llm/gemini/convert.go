@@ -51,6 +51,8 @@ func convertParameterToSchema(param *gollem.Parameter) *genai.Schema {
 		}
 		if len(param.Required) > 0 {
 			schema.Required = param.Required
+		} else {
+			schema.Required = []string{}
 		}
 	}
 
