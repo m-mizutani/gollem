@@ -114,22 +114,21 @@ func displayProgress(plan *gollem.Plan) {
 	}
 	fmt.Printf(", %d pending\n", pending)
 
-	// Progress bar
-	barLength := 30
-	completedBars := 0
 	if total > 0 {
-		completedBars = int(float64(completed) / float64(total) * float64(barLength))
-	}
+		// Progress bar
+		barLength := 30
+		completedBars := int(float64(completed) / float64(total) * float64(barLength))
 
-	fmt.Print("🔵 ")
-	for i := range barLength {
-		if i < completedBars {
-			fmt.Print("█")
-		} else {
-			fmt.Print("░")
+		fmt.Print("🔵 ")
+		for i := range barLength {
+			if i < completedBars {
+				fmt.Print("█")
+			} else {
+				fmt.Print("░")
+			}
 		}
+		fmt.Println()
 	}
-	fmt.Println()
 }
 
 func main() {

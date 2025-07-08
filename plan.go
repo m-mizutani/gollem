@@ -35,7 +35,8 @@ type planToDo struct {
 	Intent      string      `json:"todo_intent"` // High-level intention
 	Status      ToDoStatus  `json:"todo_status"`
 	Result      *toDoResult `json:"todo_result,omitempty"`
-	Error       error       `json:"todo_error,omitempty"`
+	Error       error       `json:"-"` // Not serialized
+	ErrorMsg    string      `json:"todo_error,omitempty"`
 }
 
 // PlanState represents the current state of plan execution (private)
@@ -234,6 +235,7 @@ func (p *Plan) Execute(ctx context.Context) (string, error) {
 		if err != nil {
 			currentStep.Status = ToDoStatusFailed
 			currentStep.Error = err
+			currentStep.ErrorMsg = err.Error()
 			p.state = PlanStateFailed
 			return "", goerr.Wrap(err, "plan step execution failed", goerr.V("step_id", currentStep.ID))
 		}
@@ -705,6 +707,7 @@ func (p *Plan) GetToDos() []PlanToDo {
 			Status:      toDoStatusToString(todo.Status),
 			Completed:   todo.Status == ToDoStatusCompleted,
 			Error:       todo.Error,
+			ErrorMsg:    todo.ErrorMsg,
 			Result:      todo.copyResult(),
 		}
 	}
@@ -719,6 +722,7 @@ type PlanToDo struct {
 	Status      string
 	Completed   bool
 	Error       error
+	ErrorMsg    string
 	Result      *PlanToDoResult
 }
 
@@ -751,6 +755,7 @@ func (p *planToDo) toPlanToDo() PlanToDo {
 		Status:      toDoStatusToString(p.Status),
 		Completed:   p.Status == ToDoStatusCompleted,
 		Error:       p.Error,
+		ErrorMsg:    p.ErrorMsg,
 		Result:      p.copyResult(),
 	}
 }
