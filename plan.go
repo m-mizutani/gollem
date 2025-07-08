@@ -168,28 +168,10 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 		return nil, goerr.Wrap(err, "failed to generate plan")
 	}
 
-	// Create independent session for this plan (not connected to Agent session)
-	sessionOptions := []SessionOption{}
-	if cfg.history != nil {
-		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
-	}
-	mainSession, err := g.llm.NewSession(ctx, sessionOptions...)
+	// Create plan with runtime fields
+	plan, err := g.createPlanWithRuntime(planID, prompt, todos, PlanStateCreated, toolMap, toolList, cfg, logger, ctx)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create main session for plan")
-	}
-
-	plan := &Plan{
-		id:    planID,
-		input: prompt,
-		todos: todos,
-		state: PlanStateCreated,
-
-		// Runtime fields
-		agent:       g,
-		toolMap:     toolMap,
-		config:      cfg,
-		mainSession: mainSession,
-		logger:      logger,
+		return nil, err
 	}
 
 	// Call PlanCreatedHook
@@ -452,6 +434,37 @@ func (g *Agent) createPlanConfig(options ...PlanOption) *planConfig {
 	}
 
 	return cfg
+}
+
+// createPlanWithRuntime creates a plan with all runtime fields initialized
+func (g *Agent) createPlanWithRuntime(id, input string, todos []planToDo, state PlanState, toolMap map[string]Tool, toolList []Tool, cfg *planConfig, logger *slog.Logger, ctx context.Context) (*Plan, error) {
+	// Create independent session for this plan (not connected to Agent session)
+	sessionOptions := []SessionOption{}
+	if cfg.history != nil {
+		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
+	}
+	// CRITICAL: Add tools to main session so LLM knows what tools are available
+	sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
+	mainSession, err := g.llm.NewSession(ctx, sessionOptions...)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create main session for plan")
+	}
+
+	plan := &Plan{
+		id:    id,
+		input: input,
+		todos: todos,
+		state: state,
+
+		// Runtime fields
+		agent:       g,
+		toolMap:     toolMap,
+		config:      cfg,
+		mainSession: mainSession,
+		logger:      logger,
+	}
+
+	return plan, nil
 }
 
 // createPlannerSession creates a session for plan generation
@@ -806,29 +819,16 @@ func (g *Agent) NewPlanFromData(data []byte, options ...PlanOption) (*Plan, erro
 	cfg := g.createPlanConfig(options...)
 
 	// Rebuild tool map (use existing setupTools)
-	toolMap, _, err := setupTools(context.Background(), &cfg.gollemConfig)
+	toolMap, toolList, err := setupTools(context.Background(), &cfg.gollemConfig)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to setup tools for deserialized plan")
 	}
 
-	// Recreate independent session for deserialized plan
-	sessionOptions := []SessionOption{}
-	mainSession, err := g.llm.NewSession(context.Background(), sessionOptions...)
+	// Create plan with runtime fields using shared logic
+	logger := cfg.logger.With("gollem.plan_id", planData.ID)
+	plan, err := g.createPlanWithRuntime(planData.ID, planData.Input, planData.ToDos, planData.State, toolMap, toolList, cfg, logger, context.Background())
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to recreate main session for deserialized plan")
-	}
-
-	plan := &Plan{
-		id:    planData.ID,
-		input: planData.Input,
-		todos: planData.ToDos,
-		state: planData.State,
-
-		agent:       g,
-		toolMap:     toolMap,
-		config:      cfg,
-		mainSession: mainSession,
-		logger:      cfg.logger.With("gollem.plan_id", planData.ID),
+		return nil, goerr.Wrap(err, "failed to recreate plan with runtime fields")
 	}
 
 	return plan, nil

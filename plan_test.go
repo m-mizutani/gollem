@@ -3,10 +3,12 @@ package gollem_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/llm/openai"
 	"github.com/m-mizutani/gt"
 )
 
@@ -305,6 +307,120 @@ func BenchmarkPlanDeserialization(b *testing.B) {
 		_, err := agent.NewPlanFromData(data)
 		if err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+// Test tool for threat intelligence (OTX-like)
+type threatIntelTool struct{}
+
+func (t *threatIntelTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name:        "otx.ipv4",
+		Description: "Search for threat intelligence data about IPv4 addresses using OTX",
+		Parameters: map[string]*gollem.Parameter{
+			"ip": {
+				Type:        gollem.TypeString,
+				Description: "IPv4 address to investigate",
+			},
+		},
+		Required: []string{"ip"},
+	}
+}
+
+func (t *threatIntelTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	ip, ok := args["ip"].(string)
+	if !ok {
+		return nil, fmt.Errorf("ip must be a string")
+	}
+	return map[string]any{
+		"ip":         ip,
+		"reputation": "clean",
+		"sources":    []string{"OTX"},
+	}, nil
+}
+
+// Reproduce Warren's premature completion issue with real LLM
+func TestPrematureCompletionIssueWithRealLLM(t *testing.T) {
+	openaiKey := os.Getenv("OPENAI_API_KEY")
+	if openaiKey == "" {
+		t.Skip("OPENAI_API_KEY not set, skipping integration test")
+	}
+
+	// Import the actual OpenAI client
+	openaiClient, err := openai.New(context.Background(), openaiKey)
+	if err != nil {
+		t.Fatalf("Failed to create OpenAI client: %v", err)
+	}
+
+	threatTool := &threatIntelTool{}
+	agent := gollem.New(openaiClient, gollem.WithTools(threatTool))
+
+	// Track execution progress
+	var executedTodos []string
+	var completedTodos []string
+
+	plan, err := agent.Plan(context.Background(), "Investigate IP address 192.0.2.1 for security threats",
+		gollem.WithToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
+			executedTodos = append(executedTodos, todo.ID)
+			t.Logf("Started todo %s: %s", todo.ID, todo.Description)
+			return nil
+		}),
+		gollem.WithToDoCompletedHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
+			completedTodos = append(completedTodos, todo.ID)
+			t.Logf("Completed todo %s: %s", todo.ID, todo.Description)
+			return nil
+		}),
+	)
+	gt.NoError(t, err)
+	gt.NotNil(t, plan)
+
+	initialTodos := plan.GetToDos()
+	t.Logf("Plan created with %d todos:", len(initialTodos))
+	for i, todo := range initialTodos {
+		t.Logf("  %d. %s - %s", i+1, todo.Description, todo.Intent)
+	}
+
+	result, err := plan.Execute(context.Background())
+	gt.NoError(t, err)
+
+	finalTodos := plan.GetToDos()
+	t.Logf("\nExecution completed:")
+	t.Logf("Total todos created: %d", len(initialTodos))
+	t.Logf("Todos started: %d", len(executedTodos))
+	t.Logf("Todos completed: %d", len(completedTodos))
+	t.Logf("Final result: %s", result)
+
+	// Log the final state of all todos
+	for i, todo := range finalTodos {
+		t.Logf("Todo %d (%s): %s - Status: %s", i+1, todo.ID, todo.Description, todo.Status)
+		if todo.Result != nil {
+			t.Logf("  Output: %s", todo.Result.Output)
+			t.Logf("  Tool calls: %d", len(todo.Result.ToolCalls))
+		}
+	}
+
+	// This test is mainly for observation - we want to see if:
+	// 1. LLM creates multiple todos but only executes some
+	// 2. LLM doesn't use available tools when it should
+	// 3. Reflection decides to complete early due to perceived tool unavailability
+
+	// Check if we have the premature completion issue
+	if len(initialTodos) > 1 && len(completedTodos) < len(initialTodos) {
+		t.Logf("WARNING: Potential premature completion detected!")
+		t.Logf("  Plan had %d todos but only %d were completed", len(initialTodos), len(completedTodos))
+
+		// Check if any completed todo used tools
+		toolsUsed := false
+		for _, todo := range finalTodos {
+			if todo.Completed && todo.Result != nil && len(todo.Result.ToolCalls) > 0 {
+				toolsUsed = true
+				break
+			}
+		}
+
+		if !toolsUsed {
+			t.Logf("WARNING: No tools were used despite threat intelligence tool being available!")
 		}
 	}
 }
