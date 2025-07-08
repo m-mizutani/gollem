@@ -203,12 +203,6 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		}
 	}
 
-	var tools []string
-	for _, tool := range cfg.Tools() {
-		tools = append(tools, tool.Spec().Name)
-	}
-	gollem.LoggerFromContext(ctx).Debug("gemini tools", "tools", tools)
-
 	if len(genaiFunctions) > 0 {
 		model.Tools = []*genai.Tool{
 			{
@@ -269,6 +263,13 @@ func (s *Session) convertInputs(input ...gollem.Input) ([]genai.Part, error) {
 // processResponse converts Gemini response to gollem.Response
 func processResponse(resp *genai.GenerateContentResponse) *gollem.Response {
 	if len(resp.Candidates) == 0 {
+		// DEBUG: Log why there are no candidates
+		fmt.Printf("DEBUG: Gemini returned no candidates. PromptFeedback: %+v, UsageMetadata: %+v\n", 
+			resp.PromptFeedback, resp.UsageMetadata)
+		if resp.PromptFeedback != nil {
+			fmt.Printf("DEBUG: BlockReason: %+v, SafetyRatings: %+v\n", 
+				resp.PromptFeedback.BlockReason, resp.PromptFeedback.SafetyRatings)
+		}
 		return &gollem.Response{}
 	}
 
@@ -277,20 +278,38 @@ func processResponse(resp *genai.GenerateContentResponse) *gollem.Response {
 		FunctionCalls: make([]*gollem.FunctionCall, 0),
 	}
 
-	for _, candidate := range resp.Candidates {
-		for _, part := range candidate.Content.Parts {
+	// DEBUG: Log candidate details
+	fmt.Printf("DEBUG: Processing %d candidates\n", len(resp.Candidates))
+
+	for i, candidate := range resp.Candidates {
+		// DEBUG: Log candidate info
+		fmt.Printf("DEBUG: Candidate %d - FinishReason: %+v, SafetyRatings: %+v, Parts: %d\n", 
+			i, candidate.FinishReason, candidate.SafetyRatings, len(candidate.Content.Parts))
+		
+		if len(candidate.Content.Parts) == 0 {
+			fmt.Printf("DEBUG: Candidate %d has no content parts\n", i)
+			continue
+		}
+
+		for j, part := range candidate.Content.Parts {
+			fmt.Printf("DEBUG: Candidate %d, Part %d, Type: %T\n", i, j, part)
 			switch v := part.(type) {
 			case genai.Text:
+				fmt.Printf("DEBUG: Text content: %q\n", string(v))
 				response.Texts = append(response.Texts, string(v))
 			case genai.FunctionCall:
+				fmt.Printf("DEBUG: FunctionCall - Name: %s, Args: %+v\n", v.Name, v.Args)
 				response.FunctionCalls = append(response.FunctionCalls, &gollem.FunctionCall{
 					Name:      v.Name,
 					Arguments: v.Args,
 				})
+			default:
+				fmt.Printf("DEBUG: Unknown part type: %T, value: %+v\n", part, part)
 			}
 		}
 	}
 
+	fmt.Printf("DEBUG: Final response - Texts: %d, FunctionCalls: %d\n", len(response.Texts), len(response.FunctionCalls))
 	return response
 }
 
