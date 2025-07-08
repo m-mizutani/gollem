@@ -252,7 +252,7 @@ func BenchmarkPlanCreation(b *testing.B) {
 	agent := gollem.New(mockClient, gollem.WithTools(&testSearchTool{}))
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := agent.Plan(context.Background(), "Test task")
 		if err != nil {
 			b.Fatal(err)
@@ -276,7 +276,7 @@ func BenchmarkPlanSerialization(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := plan.Serialize()
 		if err != nil {
 			b.Fatal(err)
@@ -303,7 +303,7 @@ func BenchmarkPlanDeserialization(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := agent.DeserializePlan(data)
 		if err != nil {
 			b.Fatal(err)

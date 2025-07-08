@@ -24,14 +24,28 @@ A plan consists of:
 - **State**: Current execution state (created, running, completed, failed)
 - **History**: Optional conversation history maintained across steps
 
-### ToDo Structure
+### PlanToDo Structure (External Reference)
 
-Each plan step (ToDo) contains:
-- **Description**: Detailed description of what needs to be done
-- **Intent**: High-level intention or goal of the step
-- **Status**: Current status (pending, executing, completed, failed, skipped)
-- **Result**: Execution results including tool calls and responses
-- **Error**: Any error that occurred during execution
+The public `PlanToDo` structure provides access to plan step information:
+
+```go
+type PlanToDo struct {
+    ID          string              // Unique identifier
+    Description string              // Detailed description
+    Intent      string              // High-level intention
+    Status      string              // Current status (Pending, Executing, Completed, Failed, Skipped)
+    Completed   bool                // Whether the todo is completed
+    Error       error               // Any error that occurred
+    Result      *PlanToDoResult     // Execution results (if completed)
+}
+
+type PlanToDoResult struct {
+    Output     string              // Text output from execution
+    ToolCalls  []*FunctionCall     // Tool calls made during execution
+    Data       map[string]any      // Tool execution results
+    ExecutedAt time.Time           // When the todo was executed
+}
+```
 
 ## Basic Usage
 
@@ -157,11 +171,11 @@ plan, err := agent.Plan(context.Background(), "task description",
 
 ```go
 plan, err := agent.Plan(context.Background(), "task description",
-    gollem.WithToDoStartHook(func(ctx context.Context, todo gollem.PlanToDoPublic) error {
+    gollem.WithToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
         fmt.Printf("Starting: %s\n", todo.Description)
         return nil
     }),
-    gollem.WithToDoCompletedHook(func(ctx context.Context, todo gollem.PlanToDoPublic) error {
+    gollem.WithToDoCompletedHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
         fmt.Printf("Completed: %s (Status: %s)\n", todo.Description, todo.Status)
         return nil
     }),
@@ -258,18 +272,18 @@ Use hooks to provide real-time feedback:
 
 ```go
 func createProgressMonitor() gollem.PlanOption {
-    return gollem.WithToDoStartHook(func(ctx context.Context, todo gollem.PlanToDoPublic) error {
+    return gollem.WithToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
         fmt.Printf("🔄 %s\n", todo.Description)
         return nil
     })
 }
 
 func createCompletionMonitor() gollem.PlanOption {
-    return gollem.WithToDoCompletedHook(func(ctx context.Context, todo gollem.PlanToDoPublic) error {
+    return gollem.WithToDoCompletedHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
         status := "✅"
-        if todo.Status == "failed" {
+        if todo.Status == "Failed" {
             status = "❌"
-        } else if todo.Status == "skipped" {
+        } else if todo.Status == "Skipped" {
             status = "⏭️"
         }
         fmt.Printf("%s %s\n", status, todo.Description)
@@ -278,20 +292,31 @@ func createCompletionMonitor() gollem.PlanOption {
 }
 ```
 
-### Error Recovery
+### Accessing Plan Progress
 
-Implement graceful error handling:
+Access plan progress using the external reference approach:
 
 ```go
-plan, err := agent.Plan(context.Background(), "complex task",
-    gollem.WithPlanStepCompletedHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDoInternal) error {
-        if todo.Error != nil {
-            // Log error but continue execution
-            log.Printf("Step failed: %s - %v", todo.Description, todo.Error)
-        }
-        return nil
-    }),
-)
+// Get all todos with their current status
+todos := plan.GetToDos()
+for _, todo := range todos {
+    fmt.Printf("Todo: %s, Status: %s\n", todo.Description, todo.Status)
+    if todo.Completed && todo.Result != nil {
+        fmt.Printf("  Result: %s\n", todo.Result.Output)
+    }
+    if todo.Error != nil {
+        fmt.Printf("  Error: %v\n", todo.Error)
+    }
+}
+
+// Count completed todos
+completedCount := 0
+for _, todo := range todos {
+    if todo.Completed {
+        completedCount++
+    }
+}
+fmt.Printf("Progress: %d/%d completed\n", completedCount, len(todos))
 ```
 
 ## Examples
@@ -321,3 +346,38 @@ plan, err := agent.Plan(ctx, "Task that requires MCP tools")
 ```
 
 This allows plan mode to leverage external tool ecosystems while maintaining the same planning and execution framework.
+
+## Data Access Design
+
+Plan mode follows a strict external reference approach to avoid API confusion:
+
+- **No Count Methods**: Instead of providing individual count methods (like `CountCompleted()`), use `GetToDos()` and process the returned data
+- **Data Copying**: The `GetToDos()` method returns copies of internal data structures, preventing external modification
+- **Immutable References**: All returned structures are designed to be read-only from the external perspective
+- **Consistent Interface**: A single method provides access to all todo information, allowing flexible client-side processing
+
+### Example Usage
+
+```go
+// Get all plan data
+todos := plan.GetToDos()
+
+// Process data client-side
+pendingCount := 0
+completedCount := 0
+failedCount := 0
+
+for _, todo := range todos {
+    switch todo.Status {
+    case "Pending":
+        pendingCount++
+    case "Completed":
+        completedCount++
+    case "Failed":
+        failedCount++
+    }
+}
+
+fmt.Printf("Plan Progress: %d completed, %d pending, %d failed\n", 
+    completedCount, pendingCount, failedCount)
+```

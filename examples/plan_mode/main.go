@@ -73,7 +73,7 @@ func (a *analysisTool) Run(ctx context.Context, args map[string]any) (map[string
 
 // Helper functions for displaying todos
 func displayToDoList(plan *gollem.Plan) {
-	todos := plan.GetToDoSummary()
+	todos := plan.GetToDos()
 	fmt.Printf("\n📋 Plan ToDos:\n")
 
 	for _, todo := range todos {
@@ -93,9 +93,19 @@ func displayToDoList(plan *gollem.Plan) {
 }
 
 func displayProgress(plan *gollem.Plan) {
-	completed := plan.GetCompletedToDoCount()
-	total := plan.GetToDoCount()
-	pending := plan.GetPendingToDoCount()
+	todos := plan.GetToDos()
+	total := len(todos)
+	completed := 0
+	pending := 0
+
+	// Count todos by processing the returned data
+	for _, todo := range todos {
+		if todo.Completed {
+			completed++
+		} else if todo.Status == "Pending" {
+			pending++
+		}
+	}
 
 	fmt.Printf("\n📈 Progress: %d/%d completed", completed, total)
 	if total > 0 {
@@ -106,10 +116,13 @@ func displayProgress(plan *gollem.Plan) {
 
 	// Progress bar
 	barLength := 30
-	completedBars := int(float64(completed) / float64(total) * float64(barLength))
+	completedBars := 0
+	if total > 0 {
+		completedBars = int(float64(completed) / float64(total) * float64(barLength))
+	}
 
 	fmt.Print("🔵 ")
-	for i := 0; i < barLength; i++ {
+	for i := range barLength {
 		if i < completedBars {
 			fmt.Print("█")
 		} else {
@@ -150,7 +163,7 @@ func main() {
 			displayProgress(plan)
 			return nil
 		}),
-		gollem.WithToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.ToDoSummary) error {
+		gollem.WithToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
 			fmt.Println("\n" + strings.Repeat("=", 80))
 			fmt.Printf("🔄 STARTING TODO: %s\n", todo.Description)
 			if todo.Intent != "" {
@@ -161,7 +174,7 @@ func main() {
 			displayProgress(plan)
 			return nil
 		}),
-		gollem.WithToDoCompletedHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.ToDoSummary) error {
+		gollem.WithToDoCompletedHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
 			fmt.Println("\n" + strings.Repeat("-", 80))
 			fmt.Printf("✅ COMPLETED TODO: %s\n", todo.Description)
 			fmt.Println(strings.Repeat("-", 80))

@@ -19,7 +19,7 @@ type Plan struct {
 	id      string
 	input   string
 	todos   []planToDo
-	state   planState
+	state   PlanState
 	history *History // For maintaining state between plans
 
 	// Fields reconstructed at runtime (not serialized)
@@ -33,30 +33,30 @@ type planToDo struct {
 	ID          string      `json:"todo_id"`
 	Description string      `json:"todo_description"`
 	Intent      string      `json:"todo_intent"` // High-level intention
-	Status      toDoStatus  `json:"todo_status"`
+	Status      ToDoStatus  `json:"todo_status"`
 	Result      *toDoResult `json:"todo_result,omitempty"`
 	Error       error       `json:"todo_error,omitempty"`
 }
 
-// planState represents the current state of plan execution (private)
-type planState int
+// PlanState represents the current state of plan execution (private)
+type PlanState string
 
 const (
-	planStateCreated planState = iota
-	planStateRunning
-	planStateCompleted
-	planStateFailed
+	PlanStateCreated   PlanState = "created"
+	PlanStateRunning   PlanState = "running"
+	PlanStateCompleted PlanState = "completed"
+	PlanStateFailed    PlanState = "failed"
 )
 
-// toDoStatus represents the status of a plan todo (private)
-type toDoStatus int
+// ToDoStatus represents the status of a plan todo (private)
+type ToDoStatus string
 
 const (
-	toDoStatusPending toDoStatus = iota
-	toDoStatusExecuting
-	toDoStatusCompleted
-	toDoStatusFailed
-	toDoStatusSkipped
+	ToDoStatusPending   ToDoStatus = "pending"
+	ToDoStatusExecuting ToDoStatus = "executing"
+	ToDoStatusCompleted ToDoStatus = "completed"
+	ToDoStatusFailed    ToDoStatus = "failed"
+	ToDoStatusSkipped   ToDoStatus = "skipped"
 )
 
 // toDoResult represents the result of executing a plan todo (private)
@@ -169,7 +169,7 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 		id:      planID,
 		input:   prompt,
 		todos:   todos,
-		state:   planStateCreated,
+		state:   PlanStateCreated,
 		history: cfg.history,
 
 		// Runtime fields
@@ -195,11 +195,11 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 
 // Execute executes the plan and returns the final result
 func (p *Plan) Execute(ctx context.Context) (string, error) {
-	if p.state != planStateCreated {
+	if p.state != PlanStateCreated {
 		return "", ErrPlanAlreadyExecuted
 	}
 
-	p.state = planStateRunning
+	p.state = PlanStateRunning
 
 	// Restore runtime fields (when deserialized)
 	if p.agent == nil {
@@ -223,8 +223,8 @@ func (p *Plan) Execute(ctx context.Context) (string, error) {
 
 		// Call public ToDo start hook
 		if p.config.publicToDoStartHook != nil {
-			summary := currentStep.toSummary()
-			if err := p.config.publicToDoStartHook(ctx, p, summary); err != nil {
+			todo := currentStep.toPlanToDo()
+			if err := p.config.publicToDoStartHook(ctx, p, todo); err != nil {
 				return "", goerr.Wrap(err, "failed to call public ToDo start hook")
 			}
 		}
@@ -232,13 +232,13 @@ func (p *Plan) Execute(ctx context.Context) (string, error) {
 		// Execute step
 		result, err := p.executeStep(ctx, currentStep)
 		if err != nil {
-			currentStep.Status = toDoStatusFailed
+			currentStep.Status = ToDoStatusFailed
 			currentStep.Error = err
-			p.state = planStateFailed
+			p.state = PlanStateFailed
 			return "", goerr.Wrap(err, "plan step execution failed", goerr.V("step_id", currentStep.ID))
 		}
 
-		currentStep.Status = toDoStatusCompleted
+		currentStep.Status = ToDoStatusCompleted
 		currentStep.Result = result
 
 		// Call PlanStepCompletedHook
@@ -250,8 +250,8 @@ func (p *Plan) Execute(ctx context.Context) (string, error) {
 
 		// Call public ToDo completed hook
 		if p.config.publicToDoCompletedHook != nil {
-			summary := currentStep.toSummary()
-			if err := p.config.publicToDoCompletedHook(ctx, p, summary); err != nil {
+			todo := currentStep.toPlanToDo()
+			if err := p.config.publicToDoCompletedHook(ctx, p, todo); err != nil {
 				return "", goerr.Wrap(err, "failed to call public ToDo completed hook")
 			}
 		}
@@ -270,7 +270,7 @@ func (p *Plan) Execute(ctx context.Context) (string, error) {
 		}
 
 		if !reflection.ShouldContinue {
-			p.state = planStateCompleted
+			p.state = PlanStateCompleted
 
 			// Call PlanCompletedHook
 			if p.config.planCompletedHook != nil {
@@ -292,7 +292,7 @@ func (p *Plan) Execute(ctx context.Context) (string, error) {
 		}
 	}
 
-	p.state = planStateCompleted
+	p.state = PlanStateCompleted
 	logger.Info("plan completed - all steps processed", "plan_id", p.id)
 	return "Plan completed", nil
 }
@@ -326,7 +326,7 @@ func (g *Agent) createPlanConfig(options ...PlanOption) *planConfig {
 }
 
 // createPlannerSession creates a session for plan generation
-func (g *Agent) createPlannerSession(ctx context.Context, cfg *planConfig, toolList []Tool) (Session, error) {
+func (g *Agent) createPlannerSession(ctx context.Context, cfg *planConfig, _ []Tool) (Session, error) {
 	sessionOptions := []SessionOption{
 		WithSessionContentType(ContentTypeJSON),
 	}
@@ -391,7 +391,7 @@ func (g *Agent) generatePlan(ctx context.Context, session Session, prompt string
 			ID:          fmt.Sprintf("todo_%d", len(todos)+1),
 			Description: strings.TrimSpace(s.Description),
 			Intent:      strings.TrimSpace(s.Intent),
-			Status:      toDoStatusPending,
+			Status:      ToDoStatusPending,
 		})
 	}
 
@@ -400,7 +400,7 @@ func (g *Agent) generatePlan(ctx context.Context, session Session, prompt string
 
 // executeStep executes a single plan step
 func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, error) {
-	todo.Status = toDoStatusExecuting
+	todo.Status = ToDoStatusExecuting
 
 	// Create executor session
 	executorSession, err := p.agent.createExecutorSession(ctx, p.config, p.getToolList())
@@ -536,7 +536,7 @@ func (g *Agent) createReflectorSession(ctx context.Context, cfg *planConfig) (Se
 func (p *Plan) getPendingToDos() []planToDo {
 	var pending []planToDo
 	for _, step := range p.todos {
-		if step.Status == toDoStatusPending {
+		if step.Status == ToDoStatusPending {
 			pending = append(pending, step)
 		}
 	}
@@ -545,7 +545,7 @@ func (p *Plan) getPendingToDos() []planToDo {
 
 func (p *Plan) getNextPendingToDo() *planToDo {
 	for i := range p.todos {
-		if p.todos[i].Status == toDoStatusPending {
+		if p.todos[i].Status == ToDoStatusPending {
 			return &p.todos[i]
 		}
 	}
@@ -555,7 +555,7 @@ func (p *Plan) getNextPendingToDo() *planToDo {
 func (p *Plan) getCompletedToDos() []planToDo {
 	var completed []planToDo
 	for _, step := range p.todos {
-		if step.Status == toDoStatusCompleted {
+		if step.Status == ToDoStatusCompleted {
 			completed = append(completed, step)
 		}
 	}
@@ -597,7 +597,7 @@ func (p *Plan) getPlanSummary() string {
 func (p *Plan) getCompletedStepsSummary() string {
 	var summary strings.Builder
 	for _, step := range p.todos {
-		if step.Status == toDoStatusCompleted {
+		if step.Status == ToDoStatusCompleted {
 			summary.WriteString(fmt.Sprintf("- %s: %s\n", step.Description, step.Result.Output))
 		}
 	}
@@ -606,7 +606,7 @@ func (p *Plan) getCompletedStepsSummary() string {
 
 func (p *Plan) getLastStepResult() string {
 	for i := len(p.todos) - 1; i >= 0; i-- {
-		if p.todos[i].Status == toDoStatusCompleted && p.todos[i].Result != nil {
+		if p.todos[i].Status == ToDoStatusCompleted && p.todos[i].Result != nil {
 			return p.todos[i].Result.Output
 		}
 	}
@@ -637,7 +637,7 @@ type planData struct {
 	ID      string     `json:"id"`
 	Input   string     `json:"input"`
 	ToDos   []planToDo `json:"todos"`
-	State   planState  `json:"state"`
+	State   PlanState  `json:"state"`
 	History *History   `json:"history"`
 }
 
@@ -694,43 +694,40 @@ func (g *Agent) DeserializePlan(data []byte, options ...PlanOption) (*Plan, erro
 
 // Public methods for Plan inspection
 
-// GetToDoCount returns the total number of todos in the plan
-func (p *Plan) GetToDoCount() int {
-	return len(p.todos)
-}
-
-// GetCompletedToDoCount returns the number of completed todos
-func (p *Plan) GetCompletedToDoCount() int {
-	return len(p.getCompletedToDos())
-}
-
-// GetPendingToDoCount returns the number of pending todos
-func (p *Plan) GetPendingToDoCount() int {
-	return len(p.getPendingToDos())
-}
-
-// GetToDoSummary returns a summary of all todos with their status
-func (p *Plan) GetToDoSummary() []ToDoSummary {
-	summaries := make([]ToDoSummary, len(p.todos))
+// GetToDos returns a copy of all todos with their status (external reference)
+func (p *Plan) GetToDos() []PlanToDo {
+	todos := make([]PlanToDo, len(p.todos))
 	for i, todo := range p.todos {
-		summaries[i] = ToDoSummary{
+		todos[i] = PlanToDo{
 			ID:          todo.ID,
 			Description: todo.Description,
 			Intent:      todo.Intent,
 			Status:      toDoStatusToString(todo.Status),
-			Completed:   todo.Status == toDoStatusCompleted,
+			Completed:   todo.Status == ToDoStatusCompleted,
+			Error:       todo.Error,
+			Result:      todo.copyResult(),
 		}
 	}
-	return summaries
+	return todos
 }
 
-// ToDoSummary represents a public view of a todo
-type ToDoSummary struct {
+// PlanToDo represents a public view of a todo (external reference structure)
+type PlanToDo struct {
 	ID          string
 	Description string
 	Intent      string
 	Status      string
 	Completed   bool
+	Error       error
+	Result      *PlanToDoResult
+}
+
+// PlanToDoResult represents a public view of todo execution result
+type PlanToDoResult struct {
+	Output     string
+	ToolCalls  []*FunctionCall
+	Data       map[string]any
+	ExecutedAt time.Time
 }
 
 // Public hook function types that use public interfaces
@@ -739,34 +736,56 @@ type (
 	PlanCreatedPublicHook func(ctx context.Context, plan *Plan) error
 
 	// PlanToDoStartPublicHook is called when a plan todo starts execution (public API)
-	PlanToDoStartPublicHook func(ctx context.Context, plan *Plan, todo ToDoSummary) error
+	PlanToDoStartPublicHook func(ctx context.Context, plan *Plan, todo PlanToDo) error
 
 	// PlanToDoCompletedPublicHook is called when a plan todo completes successfully (public API)
-	PlanToDoCompletedPublicHook func(ctx context.Context, plan *Plan, todo ToDoSummary) error
+	PlanToDoCompletedPublicHook func(ctx context.Context, plan *Plan, todo PlanToDo) error
 )
 
-// Helper method to convert internal todo to public summary
-func (p *planToDo) toSummary() ToDoSummary {
-	return ToDoSummary{
+// Helper method to convert internal todo to public structure
+func (p *planToDo) toPlanToDo() PlanToDo {
+	return PlanToDo{
 		ID:          p.ID,
 		Description: p.Description,
 		Intent:      p.Intent,
 		Status:      toDoStatusToString(p.Status),
-		Completed:   p.Status == toDoStatusCompleted,
+		Completed:   p.Status == ToDoStatusCompleted,
+		Error:       p.Error,
+		Result:      p.copyResult(),
 	}
 }
 
-func toDoStatusToString(status toDoStatus) string {
+// Helper method to copy result data for external reference
+func (p *planToDo) copyResult() *PlanToDoResult {
+	if p.Result == nil {
+		return nil
+	}
+	
+	// Deep copy of Data map
+	data := make(map[string]any)
+	for k, v := range p.Result.Data {
+		data[k] = v
+	}
+	
+	return &PlanToDoResult{
+		Output:     p.Result.Output,
+		ToolCalls:  p.Result.ToolCalls, // []*FunctionCall is immutable after creation
+		Data:       data,
+		ExecutedAt: p.Result.ExecutedAt,
+	}
+}
+
+func toDoStatusToString(status ToDoStatus) string {
 	switch status {
-	case toDoStatusPending:
+	case ToDoStatusPending:
 		return "Pending"
-	case toDoStatusExecuting:
+	case ToDoStatusExecuting:
 		return "Executing"
-	case toDoStatusCompleted:
+	case ToDoStatusCompleted:
 		return "Completed"
-	case toDoStatusFailed:
+	case ToDoStatusFailed:
 		return "Failed"
-	case toDoStatusSkipped:
+	case ToDoStatusSkipped:
 		return "Skipped"
 	default:
 		return "Unknown"
