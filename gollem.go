@@ -51,16 +51,6 @@ func (x *Agent) Session() Session {
 	return x.currentSession
 }
 
-// setSession updates the agent's current session.
-// This method should be used carefully as it replaces the existing session.
-func (x *Agent) setSession(session Session) {
-	x.currentSession = session
-	// Update history to maintain consistency
-	if session != nil && session.History() != nil {
-		x.history = session.History()
-	}
-}
-
 const (
 	DefaultLoopLimit  = 32
 	DefaultRetryLimit = 8

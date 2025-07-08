@@ -155,6 +155,15 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to setup tools for plan")
 	}
+	
+	// DEBUG: Log tools available for plan
+	logger.Debug("tools setup for plan", "tool_count", len(toolList), "tool_names", func() []string {
+		names := make([]string, len(toolList))
+		for i, tool := range toolList {
+			names[i] = tool.Spec().Name
+		}
+		return names
+	}())
 
 	// Create planner session
 	plannerSession, err := g.createPlannerSession(ctx, cfg, toolList)
@@ -445,9 +454,25 @@ func (g *Agent) createPlanWithRuntime(id, input string, todos []planToDo, state 
 	}
 	// CRITICAL: Add tools to main session so LLM knows what tools are available
 	sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
+	
+	// DEBUG: Log tools being added to session
+	if logger != nil {
+		toolNames := make([]string, len(toolList))
+		for i, tool := range toolList {
+			toolNames[i] = tool.Spec().Name
+		}
+		logger.Debug("creating plan session with tools", "tool_count", len(toolList), "tools", toolNames)
+	}
+	
 	mainSession, err := g.llm.NewSession(ctx, sessionOptions...)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create main session for plan")
+	}
+	
+	// DEBUG: Verify session was created with tools
+	if logger != nil {
+		// Try to access session config to verify tools were set
+		logger.Debug("plan session created successfully", "session_type", fmt.Sprintf("%T", mainSession))
 	}
 
 	plan := &Plan{
