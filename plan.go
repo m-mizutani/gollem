@@ -155,7 +155,7 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to setup tools for plan")
 	}
-	
+
 	// DEBUG: Log tools available for plan
 	logger.Debug("tools setup for plan", "tool_count", len(toolList), "tool_names", func() []string {
 		names := make([]string, len(toolList))
@@ -454,7 +454,7 @@ func (g *Agent) createPlanWithRuntime(id, input string, todos []planToDo, state 
 	}
 	// CRITICAL: Add tools to main session so LLM knows what tools are available
 	sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
-	
+
 	// DEBUG: Log tools being added to session
 	if logger != nil {
 		toolNames := make([]string, len(toolList))
@@ -463,12 +463,12 @@ func (g *Agent) createPlanWithRuntime(id, input string, todos []planToDo, state 
 		}
 		logger.Debug("creating plan session with tools", "tool_count", len(toolList), "tools", toolNames)
 	}
-	
+
 	mainSession, err := g.llm.NewSession(ctx, sessionOptions...)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create main session for plan")
 	}
-	
+
 	// DEBUG: Verify session was created with tools
 	if logger != nil {
 		// Try to access session config to verify tools were set
@@ -567,7 +567,11 @@ func (g *Agent) generatePlan(ctx context.Context, session Session, prompt string
 
 // executeStep executes a single plan step
 func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, error) {
+	logger := LoggerFromContext(ctx)
+
 	todo.Status = ToDoStatusExecuting
+
+	logger.Debug("start executeStep", "todo", todo)
 
 	// Use main session for step execution to maintain history continuity
 	if p.mainSession == nil {
@@ -592,6 +596,7 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 	if err != nil {
 		return nil, goerr.Wrap(err, "executor session failed")
 	}
+	logger.Debug("got response", "response", response)
 
 	// Process response (use existing handleResponse)
 	// Requirement: Tool usage must process Tools from GenerateContent return value
