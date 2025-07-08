@@ -204,6 +204,19 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 	}
 
 	if len(genaiFunctions) > 0 {
+		// DEBUG: Log Gemini function declarations
+		fmt.Printf("DEBUG: Setting up %d Gemini function declarations:\n", len(genaiFunctions))
+		for i, fn := range genaiFunctions {
+			fmt.Printf("DEBUG: Function %d - Name: %s, Description: %s, Parameters: %+v\n", 
+				i, fn.Name, fn.Description, fn.Parameters)
+			if fn.Parameters != nil && fn.Parameters.Properties != nil {
+				fmt.Printf("DEBUG: Function %s has %d properties\n", fn.Name, len(fn.Parameters.Properties))
+				for propName, prop := range fn.Parameters.Properties {
+					fmt.Printf("DEBUG: Property %s: Type=%s, Required=%v\n", propName, prop.Type, contains(fn.Parameters.Required, propName))
+				}
+			}
+		}
+
 		model.Tools = []*genai.Tool{
 			{
 				FunctionDeclarations: genaiFunctions,
@@ -219,6 +232,16 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 	}
 
 	return session, nil
+}
+
+// Helper function to check if a slice contains a string
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Session) History() *gollem.History {
@@ -323,6 +346,12 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 
 	// Filter out history entries with empty parts before sending message
 	s.filterEmptyHistoryParts(ctx)
+
+	// DEBUG: Log the parts being sent to Gemini
+	fmt.Printf("DEBUG: Sending %d parts to Gemini:\n", len(parts))
+	for i, part := range parts {
+		fmt.Printf("DEBUG: Part %d type: %T, content: %+v\n", i, part, part)
+	}
 
 	resp, err := s.session.SendMessage(ctx, parts...)
 	if err != nil {
