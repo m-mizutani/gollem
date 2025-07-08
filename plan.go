@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ type Plan struct {
 	toolMap     map[string]Tool `json:"-"`
 	config      *planConfig     `json:"-"`
 	mainSession Session         `json:"-"` // Main session for plan execution (immutable once set)
+	logger      *slog.Logger    `json:"-"` // Logger for plan execution
 }
 
 // planToDo represents a single task in the plan (private to avoid API confusion)
@@ -187,6 +189,7 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 		toolMap:     toolMap,
 		config:      cfg,
 		mainSession: mainSession,
+		logger:      logger,
 	}
 
 	// Call PlanCreatedHook
@@ -206,15 +209,17 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 
 // Execute executes the plan and returns the final result
 func (p *Plan) Execute(ctx context.Context) (string, error) {
-	logger := LoggerFromContext(ctx)
-	logger.Debug("plan execute started", "plan_id", p.id, "state", p.state)
-	
+	// Embed logger into context for internal methods to use
+	ctx = ctxWithLogger(ctx, p.logger)
+
+	p.logger.Debug("plan execute started", "plan_id", p.id, "state", p.state)
+
 	if err := p.validateAndPrepareExecution(); err != nil {
-		logger.Debug("plan validation failed", "plan_id", p.id, "error", err)
+		p.logger.Debug("plan validation failed", "plan_id", p.id, "error", err)
 		return "", err
 	}
 
-	logger.Debug("plan validation passed, starting execution", "plan_id", p.id)
+	p.logger.Debug("plan validation passed, starting execution", "plan_id", p.id)
 	return p.executeSteps(ctx)
 }
 
@@ -249,7 +254,7 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 			break
 		}
 
-		logger.Debug("processing plan step", 
+		logger.Debug("processing plan step",
 			"plan_id", p.id,
 			"step_id", currentStep.ID,
 			"step_description", currentStep.Description,
@@ -326,7 +331,7 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 	if reflection.ShouldContinue != nil {
 		shouldContinueValue = fmt.Sprintf("%t", *reflection.ShouldContinue)
 	}
-	
+
 	logger.Debug("plan reflection completed",
 		"plan_id", p.id,
 		"should_continue", shouldContinueValue,
@@ -564,7 +569,7 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 	if len(response.FunctionCalls) > 0 {
 		logger := LoggerFromContext(ctx)
 		logger.Debug("processing tool calls", "plan_id", p.id, "tool_calls_count", len(response.FunctionCalls))
-		
+
 		newInput, err := handleResponse(ctx, p.config.gollemConfig, response, p.toolMap)
 		if err != nil {
 			// Special handling for ErrExitConversation
@@ -625,11 +630,11 @@ func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 	if err := json.Unmarshal([]byte(response.Texts[0]), &reflection); err != nil {
 		// If JSON parsing fails, process as text response
 		logger := LoggerFromContext(ctx)
-		logger.Debug("reflection JSON parse failed, using fallback", 
-			"plan_id", p.id, 
-			"error", err, 
+		logger.Debug("reflection JSON parse failed, using fallback",
+			"plan_id", p.id,
+			"error", err,
 			"response_text", response.Texts[0])
-		
+
 		shouldContinue := false
 		reflection = planReflection{
 			ShouldContinue:   &shouldContinue,
@@ -640,7 +645,7 @@ func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 		// Validate that ShouldContinue field was provided
 		logger := LoggerFromContext(ctx)
 		if reflection.ShouldContinue == nil {
-			logger.Debug("reflection missing should_continue field, defaulting to false", 
+			logger.Debug("reflection missing should_continue field, defaulting to false",
 				"plan_id", p.id,
 				"response_text", response.Texts[0])
 			shouldContinue := false
@@ -823,6 +828,7 @@ func (g *Agent) NewPlanFromData(data []byte, options ...PlanOption) (*Plan, erro
 		toolMap:     toolMap,
 		config:      cfg,
 		mainSession: mainSession,
+		logger:      cfg.logger.With("gollem.plan_id", planData.ID),
 	}
 
 	return plan, nil
