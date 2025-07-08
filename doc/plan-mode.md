@@ -22,7 +22,7 @@ A plan consists of:
 - **Input**: The original user goal
 - **ToDos**: A sequence of structured steps with descriptions and intents
 - **State**: Current execution state (created, running, completed, failed)
-- **History**: Optional conversation history maintained across steps
+- **Session**: Independent session that maintains conversation history
 
 ### PlanToDo Structure (External Reference)
 
@@ -110,13 +110,17 @@ if err != nil {
     panic(err)
 }
 
-restoredPlan, err := agent.DeserializePlan(data)
+restoredPlan, err := agent.NewPlanFromData(data)
 if err != nil {
     panic(err)
 }
 
 // Continue execution
 result, err := restoredPlan.Execute(context.Background())
+
+// Access the plan's independent session with complete history
+session := restoredPlan.Session()
+planHistory := session.History()
 ```
 
 ## Plan Execution Workflow
@@ -149,6 +153,7 @@ plan, err := agent.Plan(context.Background(), "task description",
     gollem.WithMaxPlanSteps(10),                    // Limit number of steps
     gollem.WithReflectionEnabled(true),             // Enable reflection
     gollem.WithPlanSystemPrompt("Custom prompt"),   // Custom system prompt
+    gollem.WithPlanHistory(existingHistory),        // Provide initial history
 )
 ```
 
@@ -184,6 +189,18 @@ plan, err := agent.Plan(context.Background(), "task description",
 
 ## Advanced Features
 
+### Session History Management
+
+Plan mode maintains conversation history through independent session management:
+- **Independent Sessions**: Plan sessions are completely independent from Agent sessions
+- **Plan-Specific Context**: Each plan maintains its own conversation context and history
+- **Session Access**: Use `plan.Session()` to access the plan's session and history
+- **History Initialization**: Use `WithPlanHistory()` option to provide initial history when creating plans
+- **Thread Safety**: Plan sessions are not thread-safe; use one plan execution per goroutine
+- **Session Isolation**: Plan execution does not affect Agent's session state
+- **Session Requirement**: Plans require a valid session; execution will fail with `ErrPlanNotInitialized` if session is nil
+- **Session as Source of Truth**: The plan's session is the authoritative source for conversation history
+
 ### Dynamic Plan Modification
 
 During reflection, plans can be dynamically modified:
@@ -202,12 +219,17 @@ if err != nil {
     case gollem.ErrPlanAlreadyExecuted:
         fmt.Println("Plan has already been executed")
     case gollem.ErrPlanNotInitialized:
-        fmt.Println("Plan is missing required components")
+        fmt.Println("Plan is missing required components (agent or session)")
     default:
         fmt.Printf("Plan execution failed: %v\n", err)
     }
 }
 ```
+
+**Common initialization errors**:
+- `ErrPlanNotInitialized`: Occurs when the plan's agent or session is nil
+  - When using direct JSON unmarshaling without `Agent.NewPlanFromData()`
+  - When the plan session is not properly initialized during creation or restoration
 
 ### Integration with Facilitator
 
@@ -347,6 +369,29 @@ plan, err := agent.Plan(ctx, "Task that requires MCP tools")
 
 This allows plan mode to leverage external tool ecosystems while maintaining the same planning and execution framework.
 
+## Thread Safety Considerations
+
+**Important**: Agent instances are not thread-safe. Follow these guidelines:
+
+- **Single Goroutine**: Use one Agent instance per goroutine
+- **External Synchronization**: If sharing an Agent across goroutines, implement proper mutex locking
+- **Session State**: Session state is managed internally by the Agent and should not be accessed directly
+- **Plan Execution**: Each Plan execution updates the Agent's session state
+
+```go
+// Safe: One agent per goroutine
+go func() {
+    agent := gollem.New(llmClient, options...)
+    plan, _ := agent.Plan(ctx, "task")
+    plan.Execute(ctx)
+}()
+
+// Unsafe: Concurrent access without synchronization
+var agent = gollem.New(llmClient, options...)
+go plan1.Execute(ctx) // May cause race conditions
+go plan2.Execute(ctx) // May cause race conditions
+```
+
 ## Data Access Design
 
 Plan mode follows a strict external reference approach to avoid API confusion:
@@ -355,6 +400,8 @@ Plan mode follows a strict external reference approach to avoid API confusion:
 - **Data Copying**: The `GetToDos()` method returns copies of internal data structures, preventing external modification
 - **Immutable References**: All returned structures are designed to be read-only from the external perspective
 - **Consistent Interface**: A single method provides access to all todo information, allowing flexible client-side processing
+- **Session Access**: Use `plan.Session()` to access the plan's session and history; sessions are immutable once set
+- **Single Source of Truth**: The plan's session is the authoritative source for conversation history, not internal fields
 
 ### Example Usage
 

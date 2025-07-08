@@ -11,7 +11,7 @@ This example demonstrates the Plan-and-Execute functionality in gollem.
 ## Features Demonstrated
 
 - **Plan Creation**: `Agent.Plan()` method with custom options
-- **Serialization**: `Plan.Serialize()` and `Agent.DeserializePlan()` methods
+- **Serialization**: `Plan.Serialize()` and `Agent.NewPlanFromData()` methods
 - **Plan Execution**: `Plan.Execute()` method that runs the complete plan
 - **Tool Integration**: Custom tools (search, analysis) used during plan execution
 - **System Prompts**: Custom system prompts for different phases of execution

@@ -27,12 +27,16 @@ func (x ResponseMode) String() string {
 }
 
 // Agent is core structure of the package.
+// Note: Agent is not thread-safe. Each instance should be used by a single goroutine
+// or proper synchronization must be implemented by the caller.
 type Agent struct {
 	llm LLMClient
 
 	gollemConfig
 
 	// currentSession holds the current session for continuous execution
+	// This field should only be accessed through session management methods
+	// WARNING: Direct access is not thread-safe
 	currentSession Session
 }
 
@@ -42,8 +46,19 @@ func (x *Agent) Facilitator() Facilitator {
 
 // Session returns the current session for the agent.
 // This is the only way to access the session and its history.
+// If no session exists, this will return nil.
 func (x *Agent) Session() Session {
 	return x.currentSession
+}
+
+// setSession updates the agent's current session.
+// This method should be used carefully as it replaces the existing session.
+func (x *Agent) setSession(session Session) {
+	x.currentSession = session
+	// Update history to maintain consistency
+	if session != nil && session.History() != nil {
+		x.history = session.History()
+	}
 }
 
 const (

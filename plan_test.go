@@ -116,7 +116,7 @@ func TestPlanSerialization(t *testing.T) {
 	gt.True(t, len(data) > 0)
 
 	// Deserialize
-	deserializedPlan, err := agent.DeserializePlan(data)
+	deserializedPlan, err := agent.NewPlanFromData(data)
 	gt.NoError(t, err)
 	gt.NotNil(t, deserializedPlan)
 }
@@ -304,7 +304,7 @@ func BenchmarkPlanDeserialization(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		_, err := agent.DeserializePlan(data)
+		_, err := agent.NewPlanFromData(data)
 		if err != nil {
 			b.Fatal(err)
 		}

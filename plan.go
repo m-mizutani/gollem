@@ -20,12 +20,12 @@ type Plan struct {
 	input   string
 	todos   []planToDo
 	state   PlanState
-	history *History // For maintaining state between plans
 
 	// Fields reconstructed at runtime (not serialized)
-	agent   *Agent          `json:"-"`
-	toolMap map[string]Tool `json:"-"`
-	config  *planConfig     `json:"-"`
+	agent       *Agent          `json:"-"`
+	toolMap     map[string]Tool `json:"-"`
+	config      *planConfig     `json:"-"`
+	mainSession Session         `json:"-"` // Main session for plan execution (immutable once set)
 }
 
 // planToDo represents a single task in the plan (private to avoid API confusion)
@@ -166,17 +166,27 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 		return nil, goerr.Wrap(err, "failed to generate plan")
 	}
 
+	// Create independent session for this plan (not connected to Agent session)
+	sessionOptions := []SessionOption{}
+	if cfg.history != nil {
+		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
+	}
+	mainSession, err := g.llm.NewSession(ctx, sessionOptions...)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create main session for plan")
+	}
+
 	plan := &Plan{
 		id:      planID,
 		input:   prompt,
 		todos:   todos,
 		state:   PlanStateCreated,
-		history: cfg.history,
 
 		// Runtime fields
-		agent:   g,
-		toolMap: toolMap,
-		config:  cfg,
+		agent:       g,
+		toolMap:     toolMap,
+		config:      cfg,
+		mainSession: mainSession,
 	}
 
 	// Call PlanCreatedHook
@@ -206,6 +216,12 @@ func (p *Plan) Execute(ctx context.Context) (string, error) {
 	if p.agent == nil {
 		return "", ErrPlanNotInitialized
 	}
+	if p.mainSession == nil {
+		return "", ErrPlanNotInitialized
+	}
+
+	// Plan sessions are independent from Agent sessions
+	// No need to update Agent's current session
 
 	logger := LoggerFromContext(ctx) // Use existing context.go function
 
@@ -281,6 +297,7 @@ func (p *Plan) Execute(ctx context.Context) (string, error) {
 				}
 			}
 
+
 			logger.Info("plan completed successfully",
 				"plan_id", p.id,
 				"todos_executed", len(p.getCompletedToDos()))
@@ -295,6 +312,8 @@ func (p *Plan) Execute(ctx context.Context) (string, error) {
 	}
 
 	p.state = PlanStateCompleted
+	
+	
 	logger.Info("plan completed - all steps processed", "plan_id", p.id)
 	return "Plan completed", nil
 }
@@ -404,11 +423,11 @@ func (g *Agent) generatePlan(ctx context.Context, session Session, prompt string
 func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, error) {
 	todo.Status = ToDoStatusExecuting
 
-	// Create executor session
-	executorSession, err := p.agent.createExecutorSession(ctx, p.config, p.getToolList())
-	if err != nil {
-		return nil, err
+	// Use main session for step execution to maintain history continuity
+	if p.mainSession == nil {
+		return nil, goerr.Wrap(ErrPlanNotInitialized, "plan main session is not initialized")
 	}
+	executorSession := p.mainSession
 
 	// Generate execution prompt (using template)
 	var promptBuffer bytes.Buffer
@@ -461,20 +480,6 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 	}
 
 	return result, nil
-}
-
-// createExecutorSession creates a session for step execution
-func (g *Agent) createExecutorSession(ctx context.Context, cfg *planConfig, toolList []Tool) (Session, error) {
-	sessionOptions := []SessionOption{}
-
-	if cfg.history != nil {
-		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
-	}
-	if len(toolList) > 0 {
-		sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
-	}
-
-	return g.llm.NewSession(ctx, sessionOptions...)
 }
 
 // reflect analyzes execution results and determines next actions
@@ -564,14 +569,6 @@ func (p *Plan) getCompletedToDos() []planToDo {
 	return completed
 }
 
-func (p *Plan) getToolList() []Tool {
-	tools := make([]Tool, 0, len(p.toolMap))
-	for _, tool := range p.toolMap {
-		tools = append(tools, tool)
-	}
-	return tools
-}
-
 func (p *Plan) getProgressSummary() string {
 	var summary strings.Builder
 	completed := p.getCompletedToDos()
@@ -640,7 +637,6 @@ type planData struct {
 	Input   string     `json:"input"`
 	ToDos   []planToDo `json:"todos"`
 	State   PlanState  `json:"state"`
-	History *History   `json:"history"`
 }
 
 const (
@@ -649,19 +645,23 @@ const (
 
 // Serialize serializes the plan to JSON
 func (p *Plan) Serialize() ([]byte, error) {
+	return json.Marshal(p)
+}
+
+// MarshalJSON implements json.Marshaler interface for Plan
+func (p *Plan) MarshalJSON() ([]byte, error) {
 	data := planData{
 		Version: PlanVersion,
 		ID:      p.id,
 		Input:   p.input,
 		ToDos:   p.todos,
 		State:   p.state,
-		History: p.history,
 	}
 	return json.Marshal(data)
 }
 
-// DeserializePlan deserializes a plan from JSON (use existing setupTools pattern)
-func (g *Agent) DeserializePlan(data []byte, options ...PlanOption) (*Plan, error) {
+// NewPlanFromData creates a plan from serialized JSON data (use existing setupTools pattern)
+func (g *Agent) NewPlanFromData(data []byte, options ...PlanOption) (*Plan, error) {
 	var planData planData
 	if err := json.Unmarshal(data, &planData); err != nil {
 		return nil, goerr.Wrap(err, "failed to unmarshal plan data")
@@ -681,17 +681,61 @@ func (g *Agent) DeserializePlan(data []byte, options ...PlanOption) (*Plan, erro
 		return nil, goerr.Wrap(err, "failed to setup tools for deserialized plan")
 	}
 
-	return &Plan{
+	// Recreate independent session for deserialized plan
+	sessionOptions := []SessionOption{}
+	mainSession, err := g.llm.NewSession(context.Background(), sessionOptions...)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to recreate main session for deserialized plan")
+	}
+
+	plan := &Plan{
 		id:      planData.ID,
 		input:   planData.Input,
 		todos:   planData.ToDos,
 		state:   planData.State,
-		history: planData.History,
 
-		agent:   g,
-		toolMap: toolMap,
-		config:  cfg,
-	}, nil
+		agent:       g,
+		toolMap:     toolMap,
+		config:      cfg,
+		mainSession: mainSession,
+	}
+	
+	return plan, nil
+}
+
+// Session returns the session used by this plan for conversation history.
+// This session is independent from the Agent's session and maintains the plan's context.
+// The session is immutable once set during plan creation or deserialization.
+// Returns nil if the plan is not properly initialized (e.g., only unmarshaled without Agent.NewPlanFromData).
+func (p *Plan) Session() Session {
+	return p.mainSession
+}
+
+// UnmarshalJSON implements json.Unmarshaler interface for Plan
+// Note: This method requires the Plan to be associated with an Agent after unmarshaling
+// Use Agent.NewPlanFromData() for complete restoration
+func (p *Plan) UnmarshalJSON(data []byte) error {
+	var planData planData
+	if err := json.Unmarshal(data, &planData); err != nil {
+		return goerr.Wrap(err, "failed to unmarshal plan data")
+	}
+
+	// Version check
+	if planData.Version != PlanVersion {
+		return goerr.Wrap(ErrInvalidHistoryData, "plan version mismatch",
+			goerr.V("expected", PlanVersion), goerr.V("actual", planData.Version))
+	}
+
+	// Set the unmarshaled data
+	p.id = planData.ID
+	p.input = planData.Input
+	p.todos = planData.ToDos
+	p.state = planData.State
+	
+	// Runtime fields (agent, toolMap, config, mainSession) remain nil
+	// These need to be set separately via Agent.NewPlanFromData()
+	
+	return nil
 }
 
 // Public methods for Plan inspection
@@ -868,5 +912,12 @@ func WithToDoStartHook(hook PlanToDoStartPublicHook) PlanOption {
 func WithToDoCompletedHook(hook PlanToDoCompletedPublicHook) PlanOption {
 	return func(cfg *planConfig) {
 		cfg.publicToDoCompletedHook = hook
+	}
+}
+
+// WithPlanHistory sets the history for plan execution (plan-specific)
+func WithPlanHistory(history *History) PlanOption {
+	return func(cfg *planConfig) {
+		cfg.history = history
 	}
 }
