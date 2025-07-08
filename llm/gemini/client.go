@@ -3,6 +3,9 @@ package gemini
 import (
 	"context"
 	"fmt"
+	"math"
+	"strings"
+	"time"
 
 	"cloud.google.com/go/vertexai/genai"
 	"github.com/m-mizutani/goerr/v2"
@@ -12,7 +15,7 @@ import (
 )
 
 const (
-	DefaultModel          = "gemini-2.0-flash"
+	DefaultModel          = "gemini-1.5-pro" // Changed from gemini-2.0-flash to more stable version
 	DefaultEmbeddingModel = "text-embedding-004"
 )
 
@@ -165,6 +168,16 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 	return client, nil
 }
 
+// contains checks if a slice contains a string
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
 // NewSession creates a new session for the Gemini API.
 // It converts the provided tools to Gemini's tool format and initializes a new chat session.
 func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
@@ -173,7 +186,8 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 	// Convert gollem.Tool to *genai.Tool
 	genaiFunctions := make([]*genai.FunctionDeclaration, len(cfg.Tools()))
 	for i, tool := range cfg.Tools() {
-		genaiFunctions[i] = convertTool(tool)
+		converted := convertTool(tool)
+		genaiFunctions[i] = converted
 	}
 
 	var messages []*genai.Content
@@ -204,19 +218,6 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 	}
 
 	if len(genaiFunctions) > 0 {
-		// DEBUG: Log Gemini function declarations
-		fmt.Printf("DEBUG: Setting up %d Gemini function declarations:\n", len(genaiFunctions))
-		for i, fn := range genaiFunctions {
-			fmt.Printf("DEBUG: Function %d - Name: %s, Description: %s, Parameters: %+v\n", 
-				i, fn.Name, fn.Description, fn.Parameters)
-			if fn.Parameters != nil && fn.Parameters.Properties != nil {
-				fmt.Printf("DEBUG: Function %s has %d properties\n", fn.Name, len(fn.Parameters.Properties))
-				for propName, prop := range fn.Parameters.Properties {
-					fmt.Printf("DEBUG: Property %s: Type=%s, Required=%v\n", propName, prop.Type, contains(fn.Parameters.Required, propName))
-				}
-			}
-		}
-
 		model.Tools = []*genai.Tool{
 			{
 				FunctionDeclarations: genaiFunctions,
@@ -232,16 +233,6 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 	}
 
 	return session, nil
-}
-
-// Helper function to check if a slice contains a string
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *Session) History() *gollem.History {
@@ -284,16 +275,9 @@ func (s *Session) convertInputs(input ...gollem.Input) ([]genai.Part, error) {
 }
 
 // processResponse converts Gemini response to gollem.Response
-func processResponse(resp *genai.GenerateContentResponse) *gollem.Response {
+func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, error) {
 	if len(resp.Candidates) == 0 {
-		// DEBUG: Log why there are no candidates
-		fmt.Printf("DEBUG: Gemini returned no candidates. PromptFeedback: %+v, UsageMetadata: %+v\n", 
-			resp.PromptFeedback, resp.UsageMetadata)
-		if resp.PromptFeedback != nil {
-			fmt.Printf("DEBUG: BlockReason: %+v, SafetyRatings: %+v\n", 
-				resp.PromptFeedback.BlockReason, resp.PromptFeedback.SafetyRatings)
-		}
-		return &gollem.Response{}
+		return &gollem.Response{}, nil
 	}
 
 	response := &gollem.Response{
@@ -301,39 +285,34 @@ func processResponse(resp *genai.GenerateContentResponse) *gollem.Response {
 		FunctionCalls: make([]*gollem.FunctionCall, 0),
 	}
 
-	// DEBUG: Log candidate details
-	fmt.Printf("DEBUG: Processing %d candidates\n", len(resp.Candidates))
-
 	for i, candidate := range resp.Candidates {
-		// DEBUG: Log candidate info
-		fmt.Printf("DEBUG: Candidate %d - FinishReason: %+v, SafetyRatings: %+v, Parts: %d\n", 
-			i, candidate.FinishReason, candidate.SafetyRatings, len(candidate.Content.Parts))
-		
+		// Check for malformed function call errors with improved error details
+		if candidate.FinishReason.String() == "FinishReasonMalformedFunctionCall" {
+			return nil, goerr.New("malformed function call detected",
+				goerr.V("candidate_index", i),
+				goerr.V("content_parts", len(candidate.Content.Parts)),
+				goerr.V("finish_reason", candidate.FinishReason.String()),
+				goerr.V("suggested_action", "retry with simplified parameters or check tool schema"))
+		}
+
 		if len(candidate.Content.Parts) == 0 {
-			fmt.Printf("DEBUG: Candidate %d has no content parts\n", i)
 			continue
 		}
 
-		for j, part := range candidate.Content.Parts {
-			fmt.Printf("DEBUG: Candidate %d, Part %d, Type: %T\n", i, j, part)
+		for _, part := range candidate.Content.Parts {
 			switch v := part.(type) {
 			case genai.Text:
-				fmt.Printf("DEBUG: Text content: %q\n", string(v))
 				response.Texts = append(response.Texts, string(v))
 			case genai.FunctionCall:
-				fmt.Printf("DEBUG: FunctionCall - Name: %s, Args: %+v\n", v.Name, v.Args)
 				response.FunctionCalls = append(response.FunctionCalls, &gollem.FunctionCall{
 					Name:      v.Name,
 					Arguments: v.Args,
 				})
-			default:
-				fmt.Printf("DEBUG: Unknown part type: %T, value: %+v\n", part, part)
 			}
 		}
 	}
 
-	fmt.Printf("DEBUG: Final response - Texts: %d, FunctionCalls: %d\n", len(response.Texts), len(response.FunctionCalls))
-	return response
+	return response, nil
 }
 
 // GenerateContent processes the input and generates a response.
@@ -347,18 +326,38 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	// Filter out history entries with empty parts before sending message
 	s.filterEmptyHistoryParts(ctx)
 
-	// DEBUG: Log the parts being sent to Gemini
-	fmt.Printf("DEBUG: Sending %d parts to Gemini:\n", len(parts))
-	for i, part := range parts {
-		fmt.Printf("DEBUG: Part %d type: %T, content: %+v\n", i, part, part)
-	}
-
 	resp, err := s.session.SendMessage(ctx, parts...)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to send message")
 	}
 
-	return processResponse(resp), nil
+	return processResponse(resp)
+}
+
+// GenerateContentWithRetry adds retry logic for malformed function call errors
+func (s *Session) GenerateContentWithRetry(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	const maxRetries = 3
+	const baseDelay = 1 * time.Second
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		resp, err := s.GenerateContent(ctx, input...)
+		if err != nil {
+			if strings.Contains(err.Error(), "malformed function call") {
+				// Exponential backoff
+				delay := time.Duration(float64(baseDelay) * math.Pow(2, float64(attempt)))
+				select {
+				case <-time.After(delay):
+					continue
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			return nil, err
+		}
+		return resp, nil
+	}
+
+	return nil, goerr.New("max retries exceeded for malformed function call")
 }
 
 // filterEmptyHistoryParts removes history entries with empty parts
@@ -414,7 +413,14 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				return
 			}
 
-			responseChan <- processResponse(resp)
+			processedResp, err := processResponse(resp)
+			if err != nil {
+				responseChan <- &gollem.Response{
+					Error: goerr.Wrap(err, "failed to process response"),
+				}
+				return
+			}
+			responseChan <- processedResp
 		}
 	}()
 
