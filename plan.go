@@ -89,7 +89,7 @@ type (
 
 // planReflection represents the result of plan reflection (private)
 type planReflection struct {
-	ShouldContinue   bool       `json:"should_continue"`
+	ShouldContinue   *bool      `json:"should_continue"`
 	UpdatedToDos     []planToDo `json:"updated_todos,omitempty"`
 	NewToDos         []planToDo `json:"new_todos,omitempty"`
 	CompletionReason string     `json:"completion_reason,omitempty"`
@@ -206,10 +206,15 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 
 // Execute executes the plan and returns the final result
 func (p *Plan) Execute(ctx context.Context) (string, error) {
+	logger := LoggerFromContext(ctx)
+	logger.Debug("plan execute started", "plan_id", p.id, "state", p.state)
+	
 	if err := p.validateAndPrepareExecution(); err != nil {
+		logger.Debug("plan validation failed", "plan_id", p.id, "error", err)
 		return "", err
 	}
 
+	logger.Debug("plan validation passed, starting execution", "plan_id", p.id)
 	return p.executeSteps(ctx)
 }
 
@@ -235,25 +240,44 @@ func (p *Plan) validateAndPrepareExecution() error {
 // executeSteps executes all pending steps in the plan
 func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 	logger := LoggerFromContext(ctx) // Use existing context.go function
+	logger.Debug("executeSteps started", "plan_id", p.id, "pending_todos_count", len(p.getPendingToDos()))
 
 	for len(p.getPendingToDos()) > 0 {
 		currentStep := p.getNextPendingToDo()
 		if currentStep == nil {
+			logger.Debug("no more pending todos found", "plan_id", p.id)
 			break
 		}
+
+		logger.Debug("processing plan step", 
+			"plan_id", p.id,
+			"step_id", currentStep.ID,
+			"step_description", currentStep.Description,
+			"pending_count", len(p.getPendingToDos()))
 
 		// Process single step
 		result, shouldComplete, err := p.processSingleStep(ctx, currentStep)
 		if err != nil {
+			logger.Error("plan step processing failed",
+				"plan_id", p.id,
+				"step_id", currentStep.ID,
+				"error", err)
 			return "", err
 		}
 
 		if shouldComplete {
-			logger.Info("plan completed successfully",
+			logger.Debug("plan completed successfully by reflection",
 				"plan_id", p.id,
-				"todos_executed", len(p.getCompletedToDos()))
+				"step_id", currentStep.ID,
+				"todos_executed", len(p.getCompletedToDos()),
+				"result", result)
 			return result, nil
 		}
+
+		logger.Debug("plan step completed, continuing to next step",
+			"plan_id", p.id,
+			"step_id", currentStep.ID,
+			"remaining_pending", len(p.getPendingToDos()))
 	}
 
 	p.state = PlanStateCompleted
@@ -264,17 +288,23 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 
 // processSingleStep processes a single step including hooks, execution, and reflection
 func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (string, bool, error) {
+	logger := LoggerFromContext(ctx)
+	logger.Debug("starting step processing", "plan_id", p.id, "step_id", currentStep.ID, "step_intent", currentStep.Intent)
+
 	// Call step start hooks
 	if err := p.callStepStartHooks(ctx, currentStep); err != nil {
 		return "", false, err
 	}
 
+	logger.Debug("executing step", "plan_id", p.id, "step_id", currentStep.ID)
 	// Execute step
 	result, err := p.executeStep(ctx, currentStep)
 	if err != nil {
+		logger.Debug("step execution failed", "plan_id", p.id, "step_id", currentStep.ID, "error", err)
 		return "", false, p.handleStepError(currentStep, err)
 	}
 
+	logger.Debug("step execution completed", "plan_id", p.id, "step_id", currentStep.ID, "output_length", len(result.Output), "tool_calls_count", len(result.ToolCalls))
 	currentStep.Status = ToDoStatusCompleted
 	currentStep.Result = result
 
@@ -284,10 +314,25 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 	}
 
 	// Reflection and re-planning
+	logger.Debug("starting plan reflection", "plan_id", p.id, "step_id", currentStep.ID)
 	reflection, err := p.reflect(ctx)
 	if err != nil {
+		logger.Debug("plan reflection failed", "plan_id", p.id, "step_id", currentStep.ID, "error", err)
 		return "", false, goerr.Wrap(err, "plan reflection failed")
 	}
+
+	// Helper for logging bool pointer
+	shouldContinueValue := "nil"
+	if reflection.ShouldContinue != nil {
+		shouldContinueValue = fmt.Sprintf("%t", *reflection.ShouldContinue)
+	}
+	
+	logger.Debug("plan reflection completed",
+		"plan_id", p.id,
+		"should_continue", shouldContinueValue,
+		"completion_reason", reflection.CompletionReason,
+		"new_todos_count", len(reflection.NewToDos),
+		"updated_todos_count", len(reflection.UpdatedToDos))
 
 	// Call PlanReflectionHook
 	if p.config.planReflectionHook != nil {
@@ -296,8 +341,16 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 		}
 	}
 
-	if !reflection.ShouldContinue {
+	// Check if reflection indicates completion
+	// If ShouldContinue is nil or false, we consider it as completion
+	shouldContinue := reflection.ShouldContinue != nil && *reflection.ShouldContinue
+	if !shouldContinue {
 		p.state = PlanStateCompleted
+
+		logger.Debug("plan marked as completed by reflection",
+			"plan_id", p.id,
+			"completion_reason", reflection.CompletionReason,
+			"response_length", len(reflection.Response))
 
 		// Call PlanCompletedHook
 		if p.config.planCompletedHook != nil {
@@ -310,10 +363,13 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 	}
 
 	// Update plan
+	logger.Debug("updating plan based on reflection", "plan_id", p.id, "step_id", currentStep.ID)
 	if err := p.updatePlan(reflection); err != nil {
+		logger.Debug("plan update failed", "plan_id", p.id, "step_id", currentStep.ID, "error", err)
 		return "", false, goerr.Wrap(err, "failed to update plan")
 	}
 
+	logger.Debug("plan updated successfully, continuing execution", "plan_id", p.id, "step_id", currentStep.ID)
 	return "", false, nil
 }
 
@@ -506,14 +562,19 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 
 	// Process tool call results (use existing handleResponse pattern)
 	if len(response.FunctionCalls) > 0 {
+		logger := LoggerFromContext(ctx)
+		logger.Debug("processing tool calls", "plan_id", p.id, "tool_calls_count", len(response.FunctionCalls))
+		
 		newInput, err := handleResponse(ctx, p.config.gollemConfig, response, p.toolMap)
 		if err != nil {
 			// Special handling for ErrExitConversation
 			if errors.Is(err, ErrExitConversation) {
+				logger.Debug("conversation exit requested by tool", "plan_id", p.id, "tool_calls", response.FunctionCalls)
 				// Process step as successful but mark plan completion
 				result.Output += "\n[Conversation exit requested by tool]"
 				return result, nil
 			}
+			logger.Debug("tool execution failed", "plan_id", p.id, "error", err)
 			return nil, goerr.Wrap(err, "tool execution failed")
 		}
 
@@ -563,10 +624,27 @@ func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 	var reflection planReflection
 	if err := json.Unmarshal([]byte(response.Texts[0]), &reflection); err != nil {
 		// If JSON parsing fails, process as text response
+		logger := LoggerFromContext(ctx)
+		logger.Debug("reflection JSON parse failed, using fallback", 
+			"plan_id", p.id, 
+			"error", err, 
+			"response_text", response.Texts[0])
+		
+		shouldContinue := false
 		reflection = planReflection{
-			ShouldContinue:   false,
+			ShouldContinue:   &shouldContinue,
 			Response:         response.Texts[0],
 			CompletionReason: "manual_completion",
+		}
+	} else {
+		// Validate that ShouldContinue field was provided
+		logger := LoggerFromContext(ctx)
+		if reflection.ShouldContinue == nil {
+			logger.Debug("reflection missing should_continue field, defaulting to false", 
+				"plan_id", p.id,
+				"response_text", response.Texts[0])
+			shouldContinue := false
+			reflection.ShouldContinue = &shouldContinue
 		}
 	}
 
