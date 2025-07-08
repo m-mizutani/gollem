@@ -17,10 +17,10 @@ import (
 // Plan represents an executable plan
 type Plan struct {
 	// Internal state (may be processed asynchronously except during Execute execution)
-	id      string
-	input   string
-	todos   []planToDo
-	state   PlanState
+	id    string
+	input string
+	todos []planToDo
+	state PlanState
 
 	// Fields reconstructed at runtime (not serialized)
 	agent       *Agent          `json:"-"`
@@ -177,10 +177,10 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 	}
 
 	plan := &Plan{
-		id:      planID,
-		input:   prompt,
-		todos:   todos,
-		state:   PlanStateCreated,
+		id:    planID,
+		input: prompt,
+		todos: todos,
+		state: PlanStateCreated,
 
 		// Runtime fields
 		agent:       g,
@@ -257,8 +257,7 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 	}
 
 	p.state = PlanStateCompleted
-	
-	
+
 	logger.Info("plan completed - all steps processed", "plan_id", p.id)
 	return "Plan completed", nil
 }
@@ -737,17 +736,17 @@ func (g *Agent) NewPlanFromData(data []byte, options ...PlanOption) (*Plan, erro
 	}
 
 	plan := &Plan{
-		id:      planData.ID,
-		input:   planData.Input,
-		todos:   planData.ToDos,
-		state:   planData.State,
+		id:    planData.ID,
+		input: planData.Input,
+		todos: planData.ToDos,
+		state: planData.State,
 
 		agent:       g,
 		toolMap:     toolMap,
 		config:      cfg,
 		mainSession: mainSession,
 	}
-	
+
 	return plan, nil
 }
 
@@ -779,10 +778,10 @@ func (p *Plan) UnmarshalJSON(data []byte) error {
 	p.input = planData.Input
 	p.todos = planData.ToDos
 	p.state = planData.State
-	
+
 	// Runtime fields (agent, toolMap, config, mainSession) remain nil
 	// These need to be set separately via Agent.NewPlanFromData()
-	
+
 	return nil
 }
 
@@ -857,11 +856,11 @@ func (p *planToDo) copyResult() *PlanToDoResult {
 	if p.Result == nil {
 		return nil
 	}
-	
+
 	// Deep copy of Data map
 	data := make(map[string]any)
 	maps.Copy(data, p.Result.Data)
-	
+
 	return &PlanToDoResult{
 		Output:     p.Result.Output,
 		ToolCalls:  p.Result.ToolCalls, // []*FunctionCall is immutable after creation

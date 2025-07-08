@@ -1130,7 +1130,7 @@ func TestErrExitConversation(t *testing.T) {
 func TestFacilitationHook(t *testing.T) {
 	t.Run("WithFacilitationHook", func(t *testing.T) {
 		facilitationCalls := []gollem.Facilitation{}
-		
+
 		mockClient := newMockClient(func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 			// Check if input is DefaultFacilitator's proceed prompt and return JSON response
 			if len(input) > 0 {
@@ -1153,10 +1153,10 @@ func TestFacilitationHook(t *testing.T) {
 				return nil
 			}),
 		)
-		
+
 		err := s.Execute(t.Context(), "test message")
 		gt.NoError(t, err)
-		
+
 		// Verify that FacilitationHook was called
 		gt.A(t, facilitationCalls).Length(1)
 		gt.Equal(t, facilitationCalls[0].Action, gollem.ActionComplete)
@@ -1187,7 +1187,7 @@ func TestFacilitationHook(t *testing.T) {
 				return expectedError
 			}),
 		)
-		
+
 		err := s.Execute(t.Context(), "test message")
 		gt.Error(t, err)
 		gt.Equal(t, err, expectedError)

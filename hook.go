@@ -3,7 +3,7 @@ package gollem
 import "context"
 
 type (
-	// LoopHook is a hook for the session loop. This hook is called at the beginning of each iteration 
+	// LoopHook is a hook for the session loop. This hook is called at the beginning of each iteration
 	// in the main execution loop, before sending input to the LLM.
 	//
 	// Parameters:
@@ -98,9 +98,9 @@ type (
 	//   })
 	ToolResponseHook func(ctx context.Context, tool FunctionCall, response map[string]any) error
 
-	// FacilitationHook is a hook for facilitation responses. This hook is called when the facilitator 
+	// FacilitationHook is a hook for facilitation responses. This hook is called when the facilitator
 	// generates a response during the session loop when there is no input (no tool results or user messages).
-	// The hook receives the facilitation response containing the action (continue/complete), reason, 
+	// The hook receives the facilitation response containing the action (continue/complete), reason,
 	// and either next_step (for continue) or completion (for complete).
 	//
 	// This hook is useful for:

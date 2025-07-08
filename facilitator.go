@@ -200,7 +200,7 @@ func (x *defaultFacilitator) updateStatusWithContext(ctx context.Context, ssn Se
 	responseText := output.Texts[0]
 	var resp Facilitation
 	if err := json.Unmarshal([]byte(responseText), &resp); err != nil {
-		return nil, goerr.Wrap(err, "failed to unmarshal response", 
+		return nil, goerr.Wrap(err, "failed to unmarshal response",
 			goerr.V("response_text", responseText),
 			goerr.V("response_length", len(responseText)))
 	}
