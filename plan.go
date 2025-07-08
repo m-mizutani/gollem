@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -111,8 +112,7 @@ type planConfig struct {
 	publicToDoCompletedHook PlanToDoCompletedPublicHook
 
 	// Plan-specific settings
-	maxPlanSteps      int
-	reflectionEnabled bool
+	// (reserved for future use)
 }
 
 // PlanOption represents configuration options for plan creation and execution
@@ -206,23 +206,34 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 
 // Execute executes the plan and returns the final result
 func (p *Plan) Execute(ctx context.Context) (string, error) {
+	if err := p.validateAndPrepareExecution(); err != nil {
+		return "", err
+	}
+
+	return p.executeSteps(ctx)
+}
+
+// validateAndPrepareExecution validates the plan state and prepares for execution
+func (p *Plan) validateAndPrepareExecution() error {
 	if p.state != PlanStateCreated {
-		return "", ErrPlanAlreadyExecuted
+		return ErrPlanAlreadyExecuted
 	}
 
 	p.state = PlanStateRunning
 
 	// Restore runtime fields (when deserialized)
 	if p.agent == nil {
-		return "", ErrPlanNotInitialized
+		return ErrPlanNotInitialized
 	}
 	if p.mainSession == nil {
-		return "", ErrPlanNotInitialized
+		return ErrPlanNotInitialized
 	}
 
-	// Plan sessions are independent from Agent sessions
-	// No need to update Agent's current session
+	return nil
+}
 
+// executeSteps executes all pending steps in the plan
+func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 	logger := LoggerFromContext(ctx) // Use existing context.go function
 
 	for len(p.getPendingToDos()) > 0 {
@@ -231,83 +242,17 @@ func (p *Plan) Execute(ctx context.Context) (string, error) {
 			break
 		}
 
-		// Call PlanStepStartHook
-		if p.config.planStepStartHook != nil {
-			if err := p.config.planStepStartHook(ctx, p, currentStep); err != nil {
-				return "", goerr.Wrap(err, "failed to call PlanStepStartHook")
-			}
-		}
-
-		// Call public ToDo start hook
-		if p.config.publicToDoStartHook != nil {
-			todo := currentStep.toPlanToDo()
-			if err := p.config.publicToDoStartHook(ctx, p, todo); err != nil {
-				return "", goerr.Wrap(err, "failed to call public ToDo start hook")
-			}
-		}
-
-		// Execute step
-		result, err := p.executeStep(ctx, currentStep)
+		// Process single step
+		result, shouldComplete, err := p.processSingleStep(ctx, currentStep)
 		if err != nil {
-			currentStep.Status = ToDoStatusFailed
-			currentStep.Error = err
-			currentStep.ErrorMsg = err.Error()
-			p.state = PlanStateFailed
-			return "", goerr.Wrap(err, "plan step execution failed", goerr.V("step_id", currentStep.ID))
+			return "", err
 		}
 
-		currentStep.Status = ToDoStatusCompleted
-		currentStep.Result = result
-
-		// Call PlanStepCompletedHook
-		if p.config.planStepCompletedHook != nil {
-			if err := p.config.planStepCompletedHook(ctx, p, currentStep, result); err != nil {
-				return "", goerr.Wrap(err, "failed to call PlanStepCompletedHook")
-			}
-		}
-
-		// Call public ToDo completed hook
-		if p.config.publicToDoCompletedHook != nil {
-			todo := currentStep.toPlanToDo()
-			if err := p.config.publicToDoCompletedHook(ctx, p, todo); err != nil {
-				return "", goerr.Wrap(err, "failed to call public ToDo completed hook")
-			}
-		}
-
-		// Reflection and re-planning
-		reflection, err := p.reflect(ctx)
-		if err != nil {
-			return "", goerr.Wrap(err, "plan reflection failed")
-		}
-
-		// Call PlanReflectionHook
-		if p.config.planReflectionHook != nil {
-			if err := p.config.planReflectionHook(ctx, p, reflection); err != nil {
-				return "", goerr.Wrap(err, "failed to call PlanReflectionHook")
-			}
-		}
-
-		if !reflection.ShouldContinue {
-			p.state = PlanStateCompleted
-
-			// Call PlanCompletedHook
-			if p.config.planCompletedHook != nil {
-				if err := p.config.planCompletedHook(ctx, p, reflection.Response); err != nil {
-					return "", goerr.Wrap(err, "failed to call PlanCompletedHook")
-				}
-			}
-
-
+		if shouldComplete {
 			logger.Info("plan completed successfully",
 				"plan_id", p.id,
 				"todos_executed", len(p.getCompletedToDos()))
-
-			return reflection.Response, nil
-		}
-
-		// Update plan
-		if err := p.updatePlan(reflection); err != nil {
-			return "", goerr.Wrap(err, "failed to update plan")
+			return result, nil
 		}
 	}
 
@@ -316,6 +261,110 @@ func (p *Plan) Execute(ctx context.Context) (string, error) {
 	
 	logger.Info("plan completed - all steps processed", "plan_id", p.id)
 	return "Plan completed", nil
+}
+
+// processSingleStep processes a single step including hooks, execution, and reflection
+func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (string, bool, error) {
+	// Call step start hooks
+	if err := p.callStepStartHooks(ctx, currentStep); err != nil {
+		return "", false, err
+	}
+
+	// Execute step
+	result, err := p.executeStep(ctx, currentStep)
+	if err != nil {
+		return "", false, p.handleStepError(currentStep, err)
+	}
+
+	currentStep.Status = ToDoStatusCompleted
+	currentStep.Result = result
+
+	// Call step completed hooks
+	if err := p.callStepCompletedHooks(ctx, currentStep, result); err != nil {
+		return "", false, err
+	}
+
+	// Reflection and re-planning
+	reflection, err := p.reflect(ctx)
+	if err != nil {
+		return "", false, goerr.Wrap(err, "plan reflection failed")
+	}
+
+	// Call PlanReflectionHook
+	if p.config.planReflectionHook != nil {
+		if err := p.config.planReflectionHook(ctx, p, reflection); err != nil {
+			return "", false, goerr.Wrap(err, "failed to call PlanReflectionHook")
+		}
+	}
+
+	if !reflection.ShouldContinue {
+		p.state = PlanStateCompleted
+
+		// Call PlanCompletedHook
+		if p.config.planCompletedHook != nil {
+			if err := p.config.planCompletedHook(ctx, p, reflection.Response); err != nil {
+				return "", false, goerr.Wrap(err, "failed to call PlanCompletedHook")
+			}
+		}
+
+		return reflection.Response, true, nil
+	}
+
+	// Update plan
+	if err := p.updatePlan(reflection); err != nil {
+		return "", false, goerr.Wrap(err, "failed to update plan")
+	}
+
+	return "", false, nil
+}
+
+// callStepStartHooks calls all step start hooks
+func (p *Plan) callStepStartHooks(ctx context.Context, currentStep *planToDo) error {
+	// Call PlanStepStartHook
+	if p.config.planStepStartHook != nil {
+		if err := p.config.planStepStartHook(ctx, p, currentStep); err != nil {
+			return goerr.Wrap(err, "failed to call PlanStepStartHook")
+		}
+	}
+
+	// Call public ToDo start hook
+	if p.config.publicToDoStartHook != nil {
+		todo := currentStep.toPlanToDo()
+		if err := p.config.publicToDoStartHook(ctx, p, todo); err != nil {
+			return goerr.Wrap(err, "failed to call public ToDo start hook")
+		}
+	}
+
+	return nil
+}
+
+// callStepCompletedHooks calls all step completed hooks
+func (p *Plan) callStepCompletedHooks(ctx context.Context, currentStep *planToDo, result *toDoResult) error {
+	// Call PlanStepCompletedHook
+	if p.config.planStepCompletedHook != nil {
+		if err := p.config.planStepCompletedHook(ctx, p, currentStep, result); err != nil {
+			return goerr.Wrap(err, "failed to call PlanStepCompletedHook")
+		}
+	}
+
+	// Call public ToDo completed hook
+	if p.config.publicToDoCompletedHook != nil {
+		todo := currentStep.toPlanToDo()
+		if err := p.config.publicToDoCompletedHook(ctx, p, todo); err != nil {
+			return goerr.Wrap(err, "failed to call public ToDo completed hook")
+		}
+	}
+
+	return nil
+}
+
+// handleStepError handles step execution errors
+func (p *Plan) handleStepError(step *planToDo, err error) error {
+	step.Status = ToDoStatusFailed
+	step.Error = err
+	step.ErrorMsg = err.Error()
+	p.state = PlanStateFailed
+	return goerr.Wrap(err, "plan step execution failed", goerr.V("step_id", step.ID))
 }
 
 // createPlanConfig creates plan configuration from options
@@ -335,8 +384,7 @@ func (g *Agent) createPlanConfig(options ...PlanOption) *planConfig {
 		publicToDoCompletedHook: nil,
 
 		// Default settings
-		maxPlanSteps:      10,
-		reflectionEnabled: true,
+		// (reserved for future use)
 	}
 
 	for _, opt := range options {
@@ -812,9 +860,7 @@ func (p *planToDo) copyResult() *PlanToDoResult {
 	
 	// Deep copy of Data map
 	data := make(map[string]any)
-	for k, v := range p.Result.Data {
-		data[k] = v
-	}
+	maps.Copy(data, p.Result.Data)
 	
 	return &PlanToDoResult{
 		Output:     p.Result.Output,
@@ -875,20 +921,6 @@ func WithPlanReflectionHook(hook func(ctx context.Context, plan *Plan, reflectio
 func WithPlanCompletedHook(hook func(ctx context.Context, plan *Plan, result string) error) PlanOption {
 	return func(cfg *planConfig) {
 		cfg.planCompletedHook = hook
-	}
-}
-
-// WithMaxPlanSteps sets the maximum number of steps in a plan
-func WithMaxPlanSteps(max int) PlanOption {
-	return func(cfg *planConfig) {
-		cfg.maxPlanSteps = max
-	}
-}
-
-// WithReflectionEnabled enables or disables reflection between steps
-func WithReflectionEnabled(enabled bool) PlanOption {
-	return func(cfg *planConfig) {
-		cfg.reflectionEnabled = enabled
 	}
 }
 

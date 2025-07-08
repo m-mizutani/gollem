@@ -155,7 +155,6 @@ func main() {
 	plan, err := agent.Plan(context.Background(),
 		"Find information about electric cars and summarize the benefits",
 		gollem.WithPlanSystemPrompt("You are an expert research assistant focusing on clean energy technologies."),
-		gollem.WithMaxPlanSteps(5),
 		gollem.WithPlanCreatedHook(func(ctx context.Context, plan *gollem.Plan) error {
 			fmt.Println("✨ Plan created successfully!")
 			displayToDoList(plan)

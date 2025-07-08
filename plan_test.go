@@ -233,8 +233,6 @@ func TestPlanWithCustomOptions(t *testing.T) {
 	agent := gollem.New(mockClient, gollem.WithTools(&testSearchTool{}))
 
 	plan, err := agent.Plan(context.Background(), "Test task",
-		gollem.WithMaxPlanSteps(5),
-		gollem.WithReflectionEnabled(false),
 		gollem.WithPlanSystemPrompt("Custom system prompt"))
 	gt.NoError(t, err)
 	gt.NotNil(t, plan)

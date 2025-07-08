@@ -150,8 +150,6 @@ Plan execution follows a sophisticated three-phase loop for each step:
 
 ```go
 plan, err := agent.Plan(context.Background(), "task description",
-    gollem.WithMaxPlanSteps(10),                    // Limit number of steps
-    gollem.WithReflectionEnabled(true),             // Enable reflection
     gollem.WithPlanSystemPrompt("Custom prompt"),   // Custom system prompt
     gollem.WithPlanHistory(existingHistory),        // Provide initial history
 )
