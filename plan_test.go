@@ -201,13 +201,61 @@ func TestPlanHooks(t *testing.T) {
 			hooksCalled = append(hooksCalled, "completed")
 			return nil
 		}),
+		gollem.WithPlanMessageHook(func(ctx context.Context, plan *gollem.Plan, message gollem.PlanExecutionMessage) error {
+			hooksCalled = append(hooksCalled, "message")
+			return nil
+		}),
 	)
 	gt.NoError(t, err)
 
 	_, err = plan.Execute(context.Background())
 	gt.NoError(t, err)
 
-	gt.Equal(t, []string{"created", "completed"}, hooksCalled)
+	gt.True(t, len(hooksCalled) >= 2) // At least created and completed
+	gt.True(t, contains(hooksCalled, "created"))
+	gt.True(t, contains(hooksCalled, "completed"))
+}
+
+func TestPlanToDoUpdatedHook(t *testing.T) {
+	mockClient := &mockLLMClient{
+		responses: []string{
+			`{"steps": [{"description": "Initial step", "intent": "Test intent"}]}`,
+			"Step execution response",
+			`{"should_continue": true, "updated_todos": [{"todo_id": "todo_1", "todo_description": "Updated step", "todo_intent": "Updated intent", "todo_status": "pending"}]}`,
+			"Updated step response",
+			`{"should_continue": false, "response": "Task completed"}`,
+		},
+	}
+
+	var changes []gollem.PlanToDoChange
+	var hooksCalled []string
+
+	agent := gollem.New(mockClient, gollem.WithTools(&testSearchTool{}))
+
+	plan, err := agent.Plan(context.Background(), "Test task",
+		gollem.WithPlanToDoUpdatedHook(func(ctx context.Context, plan *gollem.Plan, planChanges []gollem.PlanToDoChange) error {
+			hooksCalled = append(hooksCalled, "updated")
+			changes = append(changes, planChanges...)
+			return nil
+		}),
+	)
+	gt.NoError(t, err)
+
+	_, err = plan.Execute(context.Background())
+	gt.NoError(t, err)
+
+	gt.True(t, contains(hooksCalled, "updated"))
+	gt.True(t, len(changes) > 0)
+}
+
+// Helper function to check if a slice contains a string
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }
 
 func TestPlanAlreadyExecutedError(t *testing.T) {

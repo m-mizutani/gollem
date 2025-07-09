@@ -174,18 +174,99 @@ plan, err := agent.Plan(context.Background(), "task description",
 
 ```go
 plan, err := agent.Plan(context.Background(), "task description",
-    gollem.WithToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
+    gollem.WithPlanToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
         fmt.Printf("Starting: %s\n", todo.Description)
         return nil
     }),
-    gollem.WithToDoCompletedHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
+    gollem.WithPlanToDoCompletedHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
         fmt.Printf("Completed: %s (Status: %s)\n", todo.Description, todo.Status)
+        return nil
+    }),
+    gollem.WithPlanToDoUpdatedHook(func(ctx context.Context, plan *gollem.Plan, changes []gollem.PlanToDoChange) error {
+        fmt.Printf("Plan updated with %d changes\n", len(changes))
+        for _, change := range changes {
+            switch change.Type {
+            case gollem.PlanToDoChangeUpdated:
+                fmt.Printf("  Updated: %s\n", change.Description)
+            case gollem.PlanToDoChangeAdded:
+                fmt.Printf("  Added: %s\n", change.Description)
+            case gollem.PlanToDoChangeRemoved:
+                fmt.Printf("  Removed: %s\n", change.Description)
+            }
+        }
+        return nil
+    }),
+    gollem.WithPlanMessageHook(func(ctx context.Context, plan *gollem.Plan, message gollem.PlanExecutionMessage) error {
+        fmt.Printf("Message [%s]: %s\n", message.Type, message.Content)
         return nil
     }),
 )
 ```
 
 ## Advanced Features
+
+### Enhanced Progress Tracking
+
+Plan mode now provides detailed tracking of plan refinements and execution messages:
+
+#### Plan ToDo Updates
+When reflection occurs, the plan may be updated with:
+- **Refined ToDos**: Existing tasks that have been modified based on new insights
+- **New ToDos**: Additional tasks discovered during execution
+- **Removed ToDos**: Tasks that are no longer needed
+
+Use `WithPlanToDoUpdatedHook` to track these changes:
+
+```go
+gollem.WithPlanToDoUpdatedHook(func(ctx context.Context, plan *gollem.Plan, changes []gollem.PlanToDoChange) error {
+    for _, change := range changes {
+        switch change.Type {
+        case gollem.PlanToDoChangeUpdated:
+            fmt.Printf("Refined: %s -> %s\n", change.OldToDo.Description, change.NewToDo.Description)
+        case gollem.PlanToDoChangeAdded:
+            fmt.Printf("Added: %s\n", change.NewToDo.Description)
+        case gollem.PlanToDoChangeRemoved:
+            fmt.Printf("Removed: %s\n", change.OldToDo.Description)
+        }
+    }
+    return nil
+})
+```
+
+#### Execution Messages
+Plan execution generates various types of messages that can be captured:
+
+- **Response Messages**: LLM responses during step execution
+- **System Messages**: Internal system notifications
+- **Action Messages**: Actions being taken
+- **Thought Messages**: LLM reasoning and thinking
+
+Use `WithPlanMessageHook` to capture these messages:
+
+```go
+gollem.WithPlanMessageHook(func(ctx context.Context, plan *gollem.Plan, message gollem.PlanExecutionMessage) error {
+    switch message.Type {
+    case gollem.PlanMessageResponse:
+        fmt.Printf("[%s] Response: %s\n", message.TodoID, message.Content)
+    case gollem.PlanMessageSystem:
+        fmt.Printf("[%s] System: %s\n", message.TodoID, message.Content)
+    case gollem.PlanMessageAction:
+        fmt.Printf("[%s] Action: %s\n", message.TodoID, message.Content)
+    case gollem.PlanMessageThought:
+        fmt.Printf("[%s] Thought: %s\n", message.TodoID, message.Content)
+    }
+    return nil
+})
+```
+
+#### Reflection Types
+Plan reflection now categorizes the type of reflection that occurred:
+
+- **Continue**: Plan continues with current todos
+- **Refine**: Todos were refined/updated
+- **Expand**: New todos were added
+- **Complete**: Plan completed by reflection
+- **Refined Done**: Plan completed after refinement
 
 ### Session History Management
 
@@ -292,14 +373,14 @@ Use hooks to provide real-time feedback:
 
 ```go
 func createProgressMonitor() gollem.PlanOption {
-    return gollem.WithToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
+    return gollem.WithPlanToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
         fmt.Printf("🔄 %s\n", todo.Description)
         return nil
     })
 }
 
 func createCompletionMonitor() gollem.PlanOption {
-    return gollem.WithToDoCompletedHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
+    return gollem.WithPlanToDoCompletedHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
         status := "✅"
         if todo.Status == "Failed" {
             status = "❌"

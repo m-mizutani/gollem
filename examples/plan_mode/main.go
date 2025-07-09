@@ -161,7 +161,7 @@ func main() {
 			displayProgress(plan)
 			return nil
 		}),
-		gollem.WithToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
+		gollem.WithPlanToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
 			fmt.Println("\n" + strings.Repeat("=", 80))
 			fmt.Printf("🔄 STARTING TODO: %s\n", todo.Description)
 			if todo.Intent != "" {
@@ -172,12 +172,37 @@ func main() {
 			displayProgress(plan)
 			return nil
 		}),
-		gollem.WithToDoCompletedHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
+		gollem.WithPlanToDoCompletedHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
 			fmt.Println("\n" + strings.Repeat("-", 80))
 			fmt.Printf("✅ COMPLETED TODO: %s\n", todo.Description)
 			fmt.Println(strings.Repeat("-", 80))
 			displayToDoList(plan)
 			displayProgress(plan)
+			return nil
+		}),
+		gollem.WithPlanToDoUpdatedHook(func(ctx context.Context, plan *gollem.Plan, changes []gollem.PlanToDoChange) error {
+			fmt.Println("\n" + strings.Repeat("~", 80))
+			fmt.Printf("🔄 PLAN UPDATED: %d changes detected\n", len(changes))
+			for _, change := range changes {
+				switch change.Type {
+				case gollem.PlanToDoChangeUpdated:
+					fmt.Printf("   🔧 Updated: %s\n", change.Description)
+				case gollem.PlanToDoChangeAdded:
+					fmt.Printf("   ➕ Added: %s\n", change.Description)
+				case gollem.PlanToDoChangeRemoved:
+					fmt.Printf("   ➖ Removed: %s\n", change.Description)
+				}
+			}
+			fmt.Println(strings.Repeat("~", 80))
+			displayToDoList(plan)
+			displayProgress(plan)
+			return nil
+		}),
+		gollem.WithPlanMessageHook(func(ctx context.Context, plan *gollem.Plan, message gollem.PlanExecutionMessage) error {
+			// Only display important messages to avoid spam
+			if message.Type == gollem.PlanMessageResponse && strings.TrimSpace(message.Content) != "" {
+				fmt.Printf("💬 [%s] %s\n", message.Type, message.Content)
+			}
 			return nil
 		}),
 	)

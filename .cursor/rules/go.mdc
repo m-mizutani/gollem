@@ -1,6 +1,6 @@
 ---
-description: 
-globs: 
+description:
+globs:
 alwaysApply: true
 ---
 
@@ -15,6 +15,7 @@ alwaysApply: true
 
 - You can build binary for tseting, but you MUST clean it after checking.
 - All comments and literals MUST be in English.
+- Do not remove /tmp directory.
 
 ## Comment & Literals
 

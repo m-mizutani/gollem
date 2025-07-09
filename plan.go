@@ -40,6 +40,8 @@ type planToDo struct {
 	Result      *toDoResult `json:"todo_result,omitempty"`
 	Error       error       `json:"-"` // Not serialized
 	ErrorMsg    string      `json:"todo_error,omitempty"`
+	UpdatedAt   time.Time   `json:"todo_updated_at,omitempty"` // When todo was last updated
+	CreatedAt   time.Time   `json:"todo_created_at,omitempty"` // When todo was created
 }
 
 // PlanState represents the current state of plan execution (private)
@@ -71,47 +73,136 @@ type toDoResult struct {
 	ExecutedAt time.Time       `json:"todo_executed_at"`
 }
 
-// Hook types for monitoring plan lifecycle (following existing naming patterns)
+// PlanReflectionType represents the type of reflection outcome
+type PlanReflectionType string
+
+const (
+	PlanReflectionTypeContinue    PlanReflectionType = "continue"     // Plan should continue with current todos
+	PlanReflectionTypeRefine      PlanReflectionType = "refine"       // Todos were refined/updated
+	PlanReflectionTypeExpand      PlanReflectionType = "expand"       // New todos were added
+	PlanReflectionTypeComplete    PlanReflectionType = "complete"     // Plan completed by reflection
+	PlanReflectionTypeRefinedDone PlanReflectionType = "refined_done" // Plan completed after refinement
+)
+
+// PlanToDoChange represents a change to a todo during reflection
+type PlanToDoChange struct {
+	Type        PlanToDoChangeType `json:"change_type"`
+	TodoID      string             `json:"todo_id"`
+	OldToDo     *planToDo          `json:"old_todo,omitempty"`
+	NewToDo     *planToDo          `json:"new_todo,omitempty"`
+	Description string             `json:"description"` // Human-readable description of change
+}
+
+// PlanToDoChangeType represents the type of change to a todo
+type PlanToDoChangeType string
+
+const (
+	PlanToDoChangeTypeUpdated PlanToDoChangeType = "updated" // Todo was updated/refined
+	PlanToDoChangeTypeAdded   PlanToDoChangeType = "added"   // Todo was added
+	PlanToDoChangeTypeRemoved PlanToDoChangeType = "removed" // Todo was removed
+)
+
+// Public constants for external use
+const (
+	PlanToDoChangeUpdated = PlanToDoChangeTypeUpdated
+	PlanToDoChangeAdded   = PlanToDoChangeTypeAdded
+	PlanToDoChangeRemoved = PlanToDoChangeTypeRemoved
+)
+
+// PlanExecutionMessage represents a message during plan execution
+type PlanExecutionMessage struct {
+	Type      PlanMessageType `json:"message_type"`
+	Content   string          `json:"content"`
+	TodoID    string          `json:"todo_id,omitempty"`
+	Timestamp time.Time       `json:"timestamp"`
+}
+
+// PlanMessageType represents the type of plan execution message
+type PlanMessageType string
+
+const (
+	PlanMessageTypeThought  PlanMessageType = "thought"  // LLM thinking/reasoning
+	PlanMessageTypeAction   PlanMessageType = "action"   // Action being taken
+	PlanMessageTypeResponse PlanMessageType = "response" // Response to user
+	PlanMessageTypeSystem   PlanMessageType = "system"   // System message
+)
+
+// Public constants for external use
+const (
+	PlanMessageThought  = PlanMessageTypeThought
+	PlanMessageAction   = PlanMessageTypeAction
+	PlanMessageResponse = PlanMessageTypeResponse
+	PlanMessageSystem   = PlanMessageTypeSystem
+)
+
+// Public hook types for external API
 type (
 	// PlanCreatedHook is called when a plan is successfully created
 	PlanCreatedHook func(ctx context.Context, plan *Plan) error
 
-	// PlanStepStartHook is called when a plan todo starts execution
-	PlanStepStartHook func(ctx context.Context, plan *Plan, todo *planToDo) error
+	// PlanToDoStartHook is called when a plan todo starts execution
+	PlanToDoStartHook func(ctx context.Context, plan *Plan, todo PlanToDo) error
 
-	// PlanStepCompletedHook is called when a plan todo completes successfully
-	PlanStepCompletedHook func(ctx context.Context, plan *Plan, todo *planToDo, result *toDoResult) error
+	// PlanToDoCompletedHook is called when a plan todo completes successfully
+	PlanToDoCompletedHook func(ctx context.Context, plan *Plan, todo PlanToDo) error
 
 	// PlanReflectionHook is called after reflection analysis
 	PlanReflectionHook func(ctx context.Context, plan *Plan, reflection *planReflection) error
 
 	// PlanCompletedHook is called when the entire plan is completed
 	PlanCompletedHook func(ctx context.Context, plan *Plan, result string) error
+
+	// PlanToDoUpdatedHook is called when todos are updated/refined during reflection
+	PlanToDoUpdatedHook func(ctx context.Context, plan *Plan, changes []PlanToDoChange) error
+
+	// PlanMessageHook is called when a message is generated during plan execution
+	PlanMessageHook func(ctx context.Context, plan *Plan, message PlanExecutionMessage) error
+)
+
+// Internal hook types for library implementation (unexported)
+type (
+	// planStepStartHook is called when a plan todo starts execution (internal)
+	planStepStartHook func(ctx context.Context, plan *Plan, todo *planToDo) error
+
+	// planStepCompletedHook is called when a plan todo completes successfully (internal)
+	planStepCompletedHook func(ctx context.Context, plan *Plan, todo *planToDo, result *toDoResult) error
+
+	// planToDoUpdatedHook is called when todos are updated/refined during reflection (internal)
+	planToDoUpdatedHook func(ctx context.Context, plan *Plan, changes []PlanToDoChange) error
+
+	// planMessageHook is called when a message is generated during plan execution (internal)
+	planMessageHook func(ctx context.Context, plan *Plan, message PlanExecutionMessage) error
 )
 
 // planReflection represents the result of plan reflection (private)
 type planReflection struct {
-	ShouldContinue   *bool      `json:"should_continue"`
-	UpdatedToDos     []planToDo `json:"updated_todos,omitempty"`
-	NewToDos         []planToDo `json:"new_todos,omitempty"`
-	CompletionReason string     `json:"completion_reason,omitempty"`
-	Response         string     `json:"response,omitempty"`
+	Type             PlanReflectionType `json:"reflection_type"`
+	ShouldContinue   *bool              `json:"should_continue"`
+	UpdatedToDos     []planToDo         `json:"updated_todos,omitempty"`
+	NewToDos         []planToDo         `json:"new_todos,omitempty"`
+	CompletionReason string             `json:"completion_reason,omitempty"`
+	Response         string             `json:"response,omitempty"`
+	Changes          []PlanToDoChange   `json:"changes,omitempty"` // Detailed changes
 }
 
 // planConfig holds configuration for plan creation and execution
 type planConfig struct {
 	gollemConfig
 
-	// Plan-specific hooks (internal)
-	planCreatedHook       PlanCreatedHook
-	planStepStartHook     PlanStepStartHook
-	planStepCompletedHook PlanStepCompletedHook
-	planReflectionHook    PlanReflectionHook
-	planCompletedHook     PlanCompletedHook
-
 	// Public hooks for external API
-	publicToDoStartHook     PlanToDoStartPublicHook
-	publicToDoCompletedHook PlanToDoCompletedPublicHook
+	planCreatedHook       PlanCreatedHook
+	planToDoStartHook     PlanToDoStartHook
+	planToDoCompletedHook PlanToDoCompletedHook
+	planCompletedHook     PlanCompletedHook
+	planToDoUpdatedHook   PlanToDoUpdatedHook
+	planMessageHook       PlanMessageHook
+
+	// Internal hooks for library implementation
+	internalStepStartHook     planStepStartHook
+	internalStepCompletedHook planStepCompletedHook
+	internalToDoUpdatedHook   planToDoUpdatedHook
+	internalMessageHook       planMessageHook
+	internalReflectionHook    PlanReflectionHook // Keep as exported since reflection is complex
 
 	// Plan-specific settings
 	// (reserved for future use)
@@ -120,24 +211,49 @@ type planConfig struct {
 // PlanOption represents configuration options for plan creation and execution
 type PlanOption func(*planConfig)
 
-// Default hook implementations
+// Default hook implementations for public API
 func defaultPlanCreatedHook(ctx context.Context, plan *Plan) error {
 	return nil
 }
 
-func defaultPlanStepStartHook(ctx context.Context, plan *Plan, todo *planToDo) error {
+func defaultPlanToDoStartHook(ctx context.Context, plan *Plan, todo PlanToDo) error {
 	return nil
 }
 
-func defaultPlanStepCompletedHook(ctx context.Context, plan *Plan, todo *planToDo, result *toDoResult) error {
-	return nil
-}
-
-func defaultPlanReflectionHook(ctx context.Context, plan *Plan, reflection *planReflection) error {
+func defaultPlanToDoCompletedHook(ctx context.Context, plan *Plan, todo PlanToDo) error {
 	return nil
 }
 
 func defaultPlanCompletedHook(ctx context.Context, plan *Plan, result string) error {
+	return nil
+}
+
+func defaultPlanToDoUpdatedHook(ctx context.Context, plan *Plan, changes []PlanToDoChange) error {
+	return nil
+}
+
+func defaultPlanMessageHook(ctx context.Context, plan *Plan, message PlanExecutionMessage) error {
+	return nil
+}
+
+// Default hook implementations for internal use
+func defaultInternalStepStartHook(ctx context.Context, plan *Plan, todo *planToDo) error {
+	return nil
+}
+
+func defaultInternalStepCompletedHook(ctx context.Context, plan *Plan, todo *planToDo, result *toDoResult) error {
+	return nil
+}
+
+func defaultInternalReflectionHook(ctx context.Context, plan *Plan, reflection *planReflection) error {
+	return nil
+}
+
+func defaultInternalToDoUpdatedHook(ctx context.Context, plan *Plan, changes []PlanToDoChange) error {
+	return nil
+}
+
+func defaultInternalMessageHook(ctx context.Context, plan *Plan, message PlanExecutionMessage) error {
 	return nil
 }
 
@@ -186,10 +302,8 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 	}
 
 	// Call PlanCreatedHook
-	if cfg.planCreatedHook != nil {
-		if err := cfg.planCreatedHook(ctx, plan); err != nil {
-			return nil, goerr.Wrap(err, "failed to call PlanCreatedHook")
-		}
+	if err := cfg.planCreatedHook(ctx, plan); err != nil {
+		return nil, goerr.Wrap(err, "failed to call PlanCreatedHook")
 	}
 
 	logger.Info("plan created",
@@ -332,11 +446,9 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 		"new_todos_count", len(reflection.NewToDos),
 		"updated_todos_count", len(reflection.UpdatedToDos))
 
-	// Call PlanReflectionHook
-	if p.config.planReflectionHook != nil {
-		if err := p.config.planReflectionHook(ctx, p, reflection); err != nil {
-			return "", false, goerr.Wrap(err, "failed to call PlanReflectionHook")
-		}
+	// Call internal reflection hook
+	if err := p.config.internalReflectionHook(ctx, p, reflection); err != nil {
+		return "", false, goerr.Wrap(err, "failed to call internal reflection hook")
 	}
 
 	// Check if reflection indicates completion
@@ -345,16 +457,48 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 	if !shouldContinue {
 		p.state = PlanStateCompleted
 
+		// Update plan first to generate changes if needed
+		if err := p.updatePlan(reflection); err != nil {
+			logger.Debug("plan update failed during completion", "plan_id", p.id, "step_id", currentStep.ID, "error", err)
+			return "", false, goerr.Wrap(err, "failed to update plan during completion")
+		}
+
+		// Set completion type based on whether there were changes
+		if len(reflection.Changes) > 0 {
+			reflection.Type = PlanReflectionTypeRefinedDone
+		} else {
+			reflection.Type = PlanReflectionTypeComplete
+		}
+
 		logger.Debug("plan marked as completed by reflection",
 			"plan_id", p.id,
 			"completion_reason", reflection.CompletionReason,
-			"response_length", len(reflection.Response))
+			"response_length", len(reflection.Response),
+			"reflection_type", reflection.Type)
+
+		// Call PlanToDoUpdatedHook if there are changes
+		if len(reflection.Changes) > 0 {
+			if err := p.callToDoUpdatedHook(ctx, reflection.Changes); err != nil {
+				return "", false, err
+			}
+		}
+
+		// Send completion message
+		if reflection.Response != "" {
+			completionMessage := PlanExecutionMessage{
+				Type:      PlanMessageTypeResponse,
+				Content:   reflection.Response,
+				TodoID:    currentStep.ID,
+				Timestamp: time.Now(),
+			}
+			if err := p.callMessageHook(ctx, completionMessage); err != nil {
+				logger.Warn("failed to call message hook for completion", "error", err)
+			}
+		}
 
 		// Call PlanCompletedHook
-		if p.config.planCompletedHook != nil {
-			if err := p.config.planCompletedHook(ctx, p, reflection.Response); err != nil {
-				return "", false, goerr.Wrap(err, "failed to call PlanCompletedHook")
-			}
+		if err := p.config.planCompletedHook(ctx, p, reflection.Response); err != nil {
+			return "", false, goerr.Wrap(err, "failed to call PlanCompletedHook")
 		}
 
 		return reflection.Response, true, nil
@@ -367,25 +511,28 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 		return "", false, goerr.Wrap(err, "failed to update plan")
 	}
 
+	// Call PlanToDoUpdatedHook if there are changes
+	if len(reflection.Changes) > 0 {
+		if err := p.callToDoUpdatedHook(ctx, reflection.Changes); err != nil {
+			return "", false, err
+		}
+	}
+
 	logger.Debug("plan updated successfully, continuing execution", "plan_id", p.id, "step_id", currentStep.ID)
 	return "", false, nil
 }
 
 // callStepStartHooks calls all step start hooks
 func (p *Plan) callStepStartHooks(ctx context.Context, currentStep *planToDo) error {
-	// Call PlanStepStartHook
-	if p.config.planStepStartHook != nil {
-		if err := p.config.planStepStartHook(ctx, p, currentStep); err != nil {
-			return goerr.Wrap(err, "failed to call PlanStepStartHook")
-		}
+	// Call internal step start hook
+	if err := p.config.internalStepStartHook(ctx, p, currentStep); err != nil {
+		return goerr.Wrap(err, "failed to call internal step start hook")
 	}
 
 	// Call public ToDo start hook
-	if p.config.publicToDoStartHook != nil {
-		todo := currentStep.toPlanToDo()
-		if err := p.config.publicToDoStartHook(ctx, p, todo); err != nil {
-			return goerr.Wrap(err, "failed to call public ToDo start hook")
-		}
+	todo := currentStep.toPlanToDo()
+	if err := p.config.planToDoStartHook(ctx, p, todo); err != nil {
+		return goerr.Wrap(err, "failed to call public ToDo start hook")
 	}
 
 	return nil
@@ -393,21 +540,33 @@ func (p *Plan) callStepStartHooks(ctx context.Context, currentStep *planToDo) er
 
 // callStepCompletedHooks calls all step completed hooks
 func (p *Plan) callStepCompletedHooks(ctx context.Context, currentStep *planToDo, result *toDoResult) error {
-	// Call PlanStepCompletedHook
-	if p.config.planStepCompletedHook != nil {
-		if err := p.config.planStepCompletedHook(ctx, p, currentStep, result); err != nil {
-			return goerr.Wrap(err, "failed to call PlanStepCompletedHook")
-		}
+	// Call internal step completed hook
+	if err := p.config.internalStepCompletedHook(ctx, p, currentStep, result); err != nil {
+		return goerr.Wrap(err, "failed to call internal step completed hook")
 	}
 
 	// Call public ToDo completed hook
-	if p.config.publicToDoCompletedHook != nil {
-		todo := currentStep.toPlanToDo()
-		if err := p.config.publicToDoCompletedHook(ctx, p, todo); err != nil {
-			return goerr.Wrap(err, "failed to call public ToDo completed hook")
-		}
+	todo := currentStep.toPlanToDo()
+	if err := p.config.planToDoCompletedHook(ctx, p, todo); err != nil {
+		return goerr.Wrap(err, "failed to call public ToDo completed hook")
 	}
 
+	return nil
+}
+
+// callToDoUpdatedHook calls the todo updated hook
+func (p *Plan) callToDoUpdatedHook(ctx context.Context, changes []PlanToDoChange) error {
+	if err := p.config.planToDoUpdatedHook(ctx, p, changes); err != nil {
+		return goerr.Wrap(err, "failed to call PlanToDoUpdatedHook")
+	}
+	return nil
+}
+
+// callMessageHook calls the message hook
+func (p *Plan) callMessageHook(ctx context.Context, message PlanExecutionMessage) error {
+	if err := p.config.planMessageHook(ctx, p, message); err != nil {
+		return goerr.Wrap(err, "failed to call PlanMessageHook")
+	}
 	return nil
 }
 
@@ -425,16 +584,20 @@ func (g *Agent) createPlanConfig(options ...PlanOption) *planConfig {
 	cfg := &planConfig{
 		gollemConfig: *g.gollemConfig.Clone(),
 
-		// Default hooks
+		// Default public hooks
 		planCreatedHook:       defaultPlanCreatedHook,
-		planStepStartHook:     defaultPlanStepStartHook,
-		planStepCompletedHook: defaultPlanStepCompletedHook,
-		planReflectionHook:    defaultPlanReflectionHook,
+		planToDoStartHook:     defaultPlanToDoStartHook,
+		planToDoCompletedHook: defaultPlanToDoCompletedHook,
 		planCompletedHook:     defaultPlanCompletedHook,
+		planToDoUpdatedHook:   defaultPlanToDoUpdatedHook,
+		planMessageHook:       defaultPlanMessageHook,
 
-		// Public hooks (nil by default)
-		publicToDoStartHook:     nil,
-		publicToDoCompletedHook: nil,
+		// Default internal hooks
+		internalStepStartHook:     defaultInternalStepStartHook,
+		internalStepCompletedHook: defaultInternalStepCompletedHook,
+		internalToDoUpdatedHook:   defaultInternalToDoUpdatedHook,
+		internalMessageHook:       defaultInternalMessageHook,
+		internalReflectionHook:    defaultInternalReflectionHook,
 
 		// Default settings
 		// (reserved for future use)
@@ -550,6 +713,7 @@ func (g *Agent) generatePlan(ctx context.Context, session Session, prompt string
 	}
 
 	todos := make([]planToDo, 0, len(planData.Steps))
+	now := time.Now()
 	for _, s := range planData.Steps {
 		// Skip steps with empty descriptions
 		if strings.TrimSpace(s.Description) == "" {
@@ -561,6 +725,8 @@ func (g *Agent) generatePlan(ctx context.Context, session Session, prompt string
 			Description: strings.TrimSpace(s.Description),
 			Intent:      strings.TrimSpace(s.Intent),
 			Status:      ToDoStatusPending,
+			CreatedAt:   now,
+			UpdatedAt:   now,
 		})
 	}
 
@@ -599,6 +765,19 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 		return nil, goerr.Wrap(err, "executor session failed")
 	}
 	logger.Debug("got response", "response", response)
+
+	// Send response message through hook
+	if len(response.Texts) > 0 {
+		responseMessage := PlanExecutionMessage{
+			Type:      PlanMessageTypeResponse,
+			Content:   strings.Join(response.Texts, "\n"),
+			TodoID:    todo.ID,
+			Timestamp: time.Now(),
+		}
+		if err := p.callMessageHook(ctx, responseMessage); err != nil {
+			logger.Warn("failed to call message hook for response", "error", err)
+		}
+	}
 
 	// Process response (use existing handleResponse)
 	// Requirement: Tool usage must process Tools from GenerateContent return value
@@ -788,17 +967,78 @@ func (p *Plan) getLastStepResult() string {
 }
 
 func (p *Plan) updatePlan(reflection *planReflection) error {
-	// Update plan with new todos
+	now := time.Now()
+	var changes []PlanToDoChange
+
+	// Track changes for updated todos
 	if len(reflection.UpdatedToDos) > 0 {
+		// Create a map of existing todos for comparison
+		existingTodos := make(map[string]*planToDo)
+		for i := range p.todos {
+			existingTodos[p.todos[i].ID] = &p.todos[i]
+		}
+
 		// Replace existing incomplete todos with updated todos
 		newToDos := p.getCompletedToDos()
+		for _, updatedTodo := range reflection.UpdatedToDos {
+			updatedTodo.UpdatedAt = now
+			if oldTodo, exists := existingTodos[updatedTodo.ID]; exists {
+				// This is an update to an existing todo
+				oldTodoCopy := *oldTodo
+				changes = append(changes, PlanToDoChange{
+					Type:        PlanToDoChangeTypeUpdated,
+					TodoID:      updatedTodo.ID,
+					OldToDo:     &oldTodoCopy,
+					NewToDo:     &updatedTodo,
+					Description: fmt.Sprintf("Updated todo: %s", updatedTodo.Description),
+				})
+			}
+		}
 		newToDos = append(newToDos, reflection.UpdatedToDos...)
 		p.todos = newToDos
 	}
 
+	// Track changes for new todos
 	if len(reflection.NewToDos) > 0 {
+		for _, newTodo := range reflection.NewToDos {
+			newTodo.CreatedAt = now
+			newTodo.UpdatedAt = now
+			changes = append(changes, PlanToDoChange{
+				Type:        PlanToDoChangeTypeAdded,
+				TodoID:      newTodo.ID,
+				NewToDo:     &newTodo,
+				Description: fmt.Sprintf("Added new todo: %s", newTodo.Description),
+			})
+		}
 		p.todos = append(p.todos, reflection.NewToDos...)
 	}
+
+	// Determine reflection type based on changes
+	if len(changes) > 0 {
+		hasUpdates := false
+		hasAdded := false
+		for _, change := range changes {
+			switch change.Type {
+			case PlanToDoChangeTypeUpdated:
+				hasUpdates = true
+			case PlanToDoChangeTypeAdded:
+				hasAdded = true
+			}
+		}
+
+		if hasUpdates && hasAdded {
+			reflection.Type = PlanReflectionTypeExpand
+		} else if hasUpdates {
+			reflection.Type = PlanReflectionTypeRefine
+		} else if hasAdded {
+			reflection.Type = PlanReflectionTypeExpand
+		}
+	} else {
+		reflection.Type = PlanReflectionTypeContinue
+	}
+
+	// Store changes in reflection for hook calls
+	reflection.Changes = changes
 
 	return nil
 }
@@ -931,6 +1171,8 @@ type PlanToDo struct {
 	Error       error
 	ErrorMsg    string
 	Result      *PlanToDoResult
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // PlanToDoResult represents a public view of todo execution result
@@ -941,17 +1183,7 @@ type PlanToDoResult struct {
 	ExecutedAt time.Time
 }
 
-// Public hook function types that use public interfaces
-type (
-	// PlanCreatedPublicHook is called when a plan is successfully created (public API)
-	PlanCreatedPublicHook func(ctx context.Context, plan *Plan) error
-
-	// PlanToDoStartPublicHook is called when a plan todo starts execution (public API)
-	PlanToDoStartPublicHook func(ctx context.Context, plan *Plan, todo PlanToDo) error
-
-	// PlanToDoCompletedPublicHook is called when a plan todo completes successfully (public API)
-	PlanToDoCompletedPublicHook func(ctx context.Context, plan *Plan, todo PlanToDo) error
-)
+// These are now handled by the main public hook types above
 
 // Helper method to convert internal todo to public structure
 func (p *planToDo) toPlanToDo() PlanToDo {
@@ -964,6 +1196,8 @@ func (p *planToDo) toPlanToDo() PlanToDo {
 		Error:       p.Error,
 		ErrorMsg:    p.ErrorMsg,
 		Result:      p.copyResult(),
+		CreatedAt:   p.CreatedAt,
+		UpdatedAt:   p.UpdatedAt,
 	}
 }
 
@@ -1005,35 +1239,30 @@ func toDoStatusToString(status ToDoStatus) string {
 // Plan option methods
 
 // WithPlanCreatedHook sets a hook for plan creation
-func WithPlanCreatedHook(hook func(ctx context.Context, plan *Plan) error) PlanOption {
+func WithPlanCreatedHook(hook PlanCreatedHook) PlanOption {
 	return func(cfg *planConfig) {
 		cfg.planCreatedHook = hook
 	}
 }
 
-// WithPlanStepStartHook sets a hook for step start
-func WithPlanStepStartHook(hook func(ctx context.Context, plan *Plan, todo *planToDo) error) PlanOption {
+// WithPlanToDoStartHook sets a hook for plan todo start
+func WithPlanToDoStartHook(hook PlanToDoStartHook) PlanOption {
 	return func(cfg *planConfig) {
-		cfg.planStepStartHook = hook
+		cfg.planToDoStartHook = hook
 	}
 }
 
-// WithPlanStepCompletedHook sets a hook for step completion
-func WithPlanStepCompletedHook(hook func(ctx context.Context, plan *Plan, todo *planToDo, result *toDoResult) error) PlanOption {
+// WithPlanToDoCompletedHook sets a hook for plan todo completion
+func WithPlanToDoCompletedHook(hook PlanToDoCompletedHook) PlanOption {
 	return func(cfg *planConfig) {
-		cfg.planStepCompletedHook = hook
+		cfg.planToDoCompletedHook = hook
 	}
 }
 
-// WithPlanReflectionHook sets a hook for plan reflection
-func WithPlanReflectionHook(hook func(ctx context.Context, plan *Plan, reflection *planReflection) error) PlanOption {
-	return func(cfg *planConfig) {
-		cfg.planReflectionHook = hook
-	}
-}
+// These hooks are deprecated, use WithPlanToDoStartHook/WithPlanToDoCompletedHook instead
 
 // WithPlanCompletedHook sets a hook for plan completion
-func WithPlanCompletedHook(hook func(ctx context.Context, plan *Plan, result string) error) PlanOption {
+func WithPlanCompletedHook(hook PlanCompletedHook) PlanOption {
 	return func(cfg *planConfig) {
 		cfg.planCompletedHook = hook
 	}
@@ -1049,18 +1278,34 @@ func WithPlanSystemPrompt(systemPrompt string) PlanOption {
 // Public hook option functions
 
 // WithToDoStartHook sets a hook for todo start (public API)
-func WithToDoStartHook(hook PlanToDoStartPublicHook) PlanOption {
+func WithToDoStartHook(hook PlanToDoStartHook) PlanOption {
 	return func(cfg *planConfig) {
-		cfg.publicToDoStartHook = hook
+		cfg.planToDoStartHook = hook
 	}
 }
 
 // WithToDoCompletedHook sets a hook for todo completion (public API)
-func WithToDoCompletedHook(hook PlanToDoCompletedPublicHook) PlanOption {
+func WithToDoCompletedHook(hook PlanToDoCompletedHook) PlanOption {
 	return func(cfg *planConfig) {
-		cfg.publicToDoCompletedHook = hook
+		cfg.planToDoCompletedHook = hook
 	}
 }
+
+// WithPlanToDoUpdatedHook sets a hook for todo updates/refinements
+func WithPlanToDoUpdatedHook(hook PlanToDoUpdatedHook) PlanOption {
+	return func(cfg *planConfig) {
+		cfg.planToDoUpdatedHook = hook
+	}
+}
+
+// WithPlanMessageHook sets a hook for plan execution messages
+func WithPlanMessageHook(hook PlanMessageHook) PlanOption {
+	return func(cfg *planConfig) {
+		cfg.planMessageHook = hook
+	}
+}
+
+// These hooks are already provided by WithPlanToDoUpdatedHook and WithPlanMessageHook
 
 // WithPlanHistory sets the history for plan execution (plan-specific)
 func WithPlanHistory(history *History) PlanOption {
