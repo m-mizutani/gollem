@@ -187,7 +187,17 @@ func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (
 
 // updateStatusWithContext generates status with improved prompt
 func (x *defaultFacilitator) updateStatusWithContext(ctx context.Context, ssn Session) (*Facilitation, error) {
-	output, err := ssn.GenerateContent(ctx, Text("choose your next action or complete. Respond with JSON containing all required fields: action, reason, and either next_prompt (for continue) or completion (for complete)."))
+	output, err := ssn.GenerateContent(ctx, Text(`Choose your next action or complete. Respond with JSON containing all required fields:
+
+If action is "continue":
+- Required: action, reason, next_prompt
+- Example: {"action": "continue", "reason": "Need to call tool", "next_prompt": "Call the tool with specific parameters"}
+
+If action is "complete":
+- Required: action, reason, completion
+- Example: {"action": "complete", "reason": "Task finished", "completion": "Successfully generated random number"}
+
+Respond with valid JSON only.`))
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update status")
 	}
@@ -198,6 +208,8 @@ func (x *defaultFacilitator) updateStatusWithContext(ctx context.Context, ssn Se
 
 	// Add detailed error information for debugging
 	responseText := output.Texts[0]
+	LoggerFromContext(ctx).Debug("facilitation response", "response_text", responseText)
+
 	var resp Facilitation
 	if err := json.Unmarshal([]byte(responseText), &resp); err != nil {
 		return nil, goerr.Wrap(err, "failed to unmarshal response",
@@ -205,10 +217,16 @@ func (x *defaultFacilitator) updateStatusWithContext(ctx context.Context, ssn Se
 			goerr.V("response_length", len(responseText)))
 	}
 
+	LoggerFromContext(ctx).Debug("parsed facilitation", "facilitation", resp)
+
 	if err := resp.Validate(); err != nil {
 		return nil, goerr.Wrap(err, "invalid response",
 			goerr.V("facilitation", resp),
-			goerr.V("response_text", responseText))
+			goerr.V("response_text", responseText),
+			goerr.V("action", resp.Action),
+			goerr.V("reason", resp.Reason),
+			goerr.V("next_prompt", resp.NextPrompt),
+			goerr.V("completion", resp.Completion))
 	}
 
 	return &resp, nil

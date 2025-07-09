@@ -61,9 +61,23 @@ func (t *randomNumberTool) Run(ctx context.Context, args map[string]any) (map[st
 func testGenerateContent(t *testing.T, session gollem.Session) {
 	ctx := t.Context()
 
-	// Test case 1: Generate random number
-	resp1, err := session.GenerateContent(ctx, gollem.Text("Please generate a random number between 1 and 10"))
+	// Test case 1: Generate random number with retry logic
+	resp1, err := retryAPICall(t, func() (*gollem.Response, error) {
+		return session.GenerateContent(ctx, gollem.Text("Please generate a random number between 1 and 10"))
+	}, "generate random number")
+
+	// Skip if API is temporarily unavailable
+	if err != nil && isTemporaryAPIError(err) {
+		t.Skipf("API temporarily unavailable after retries: %v", err)
+	}
+
 	gt.NoError(t, err)
+
+	// Check if response is valid
+	if resp1 == nil {
+		t.Fatal("Response is nil despite no error")
+	}
+
 	gt.Array(t, resp1.FunctionCalls).Length(1).Required()
 	gt.Value(t, resp1.FunctionCalls[0].Name).Equal("random_number")
 
@@ -71,12 +85,27 @@ func testGenerateContent(t *testing.T, session gollem.Session) {
 	gt.Value(t, args["min"]).Equal(1.0)
 	gt.Value(t, args["max"]).Equal(10.0)
 
-	resp2, err := session.GenerateContent(ctx, gollem.FunctionResponse{
-		ID:   resp1.FunctionCalls[0].ID,
-		Name: "random_number",
-		Data: map[string]any{"result": 5.5},
-	})
+	// Test case 2: Function response with retry
+	resp2, err := retryAPICall(t, func() (*gollem.Response, error) {
+		return session.GenerateContent(ctx, gollem.FunctionResponse{
+			ID:   resp1.FunctionCalls[0].ID,
+			Name: "random_number",
+			Data: map[string]any{"result": 5.5},
+		})
+	}, "function response")
+
+	// Skip if API is temporarily unavailable
+	if err != nil && isTemporaryAPIError(err) {
+		t.Skipf("API temporarily unavailable after retries: %v", err)
+	}
+
 	gt.NoError(t, err).Required()
+
+	// Check if response is valid
+	if resp2 == nil {
+		t.Fatal("Response is nil despite no error")
+	}
+
 	gt.Array(t, resp2.Texts).Length(1).Required()
 }
 
@@ -409,7 +438,7 @@ func TestFacilitator(t *testing.T) {
 		s := gollem.New(client,
 			gollem.WithFacilitator(facilitator),
 			gollem.WithTools(&randomNumberTool{}),
-			gollem.WithSystemPrompt("You are an assistant that can use tools. When asked to complete a task and end the session, you must use the finalize_task tool to properly end the session."),
+			gollem.WithSystemPrompt("You are an assistant that can use tools. When asked to complete a task and end the session, you must use the respond_to_user tool to properly end the session."),
 			gollem.WithLoopHook(func(ctx context.Context, loop int, input []gollem.Input) error {
 				loopCount++
 				t.Logf("Loop called: %d", loop)

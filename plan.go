@@ -151,6 +151,8 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 	ctx = ctxWithLogger(ctx, logger) // Use existing context.go function
 
 	// Tool setup (use existing setupTools function)
+	// Facilitator is not supported in plan mode
+	cfg.gollemConfig.facilitator = nil
 	toolMap, toolList, err := setupTools(ctx, &cfg.gollemConfig)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to setup tools for plan")
@@ -834,7 +836,7 @@ func (p *Plan) MarshalJSON() ([]byte, error) {
 }
 
 // NewPlanFromData creates a plan from serialized JSON data (use existing setupTools pattern)
-func (g *Agent) NewPlanFromData(data []byte, options ...PlanOption) (*Plan, error) {
+func (g *Agent) NewPlanFromData(ctx context.Context, data []byte, options ...PlanOption) (*Plan, error) {
 	var planData planData
 	if err := json.Unmarshal(data, &planData); err != nil {
 		return nil, goerr.Wrap(err, "failed to unmarshal plan data")
@@ -849,7 +851,7 @@ func (g *Agent) NewPlanFromData(data []byte, options ...PlanOption) (*Plan, erro
 	cfg := g.createPlanConfig(options...)
 
 	// Rebuild tool map (use existing setupTools)
-	toolMap, toolList, err := setupTools(context.Background(), &cfg.gollemConfig)
+	toolMap, toolList, err := setupTools(ctx, &cfg.gollemConfig)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to setup tools for deserialized plan")
 	}

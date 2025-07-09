@@ -293,9 +293,11 @@ func WithHistory(history *History) Option {
 
 func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool, error) {
 	allTools := cfg.tools[:]
+
 	if cfg.facilitator != nil {
 		allTools = append(allTools, cfg.facilitator)
 	}
+
 	toolMap, err := buildToolMap(ctx, allTools, cfg.toolSets)
 	if err != nil {
 		return nil, nil, err

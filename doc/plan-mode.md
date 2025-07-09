@@ -110,7 +110,7 @@ if err != nil {
     panic(err)
 }
 
-restoredPlan, err := agent.NewPlanFromData(data)
+restoredPlan, err := agent.NewPlanFromData(ctx, data)
 if err != nil {
     panic(err)
 }
@@ -423,6 +423,6 @@ for _, todo := range todos {
     }
 }
 
-fmt.Printf("Plan Progress: %d completed, %d pending, %d failed\n", 
+fmt.Printf("Plan Progress: %d completed, %d pending, %d failed\n",
     completedCount, pendingCount, failedCount)
 ```
