@@ -168,16 +168,6 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 	return client, nil
 }
 
-// contains checks if a slice contains a string
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
 // NewSession creates a new session for the Gemini API.
 // It converts the provided tools to Gemini's tool format and initializes a new chat session.
 func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
