@@ -109,6 +109,45 @@ const (
 	PlanToDoChangeRemoved = PlanToDoChangeTypeRemoved
 )
 
+// PlanExecutionMode represents how the plan should handle task execution
+type PlanExecutionMode string
+
+const (
+	PlanExecutionModeComplete  PlanExecutionMode = "complete"  // Execute all tasks without skipping
+	PlanExecutionModeBalanced  PlanExecutionMode = "balanced"  // Default adaptive mode
+	PlanExecutionModeEfficient PlanExecutionMode = "efficient" // Aggressively skip when possible
+)
+
+// Public constants for external use
+const (
+	PlanExecutionComplete  = PlanExecutionModeComplete
+	PlanExecutionBalanced  = PlanExecutionModeBalanced
+	PlanExecutionEfficient = PlanExecutionModeEfficient
+)
+
+// SkipDecision represents a decision to skip a specific todo with detailed reasoning
+type SkipDecision struct {
+	TodoID     string  `json:"todo_id"`
+	SkipReason string  `json:"skip_reason"`
+	Confidence float64 `json:"confidence"` // 0.0-1.0, higher means more confident
+	Evidence   string  `json:"evidence"`   // Supporting evidence for the decision
+}
+
+// Validate validates the SkipDecision structure
+func (s *SkipDecision) Validate() error {
+	if s.TodoID == "" {
+		return goerr.New("skip decision: todo_id cannot be empty")
+	}
+	if s.SkipReason == "" {
+		return goerr.New("skip decision: skip_reason cannot be empty", goerr.Value("todo_id", s.TodoID))
+	}
+	if s.Confidence < 0.0 || s.Confidence > 1.0 {
+		return goerr.New("skip decision: confidence must be between 0.0 and 1.0",
+			goerr.Value("todo_id", s.TodoID), goerr.Value("confidence", s.Confidence))
+	}
+	return nil
+}
+
 // PlanExecutionMessage represents a message during plan execution
 type PlanExecutionMessage struct {
 	Type      PlanMessageType `json:"message_type"`
@@ -157,6 +196,9 @@ type (
 
 	// PlanMessageHook is called when a message is generated during plan execution
 	PlanMessageHook func(ctx context.Context, plan *Plan, message PlanExecutionMessage) error
+
+	// PlanSkipConfirmationHook is called when a skip decision is made, returns true to approve skip
+	PlanSkipConfirmationHook func(ctx context.Context, plan *Plan, decision SkipDecision) bool
 )
 
 // Internal hook types for library implementation (unexported)
@@ -177,12 +219,60 @@ type (
 // planReflection represents the result of plan reflection (private)
 type planReflection struct {
 	Type             PlanReflectionType `json:"reflection_type"`
-	ShouldContinue   *bool              `json:"should_continue"`
 	UpdatedToDos     []planToDo         `json:"updated_todos,omitempty"`
 	NewToDos         []planToDo         `json:"new_todos,omitempty"`
+	SkippedToDos     []string           `json:"skipped_todos,omitempty"`  // Todo IDs to skip (legacy)
+	SkipDecisions    []SkipDecision     `json:"skip_decisions,omitempty"` // Enhanced skip decisions with reasoning
 	CompletionReason string             `json:"completion_reason,omitempty"`
 	Response         string             `json:"response,omitempty"`
 	Changes          []PlanToDoChange   `json:"changes,omitempty"` // Detailed changes
+}
+
+// Validate validates the planReflection structure
+func (r *planReflection) Validate() error {
+	// Validate legacy skipped todos
+	for i, skippedTodoID := range r.SkippedToDos {
+		if skippedTodoID == "" {
+			return goerr.New("skipped_todos: todo_id cannot be empty", goerr.Value("index", i))
+		}
+	}
+
+	// Validate skip decisions
+	for i, skipDecision := range r.SkipDecisions {
+		if err := skipDecision.Validate(); err != nil {
+			return goerr.Wrap(err, "skip decision validation failed", goerr.Value("index", i))
+		}
+	}
+
+	// Validate updated todos
+	for i, todo := range r.UpdatedToDos {
+		if err := validateToDo(todo, fmt.Sprintf("updated_todos[%d]", i)); err != nil {
+			return err
+		}
+	}
+
+	// Validate new todos
+	for i, todo := range r.NewToDos {
+		if err := validateToDo(todo, fmt.Sprintf("new_todos[%d]", i)); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateToDo validates a single planToDo structure
+func validateToDo(todo planToDo, context string) error {
+	if todo.ID == "" {
+		return goerr.New("todo_id cannot be empty", goerr.Value("context", context))
+	}
+	if todo.Description == "" {
+		return goerr.New("todo_description cannot be empty", goerr.Value("context", context), goerr.Value("todo_id", todo.ID))
+	}
+	if todo.Intent == "" {
+		return goerr.New("todo_intent cannot be empty", goerr.Value("context", context), goerr.Value("todo_id", todo.ID))
+	}
+	return nil
 }
 
 // planConfig holds configuration for plan creation and execution
@@ -205,7 +295,9 @@ type planConfig struct {
 	internalReflectionHook    PlanReflectionHook // Keep as exported since reflection is complex
 
 	// Plan-specific settings
-	// (reserved for future use)
+	executionMode           PlanExecutionMode
+	skipConfidenceThreshold float64
+	skipConfirmationHook    PlanSkipConfirmationHook
 }
 
 // PlanOption represents configuration options for plan creation and execution
@@ -234,6 +326,11 @@ func defaultPlanToDoUpdatedHook(ctx context.Context, plan *Plan, changes []PlanT
 
 func defaultPlanMessageHook(ctx context.Context, plan *Plan, message PlanExecutionMessage) error {
 	return nil
+}
+
+func defaultPlanSkipConfirmationHook(ctx context.Context, plan *Plan, decision SkipDecision) bool {
+	// Default behavior: approve skip based on confidence threshold
+	return decision.Confidence >= 0.8 // High confidence threshold by default
 }
 
 // Default hook implementations for internal use
@@ -433,35 +530,39 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 		return "", false, goerr.Wrap(err, "plan reflection failed")
 	}
 
-	// Helper for logging bool pointer
-	shouldContinueValue := "nil"
-	if reflection.ShouldContinue != nil {
-		shouldContinueValue = fmt.Sprintf("%t", *reflection.ShouldContinue)
-	}
-
 	logger.Debug("plan reflection completed",
 		"plan_id", p.id,
-		"should_continue", shouldContinueValue,
 		"completion_reason", reflection.CompletionReason,
 		"new_todos_count", len(reflection.NewToDos),
-		"updated_todos_count", len(reflection.UpdatedToDos))
+		"updated_todos_count", len(reflection.UpdatedToDos),
+		"skipped_todos_count", len(reflection.SkippedToDos),
+		"reflection_type", reflection.Type,
+		"response_length", len(reflection.Response))
 
 	// Call internal reflection hook
 	if err := p.config.internalReflectionHook(ctx, p, reflection); err != nil {
 		return "", false, goerr.Wrap(err, "failed to call internal reflection hook")
 	}
 
-	// Check if reflection indicates completion
-	// If ShouldContinue is nil or false, we consider it as completion
-	shouldContinue := reflection.ShouldContinue != nil && *reflection.ShouldContinue
-	if !shouldContinue {
-		p.state = PlanStateCompleted
+	// Update plan
+	logger.Debug("updating plan based on reflection", "plan_id", p.id, "step_id", currentStep.ID)
+	if err := p.updatePlan(reflection); err != nil {
+		logger.Debug("plan update failed", "plan_id", p.id, "step_id", currentStep.ID, "error", err)
+		return "", false, goerr.Wrap(err, "failed to update plan")
+	}
 
-		// Update plan first to generate changes if needed
-		if err := p.updatePlan(reflection); err != nil {
-			logger.Debug("plan update failed during completion", "plan_id", p.id, "step_id", currentStep.ID, "error", err)
-			return "", false, goerr.Wrap(err, "failed to update plan during completion")
+	// Call PlanToDoUpdatedHook if there are changes
+	if len(reflection.Changes) > 0 {
+		if err := p.callToDoUpdatedHook(ctx, reflection.Changes); err != nil {
+			return "", false, err
 		}
+	}
+
+	// Determine if execution should continue based on TODO status
+	pendingTodos := p.getPendingToDos()
+	if len(pendingTodos) == 0 {
+		// No pending todos - plan is complete
+		p.state = PlanStateCompleted
 
 		// Set completion type based on whether there were changes
 		if len(reflection.Changes) > 0 {
@@ -470,18 +571,7 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 			reflection.Type = PlanReflectionTypeComplete
 		}
 
-		logger.Debug("plan marked as completed by reflection",
-			"plan_id", p.id,
-			"completion_reason", reflection.CompletionReason,
-			"response_length", len(reflection.Response),
-			"reflection_type", reflection.Type)
-
-		// Call PlanToDoUpdatedHook if there are changes
-		if len(reflection.Changes) > 0 {
-			if err := p.callToDoUpdatedHook(ctx, reflection.Changes); err != nil {
-				return "", false, err
-			}
-		}
+		logger.Debug("plan completed - no pending todos remaining", "plan_id", p.id, "step_id", currentStep.ID)
 
 		// Send completion message
 		if reflection.Response != "" {
@@ -504,20 +594,7 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 		return reflection.Response, true, nil
 	}
 
-	// Update plan
-	logger.Debug("updating plan based on reflection", "plan_id", p.id, "step_id", currentStep.ID)
-	if err := p.updatePlan(reflection); err != nil {
-		logger.Debug("plan update failed", "plan_id", p.id, "step_id", currentStep.ID, "error", err)
-		return "", false, goerr.Wrap(err, "failed to update plan")
-	}
-
-	// Call PlanToDoUpdatedHook if there are changes
-	if len(reflection.Changes) > 0 {
-		if err := p.callToDoUpdatedHook(ctx, reflection.Changes); err != nil {
-			return "", false, err
-		}
-	}
-
+	// Continue execution with remaining todos
 	logger.Debug("plan updated successfully, continuing execution", "plan_id", p.id, "step_id", currentStep.ID)
 	return "", false, nil
 }
@@ -591,6 +668,7 @@ func (g *Agent) createPlanConfig(options ...PlanOption) *planConfig {
 		planCompletedHook:     defaultPlanCompletedHook,
 		planToDoUpdatedHook:   defaultPlanToDoUpdatedHook,
 		planMessageHook:       defaultPlanMessageHook,
+		skipConfirmationHook:  defaultPlanSkipConfirmationHook,
 
 		// Default internal hooks
 		internalStepStartHook:     defaultInternalStepStartHook,
@@ -599,8 +677,9 @@ func (g *Agent) createPlanConfig(options ...PlanOption) *planConfig {
 		internalMessageHook:       defaultInternalMessageHook,
 		internalReflectionHook:    defaultInternalReflectionHook,
 
-		// Default settings
-		// (reserved for future use)
+		// Default plan-specific settings
+		executionMode:           PlanExecutionModeBalanced,
+		skipConfidenceThreshold: 0.8,
 	}
 
 	for _, opt := range options {
@@ -760,7 +839,11 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 	}
 
 	// Tool execution (process tools with GenerateContent return value)
-	response, err := executorSession.GenerateContent(ctx, Text(promptBuffer.String()))
+	// Add timeout for step execution to prevent hanging
+	stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	response, err := executorSession.GenerateContent(stepCtx, Text(promptBuffer.String()))
 	if err != nil {
 		return nil, goerr.Wrap(err, "executor session failed")
 	}
@@ -814,6 +897,45 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 				result.Data[funcResp.Name] = funcResp.Data
 			}
 		}
+
+		// Send tool results back to LLM to get final response
+		if len(newInput) > 0 {
+			logger.Debug("sending tool results back to LLM", "plan_id", p.id, "input_count", len(newInput))
+			// Add timeout for tool result processing
+			toolResultCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+
+			finalResponse, err := executorSession.GenerateContent(toolResultCtx, newInput...)
+			if err != nil {
+				logger.Debug("failed to get final response from LLM", "plan_id", p.id, "error", err)
+				return nil, goerr.Wrap(err, "failed to get final response from LLM")
+			}
+
+			// Update result with final response
+			if len(finalResponse.Texts) > 0 {
+				finalOutput := strings.Join(finalResponse.Texts, "\n")
+				result.Output += "\n" + finalOutput
+				logger.Debug("got final response from LLM", "plan_id", p.id, "output_length", len(finalOutput))
+
+				// Send final response message through hook
+				responseMessage := PlanExecutionMessage{
+					Type:      PlanMessageTypeResponse,
+					Content:   finalOutput,
+					TodoID:    todo.ID,
+					Timestamp: time.Now(),
+				}
+				if err := p.callMessageHook(ctx, responseMessage); err != nil {
+					logger.Warn("failed to call message hook for final response", "error", err)
+				}
+			}
+
+			// Handle any additional tool calls in the final response (recursive tool calls)
+			if len(finalResponse.FunctionCalls) > 0 {
+				logger.Debug("final response contains additional tool calls", "plan_id", p.id, "tool_calls_count", len(finalResponse.FunctionCalls))
+				// For now, we'll just log this and not handle recursive tool calls
+				// This could be enhanced in the future to support multiple rounds of tool calls
+			}
+		}
 	}
 
 	return result, nil
@@ -821,62 +943,82 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 
 // reflect analyzes execution results and determines next actions
 func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
+	logger := LoggerFromContext(ctx)
+	logger.Debug("starting reflection", "plan_id", p.id)
+
 	// Create reflection session
 	reflectorSession, err := p.agent.createReflectorSession(ctx, p.config)
 	if err != nil {
+		logger.Debug("failed to create reflector session", "plan_id", p.id, "error", err)
 		return nil, err
 	}
+	logger.Debug("reflector session created", "plan_id", p.id)
 
 	// Generate reflection prompt (using template)
 	var promptBuffer bytes.Buffer
 	templateData := reflectorTemplateData{
-		Goal:           p.input,
-		OriginalPlan:   p.getPlanSummary(),
-		CompletedSteps: p.getCompletedStepsSummary(),
-		LastStepResult: p.getLastStepResult(),
-		SystemPrompt:   p.config.systemPrompt,
+		Goal:              p.input,
+		CurrentPlanStatus: p.getCurrentPlanStatus(),
+		OriginalPlan:      p.getPlanSummary(),
+		CompletedSteps:    p.getCompletedStepsSummary(),
+		LastStepResult:    p.getLastStepResult(),
+		SystemPrompt:      p.config.systemPrompt,
 	}
 
 	if err := reflectorTmpl.Execute(&promptBuffer, templateData); err != nil {
+		logger.Debug("failed to execute reflector template", "plan_id", p.id, "error", err)
 		return nil, goerr.Wrap(err, "failed to execute reflector template")
 	}
+	logger.Debug("reflector prompt generated", "plan_id", p.id, "prompt_length", promptBuffer.Len())
 
-	response, err := reflectorSession.GenerateContent(ctx, Text(promptBuffer.String()))
+	// Add timeout for reflection to prevent hanging
+	reflectionCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	logger.Debug("sending reflection request to LLM", "plan_id", p.id)
+	response, err := reflectorSession.GenerateContent(reflectionCtx, Text(promptBuffer.String()))
 	if err != nil {
+		logger.Debug("reflection request failed", "plan_id", p.id, "error", err)
 		return nil, err
 	}
+	logger.Debug("reflection response received", "plan_id", p.id, "response_length", len(response.Texts))
 
 	if len(response.Texts) == 0 {
+		logger.Debug("no response from reflector", "plan_id", p.id)
 		return nil, goerr.New("no response from reflector")
 	}
 
+	logger.Debug("parsing reflection response", "plan_id", p.id, "response_text", response.Texts[0])
 	var reflection planReflection
 	if err := json.Unmarshal([]byte(response.Texts[0]), &reflection); err != nil {
 		// If JSON parsing fails, process as text response
-		logger := LoggerFromContext(ctx)
 		logger.Debug("reflection JSON parse failed, using fallback",
 			"plan_id", p.id,
 			"error", err,
 			"response_text", response.Texts[0])
 
-		shouldContinue := false
 		reflection = planReflection{
-			ShouldContinue:   &shouldContinue,
 			Response:         response.Texts[0],
-			CompletionReason: "manual_completion",
+			CompletionReason: "reflection_fallback_used",
 		}
 	} else {
-		// Validate that ShouldContinue field was provided
-		logger := LoggerFromContext(ctx)
-		if reflection.ShouldContinue == nil {
-			logger.Debug("reflection missing should_continue field, defaulting to false",
+		// Validate reflection
+		if err := reflection.Validate(); err != nil {
+			logger.Debug("reflection validation failed, using fallback",
 				"plan_id", p.id,
+				"error", err,
 				"response_text", response.Texts[0])
-			shouldContinue := false
-			reflection.ShouldContinue = &shouldContinue
+
+			reflection = planReflection{
+				Response:         response.Texts[0],
+				CompletionReason: "reflection_validation_failed",
+			}
+		} else {
+			logger.Debug("reflection validation successful", "plan_id", p.id, "type", reflection.Type)
 		}
 	}
 
+	logger.Debug("reflection completed", "plan_id", p.id, "type", reflection.Type)
 	return &reflection, nil
 }
 
@@ -932,7 +1074,11 @@ func (p *Plan) getProgressSummary() string {
 	} else {
 		summary.WriteString("Completed steps:\n")
 		for _, step := range completed {
-			summary.WriteString(fmt.Sprintf("- %s: %s\n", step.Description, step.Result.Output))
+			output := "No output"
+			if step.Result != nil {
+				output = step.Result.Output
+			}
+			summary.WriteString(fmt.Sprintf("- %s: %s\n", step.Description, output))
 		}
 	}
 
@@ -951,7 +1097,11 @@ func (p *Plan) getCompletedStepsSummary() string {
 	var summary strings.Builder
 	for _, step := range p.todos {
 		if step.Status == ToDoStatusCompleted {
-			summary.WriteString(fmt.Sprintf("- %s: %s\n", step.Description, step.Result.Output))
+			output := "No output"
+			if step.Result != nil {
+				output = step.Result.Output
+			}
+			summary.WriteString(fmt.Sprintf("- %s: %s\n", step.Description, output))
 		}
 	}
 	return summary.String()
@@ -966,9 +1116,54 @@ func (p *Plan) getLastStepResult() string {
 	return "No completed steps yet."
 }
 
+func (p *Plan) getCurrentPlanStatus() string {
+	var summary strings.Builder
+
+	// Count todos by status
+	var completed, pending, failed, skipped int
+	for _, todo := range p.todos {
+		switch todo.Status {
+		case ToDoStatusCompleted:
+			completed++
+		case ToDoStatusPending:
+			pending++
+		case ToDoStatusFailed:
+			failed++
+		case ToDoStatusSkipped:
+			skipped++
+		}
+	}
+
+	total := len(p.todos)
+	summary.WriteString(fmt.Sprintf("Total tasks: %d\n", total))
+	summary.WriteString(fmt.Sprintf("✅ Completed: %d\n", completed))
+	summary.WriteString(fmt.Sprintf("⏳ Pending: %d\n", pending))
+	if failed > 0 {
+		summary.WriteString(fmt.Sprintf("❌ Failed: %d\n", failed))
+	}
+	if skipped > 0 {
+		summary.WriteString(fmt.Sprintf("⏭️ Skipped: %d\n", skipped))
+	}
+
+	return summary.String()
+}
+
 func (p *Plan) updatePlan(reflection *planReflection) error {
 	now := time.Now()
 	var changes []PlanToDoChange
+
+	// Validate skip decisions and legacy skipped todos for conflicts
+	skipMap := make(map[string]bool)
+	for _, skippedTodoID := range reflection.SkippedToDos {
+		skipMap[skippedTodoID] = true
+	}
+	for _, skipDecision := range reflection.SkipDecisions {
+		if skipMap[skipDecision.TodoID] {
+			p.logger.Warn("todo appears in both skipped_todos and skip_decisions, using skip_decisions",
+				"todo_id", skipDecision.TodoID)
+		}
+		skipMap[skipDecision.TodoID] = true
+	}
 
 	// Track changes for updated todos
 	if len(reflection.UpdatedToDos) > 0 {
@@ -1013,6 +1208,86 @@ func (p *Plan) updatePlan(reflection *planReflection) error {
 		p.todos = append(p.todos, reflection.NewToDos...)
 	}
 
+	// Track changes for skipped todos
+	if len(reflection.SkippedToDos) > 0 {
+		for _, skippedTodoID := range reflection.SkippedToDos {
+			// Find the todo to skip
+			for i := range p.todos {
+				if p.todos[i].ID == skippedTodoID {
+					oldTodo := p.todos[i]
+					p.todos[i].Status = ToDoStatusSkipped
+					p.todos[i].UpdatedAt = now
+					changes = append(changes, PlanToDoChange{
+						Type:        PlanToDoChangeTypeUpdated,
+						TodoID:      skippedTodoID,
+						OldToDo:     &oldTodo,
+						NewToDo:     &p.todos[i],
+						Description: fmt.Sprintf("Skipped todo: %s", p.todos[i].Description),
+					})
+					break
+				}
+			}
+		}
+	}
+
+	// Process enhanced skip decisions with confirmation
+	if len(reflection.SkipDecisions) > 0 {
+		logger := p.logger
+		for _, skipDecision := range reflection.SkipDecisions {
+			// Check execution mode
+			shouldSkip := false
+			switch p.config.executionMode {
+			case PlanExecutionModeComplete:
+				// Never skip in complete mode
+				shouldSkip = false
+				logger.Debug("skip denied due to complete execution mode",
+					"todo_id", skipDecision.TodoID, "reason", skipDecision.SkipReason)
+			case PlanExecutionModeEfficient:
+				// Skip if confidence meets threshold
+				shouldSkip = skipDecision.Confidence >= p.config.skipConfidenceThreshold
+				logger.Debug("skip decision in efficient mode",
+					"todo_id", skipDecision.TodoID, "confidence", skipDecision.Confidence,
+					"threshold", p.config.skipConfidenceThreshold, "approved", shouldSkip)
+			case PlanExecutionModeBalanced:
+				// Check confidence and get confirmation
+				if skipDecision.Confidence >= p.config.skipConfidenceThreshold {
+					shouldSkip = p.config.skipConfirmationHook(context.Background(), p, skipDecision)
+					logger.Debug("skip decision in balanced mode",
+						"todo_id", skipDecision.TodoID, "confidence", skipDecision.Confidence,
+						"confirmed", shouldSkip)
+				} else {
+					logger.Debug("skip denied due to low confidence",
+						"todo_id", skipDecision.TodoID, "confidence", skipDecision.Confidence,
+						"threshold", p.config.skipConfidenceThreshold)
+				}
+			}
+
+			if shouldSkip {
+				// Find the todo to skip
+				for i := range p.todos {
+					if p.todos[i].ID == skipDecision.TodoID {
+						oldTodo := p.todos[i]
+						p.todos[i].Status = ToDoStatusSkipped
+						p.todos[i].UpdatedAt = now
+						changes = append(changes, PlanToDoChange{
+							Type:    PlanToDoChangeTypeUpdated,
+							TodoID:  skipDecision.TodoID,
+							OldToDo: &oldTodo,
+							NewToDo: &p.todos[i],
+							Description: fmt.Sprintf("Skipped todo: %s (reason: %s, confidence: %.2f)",
+								p.todos[i].Description, skipDecision.SkipReason, skipDecision.Confidence),
+						})
+						logger.Info("todo skipped",
+							"todo_id", skipDecision.TodoID,
+							"reason", skipDecision.SkipReason,
+							"confidence", skipDecision.Confidence)
+						break
+					}
+				}
+			}
+		}
+	}
+
 	// Determine reflection type based on changes
 	if len(changes) > 0 {
 		hasUpdates := false
@@ -1039,6 +1314,38 @@ func (p *Plan) updatePlan(reflection *planReflection) error {
 
 	// Store changes in reflection for hook calls
 	reflection.Changes = changes
+
+	// Log skip decision statistics
+	if len(reflection.SkipDecisions) > 0 {
+		var approvedSkips, deniedSkips int
+		var totalConfidence float64
+
+		for _, skipDecision := range reflection.SkipDecisions {
+			// Check if this todo was actually skipped
+			wasSkipped := false
+			for _, change := range changes {
+				if change.TodoID == skipDecision.TodoID && change.NewToDo != nil && change.NewToDo.Status == ToDoStatusSkipped {
+					wasSkipped = true
+					break
+				}
+			}
+
+			if wasSkipped {
+				approvedSkips++
+			} else {
+				deniedSkips++
+			}
+			totalConfidence += skipDecision.Confidence
+		}
+
+		avgConfidence := totalConfidence / float64(len(reflection.SkipDecisions))
+		p.logger.Info("skip decision summary",
+			"total_decisions", len(reflection.SkipDecisions),
+			"approved", approvedSkips,
+			"denied", deniedSkips,
+			"avg_confidence", avgConfidence,
+			"execution_mode", p.config.executionMode)
+	}
 
 	return nil
 }
@@ -1311,5 +1618,29 @@ func WithPlanMessageHook(hook PlanMessageHook) PlanOption {
 func WithPlanHistory(history *History) PlanOption {
 	return func(cfg *planConfig) {
 		cfg.history = history
+	}
+}
+
+// WithPlanExecutionMode sets the execution mode for the plan.
+// Default: PlanExecutionModeBalanced
+func WithPlanExecutionMode(mode PlanExecutionMode) PlanOption {
+	return func(cfg *planConfig) {
+		cfg.executionMode = mode
+	}
+}
+
+// WithSkipConfidenceThreshold sets the confidence threshold for skip decisions.
+// Default: 0.8 (80% confidence required)
+func WithSkipConfidenceThreshold(threshold float64) PlanOption {
+	return func(cfg *planConfig) {
+		cfg.skipConfidenceThreshold = threshold
+	}
+}
+
+// WithSkipConfirmationHook sets a hook to confirm skip decisions.
+// Default: Auto-approve skip decisions that meet the confidence threshold (0.8)
+func WithSkipConfirmationHook(hook PlanSkipConfirmationHook) PlanOption {
+	return func(cfg *planConfig) {
+		cfg.skipConfirmationHook = hook
 	}
 }

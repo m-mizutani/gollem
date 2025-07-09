@@ -280,6 +280,148 @@ Plan mode maintains conversation history through independent session management:
 - **Session Requirement**: Plans require a valid session; execution will fail with `ErrPlanNotInitialized` if session is nil
 - **Session as Source of Truth**: The plan's session is the authoritative source for conversation history
 
+### Adaptive Skip Functionality
+
+Plan mode includes sophisticated skip functionality that allows the LLM to intelligently skip tasks that become unnecessary during execution. This feature is based on research into modern AI agent architectures and provides transparent, configurable task management.
+
+#### Skip Decision Structure
+
+The skip system uses structured decisions with detailed reasoning:
+
+```go
+type SkipDecision struct {
+    TodoID     string  `json:"todo_id"`     // ID of the task to skip
+    SkipReason string  `json:"skip_reason"` // Detailed explanation
+    Confidence float64 `json:"confidence"`  // 0.0-1.0 confidence level
+    Evidence   string  `json:"evidence"`    // Supporting evidence
+}
+```
+
+#### Plan Execution Modes
+
+Choose how aggressively the plan should skip tasks:
+
+```go
+// Complete Mode: Never skip tasks - execute everything
+plan, err := agent.Plan(ctx, "task description",
+    gollem.WithPlanExecutionMode(gollem.PlanExecutionModeComplete),
+)
+
+// Balanced Mode (Default): Skip with confirmation when confidence is high
+// Default execution mode: PlanExecutionModeBalanced
+// Default confidence threshold: 0.8 (80%)
+plan, err := agent.Plan(ctx, "task description",
+    gollem.WithPlanExecutionMode(gollem.PlanExecutionModeBalanced), // Default mode
+    gollem.WithSkipConfidenceThreshold(0.8), // Default threshold
+)
+
+// Efficient Mode: Aggressively skip when confidence threshold is met
+plan, err := agent.Plan(ctx, "task description",
+    gollem.WithPlanExecutionMode(gollem.PlanExecutionModeEfficient),
+    gollem.WithSkipConfidenceThreshold(0.7), // Lower threshold for efficiency
+)
+
+// Using defaults (equivalent to Balanced mode with 0.8 threshold)
+plan, err := agent.Plan(ctx, "task description")
+```
+
+#### Custom Skip Confirmation
+
+Implement custom logic for skip decisions:
+
+```go
+// Default skip confirmation hook behavior:
+// - Auto-approve skip decisions with confidence >= 0.8 (threshold)
+// - Deny skip decisions with confidence < 0.8
+
+// Custom skip confirmation hook:
+skipHook := func(ctx context.Context, plan *gollem.Plan, decision gollem.SkipDecision) bool {
+    // Auto-approve very high confidence decisions
+    if decision.Confidence >= 0.95 {
+        log.Printf("Auto-approving skip: %s (confidence: %.2f)",
+            decision.SkipReason, decision.Confidence)
+        return true
+    }
+
+    // Ask user for medium confidence decisions
+    if decision.Confidence >= 0.7 {
+        fmt.Printf("Skip '%s'?\nReason: %s\nEvidence: %s\nConfidence: %.2f\n",
+            decision.TodoID, decision.SkipReason, decision.Evidence, decision.Confidence)
+
+        var response string
+        fmt.Print("Skip this task? (y/n): ")
+        fmt.Scanln(&response)
+        return strings.ToLower(response) == "y"
+    }
+
+    // Deny low confidence decisions
+    return false
+}
+
+plan, err := agent.Plan(ctx, "task description",
+    gollem.WithPlanExecutionMode(gollem.PlanExecutionModeBalanced), // Default mode
+    gollem.WithSkipConfirmationHook(skipHook), // Override default hook
+)
+```
+
+#### Skip Decision Examples
+
+The LLM provides structured skip decisions during reflection:
+
+```json
+{
+  "skip_decisions": [
+    {
+      "todo_id": "analyze_logs",
+      "skip_reason": "Log analysis already completed in step 2 with comprehensive threat detection results",
+      "confidence": 0.9,
+      "evidence": "Step 2 output contains detailed log analysis with 15 threat indicators identified and classified"
+    },
+    {
+      "todo_id": "validate_findings",
+      "skip_reason": "Findings validation integrated into previous analysis steps",
+      "confidence": 0.75,
+      "evidence": "Each analysis step included validation checks and cross-references with threat intelligence"
+    }
+  ]
+}
+```
+
+#### Confidence Guidelines
+
+The system uses confidence levels to make skip decisions:
+
+- **0.9-1.0**: Very high confidence (redundant task, goal already achieved)
+- **0.7-0.9**: High confidence (strong evidence task is unnecessary)
+- **0.5-0.7**: Moderate confidence (reasonable doubt about task necessity)
+- **0.3-0.5**: Low confidence (uncertain, may need user confirmation)
+- **0.0-0.3**: Very low confidence (should not skip)
+
+#### Skip Statistics and Monitoring
+
+Monitor skip decisions during execution:
+
+```go
+plan, err := agent.Plan(ctx, "security analysis",
+    gollem.WithPlanExecutionMode(gollem.PlanExecutionModeBalanced),
+    gollem.WithPlanToDoUpdatedHook(func(ctx context.Context, plan *gollem.Plan, changes []gollem.PlanToDoChange) error {
+        for _, change := range changes {
+            if change.Type == gollem.PlanToDoChangeUpdated &&
+               change.NewToDo != nil && change.NewToDo.Status == "Skipped" {
+                fmt.Printf("⏭️  Skipped: %s\n", change.Description)
+            }
+        }
+        return nil
+    }),
+)
+```
+
+The system automatically logs skip decision statistics:
+- Total skip decisions made
+- Number approved vs denied
+- Average confidence level
+- Execution mode used
+
 ### Dynamic Plan Modification
 
 During reflection, plans can be dynamically modified:

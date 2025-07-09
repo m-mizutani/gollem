@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -52,6 +54,9 @@ type Client struct {
 
 	// systemPrompt is the system prompt to use for chat completions.
 	systemPrompt string
+
+	// timeout for API requests
+	timeout time.Duration
 }
 
 // Option is a function that configures a Client.
@@ -103,7 +108,14 @@ func WithMaxTokens(maxTokens int64) Option {
 	}
 }
 
-// WithSystemPrompt sets the system prompt to use for chat completions.
+// WithTimeout sets the timeout for API requests
+func WithTimeout(timeout time.Duration) Option {
+	return func(c *Client) {
+		c.timeout = timeout
+	}
+}
+
+// WithSystemPrompt sets the system prompt for the client
 func WithSystemPrompt(prompt string) Option {
 	return func(c *Client) {
 		c.systemPrompt = prompt
@@ -122,15 +134,26 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 			TopP:        1.0,
 			MaxTokens:   4096,
 		},
+		timeout: 30 * time.Second, // Default timeout
 	}
 
 	for _, option := range options {
 		option(client)
 	}
 
-	newClient := anthropic.NewClient(
+	clientOptions := []option.RequestOption{
 		option.WithAPIKey(apiKey),
-	)
+	}
+
+	// Add timeout if specified
+	if client.timeout > 0 {
+		httpClient := &http.Client{
+			Timeout: client.timeout,
+		}
+		clientOptions = append(clientOptions, option.WithHTTPClient(httpClient))
+	}
+
+	newClient := anthropic.NewClient(clientOptions...)
 	client.client = &newClient
 
 	return client, nil

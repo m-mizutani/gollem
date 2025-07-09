@@ -385,10 +385,146 @@ func validateParameterType(value any, expectedType gollem.ParameterType) error {
 }
 ```
 
+## Plan Mode with Adaptive Skip
+
+The [plan mode example](../examples/plan_mode/) demonstrates advanced multi-step planning with intelligent skip capabilities:
+
+```go
+func planModeExample(ctx context.Context, client gollem.LLMClient) error {
+    agent := gollem.New(client,
+        gollem.WithTools(&SearchTool{}, &AnalysisTool{}, &ReportTool{}),
+    )
+    
+    // Create plan with balanced execution mode (default settings)
+    plan, err := agent.Plan(ctx,
+        "Research AI trends, analyze the data, and generate a comprehensive report",
+        gollem.WithPlanExecutionMode(gollem.PlanExecutionModeBalanced), // Default mode
+        gollem.WithSkipConfidenceThreshold(0.8), // Default threshold
+        gollem.WithSkipConfirmationHook(func(ctx context.Context, plan *gollem.Plan, decision gollem.SkipDecision) bool {
+            // Auto-approve high confidence decisions
+            if decision.Confidence >= 0.9 {
+                fmt.Printf("🤖 Auto-approving skip (%.2f): %s\n", 
+                    decision.Confidence, decision.SkipReason)
+                return true
+            }
+            
+            // Ask user for medium confidence decisions
+            if decision.Confidence >= 0.7 {
+                fmt.Printf("Skip task? (confidence: %.2f)\n", decision.Confidence)
+                fmt.Printf("Reason: %s\n", decision.SkipReason)
+                fmt.Printf("Evidence: %s\n", decision.Evidence)
+                
+                var response string
+                fmt.Print("Continue? (y/n): ")
+                fmt.Scanln(&response)
+                return strings.ToLower(response) == "y"
+            }
+            
+            return false // Deny low confidence decisions
+        }),
+        gollem.WithPlanToDoUpdatedHook(func(ctx context.Context, plan *gollem.Plan, changes []gollem.PlanToDoChange) error {
+            for _, change := range changes {
+                if change.Type == gollem.PlanToDoChangeUpdated && 
+                   change.NewToDo != nil && change.NewToDo.Status == "Skipped" {
+                    fmt.Printf("⏭️  Skipped: %s\n", change.Description)
+                }
+            }
+            return nil
+        }),
+    )
+    if err != nil {
+        return fmt.Errorf("failed to create plan: %w", err)
+    }
+    
+    // Execute the plan
+    result, err := plan.Execute(ctx)
+    if err != nil {
+        return fmt.Errorf("failed to execute plan: %w", err)
+    }
+    
+    // Display results and statistics
+    fmt.Printf("Plan completed: %s\n", result)
+    displayPlanStatistics(plan)
+    
+    return nil
+}
+
+func displayPlanStatistics(plan *gollem.Plan) {
+    todos := plan.GetToDos()
+    var completed, skipped, failed int
+    
+    for _, todo := range todos {
+        switch todo.Status {
+        case "Completed":
+            completed++
+        case "Skipped":
+            skipped++
+        case "Failed":
+            failed++
+        }
+    }
+    
+    fmt.Printf("\n📊 Plan Statistics:\n")
+    fmt.Printf("   Total tasks: %d\n", len(todos))
+    fmt.Printf("   ✅ Completed: %d\n", completed)
+    fmt.Printf("   ⏭️  Skipped: %d\n", skipped)
+    fmt.Printf("   ❌ Failed: %d\n", failed)
+    fmt.Printf("   📈 Efficiency: %.1f%%\n", 
+        float64(completed+skipped)/float64(len(todos))*100)
+}
+```
+
+### Plan Execution Modes
+
+The plan mode supports three execution modes:
+
+1. **Complete Mode**: Execute all tasks without skipping
+   ```go
+   gollem.WithPlanExecutionMode(gollem.PlanExecutionModeComplete)
+   ```
+
+2. **Balanced Mode**: Smart skipping with confirmation (default)
+   ```go
+   gollem.WithPlanExecutionMode(gollem.PlanExecutionModeBalanced) // Default mode
+   gollem.WithSkipConfidenceThreshold(0.8) // Default threshold
+   ```
+
+3. **Efficient Mode**: Aggressive skipping for speed
+   ```go
+   gollem.WithPlanExecutionMode(gollem.PlanExecutionModeEfficient)
+   gollem.WithSkipConfidenceThreshold(0.6) // Lower threshold
+   ```
+
+4. **Using Defaults**: Equivalent to Balanced mode with 0.8 threshold
+   ```go
+   // No options needed - uses defaults
+   plan, err := agent.Plan(ctx, "task description")
+   ```
+
+### Skip Decision Intelligence
+
+The LLM provides structured skip decisions with:
+
+- **Confidence levels** (0.0-1.0) indicating certainty
+- **Detailed reasoning** for why tasks should be skipped
+- **Evidence** from previous execution results
+- **Transparent decision-making** process
+
+Example skip decision:
+```json
+{
+  "todo_id": "analyze_data",
+  "skip_reason": "Data analysis already completed in previous step with comprehensive results",
+  "confidence": 0.85,
+  "evidence": "Step 2 output contains detailed analysis with 15 key insights identified"
+}
+```
+
 ## Next Steps
 
 - Learn more about [tool creation](tools.md)
 - Explore [MCP server integration](mcp.md)
 - Check out the [getting started guide](getting-started.md)
 - Understand [history management](history.md) for conversation context
+- Discover [plan mode capabilities](plan-mode.md) for complex workflows
 - Review the [complete documentation](README.md)

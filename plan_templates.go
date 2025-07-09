@@ -39,9 +39,10 @@ type executorTemplateData struct {
 }
 
 type reflectorTemplateData struct {
-	Goal           string
-	OriginalPlan   string
-	CompletedSteps string
-	LastStepResult string
-	SystemPrompt   string
+	Goal              string
+	CurrentPlanStatus string
+	OriginalPlan      string
+	CompletedSteps    string
+	LastStepResult    string
+	SystemPrompt      string
 }

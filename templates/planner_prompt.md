@@ -7,17 +7,34 @@ Break down the following goal into a series of simple, logical steps. Focus on t
 Available capabilities (reference only, do not specify directly):
 {{.ToolInfo}}
 
-Your output must be a JSON object with a single key 'steps'. The value should be a list of objects representing each step.
+# Response Format
 
-IMPORTANT: Each step MUST have a non-empty "description" field. Do not create steps with empty descriptions.
+You MUST respond with valid JSON in the following format:
 
-Example format:
+```json
 {
   "steps": [
-    {"description": "Search for information about electric cars", "intent": "Gather comprehensive data on electric vehicles"},
-    {"description": "Analyze benefits and advantages", "intent": "Extract key benefits from collected information"},
-    {"description": "Summarize findings", "intent": "Create final summary for user"}
+    {
+      "description": "clear, actionable step description",
+      "intent": "high-level intention or purpose of this step"
+    },
+    {
+      "description": "another step description",
+      "intent": "intention for this step"
+    }
   ]
 }
+```
+
+# Schema Requirements:
+- `steps`: REQUIRED array - list of planned steps
+- `description`: REQUIRED string - clear, actionable description of what needs to be done
+- `intent`: REQUIRED string - high-level intention/purpose of this step
+
+IMPORTANT:
+- Each step MUST have a non-empty "description" field
+- Do not create steps with empty descriptions
+- Focus on logical progression toward the goal
+- The final step should typically integrate findings and provide a complete answer
 
 Goal: {{.Goal}}

@@ -304,10 +304,6 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	message := resp.Choices[0].Message
 	if message.Content != "" {
 		response.Texts = append(response.Texts, message.Content)
-		s.messages = append(s.messages, openai.ChatCompletionMessage{
-			Role:    openai.ChatMessageRoleAssistant,
-			Content: message.Content,
-		})
 	}
 
 	if message.ToolCalls != nil {
@@ -322,12 +318,20 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 				Name:      toolCall.Function.Name,
 				Arguments: args,
 			})
-			s.messages = append(s.messages, openai.ChatCompletionMessage{
-				Role:      openai.ChatMessageRoleAssistant,
-				Content:   message.Content,
-				ToolCalls: []openai.ToolCall{toolCall},
-			})
 		}
+
+		// Add a single assistant message with all tool calls
+		s.messages = append(s.messages, openai.ChatCompletionMessage{
+			Role:      openai.ChatMessageRoleAssistant,
+			Content:   message.Content,
+			ToolCalls: message.ToolCalls,
+		})
+	} else if message.Content != "" {
+		// Add assistant message only if there are no tool calls
+		s.messages = append(s.messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleAssistant,
+			Content: message.Content,
+		})
 	}
 
 	return response, nil
