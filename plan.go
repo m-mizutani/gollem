@@ -1281,13 +1281,17 @@ func (p *Plan) updatePlan(reflection *planReflection) error {
 
 	// Track changes for new todos
 	if len(reflection.NewToDos) > 0 {
-		for _, newTodo := range reflection.NewToDos {
+		for i := range reflection.NewToDos {
+			newTodo := &reflection.NewToDos[i]
+			if newTodo.ID == "" {
+				newTodo.ID = uuid.New().String()
+			}
 			newTodo.CreatedAt = now
 			newTodo.UpdatedAt = now
 			changes = append(changes, PlanToDoChange{
 				Type:        PlanToDoChangeTypeAdded,
 				TodoID:      newTodo.ID,
-				NewToDo:     &newTodo,
+				NewToDo:     newTodo,
 				Description: fmt.Sprintf("Added new todo: %s", newTodo.Description),
 			})
 		}

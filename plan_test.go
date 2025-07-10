@@ -428,94 +428,6 @@ func newPlanTestClaudeClient(t *testing.T) gollem.LLMClient {
 	return client
 }
 
-// Common test function for premature completion issue
-func testPrematureCompletion(t *testing.T, client gollem.LLMClient) {
-	threatTool := &threatIntelTool{}
-	agent := gollem.New(client, gollem.WithTools(threatTool))
-
-	// Track execution progress
-	var executedTodos []string
-	var completedTodos []string
-
-	plan, err := agent.Plan(context.Background(), "Investigate IP address 192.0.2.1 for security threats",
-		gollem.WithToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
-			executedTodos = append(executedTodos, todo.ID)
-			t.Logf("Started todo %s: %s", todo.ID, todo.Description)
-			return nil
-		}),
-		gollem.WithToDoCompletedHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
-			completedTodos = append(completedTodos, todo.ID)
-			t.Logf("Completed todo %s: %s", todo.ID, todo.Description)
-			return nil
-		}),
-	)
-	gt.NoError(t, err)
-	gt.NotNil(t, plan)
-
-	initialTodos := plan.GetToDos()
-	t.Logf("Plan created with %d todos:", len(initialTodos))
-	for i, todo := range initialTodos {
-		t.Logf("  %d. %s - %s", i+1, todo.Description, todo.Intent)
-	}
-
-	result, err := plan.Execute(context.Background())
-	if err != nil {
-		t.Logf("Plan execution failed: %v", err)
-		// If plan is not nil, still try to get todos to see what happened
-		if plan != nil {
-			finalTodos := plan.GetToDos()
-			t.Logf("Final todos after error:")
-			for i, todo := range finalTodos {
-				t.Logf("Todo %d (%s): %s - Status: %s", i+1, todo.ID, todo.Description, todo.Status)
-				if todo.Error != nil {
-					t.Logf("  Error: %v", todo.Error)
-				}
-			}
-		}
-	}
-	gt.NoError(t, err)
-
-	finalTodos := plan.GetToDos()
-	t.Logf("\nExecution completed:")
-	t.Logf("Total todos created: %d", len(initialTodos))
-	t.Logf("Todos started: %d", len(executedTodos))
-	t.Logf("Todos completed: %d", len(completedTodos))
-	t.Logf("Final result: %s", result)
-
-	// Log the final state of all todos
-	for i, todo := range finalTodos {
-		t.Logf("Todo %d (%s): %s - Status: %s", i+1, todo.ID, todo.Description, todo.Status)
-		if todo.Result != nil {
-			t.Logf("  Output: %s", todo.Result.Output)
-			t.Logf("  Tool calls: %d", len(todo.Result.ToolCalls))
-		}
-	}
-
-	// This test is mainly for observation - we want to see if:
-	// 1. LLM creates multiple todos but only executes some
-	// 2. LLM doesn't use available tools when it should
-	// 3. Reflection decides to complete early due to perceived tool unavailability
-
-	// Check if we have the premature completion issue
-	if len(initialTodos) > 1 && len(completedTodos) < len(initialTodos) {
-		t.Logf("WARNING: Potential premature completion detected!")
-		t.Logf("  Plan had %d todos but only %d were completed", len(initialTodos), len(completedTodos))
-
-		// Check if any completed todo used tools
-		toolsUsed := false
-		for _, todo := range finalTodos {
-			if todo.Completed && todo.Result != nil && len(todo.Result.ToolCalls) > 0 {
-				toolsUsed = true
-				break
-			}
-		}
-
-		if !toolsUsed {
-			t.Logf("WARNING: No tools were used despite threat intelligence tool being available!")
-		}
-	}
-}
-
 // Test premature completion issue with all LLMs
 func TestPrematureCompletionIssueWithRealLLM(t *testing.T) {
 	t.Skip("Integration tests require LLM API keys - run separately")
@@ -1075,4 +987,76 @@ func TestPlanModeClaudeToolExecution(t *testing.T) {
 	if totalToolCalls == 0 {
 		t.Logf("⚠️  WARNING: No tools were used despite predefined plan requiring tool usage")
 	}
+}
+
+func TestNewTodoIDGeneration(t *testing.T) {
+	type testCase struct {
+		name        string
+		newTodos    []gollem.TestPlanToDo
+		expectedIds []string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			// Create a test plan
+			plan := gollem.NewTestPlan("test-plan", "Test input", []gollem.TestPlanToDo{})
+
+			// Create reflection with new todos
+			reflection := gollem.NewTestPlanReflection(gollem.PlanReflectionTypeExpand, tc.newTodos)
+
+			// Apply the update
+			err := plan.TestUpdatePlan(reflection)
+			gt.NoError(t, err)
+
+			// Verify todos were added
+			todos := plan.TestGetTodos()
+			gt.N(t, len(todos)).Equal(len(tc.newTodos))
+
+			// Verify IDs are unique and not empty
+			seenIds := make(map[string]bool)
+			for i, todo := range todos {
+				gt.Value(t, todo.ID).NotEqual("")
+
+				if len(tc.expectedIds) > i && tc.expectedIds[i] != "" {
+					// If expected ID is provided, verify it matches
+					gt.Value(t, todo.ID).Equal(tc.expectedIds[i])
+				} else {
+					// If no expected ID, verify it's a UUID format
+					gt.Number(t, len(todo.ID)).Greater(0)
+				}
+
+				// Verify ID is unique
+				gt.Value(t, seenIds[todo.ID]).Equal(false)
+				seenIds[todo.ID] = true
+			}
+		}
+	}
+
+	t.Run("generates unique IDs for empty todo IDs", runTest(testCase{
+		name: "empty IDs",
+		newTodos: []gollem.TestPlanToDo{
+			{ID: "", Description: "First new todo", Intent: "Do first new task"},
+			{ID: "", Description: "Second new todo", Intent: "Do second new task"},
+		},
+		expectedIds: []string{}, // Will be generated
+	}))
+
+	t.Run("preserves existing IDs", runTest(testCase{
+		name: "existing IDs",
+		newTodos: []gollem.TestPlanToDo{
+			{ID: "existing-1", Description: "First existing todo", Intent: "Do first existing task"},
+			{ID: "existing-2", Description: "Second existing todo", Intent: "Do second existing task"},
+		},
+		expectedIds: []string{"existing-1", "existing-2"},
+	}))
+
+	t.Run("mixed empty and existing IDs", runTest(testCase{
+		name: "mixed IDs",
+		newTodos: []gollem.TestPlanToDo{
+			{ID: "existing-1", Description: "First existing todo", Intent: "Do first existing task"},
+			{ID: "", Description: "Second new todo", Intent: "Do second new task"},
+			{ID: "existing-3", Description: "Third existing todo", Intent: "Do third existing task"},
+		},
+		expectedIds: []string{"existing-1", "", "existing-3"}, // Empty will be generated
+	}))
 }

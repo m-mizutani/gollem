@@ -94,10 +94,12 @@ You MUST respond with valid JSON in the following format:
 - **Purpose**: Add completely new tasks that weren't in the original plan
 - **When to use**: When analysis reveals additional work is needed
 - **Array of objects** with these required fields:
-  - `todo_id` (string, required): Unique identifier (e.g., "additional_task_1", "validate_findings")
+  - `todo_id` (string, required): **MUST be unique identifier** - use descriptive names like "additional_task_1", "validate_findings", "cross_reference_data", etc. **Never use empty strings or duplicate existing IDs**
   - `todo_description` (string, required): Clear, actionable description
   - `todo_intent` (string, required): High-level purpose
   - `todo_status` (string, required): Should typically be "pending" for new tasks
+
+**IMPORTANT**: Each `todo_id` must be unique across all todos in the plan. Generate descriptive, meaningful IDs that clearly identify the task purpose.
 
 **Example**:
 ```json
@@ -168,7 +170,7 @@ You MUST respond with valid JSON in the following format:
 2. **Todo IDs**:
    - Must be non-empty strings
    - For `updated_todos`: Must reference existing todo IDs
-   - For `new_todos`: Must be unique and not conflict with existing IDs
+   - For `new_todos`: **MUST be unique and not conflict with existing IDs** - use descriptive names like "analyze_threat_data", "validate_results", "cross_reference_findings"
    - For `skipped_todos`: Must reference existing todo IDs
 3. **Todo Status**: Must be exactly one of: "pending", "completed", "skipped"
 4. **Required Fields**: All fields marked as required must be present and non-empty

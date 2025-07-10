@@ -17,6 +17,7 @@ alwaysApply: true
 - All comments and literals MUST be in English.
 - Do not remove /tmp directory.
 - You need to run `go test ./...` and check errors before exiting your task.
+- If you need to access internal package for testing, you should use `export_test.go` file.
 
 ## Comment & Literals
 
