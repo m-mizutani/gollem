@@ -13,9 +13,10 @@ alwaysApply: true
 
 # Restrictions
 
-- You can build binary for tseting, but you MUST clean it after checking.
+- You can build binary for testing, but you MUST clean it after checking.
 - All comments and literals MUST be in English.
 - Do not remove /tmp directory.
+- You need to run `go test ./...` and check errors before exiting your task.
 
 ## Comment & Literals
 

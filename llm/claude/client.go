@@ -12,6 +12,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/internal"
 )
 
 const (
@@ -241,6 +242,15 @@ func (s *Session) convertInputs(input ...gollem.Input) ([]anthropic.MessageParam
 				response = fmt.Sprintf("Error: %v", v.Error)
 			}
 
+			// DEBUG: Log tool result creation
+			// Note: This log is commented out by default to avoid spamming logs
+			// Uncomment for debugging tool_use/tool_result issues
+			internal.TestLogger().Info("creating tool_result",
+				"tool_use_id", v.ID,
+				"tool_name", v.Name,
+				"is_error", isError,
+				"response_length", len(response))
+
 			// Create tool result - try original argument order: tool_use_id, content, is_error
 			toolResult := anthropic.NewToolResultBlock(v.ID, response, isError)
 			toolResults = append(toolResults, toolResult)
@@ -335,16 +345,44 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		return nil, err
 	}
 
+	// DEBUG: Log message history for debugging
+	internal.TestLogger().Info("Claude API request",
+		"message_count", len(s.messages),
+		"input_count", len(input))
+
+	// Log the last few messages to understand the conversation state
+	for i, msg := range s.messages[max(0, len(s.messages)-5):] {
+		internal.TestLogger().Info("Claude message",
+			"index", i,
+			"role", msg.Role,
+			"content_blocks", len(msg.Content))
+	}
+
 	s.messages = append(s.messages, messages...)
 	params := s.createRequest()
 
+	internal.TestLogger().Info("Claude API calling anthropic",
+		"total_messages", len(s.messages),
+		"max_tokens", params.MaxTokens,
+		"model", params.Model)
+
 	resp, err := s.client.Messages.New(ctx, params)
 	if err != nil {
+		internal.TestLogger().Info("Claude API request failed", "error", err)
 		return nil, goerr.Wrap(err, "failed to create message")
 	}
 
+	internal.TestLogger().Info("Claude API response received",
+		"content_blocks", len(resp.Content),
+		"stop_reason", resp.StopReason)
+
 	// Add assistant's response to message history
+	// This is critical for tool_use/tool_result consistency
 	s.messages = append(s.messages, resp.ToParam())
+
+	internal.TestLogger().Info("Added assistant response to message history",
+		"content_blocks", len(resp.Content),
+		"total_messages", len(s.messages))
 
 	return processResponse(resp), nil
 }

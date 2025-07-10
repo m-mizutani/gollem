@@ -242,6 +242,19 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 			if v.Error != nil {
 				response = fmt.Sprintf(`Error message: %+v`, v.Error)
 			}
+
+			// DEBUG: Log tool result creation for OpenAI
+			// Note: This log is commented out by default to avoid spamming logs
+			// Uncomment for debugging tool_call_id issues
+			/*
+				logger := slog.Default()
+				logger.Debug("creating tool response for OpenAI",
+					"tool_call_id", v.ID,
+					"tool_name", v.Name,
+					"has_error", v.Error != nil,
+					"response_length", len(response))
+			*/
+
 			s.messages = append(s.messages, openai.ChatCompletionMessage{
 				Role:       openai.ChatMessageRoleTool,
 				Content:    response,

@@ -3,11 +3,11 @@ package gollem
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/m-mizutani/gollem/internal"
 )
 
 // ResponseMode is the type for the response mode of the gollem agent.
@@ -407,11 +407,6 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 
 			newInput, err := handleResponse(ctx, *cfg, output, toolMap)
 			if err != nil {
-				// Check if the error is ErrExitConversation
-				if errors.Is(err, ErrExitConversation) {
-					logger.Info("conversation exited by tool")
-					return nil
-				}
 				return err
 			}
 			input = newInput
@@ -427,11 +422,6 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 				logger.Debug("recv response", "output", output)
 				newInput, err := handleResponse(ctx, *cfg, output, toolMap)
 				if err != nil {
-					// Check if the error is ErrExitConversation
-					if errors.Is(err, ErrExitConversation) {
-						logger.Info("conversation exited by tool")
-						return nil
-					}
 					return err
 				}
 				input = append(input, newInput...)
@@ -446,7 +436,19 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 	logger := LoggerFromContext(ctx)
 
 	newInput := make([]Input, 0)
-	var exitConversationErr error
+
+	// DEBUG: Log all function calls received (minimal logging for debugging)
+	if len(output.FunctionCalls) > 0 {
+		internal.TestLogger().Info("handleResponse: processing response",
+			"function_calls_count", len(output.FunctionCalls))
+
+		for i, toolCall := range output.FunctionCalls {
+			internal.TestLogger().Info("handleResponse: function call",
+				"index", i,
+				"tool_id", toolCall.ID,
+				"tool_name", toolCall.Name)
+		}
+	}
 
 	// Call the MessageHook for all texts
 	for _, text := range output.Texts {
@@ -474,6 +476,9 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 
 		tool, ok := toolMap[toolCall.Name]
 		if !ok {
+			internal.TestLogger().Info("handleResponse: tool not found, creating error response",
+				"tool_name", toolCall.Name,
+				"tool_id", toolCall.ID)
 			logger.Info("gollem tool not found", "call", toolCall)
 			newInput = append(newInput, FunctionResponse{
 				Name:  toolCall.Name,
@@ -486,60 +491,70 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 		result, err := tool.Run(ctx, toolCall.Arguments)
 		logger.Debug("gollem tool result", "tool", toolCall.Name, "result", result)
 		if err != nil {
-			// Check if the error is ErrExitConversation
-			if errors.Is(err, ErrExitConversation) {
-				// Store the error but continue processing other tools
-				exitConversationErr = goerr.Wrap(ErrExitConversation, "conversation exit requested by tool", goerr.V("tool", toolCall.Name))
-				logger.Info("tool requested conversation exit, continuing to process remaining tools", "tool", toolCall.Name)
-				continue
-			}
-
+			internal.TestLogger().Info("handleResponse: tool error, creating error response",
+				"tool_name", toolCall.Name,
+				"tool_id", toolCall.ID,
+				"error", err)
 			if cbErr := cfg.toolErrorHook(ctx, err, *toolCall); cbErr != nil {
 				return nil, goerr.Wrap(cbErr, "failed to call ToolErrorHook")
 			}
 
 			logger.Info("gollem tool error", "call", toolCall, "error", err)
-
 			newInput = append(newInput, FunctionResponse{
 				ID:    toolCall.ID,
 				Name:  toolCall.Name,
 				Error: goerr.Wrap(err, toolCall.Name+" failed to run", goerr.V("call", toolCall)),
 			})
-			continue
-		}
-
-		// Call the ToolResponseHook only if this is not a Facilitator tool
-		if !isFacilitator {
-			if cbErr := cfg.toolResponseHook(ctx, *toolCall, result); cbErr != nil {
-				return nil, goerr.Wrap(cbErr, "failed to call ToolResponseHook")
+		} else {
+			// Call the ToolResponseHook only if this is not a Facilitator tool
+			if !isFacilitator {
+				if cbErr := cfg.toolResponseHook(ctx, *toolCall, result); cbErr != nil {
+					return nil, goerr.Wrap(cbErr, "failed to call ToolResponseHook")
+				}
 			}
-		}
 
-		logger.Info("gollem tool response", "call", toolCall, "result", result)
+			logger.Debug("gollem tool response", "call", toolCall, "result", result, "should_exit", err)
 
-		// Sanitize result to ensure a generic JSON-compatible structure for LLM processing.
-		if result != nil {
-			marshaled, err := json.Marshal(result)
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to marshal result")
+			// Sanitize result to ensure a generic JSON-compatible structure for LLM processing.
+			if result != nil {
+				marshaled, err := json.Marshal(result)
+				if err != nil {
+					return nil, goerr.Wrap(err, "failed to marshal result")
+				}
+				var unmarshaled map[string]any
+				if err := json.Unmarshal(marshaled, &unmarshaled); err != nil {
+					return nil, goerr.Wrap(err, "failed to unmarshal result")
+				}
+				result = unmarshaled
 			}
-			var unmarshaled map[string]any
-			if err := json.Unmarshal(marshaled, &unmarshaled); err != nil {
-				return nil, goerr.Wrap(err, "failed to unmarshal result")
-			}
-			result = unmarshaled
-		}
 
-		newInput = append(newInput, FunctionResponse{
-			ID:   toolCall.ID,
-			Name: toolCall.Name,
-			Data: result,
-		})
+			internal.TestLogger().Info("handleResponse: tool success, creating data response",
+				"tool_name", toolCall.Name,
+				"tool_id", toolCall.ID,
+				"result_keys", func() []string {
+					if result == nil {
+						return nil
+					}
+					keys := make([]string, 0, len(result))
+					for k := range result {
+						keys = append(keys, k)
+					}
+					return keys
+				}())
+
+			newInput = append(newInput, FunctionResponse{
+				ID:   toolCall.ID,
+				Name: toolCall.Name,
+				Data: result,
+			})
+		}
 	}
 
-	// Return the exit conversation error after processing all tool calls
-	if exitConversationErr != nil {
-		return nil, exitConversationErr
+	// DEBUG: Log final function response count
+	if len(output.FunctionCalls) > 0 {
+		internal.TestLogger().Info("handleResponse: completed processing",
+			"function_responses_created", len(newInput),
+			"original_function_calls", len(output.FunctionCalls))
 	}
 
 	return newInput, nil
