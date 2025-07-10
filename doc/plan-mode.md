@@ -63,7 +63,10 @@ import (
 
 func main() {
     // Create LLM client
-    client := openai.New()
+    client, err := openai.New(context.Background(), "YOUR_API_KEY")
+    if err != nil {
+        panic(err)
+    }
 
     // Create agent with tools
     agent := gollem.New(client,
