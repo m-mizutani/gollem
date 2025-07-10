@@ -187,47 +187,64 @@ func newClaudeClient(t *testing.T) gollem.LLMClient {
 }
 
 func TestGemini(t *testing.T) {
+	t.Parallel()
 	client := newGeminiClient(t)
 
 	// Setup tools
 	tools := []gollem.Tool{&randomNumberTool{}}
-	session, err := client.NewSession(t.Context(), gollem.WithSessionTools(tools...))
-	gt.NoError(t, err)
 
 	t.Run("generate content", func(t *testing.T) {
+		t.Parallel()
+		session, err := client.NewSession(t.Context(), gollem.WithSessionTools(tools...))
+		gt.NoError(t, err)
 		testGenerateContent(t, session)
 	})
 	t.Run("generate stream", func(t *testing.T) {
+		t.Parallel()
+		session, err := client.NewSession(t.Context(), gollem.WithSessionTools(tools...))
+		gt.NoError(t, err)
 		testGenerateStream(t, session)
 	})
 }
 
 func TestOpenAI(t *testing.T) {
+	t.Parallel()
 	client := newOpenAIClient(t)
 
 	// Setup tools
 	tools := []gollem.Tool{&randomNumberTool{}}
-	session, err := client.NewSession(t.Context(), gollem.WithSessionTools(tools...))
-	gt.NoError(t, err)
 
 	t.Run("generate content", func(t *testing.T) {
+		t.Parallel()
+		session, err := client.NewSession(t.Context(), gollem.WithSessionTools(tools...))
+		gt.NoError(t, err)
 		testGenerateContent(t, session)
 	})
 	t.Run("generate stream", func(t *testing.T) {
+		t.Parallel()
+		session, err := client.NewSession(t.Context(), gollem.WithSessionTools(tools...))
+		gt.NoError(t, err)
 		testGenerateStream(t, session)
 	})
 }
 
 func TestClaude(t *testing.T) {
+	t.Parallel()
 	client := newClaudeClient(t)
 
-	session, err := client.NewSession(context.Background(), gollem.WithSessionTools(&randomNumberTool{}))
-	gt.NoError(t, err)
+	// Setup tools
+	tools := []gollem.Tool{&randomNumberTool{}}
 
 	t.Run("generate content", func(t *testing.T) {
+		t.Parallel()
+		session, err := client.NewSession(context.Background(), gollem.WithSessionTools(tools...))
+		gt.NoError(t, err)
 		testGenerateContent(t, session)
 	})
 	t.Run("generate stream", func(t *testing.T) {
+		t.Parallel()
+		session, err := client.NewSession(context.Background(), gollem.WithSessionTools(tools...))
+		gt.NoError(t, err)
 		testGenerateStream(t, session)
 	})
 }
@@ -256,11 +273,13 @@ func (t *weatherTool) Run(ctx context.Context, input map[string]any) (map[string
 }
 
 func TestCallToolNameConvention(t *testing.T) {
+	t.Parallel()
 	if _, ok := os.LookupEnv("TEST_FLAG_TOOL_NAME_CONVENTION"); !ok {
 		t.Skip("TEST_FLAG_TOOL_NAME_CONVENTION is not set")
 	}
 
 	testFunc := func(t *testing.T, client gollem.LLMClient) {
+		t.Parallel()
 		testCases := map[string]struct {
 			name    string
 			isError bool
@@ -308,6 +327,7 @@ func TestCallToolNameConvention(t *testing.T) {
 
 		for name, tc := range testCases {
 			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 				ctx := t.Context()
 				tool := &weatherTool{name: tc.name}
 
@@ -330,6 +350,7 @@ func TestCallToolNameConvention(t *testing.T) {
 	}
 
 	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
 		ctx := t.Context()
 		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
 		if !ok {
@@ -342,6 +363,7 @@ func TestCallToolNameConvention(t *testing.T) {
 	})
 
 	t.Run("gemini", func(t *testing.T) {
+		t.Parallel()
 		ctx := t.Context()
 		projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
 		if !ok {
@@ -359,6 +381,7 @@ func TestCallToolNameConvention(t *testing.T) {
 	})
 
 	t.Run("claude", func(t *testing.T) {
+		t.Parallel()
 		ctx := t.Context()
 		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
 		if !ok {
@@ -372,7 +395,9 @@ func TestCallToolNameConvention(t *testing.T) {
 }
 
 func TestSessionHistory(t *testing.T) {
+	t.Parallel()
 	testFn := func(t *testing.T, client gollem.LLMClient) {
+		t.Parallel()
 		ctx := t.Context()
 		session, err := client.NewSession(ctx, gollem.WithSessionTools(&weatherTool{name: "weather"}))
 		gt.NoError(t, err).Required()

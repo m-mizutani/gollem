@@ -234,10 +234,16 @@ func (s *Session) convertInputs(input ...gollem.Input) ([]anthropic.MessageParam
 				return nil, nil, goerr.Wrap(err, "failed to marshal function response")
 			}
 			response := string(data)
-			if v.Error != nil {
-				response = fmt.Sprintf(`Error message: %+v`, v.Error)
+
+			// Handle error cases properly
+			isError := v.Error != nil
+			if isError {
+				response = fmt.Sprintf("Error: %v", v.Error)
 			}
-			toolResults = append(toolResults, anthropic.NewToolResultBlock(v.ID, response, v.Error != nil))
+
+			// Create tool result - try original argument order: tool_use_id, content, is_error
+			toolResult := anthropic.NewToolResultBlock(v.ID, response, isError)
+			toolResults = append(toolResults, toolResult)
 
 		default:
 			return nil, nil, goerr.Wrap(gollem.ErrInvalidParameter, "invalid input")

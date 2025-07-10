@@ -57,6 +57,7 @@ func (t *RandomNumberTool) Run(ctx context.Context, args map[string]any) (map[st
 }
 
 func TestGollemWithTool(t *testing.T) {
+	t.Parallel()
 	respModes := []gollem.ResponseMode{
 		gollem.ResponseModeBlocking,
 		gollem.ResponseModeStreaming,
@@ -65,6 +66,7 @@ func TestGollemWithTool(t *testing.T) {
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
 		for _, respMode := range respModes {
 			t.Run(fmt.Sprintf("ResponseMode=%s", respMode), func(t *testing.T) {
+				t.Parallel()
 				client, err := newClient(t)
 				gt.NoError(t, err)
 
@@ -113,6 +115,7 @@ func TestGollemWithTool(t *testing.T) {
 	}
 
 	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
 		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
 		if !ok {
 			t.Skip("TEST_OPENAI_API_KEY is not set")
@@ -123,6 +126,7 @@ func TestGollemWithTool(t *testing.T) {
 	})
 
 	t.Run("Claude", func(t *testing.T) {
+		t.Parallel()
 		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
 		if !ok {
 			t.Skip("TEST_CLAUDE_API_KEY is not set")
@@ -133,6 +137,7 @@ func TestGollemWithTool(t *testing.T) {
 	})
 
 	t.Run("Gemini", func(t *testing.T) {
+		t.Parallel()
 		projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
 		if !ok {
 			t.Skip("TEST_GCP_PROJECT_ID is not set")
@@ -148,6 +153,7 @@ func TestGollemWithTool(t *testing.T) {
 }
 
 func TestGollemWithHooks(t *testing.T) {
+	t.Parallel()
 	mockClient := &mock.LLMClientMock{
 		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 			mockSession := &mock.SessionMock{
@@ -209,6 +215,7 @@ func TestGollemWithHooks(t *testing.T) {
 	}
 
 	t.Run("ToolRequestHook", func(t *testing.T) {
+		t.Parallel()
 		toolRequestCalled := false
 		s := gollem.New(mockClient,
 			gollem.WithTools(&RandomNumberTool{}),
@@ -229,6 +236,7 @@ func TestGollemWithHooks(t *testing.T) {
 	})
 
 	t.Run("ToolResponseHook", func(t *testing.T) {
+		t.Parallel()
 		// Create a tool that returns a test result
 		testTool := &mockTool{
 			spec: gollem.ToolSpec{
@@ -262,6 +270,7 @@ func TestGollemWithHooks(t *testing.T) {
 	})
 
 	t.Run("ToolErrorHook", func(t *testing.T) {
+		t.Parallel()
 		// Create a tool that always returns an error
 		errorTool := &mockTool{
 			spec: gollem.ToolSpec{
@@ -293,6 +302,7 @@ func TestGollemWithHooks(t *testing.T) {
 	})
 
 	t.Run("MessageHook", func(t *testing.T) {
+		t.Parallel()
 		messageHookCalled := false
 		s := gollem.New(mockClient,
 			gollem.WithMessageHook(func(ctx context.Context, msg string) error {

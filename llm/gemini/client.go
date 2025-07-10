@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	DefaultModel          = "gemini-1.5-pro" // Changed from gemini-2.0-flash to more stable version
+	DefaultModel          = "gemini-2.0-flash"
 	DefaultEmbeddingModel = "text-embedding-004"
 )
 

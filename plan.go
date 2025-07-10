@@ -849,6 +849,16 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 	}
 	logger.Debug("got response", "response", response)
 
+	// DEBUG: Log function calls from initial response
+	if len(response.FunctionCalls) > 0 {
+		logger.Debug("initial response contains function calls", "plan_id", p.id, "function_calls_count", len(response.FunctionCalls))
+		for i, toolCall := range response.FunctionCalls {
+			logger.Debug("initial function call", "plan_id", p.id, "index", i, "tool_id", toolCall.ID, "tool_name", toolCall.Name)
+		}
+	} else {
+		logger.Debug("initial response contains no function calls", "plan_id", p.id)
+	}
+
 	// Send response message through hook
 	if len(response.Texts) > 0 {
 		responseMessage := PlanExecutionMessage{
@@ -877,6 +887,11 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 		logger := LoggerFromContext(ctx)
 		logger.Debug("processing tool calls", "plan_id", p.id, "tool_calls_count", len(response.FunctionCalls))
 
+		// DEBUG: Log all tool calls and their IDs
+		for i, toolCall := range response.FunctionCalls {
+			logger.Debug("tool call details", "plan_id", p.id, "index", i, "tool_id", toolCall.ID, "tool_name", toolCall.Name)
+		}
+
 		newInput, err := handleResponse(ctx, p.config.gollemConfig, response, p.toolMap)
 		if err != nil {
 			// Special handling for ErrExitConversation
@@ -888,6 +903,14 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 			}
 			logger.Debug("tool execution failed", "plan_id", p.id, "error", err)
 			return nil, goerr.Wrap(err, "tool execution failed")
+		}
+
+		// DEBUG: Log all function responses
+		logger.Debug("function responses generated", "plan_id", p.id, "response_count", len(newInput))
+		for i, input := range newInput {
+			if funcResp, ok := input.(FunctionResponse); ok {
+				logger.Debug("function response details", "plan_id", p.id, "index", i, "response_id", funcResp.ID, "response_name", funcResp.Name, "has_error", funcResp.Error != nil)
+			}
 		}
 
 		// Store tool results in Data
