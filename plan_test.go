@@ -548,12 +548,12 @@ func createSessionWithHistoryWithRetry(ctx context.Context, client gollem.LLMCli
 
 // Test plan mode with multiple tools and history - optimized for parallel execution
 func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
-	// Enable parallel execution for this test
-	t.Parallel()
+	// Disable parallel execution to reduce Claude API load
+	// t.Parallel()
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) gollem.LLMClient, llmName string) {
-		// Enable parallel execution for subtests
-		t.Parallel()
+		// Disable parallel execution for subtests to reduce API load
+		// t.Parallel()
 
 		client := newClient(t)
 
@@ -906,7 +906,7 @@ func TestPlanModeClaudeToolExecution(t *testing.T) {
 				"todo_created_at": "2024-01-01T00:00:00Z"
 			},
 			{
-				"todo_id": "threat_intel_task", 
+				"todo_id": "threat_intel_task",
 				"todo_description": "Check IP 192.0.2.1 for threats",
 				"todo_intent": "Analyze IP using threat_intel tool",
 				"todo_status": "pending",

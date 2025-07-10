@@ -229,20 +229,23 @@ func TestOpenAI(t *testing.T) {
 }
 
 func TestClaude(t *testing.T) {
-	t.Parallel()
+	// Disable parallel execution for Claude to reduce API load
+	// t.Parallel()
 	client := newClaudeClient(t)
 
 	// Setup tools
 	tools := []gollem.Tool{&randomNumberTool{}}
 
 	t.Run("generate content", func(t *testing.T) {
-		t.Parallel()
+		// Disable parallel execution for Claude subtests to reduce API load
+		// t.Parallel()
 		session, err := client.NewSession(context.Background(), gollem.WithSessionTools(tools...))
 		gt.NoError(t, err)
 		testGenerateContent(t, session)
 	})
 	t.Run("generate stream", func(t *testing.T) {
-		t.Parallel()
+		// Disable parallel execution for Claude subtests to reduce API load
+		// t.Parallel()
 		session, err := client.NewSession(context.Background(), gollem.WithSessionTools(tools...))
 		gt.NoError(t, err)
 		testGenerateStream(t, session)
@@ -327,7 +330,8 @@ func TestCallToolNameConvention(t *testing.T) {
 
 		for name, tc := range testCases {
 			t.Run(name, func(t *testing.T) {
-				t.Parallel()
+				// Disable parallel execution for individual tool validation tests to reduce API load
+				// t.Parallel()
 				ctx := t.Context()
 				tool := &weatherTool{name: tc.name}
 
@@ -381,7 +385,8 @@ func TestCallToolNameConvention(t *testing.T) {
 	})
 
 	t.Run("claude", func(t *testing.T) {
-		t.Parallel()
+		// Disable parallel execution for Claude to reduce API load
+		// t.Parallel()
 		ctx := t.Context()
 		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
 		if !ok {
@@ -397,7 +402,8 @@ func TestCallToolNameConvention(t *testing.T) {
 func TestSessionHistory(t *testing.T) {
 	t.Parallel()
 	testFn := func(t *testing.T, client gollem.LLMClient) {
-		t.Parallel()
+		// Disable parallel execution for individual session history tests to reduce API load
+		// t.Parallel()
 		ctx := t.Context()
 		session, err := client.NewSession(ctx, gollem.WithSessionTools(&weatherTool{name: "weather"}))
 		gt.NoError(t, err).Required()
@@ -447,6 +453,7 @@ func TestSessionHistory(t *testing.T) {
 	})
 
 	t.Run("claude", func(t *testing.T) {
+		// Claude runs sequentially to reduce API load
 		client := newClaudeClient(t)
 		testFn(t, client)
 	})
@@ -501,6 +508,7 @@ func TestFacilitator(t *testing.T) {
 	})
 
 	t.Run("Claude", func(t *testing.T) {
+		// Claude runs sequentially to reduce API load
 		testFn(t, newClaudeClient)
 	})
 }

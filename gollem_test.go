@@ -66,7 +66,8 @@ func TestGollemWithTool(t *testing.T) {
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
 		for _, respMode := range respModes {
 			t.Run(fmt.Sprintf("ResponseMode=%s", respMode), func(t *testing.T) {
-				t.Parallel()
+				// Disable parallel execution for individual response modes to reduce API load
+				// t.Parallel()
 				client, err := newClient(t)
 				gt.NoError(t, err)
 
@@ -126,7 +127,8 @@ func TestGollemWithTool(t *testing.T) {
 	})
 
 	t.Run("Claude", func(t *testing.T) {
-		t.Parallel()
+		// Disable parallel execution for Claude to reduce API load
+		// t.Parallel()
 		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
 		if !ok {
 			t.Skip("TEST_CLAUDE_API_KEY is not set")
