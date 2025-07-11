@@ -7,7 +7,7 @@ toolchain go1.24.3
 require (
 	cloud.google.com/go/aiplatform v1.90.0
 	cloud.google.com/go/vertexai v0.13.4
-	github.com/anthropics/anthropic-sdk-go v1.4.0
+	github.com/anthropics/anthropic-sdk-go v1.5.0
 	github.com/google/uuid v1.6.0
 	github.com/m-mizutani/goerr/v2 v2.0.0-beta.2
 	github.com/m-mizutani/gt v0.0.16

@@ -3,6 +3,8 @@ package gollem
 import (
 	"context"
 	"encoding/json"
+	"regexp"
+	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
 )
@@ -210,10 +212,15 @@ Respond with valid JSON only.`))
 	responseText := output.Texts[0]
 	LoggerFromContext(ctx).Debug("facilitation response", "response_text", responseText)
 
+	// Clean the response text to extract JSON from markdown code blocks or other formatting
+	cleanedText := extractJSONFromResponse(responseText)
+	LoggerFromContext(ctx).Debug("cleaned facilitation response", "cleaned_text", cleanedText)
+
 	var resp Facilitation
-	if err := json.Unmarshal([]byte(responseText), &resp); err != nil {
+	if err := json.Unmarshal([]byte(cleanedText), &resp); err != nil {
 		return nil, goerr.Wrap(err, "failed to unmarshal response",
 			goerr.V("response_text", responseText),
+			goerr.V("cleaned_text", cleanedText),
 			goerr.V("response_length", len(responseText)))
 	}
 
@@ -230,4 +237,42 @@ Respond with valid JSON only.`))
 	}
 
 	return &resp, nil
+}
+
+// extractJSONFromResponse cleans the response text to extract valid JSON
+// This is necessary because some LLMs (like Claude) return JSON wrapped in markdown code blocks
+// even when ContentTypeJSON is specified.
+func extractJSONFromResponse(text string) string {
+	// Remove leading/trailing whitespace
+	text = strings.TrimSpace(text)
+	
+	// Try to extract JSON from markdown code blocks
+	codeBlockRegex := regexp.MustCompile("(?s)```(?:json)?\n?(.*?)\n?```")
+	matches := codeBlockRegex.FindStringSubmatch(text)
+	if len(matches) > 1 {
+		return strings.TrimSpace(matches[1])
+	}
+	
+	// Try to find JSON object boundaries
+	start := strings.Index(text, "{")
+	if start == -1 {
+		return text // No JSON found, return original
+	}
+	
+	// Find the matching closing brace
+	braceCount := 0
+	for i := start; i < len(text); i++ {
+		switch text[i] {
+		case '{':
+			braceCount++
+		case '}':
+			braceCount--
+			if braceCount == 0 {
+				return text[start : i+1]
+			}
+		}
+	}
+	
+	// If no matching brace found, try from start to end
+	return text[start:]
 }
