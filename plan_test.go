@@ -5,15 +5,11 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/m-mizutani/gollem"
-	"github.com/m-mizutani/gollem/llm/claude"
-	"github.com/m-mizutani/gollem/llm/gemini"
-	"github.com/m-mizutani/gollem/llm/openai"
 	"github.com/m-mizutani/gt"
 )
 
@@ -169,47 +165,6 @@ func (t *threatIntelTool) Run(ctx context.Context, args map[string]any) (map[str
 	}, nil
 }
 
-// Client creation functions for different LLMs (similar to llm_test.go pattern)
-func newPlanTestGeminiClient(t *testing.T) gollem.LLMClient {
-	projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
-	if !ok {
-		t.Skip("TEST_GCP_PROJECT_ID is not set")
-	}
-
-	location, ok := os.LookupEnv("TEST_GCP_LOCATION")
-	if !ok {
-		t.Skip("TEST_GCP_LOCATION is not set")
-	}
-
-	ctx := t.Context()
-	client, err := gemini.New(ctx, projectID, location)
-	gt.NoError(t, err)
-	return client
-}
-
-func newPlanTestOpenAIClient(t *testing.T) gollem.LLMClient {
-	apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
-	if !ok {
-		t.Skip("TEST_OPENAI_API_KEY is not set")
-	}
-
-	ctx := t.Context()
-	client, err := openai.New(ctx, apiKey)
-	gt.NoError(t, err)
-	return client
-}
-
-func newPlanTestClaudeClient(t *testing.T) gollem.LLMClient {
-	apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
-	if !ok {
-		t.Skip("TEST_CLAUDE_API_KEY is not set")
-	}
-
-	client, err := claude.New(context.Background(), apiKey)
-	gt.NoError(t, err)
-	return client
-}
-
 // Multiple security tools for comprehensive testing
 type virusTotalTool struct{}
 
@@ -325,8 +280,6 @@ func createSessionWithHistoryWithRetry(ctx context.Context, client gollem.LLMCli
 
 // Test plan mode with multiple tools and history - optimized for parallel execution
 func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
-	t.Parallel()
-
 	testFn := func(t *testing.T, newClient func(t *testing.T) gollem.LLMClient, llmName string) {
 		// Disable parallel execution for subtests to reduce API load
 		// t.Parallel()
@@ -459,17 +412,22 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 
 	t.Run("OpenAI", func(t *testing.T) {
 		t.Parallel()
-		testFn(t, newPlanTestOpenAIClient, "OpenAI")
+		testFn(t, newOpenAIClient, "OpenAI")
 	})
 
 	t.Run("Gemini", func(t *testing.T) {
 		t.Parallel()
-		testFn(t, newPlanTestGeminiClient, "Gemini")
+		testFn(t, newGeminiClient, "Gemini")
 	})
 
 	t.Run("Claude", func(t *testing.T) {
 		t.Parallel()
-		testFn(t, newPlanTestClaudeClient, "Claude")
+		testFn(t, newClaudeClient, "Claude")
+	})
+
+	t.Run("ClaudeVertexAI", func(t *testing.T) {
+		t.Parallel()
+		testFn(t, newClaudeVertexClient, "ClaudeVertexAI")
 	})
 }
 
@@ -786,17 +744,22 @@ func TestPlanModeToolExecution(t *testing.T) {
 
 	t.Run("OpenAI", func(t *testing.T) {
 		t.Parallel()
-		testFn(t, newPlanTestOpenAIClient, "OpenAI")
+		testFn(t, newOpenAIClient, "OpenAI")
 	})
 
 	t.Run("Gemini", func(t *testing.T) {
 		t.Parallel()
-		testFn(t, newPlanTestGeminiClient, "Gemini")
+		testFn(t, newGeminiClient, "Gemini")
 	})
 
 	t.Run("Claude", func(t *testing.T) {
 		t.Parallel()
-		testFn(t, newPlanTestClaudeClient, "Claude")
+		testFn(t, newClaudeClient, "Claude")
+	})
+
+	t.Run("ClaudeVertexAI", func(t *testing.T) {
+		t.Parallel()
+		testFn(t, newClaudeVertexClient, "ClaudeVertexAI")
 	})
 }
 
