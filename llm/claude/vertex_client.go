@@ -2,58 +2,44 @@ package claude
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
-	"cloud.google.com/go/vertexai/genai"
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/vertex"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
-	"google.golang.org/api/option"
 )
 
 const (
-	// Default Claude models available in Vertex AI
-	DefaultVertexClaudeModel          = "claude-3-5-sonnet@20241022"
-	DefaultVertexClaudeEmbeddingModel = "claude-3-sonnet-20240229"
+	// Default Claude models available via Vertex AI using Anthropic SDK
+	DefaultVertexClaudeModel = "claude-sonnet-4@20250514"
 )
 
-// VertexClient is a client for Claude models via Google Vertex AI.
-// It provides methods to interact with Anthropic's Claude models through Vertex AI.
+// VertexClient is a client for Claude models via Vertex AI using official Anthropic SDK.
 type VertexClient struct {
-	projectID string
-	location  string
-
-	// client is the underlying Vertex AI client.
-	client *genai.Client
+	// client is the underlying Anthropic client configured for Vertex AI.
+	client *anthropic.Client
 
 	// defaultModel is the model to use for chat completions.
-	// It can be overridden using WithModel option.
 	defaultModel string
 
 	// embeddingModel is the model to use for embeddings.
-	// It can be overridden using WithEmbeddingModel option.
 	embeddingModel string
-
-	// gcpOptions are additional options for Google Cloud Platform.
-	// They can be set using WithGoogleCloudOptions.
-	gcpOptions []option.ClientOption
 
 	// generation parameters
 	params generationParameters
 
 	// systemPrompt is the system prompt to use for chat completions.
 	systemPrompt string
-
-	// contentType is the type of content to be generated.
-	contentType gollem.ContentType
 }
 
 // VertexOption is a function that configures a VertexClient.
 type VertexOption func(*VertexClient)
 
 // WithVertexModel sets the default model to use for chat completions.
-// The model name should be a valid Claude model identifier available in Vertex AI.
-// Default: DefaultVertexClaudeModel
 func WithVertexModel(modelName string) VertexOption {
 	return func(c *VertexClient) {
 		c.defaultModel = modelName
@@ -61,8 +47,6 @@ func WithVertexModel(modelName string) VertexOption {
 }
 
 // WithVertexEmbeddingModel sets the embedding model to use for embeddings.
-// The model name should be a valid Claude model identifier available in Vertex AI.
-// Default: DefaultVertexClaudeEmbeddingModel
 func WithVertexEmbeddingModel(modelName string) VertexOption {
 	return func(c *VertexClient) {
 		c.embeddingModel = modelName
@@ -70,9 +54,6 @@ func WithVertexEmbeddingModel(modelName string) VertexOption {
 }
 
 // WithVertexTemperature sets the temperature parameter for text generation.
-// Higher values make the output more random, lower values make it more focused.
-// Range: 0.0 to 1.0
-// Default: 0.7
 func WithVertexTemperature(temp float64) VertexOption {
 	return func(c *VertexClient) {
 		c.params.Temperature = temp
@@ -80,9 +61,6 @@ func WithVertexTemperature(temp float64) VertexOption {
 }
 
 // WithVertexTopP sets the top_p parameter for text generation.
-// Controls diversity via nucleus sampling.
-// Range: 0.0 to 1.0
-// Default: 1.0
 func WithVertexTopP(topP float64) VertexOption {
 	return func(c *VertexClient) {
 		c.params.TopP = topP
@@ -90,350 +68,312 @@ func WithVertexTopP(topP float64) VertexOption {
 }
 
 // WithVertexMaxTokens sets the maximum number of tokens to generate.
-// Default: 4096
 func WithVertexMaxTokens(maxTokens int64) VertexOption {
 	return func(c *VertexClient) {
 		c.params.MaxTokens = maxTokens
 	}
 }
 
-// WithVertexSystemPrompt sets the system prompt for the client
+// WithVertexSystemPrompt sets the system prompt for the client.
 func WithVertexSystemPrompt(prompt string) VertexOption {
 	return func(c *VertexClient) {
 		c.systemPrompt = prompt
 	}
 }
 
-// WithVertexContentType sets the content type for text generation.
-// This determines the format of the generated content.
-func WithVertexContentType(contentType gollem.ContentType) VertexOption {
-	return func(c *VertexClient) {
-		c.contentType = contentType
+// NewWithVertex creates a new client for Claude models via Vertex AI using Anthropic's official SDK.
+// This is the recommended approach as it uses Anthropic's native Vertex AI integration.
+func NewWithVertex(ctx context.Context, region, projectID string, options ...VertexOption) (*VertexClient, error) {
+	if region == "" {
+		return nil, goerr.New("region is required")
 	}
-}
-
-// WithVertexGoogleCloudOptions sets additional options for Google Cloud Platform.
-// These options are passed to the underlying Vertex AI client.
-func WithVertexGoogleCloudOptions(options ...option.ClientOption) VertexOption {
-	return func(c *VertexClient) {
-		c.gcpOptions = options
-	}
-}
-
-// NewWithVertexAI creates a new client for Claude models via Google Vertex AI.
-// It requires a project ID and location, and can be configured with additional options.
-func NewWithVertexAI(ctx context.Context, projectID, location string, options ...VertexOption) (*VertexClient, error) {
 	if projectID == "" {
 		return nil, goerr.New("projectID is required")
 	}
-	if location == "" {
-		return nil, goerr.New("location is required")
-	}
 
 	client := &VertexClient{
-		projectID:      projectID,
-		location:       location,
 		defaultModel:   DefaultVertexClaudeModel,
-		embeddingModel: DefaultVertexClaudeEmbeddingModel,
+		embeddingModel: DefaultEmbeddingModel,
 		params: generationParameters{
 			Temperature: 0.7,
 			TopP:        1.0,
 			MaxTokens:   4096,
 		},
-		contentType: gollem.ContentTypeText,
 	}
 
-	for _, option := range options {
-		option(client)
+	for _, opt := range options {
+		opt(client)
 	}
 
-	newClient, err := genai.NewClient(ctx, projectID, location, client.gcpOptions...)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create Vertex AI client")
-	}
+	// Create Anthropic client with Vertex AI integration
+	anthropicClient := anthropic.NewClient(
+		option.WithAPIKey("dummy"), // Not used for Vertex AI
+		vertex.WithGoogleAuth(ctx, region, projectID),
+	)
 
-	client.client = newClient
+	client.client = &anthropicClient
 
 	return client, nil
 }
 
-// VertexSession is a session for Claude via Vertex AI.
-// It maintains the conversation state and handles message generation.
-type VertexSession struct {
-	// session is the underlying Vertex AI chat session.
-	session *genai.ChatSession
-
-	// defaultModel is the model to use for chat completions.
+// VertexAnthropicSession is a session for Claude via Vertex AI using Anthropic SDK.
+type VertexAnthropicSession struct {
+	client       *anthropic.Client
 	defaultModel string
-
-	// generation parameters
-	params generationParameters
-
-	cfg gollem.SessionConfig
+	params       generationParameters
+	cfg          gollem.SessionConfig
+	messages     []anthropic.MessageParam
 }
 
-// NewSession creates a new session for Claude via Vertex AI.
-// It converts the provided tools to Vertex AI's tool format and initializes a new chat session.
+// NewSession creates a new session for Claude via Vertex AI using Anthropic SDK.
 func (c *VertexClient) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 	cfg := gollem.NewSessionConfig(options...)
 
-	// Convert gollem.Tool to *genai.FunctionDeclaration
-	genaiFunctions := make([]*genai.FunctionDeclaration, len(cfg.Tools()))
-	for i, tool := range cfg.Tools() {
-		converted := convertToolToGenai(tool)
-		genaiFunctions[i] = converted
-	}
-
-	var messages []*genai.Content
-
+	var messages []anthropic.MessageParam
 	if cfg.History() != nil {
-		history, err := cfg.History().ToGemini()
+		history, err := cfg.History().ToClaude()
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to convert history to genai.Content")
+			return nil, goerr.Wrap(err, "failed to convert history to anthropic.MessageParam")
 		}
 		messages = append(messages, history...)
 	}
 
-	// Create model with Claude model name
-	model := c.client.GenerativeModel(c.defaultModel)
-	
-	// Set generation parameters
-	temperature := float32(c.params.Temperature)
-	topP := float32(c.params.TopP)
-	maxTokens := int32(c.params.MaxTokens)
-	
-	model.GenerationConfig = genai.GenerationConfig{
-		Temperature:      &temperature,
-		TopP:             &topP,
-		MaxOutputTokens:  &maxTokens,
-	}
-
-	// Set content type
-	switch cfg.ContentType() {
-	case gollem.ContentTypeJSON:
-		model.GenerationConfig.ResponseMIMEType = "application/json"
-	case gollem.ContentTypeText:
-		model.GenerationConfig.ResponseMIMEType = "text/plain"
-	}
-
-	// Set system prompt
-	if cfg.SystemPrompt() != "" {
-		model.SystemInstruction = &genai.Content{
-			Role:  "system",
-			Parts: []genai.Part{genai.Text(cfg.SystemPrompt())},
-		}
-	}
-
-	// Set tools
-	if len(genaiFunctions) > 0 {
-		model.Tools = []*genai.Tool{
-			{
-				FunctionDeclarations: genaiFunctions,
-			},
-		}
-	}
-
-	session := &VertexSession{
-		session:      model.StartChat(),
+	session := &VertexAnthropicSession{
+		client:       c.client,
 		defaultModel: c.defaultModel,
 		params:       c.params,
 		cfg:          cfg,
-	}
-
-	if len(messages) > 0 {
-		session.session.History = messages
+		messages:     messages,
 	}
 
 	return session, nil
 }
 
-// convertToolToGenai converts a gollem.Tool to *genai.FunctionDeclaration
-func convertToolToGenai(tool gollem.Tool) *genai.FunctionDeclaration {
-	spec := tool.Spec()
-	
-	// Convert parameters
-	properties := make(map[string]*genai.Schema)
-	required := make([]string, 0)
-	
-	for name, param := range spec.Parameters {
-		schema := &genai.Schema{
-			Type:        convertParameterType(param.Type),
-			Description: param.Description,
-		}
-		
-		// Handle enum values
-		if len(param.Enum) > 0 {
-			schema.Enum = make([]string, len(param.Enum))
-			for i, v := range param.Enum {
-				schema.Enum[i] = fmt.Sprintf("%v", v)
-			}
-		}
-		
-		properties[name] = schema
-		
-		// Check if parameter is required
-		for _, req := range spec.Required {
-			if req == name {
-				required = append(required, name)
-				break
-			}
-		}
-	}
-	
-	return &genai.FunctionDeclaration{
-		Name:        spec.Name,
-		Description: spec.Description,
-		Parameters: &genai.Schema{
-			Type:       genai.TypeObject,
-			Properties: properties,
-			Required:   required,
-		},
-	}
-}
-
-// convertParameterType converts gollem parameter type to genai schema type
-func convertParameterType(paramType gollem.ParameterType) genai.Type {
-	switch paramType {
-	case gollem.TypeString:
-		return genai.TypeString
-	case gollem.TypeNumber:
-		return genai.TypeNumber
-	case gollem.TypeInteger:
-		return genai.TypeInteger
-	case gollem.TypeBoolean:
-		return genai.TypeBoolean
-	case gollem.TypeArray:
-		return genai.TypeArray
-	case gollem.TypeObject:
-		return genai.TypeObject
-	default:
-		return genai.TypeString
-	}
-}
-
 // History returns the conversation history
-func (s *VertexSession) History() *gollem.History {
-	return gollem.NewHistoryFromGemini(s.session.History)
+func (s *VertexAnthropicSession) History() *gollem.History {
+	return gollem.NewHistoryFromClaude(s.messages)
 }
 
-// convertInputs converts gollem.Input to Vertex AI parts
-func (s *VertexSession) convertInputs(input ...gollem.Input) ([]genai.Part, error) {
-	parts := make([]genai.Part, len(input))
-	for i, in := range input {
+// convertInputs converts gollem.Input to Claude messages and tool results
+func (s *VertexAnthropicSession) convertInputs(ctx context.Context, input ...gollem.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
+	logger := gollem.LoggerFromContext(ctx)
+	var toolResults []anthropic.ContentBlockParamUnion
+	var messages []anthropic.MessageParam
+
+	for _, in := range input {
 		switch v := in.(type) {
 		case gollem.Text:
-			parts[i] = genai.Text(string(v))
+			messages = append(messages, anthropic.NewUserMessage(
+				anthropic.NewTextBlock(string(v)),
+			))
+
 		case gollem.FunctionResponse:
-			if v.Error != nil {
-				parts[i] = genai.FunctionResponse{
-					Name: v.Name,
-					Response: map[string]any{
-						"error_message": fmt.Sprintf("%+v", v.Error),
-					},
-				}
+			data, err := v.Data, v.Error
+			var response string
+			isError := err != nil
+
+			if isError {
+				response = fmt.Sprintf("Error: %v", err)
 			} else {
-				parts[i] = genai.FunctionResponse{
-					Name:     v.Name,
-					Response: v.Data,
+				jsonData, marshalErr := json.Marshal(data)
+				if marshalErr != nil {
+					return nil, nil, goerr.Wrap(marshalErr, "failed to marshal function response")
 				}
+				response = string(jsonData)
 			}
+
+			logger.Debug("creating tool_result",
+				"tool_use_id", v.ID,
+				"tool_name", v.Name,
+				"is_error", isError,
+				"response_length", len(response))
+
+			toolResult := anthropic.NewToolResultBlock(v.ID, response, isError)
+			toolResults = append(toolResults, toolResult)
+
 		default:
-			return nil, goerr.Wrap(gollem.ErrInvalidParameter, "invalid input")
-		}
-	}
-	return parts, nil
-}
-
-// processVertexResponse converts Vertex AI response to gollem.Response
-func processVertexResponse(resp *genai.GenerateContentResponse) (*gollem.Response, error) {
-	if len(resp.Candidates) == 0 {
-		return &gollem.Response{}, nil
-	}
-
-	response := &gollem.Response{
-		Texts:         make([]string, 0),
-		FunctionCalls: make([]*gollem.FunctionCall, 0),
-	}
-
-	for i, candidate := range resp.Candidates {
-		// Check for malformed function call errors
-		if candidate.FinishReason.String() == "FinishReasonMalformedFunctionCall" {
-			return nil, goerr.New("malformed function call detected",
-				goerr.V("candidate_index", i),
-				goerr.V("content_parts", len(candidate.Content.Parts)),
-				goerr.V("finish_reason", candidate.FinishReason.String()))
-		}
-
-		if len(candidate.Content.Parts) == 0 {
-			continue
-		}
-
-		for _, part := range candidate.Content.Parts {
-			switch v := part.(type) {
-			case genai.Text:
-				response.Texts = append(response.Texts, string(v))
-			case genai.FunctionCall:
-				response.FunctionCalls = append(response.FunctionCalls, &gollem.FunctionCall{
-					Name:      v.Name,
-					Arguments: v.Args,
-				})
-			}
+			return nil, nil, goerr.Wrap(gollem.ErrInvalidParameter, "invalid input")
 		}
 	}
 
-	return response, nil
+	if len(toolResults) > 0 {
+		messages = append(messages, anthropic.NewUserMessage(toolResults...))
+	}
+
+	return messages, toolResults, nil
 }
 
 // GenerateContent processes the input and generates a response.
-// It handles both text messages and function responses.
-func (s *VertexSession) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-	parts, err := s.convertInputs(input...)
+func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	logger := gollem.LoggerFromContext(ctx)
+	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := s.session.SendMessage(ctx, parts...)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to send message to Claude via Vertex AI")
+	s.messages = append(s.messages, messages...)
+
+	// Convert gollem tools to anthropic tools
+	var tools []anthropic.ToolUnionParam
+	if len(s.cfg.Tools()) > 0 {
+		tools = make([]anthropic.ToolUnionParam, len(s.cfg.Tools()))
+		for i, tool := range s.cfg.Tools() {
+			tools[i] = convertTool(tool)
+		}
 	}
 
-	return processVertexResponse(resp)
+	// Prepare message parameters
+	msgParams := anthropic.MessageNewParams{
+		Model:       anthropic.Model(s.defaultModel),
+		MaxTokens:   s.params.MaxTokens,
+		Temperature: anthropic.Float(s.params.Temperature),
+		TopP:        anthropic.Float(s.params.TopP),
+		Messages:    s.messages,
+	}
+
+	if len(tools) > 0 {
+		msgParams.Tools = tools
+	}
+
+	// Add system prompt if available
+	if s.cfg.SystemPrompt() != "" {
+		msgParams.System = []anthropic.TextBlockParam{
+			{Text: s.cfg.SystemPrompt()},
+		}
+	}
+
+	logger.Debug("Claude Vertex API calling",
+		"model", s.defaultModel,
+		"message_count", len(s.messages),
+		"tools_count", len(tools))
+
+	resp, err := s.client.Messages.New(ctx, msgParams)
+	if err != nil {
+		logger.Debug("Claude Vertex API request failed", "error", err)
+		return nil, goerr.Wrap(err, "failed to create message via Vertex AI")
+	}
+
+	logger.Debug("Claude Vertex API response received",
+		"content_blocks", len(resp.Content),
+		"stop_reason", resp.StopReason)
+
+	// Add assistant's response to message history
+	s.messages = append(s.messages, resp.ToParam())
+
+	return processResponse(resp), nil
 }
 
 // GenerateStream processes the input and generates a response stream.
-// It handles both text messages and function responses, and returns a channel for streaming responses.
-func (s *VertexSession) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
-	parts, err := s.convertInputs(input...)
+func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
 	}
 
-	iter := s.session.SendMessageStream(ctx, parts...)
+	s.messages = append(s.messages, messages...)
+
+	// Convert gollem tools to anthropic tools
+	var tools []anthropic.ToolUnionParam
+	if len(s.cfg.Tools()) > 0 {
+		tools = make([]anthropic.ToolUnionParam, len(s.cfg.Tools()))
+		for i, tool := range s.cfg.Tools() {
+			tools[i] = convertTool(tool)
+		}
+	}
+
+	// Prepare message parameters
+	msgParams := anthropic.MessageNewParams{
+		Model:       anthropic.Model(s.defaultModel),
+		MaxTokens:   s.params.MaxTokens,
+		Temperature: anthropic.Float(s.params.Temperature),
+		TopP:        anthropic.Float(s.params.TopP),
+		Messages:    s.messages,
+	}
+
+	if len(tools) > 0 {
+		msgParams.Tools = tools
+	}
+
+	// Add system prompt if available
+	if s.cfg.SystemPrompt() != "" {
+		msgParams.System = []anthropic.TextBlockParam{
+			{Text: s.cfg.SystemPrompt()},
+		}
+	}
+
+	stream := s.client.Messages.NewStreaming(ctx, msgParams)
+	if stream == nil {
+		return nil, goerr.New("failed to create message stream")
+	}
+
 	responseChan := make(chan *gollem.Response)
+
+	// Accumulate text and tool calls for message history
+	var textContent strings.Builder
+	var toolCalls []anthropic.ContentBlockParamUnion
+	acc := newFunctionCallAccumulator()
 
 	go func() {
 		defer close(responseChan)
 
 		for {
-			resp, err := iter.Next()
-			if err != nil {
-				if strings.Contains(err.Error(), "Done") {
-					return
-				}
-				responseChan <- &gollem.Response{
-					Error: goerr.Wrap(err, "failed to generate stream"),
+			if !stream.Next() {
+				// Add accumulated message to history when stream ends
+				if textContent.Len() > 0 || len(toolCalls) > 0 {
+					var content []anthropic.ContentBlockParamUnion
+					if textContent.Len() > 0 {
+						content = append(content, anthropic.NewTextBlock(textContent.String()))
+					}
+					content = append(content, toolCalls...)
+					s.messages = append(s.messages, anthropic.NewAssistantMessage(content...))
 				}
 				return
 			}
 
-			processedResp, err := processVertexResponse(resp)
-			if err != nil {
-				responseChan <- &gollem.Response{
-					Error: goerr.Wrap(err, "failed to process response"),
-				}
-				return
+			event := stream.Current()
+			response := &gollem.Response{
+				Texts:         make([]string, 0),
+				FunctionCalls: make([]*gollem.FunctionCall, 0),
 			}
-			responseChan <- processedResp
+
+			switch event.Type {
+			case "content_block_delta":
+				deltaEvent := event.AsContentBlockDelta()
+				switch deltaEvent.Delta.Type {
+				case "text_delta":
+					textDelta := deltaEvent.Delta.AsTextDelta()
+					response.Texts = append(response.Texts, textDelta.Text)
+					textContent.WriteString(textDelta.Text)
+				case "input_json_delta":
+					jsonDelta := deltaEvent.Delta.AsInputJSONDelta()
+					if jsonDelta.PartialJSON != "" {
+						acc.Arguments += jsonDelta.PartialJSON
+					}
+				}
+			case "content_block_start":
+				startEvent := event.AsContentBlockStart()
+				if startEvent.ContentBlock.Type == "tool_use" {
+					toolUseBlock := startEvent.ContentBlock.AsToolUse()
+					acc.ID = toolUseBlock.ID
+					acc.Name = toolUseBlock.Name
+				}
+			case "content_block_stop":
+				if acc.ID != "" && acc.Name != "" {
+					funcCall, err := acc.accumulate()
+					if err != nil {
+						response.Error = err
+						responseChan <- response
+						return
+					}
+					response.FunctionCalls = append(response.FunctionCalls, funcCall)
+					toolCalls = append(toolCalls, anthropic.NewToolUseBlock(funcCall.ID, funcCall.Arguments, funcCall.Name))
+					acc = newFunctionCallAccumulator()
+				}
+			}
+
+			if response.HasData() {
+				responseChan <- response
+			}
 		}
 	}()
 
@@ -441,8 +381,6 @@ func (s *VertexSession) GenerateStream(ctx context.Context, input ...gollem.Inpu
 }
 
 // GenerateEmbedding generates embeddings for the given input texts.
-// Note: Claude models through Vertex AI may not support embeddings directly.
-// This is a placeholder implementation that returns an error.
 func (c *VertexClient) GenerateEmbedding(ctx context.Context, dimension int, input []string) ([][]float64, error) {
 	return nil, goerr.New("embedding generation not supported for Claude models via Vertex AI")
 }
