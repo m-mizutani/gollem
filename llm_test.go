@@ -429,8 +429,7 @@ func TestCallToolNameConvention(t *testing.T) {
 	})
 
 	t.Run("claude", func(t *testing.T) {
-		// Disable parallel execution for Claude to reduce API load
-		// t.Parallel()
+		t.Parallel()
 		ctx := t.Context()
 		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
 		if !ok {
@@ -443,8 +442,7 @@ func TestCallToolNameConvention(t *testing.T) {
 	})
 
 	t.Run("claude-vertex", func(t *testing.T) {
-		// Disable parallel execution for Claude Vertex to reduce API load
-		// t.Parallel()
+		t.Parallel()
 		client := newClaudeVertexClient(t)
 		testFunc(t, client)
 	})
@@ -494,23 +492,27 @@ func TestSessionHistory(t *testing.T) {
 	}
 
 	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
 		client := newOpenAIClient(t)
 		testFn(t, client)
 	})
 
 	t.Run("gemini", func(t *testing.T) {
+		t.Parallel()
 		client := newGeminiClient(t)
 		testFn(t, client)
 	})
 
 	t.Run("claude", func(t *testing.T) {
 		// Claude runs sequentially to reduce API load
+		t.Parallel()
 		client := newClaudeClient(t)
 		testFn(t, client)
 	})
 
 	t.Run("claude-vertex", func(t *testing.T) {
 		// Claude Vertex runs sequentially to reduce API load
+		t.Parallel()
 		client := newClaudeVertexClient(t)
 		testFn(t, client)
 	})
@@ -557,20 +559,24 @@ func TestFacilitator(t *testing.T) {
 	}
 
 	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
 		testFn(t, newOpenAIClient)
 	})
 
 	t.Run("Gemini", func(t *testing.T) {
+		t.Parallel()
 		testFn(t, newGeminiClient)
 	})
 
 	t.Run("Claude", func(t *testing.T) {
 		// Claude runs sequentially to reduce API load
+		t.Parallel()
 		testFn(t, newClaudeClient)
 	})
 
 	t.Run("ClaudeVertex", func(t *testing.T) {
 		// Claude Vertex runs sequentially to reduce API load
+		t.Parallel()
 		testFn(t, newClaudeVertexClient)
 	})
 }
