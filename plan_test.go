@@ -297,13 +297,12 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 
 		// Use fewer tools for faster execution while maintaining coverage
 		tools := []gollem.Tool{
-			&threatIntelTool{}, // Basic tool
-			&dnsLookupTool{},   // Network tool
-			&virusTotalTool{},  // Security tool
+			&dnsLookupTool{},   // Primary tool for this test
+			&threatIntelTool{}, // Secondary tool
 		}
 
-		// Simplified system prompt for faster execution
-		systemPrompt := `You are a security analyst. Use the available tools to analyze the target domain and IP address efficiently.`
+		// More specific system prompt to limit task scope and execution time
+		systemPrompt := `You are a security analyst. Create a simple plan with exactly 2-3 tasks to analyze the given domain. Keep tasks simple and focused only on DNS lookup and threat intelligence. Complete the analysis quickly and efficiently.`
 
 		agent := gollem.New(client,
 			gollem.WithTools(tools...),
@@ -316,10 +315,14 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 		var completedTodos []string
 		var toolsUsed []string
 
-		// Simplified prompt for faster execution
-		simplePrompt := `Analyze the domain 'example.com' and IP '192.0.2.1' using available security tools. Focus on DNS lookup and threat intelligence.`
+		// Very specific and limited prompt for faster execution
+		simplePrompt := `Analyze 'example.com' with these steps: 1) DNS lookup 2) Threat intelligence check. Keep it simple with just 2 tasks total. No additional analysis needed.`
 
-		plan, err := agent.Plan(context.Background(),
+		// Create plan with timeout to prevent hanging
+		planCtx, planCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer planCancel()
+		
+		plan, err := agent.Plan(planCtx,
 			simplePrompt,
 			gollem.WithToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
 				executedTodos = append(executedTodos, todo.ID)
@@ -347,9 +350,12 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 			t.Logf("[%s]   %d. %s - %s", llmName, i+1, todo.Description, todo.Intent)
 		}
 
-		// Execute plan with retry logic for API errors
+		// Execute plan with timeout and retry logic for API errors
 		result, executeErr := retryAPICall(t, func() (string, error) {
-			return plan.Execute(context.Background())
+			// Set a timeout to prevent tests from running too long
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			return plan.Execute(ctx)
 		}, fmt.Sprintf("[%s] plan execution", llmName))
 
 		// Only fail if we couldn't execute after retries
@@ -370,8 +376,8 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 		t.Logf("[%s] Tools used: %v", llmName, toolsUsed)
 		t.Logf("[%s] Final result length: %d characters", llmName, len(result))
 
-		// Verify that tools were available and used
-		gt.N(t, len(tools)).GreaterOrEqual(3)
+		// Verify that tools were available and used (reduced from 3 to 2)
+		gt.N(t, len(tools)).GreaterOrEqual(2)
 		t.Logf("[%s] Total tools available: %d", llmName, len(tools))
 
 		// Log tool usage

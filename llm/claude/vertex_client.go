@@ -191,7 +191,7 @@ func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...g
 	// Add assistant's response to message history
 	s.messages = append(s.messages, resp.ToParam())
 
-	return processResponse(resp), nil
+	return processResponseWithContentType(resp, s.cfg.ContentType()), nil
 }
 
 

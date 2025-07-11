@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -240,7 +241,7 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 			// Handle error cases first
 			isError := v.Error != nil
 			var response string
-			
+
 			if isError {
 				response = fmt.Sprintf("Error: %v", v.Error)
 			} else {
@@ -259,19 +260,19 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 
 			// Create tool result block with new API
 			toolResult := anthropic.NewToolResultBlock(v.ID)
-			
+
 			// Set content
 			if response != "" {
 				toolResult.OfToolResult.Content = []anthropic.ToolResultBlockParamContentUnion{
 					{OfText: &anthropic.TextBlockParam{Text: response}},
 				}
 			}
-			
+
 			// Set error flag
 			if isError {
 				toolResult.OfToolResult.IsError = param.NewOpt(true)
 			}
-			
+
 			toolResults = append(toolResults, toolResult)
 
 		default:
@@ -285,7 +286,6 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 
 	return messages, toolResults, nil
 }
-
 
 // createSystemPrompt creates system prompt with content type handling
 // This is a shared helper function used by both standard Claude client and Vertex AI Claude client.
@@ -412,7 +412,12 @@ func generateClaudeStream(
 				if textContent.Len() > 0 || len(toolCalls) > 0 {
 					var content []anthropic.ContentBlockParamUnion
 					if textContent.Len() > 0 {
-						content = append(content, anthropic.NewTextBlock(textContent.String()))
+						finalText := textContent.String()
+						// Apply JSON extraction for Claude when ContentTypeJSON is specified
+						if cfg.ContentType() == gollem.ContentTypeJSON {
+							finalText = extractJSONFromResponse(finalText)
+						}
+						content = append(content, anthropic.NewTextBlock(finalText))
 					}
 					content = append(content, toolCalls...)
 					*messageHistory = append(*messageHistory, anthropic.NewAssistantMessage(content...))
@@ -470,8 +475,45 @@ func generateClaudeStream(
 	return responseChan, nil
 }
 
-// processResponse converts Claude response to gollem.Response
-func processResponse(resp *anthropic.Message) *gollem.Response {
+// extractJSONFromResponse cleans the response text to extract valid JSON
+// This is necessary because Claude returns JSON wrapped in markdown code blocks
+// even when ContentTypeJSON is specified.
+func extractJSONFromResponse(text string) string {
+	// Remove leading/trailing whitespace
+	text = strings.TrimSpace(text)
+	// Try to extract JSON from markdown code blocks
+	codeBlockRegex := regexp.MustCompile("(?s)```(?:json)?\n?(.*?)\n?```")
+	matches := codeBlockRegex.FindStringSubmatch(text)
+	if len(matches) > 1 {
+		return strings.TrimSpace(matches[1])
+	}
+
+	// Try to find JSON object boundaries
+	start := strings.Index(text, "{")
+	if start == -1 {
+		return text // No JSON found, return original
+	}
+
+	// Find the matching closing brace
+	braceCount := 0
+	for i := start; i < len(text); i++ {
+		switch text[i] {
+		case '{':
+			braceCount++
+		case '}':
+			braceCount--
+			if braceCount == 0 {
+				return text[start : i+1]
+			}
+		}
+	}
+
+	// If no matching brace found, try from start to end
+	return text[start:]
+}
+
+// processResponseWithContentType converts Claude response to gollem.Response with content type handling
+func processResponseWithContentType(resp *anthropic.Message, contentType gollem.ContentType) *gollem.Response {
 	if len(resp.Content) == 0 {
 		return &gollem.Response{}
 	}
@@ -485,7 +527,14 @@ func processResponse(resp *anthropic.Message) *gollem.Response {
 		switch content.Type {
 		case "text":
 			textBlock := content.AsText()
-			response.Texts = append(response.Texts, textBlock.Text)
+			text := textBlock.Text
+
+			// Apply JSON extraction for Claude when ContentTypeJSON is specified
+			if contentType == gollem.ContentTypeJSON {
+				text = extractJSONFromResponse(text)
+			}
+
+			response.Texts = append(response.Texts, text)
 		case "tool_use":
 			toolUseBlock := content.AsToolUse()
 			var args map[string]interface{}
@@ -551,7 +600,7 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		"content_blocks", len(resp.Content),
 		"total_messages", len(s.messages))
 
-	return processResponse(resp), nil
+	return processResponseWithContentType(resp, s.cfg.ContentType()), nil
 }
 
 // FunctionCallAccumulator accumulates function call information from stream
