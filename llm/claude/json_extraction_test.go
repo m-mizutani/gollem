@@ -61,6 +61,46 @@ func TestExtractJSONFromResponse(t *testing.T) {
 				"next_prompt": "Let's try a different approach with \"escapes\" and {nested} content"
 			}`,
 		},
+		{
+			name:     "simple JSON array",
+			input:    `[{"id": 1, "name": "test"}]`,
+			expected: `[{"id": 1, "name": "test"}]`,
+		},
+		{
+			name:     "JSON array in markdown code block",
+			input:    "```json\n[{\"id\": 1, \"name\": \"test\"}]\n```",
+			expected: `[{"id": 1, "name": "test"}]`,
+		},
+		{
+			name:     "JSON array with brackets in string literals",
+			input:    `[{"message": "The process failed because of an unexpected character: ']'."}]`,
+			expected: `[{"message": "The process failed because of an unexpected character: ']'."}]`,
+		},
+		{
+			name:     "nested JSON arrays",
+			input:    `[{"items": [1, 2, 3], "name": "test"}]`,
+			expected: `[{"items": [1, 2, 3], "name": "test"}]`,
+		},
+		{
+			name:     "JSON array with text before and after",
+			input:    `Some text before [{"id": 1}] some text after`,
+			expected: `[{"id": 1}]`,
+		},
+		{
+			name:     "mixed JSON object and array",
+			input:    `{"data": [{"id": 1}, {"id": 2}], "count": 2}`,
+			expected: `{"data": [{"id": 1}, {"id": 2}], "count": 2}`,
+		},
+		{
+			name:     "brace before bracket",
+			input:    `{"items": [1, 2, 3]} and [{"id": 1}]`,
+			expected: `{"items": [1, 2, 3]}`,
+		},
+		{
+			name:     "bracket before brace",
+			input:    `[{"id": 1}] and {"items": [1, 2, 3]}`,
+			expected: `[{"id": 1}]`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -96,6 +136,16 @@ func TestExtractJSONFromResponse_EdgeCases(t *testing.T) {
 			name:     "incomplete JSON",
 			input:    `{"action": "continue", "reason": "incomplete`,
 			expected: `{"action": "continue", "reason": "incomplete`,
+		},
+		{
+			name:     "incomplete JSON array",
+			input:    `[{"id": 1, "name": "incomplete`,
+			expected: `[{"id": 1, "name": "incomplete`,
+		},
+		{
+			name:     "JSON array with object inside",
+			input:    `[{"nested": {"key": "value"}}]`,
+			expected: `[{"nested": {"key": "value"}}]`,
 		},
 	}
 
