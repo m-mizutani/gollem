@@ -148,32 +148,6 @@ func (s *SkipDecision) Validate() error {
 	return nil
 }
 
-// PlanExecutionMessage represents a message during plan execution
-type PlanExecutionMessage struct {
-	Type      PlanMessageType `json:"message_type"`
-	Content   string          `json:"content"`
-	TodoID    string          `json:"todo_id,omitempty"`
-	Timestamp time.Time       `json:"timestamp"`
-}
-
-// PlanMessageType represents the type of plan execution message
-type PlanMessageType string
-
-const (
-	PlanMessageTypeThought  PlanMessageType = "thought"  // LLM thinking/reasoning
-	PlanMessageTypeAction   PlanMessageType = "action"   // Action being taken
-	PlanMessageTypeResponse PlanMessageType = "response" // Response to user
-	PlanMessageTypeSystem   PlanMessageType = "system"   // System message
-)
-
-// Public constants for external use
-const (
-	PlanMessageThought  = PlanMessageTypeThought
-	PlanMessageAction   = PlanMessageTypeAction
-	PlanMessageResponse = PlanMessageTypeResponse
-	PlanMessageSystem   = PlanMessageTypeSystem
-)
-
 // Public hook types for external API
 type (
 	// PlanCreatedHook is called when a plan is successfully created
@@ -194,9 +168,6 @@ type (
 	// PlanToDoUpdatedHook is called when todos are updated/refined during reflection
 	PlanToDoUpdatedHook func(ctx context.Context, plan *Plan, changes []PlanToDoChange) error
 
-	// PlanMessageHook is called when a message is generated during plan execution
-	PlanMessageHook func(ctx context.Context, plan *Plan, message PlanExecutionMessage) error
-
 	// PlanSkipConfirmationHook is called when a skip decision is made, returns true to approve skip
 	PlanSkipConfirmationHook func(ctx context.Context, plan *Plan, decision SkipDecision) bool
 )
@@ -211,9 +182,6 @@ type (
 
 	// planToDoUpdatedHook is called when todos are updated/refined during reflection (internal)
 	planToDoUpdatedHook func(ctx context.Context, plan *Plan, changes []PlanToDoChange) error
-
-	// planMessageHook is called when a message is generated during plan execution (internal)
-	planMessageHook func(ctx context.Context, plan *Plan, message PlanExecutionMessage) error
 )
 
 // planReflection represents the result of plan reflection (private)
@@ -285,19 +253,18 @@ type planConfig struct {
 	planToDoCompletedHook PlanToDoCompletedHook
 	planCompletedHook     PlanCompletedHook
 	planToDoUpdatedHook   PlanToDoUpdatedHook
-	planMessageHook       PlanMessageHook
 
 	// Internal hooks for library implementation
 	internalStepStartHook     planStepStartHook
 	internalStepCompletedHook planStepCompletedHook
 	internalToDoUpdatedHook   planToDoUpdatedHook
-	internalMessageHook       planMessageHook
 	internalReflectionHook    PlanReflectionHook // Keep as exported since reflection is complex
 
 	// Plan-specific settings
 	executionMode           PlanExecutionMode
 	skipConfidenceThreshold float64
 	skipConfirmationHook    PlanSkipConfirmationHook
+	maxToolRetries          int // Maximum number of recursive tool calls
 }
 
 // PlanOption represents configuration options for plan creation and execution
@@ -324,10 +291,6 @@ func defaultPlanToDoUpdatedHook(ctx context.Context, plan *Plan, changes []PlanT
 	return nil
 }
 
-func defaultPlanMessageHook(ctx context.Context, plan *Plan, message PlanExecutionMessage) error {
-	return nil
-}
-
 func defaultPlanSkipConfirmationHook(ctx context.Context, plan *Plan, decision SkipDecision) bool {
 	// Default behavior: approve skip based on confidence threshold
 	return decision.Confidence >= 0.8 // High confidence threshold by default
@@ -347,10 +310,6 @@ func defaultInternalReflectionHook(ctx context.Context, plan *Plan, reflection *
 }
 
 func defaultInternalToDoUpdatedHook(ctx context.Context, plan *Plan, changes []PlanToDoChange) error {
-	return nil
-}
-
-func defaultInternalMessageHook(ctx context.Context, plan *Plan, message PlanExecutionMessage) error {
 	return nil
 }
 
@@ -570,19 +529,6 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 
 		logger.Debug("plan completed - no pending todos remaining", "step_id", currentStep.ID)
 
-		// Send completion message
-		if reflection.Response != "" {
-			completionMessage := PlanExecutionMessage{
-				Type:      PlanMessageTypeResponse,
-				Content:   reflection.Response,
-				TodoID:    currentStep.ID,
-				Timestamp: time.Now(),
-			}
-			if err := p.callMessageHook(ctx, completionMessage); err != nil {
-				logger.Warn("failed to call message hook for completion", "error", err)
-			}
-		}
-
 		// Call PlanCompletedHook
 		if err := p.config.planCompletedHook(ctx, p, reflection.Response); err != nil {
 			return "", false, goerr.Wrap(err, "failed to call PlanCompletedHook")
@@ -636,14 +582,6 @@ func (p *Plan) callToDoUpdatedHook(ctx context.Context, changes []PlanToDoChange
 	return nil
 }
 
-// callMessageHook calls the message hook
-func (p *Plan) callMessageHook(ctx context.Context, message PlanExecutionMessage) error {
-	if err := p.config.planMessageHook(ctx, p, message); err != nil {
-		return goerr.Wrap(err, "failed to call PlanMessageHook")
-	}
-	return nil
-}
-
 // handleStepError handles step execution errors
 func (p *Plan) handleStepError(step *planToDo, err error) error {
 	step.Status = ToDoStatusFailed
@@ -664,19 +602,18 @@ func (g *Agent) createPlanConfig(options ...PlanOption) *planConfig {
 		planToDoCompletedHook: defaultPlanToDoCompletedHook,
 		planCompletedHook:     defaultPlanCompletedHook,
 		planToDoUpdatedHook:   defaultPlanToDoUpdatedHook,
-		planMessageHook:       defaultPlanMessageHook,
 		skipConfirmationHook:  defaultPlanSkipConfirmationHook,
 
 		// Default internal hooks
 		internalStepStartHook:     defaultInternalStepStartHook,
 		internalStepCompletedHook: defaultInternalStepCompletedHook,
 		internalToDoUpdatedHook:   defaultInternalToDoUpdatedHook,
-		internalMessageHook:       defaultInternalMessageHook,
 		internalReflectionHook:    defaultInternalReflectionHook,
 
 		// Default plan-specific settings
 		executionMode:           PlanExecutionModeBalanced,
 		skipConfidenceThreshold: 0.8,
+		maxToolRetries:          10,
 	}
 
 	for _, opt := range options {
@@ -809,6 +746,97 @@ func (g *Agent) generatePlan(ctx context.Context, session Session, prompt string
 	return todos, nil
 }
 
+// executeStepWithInput handles recursive tool processing with maximum retry control
+func executeStepWithInput(ctx context.Context, session Session, config gollemConfig, toolMap map[string]Tool, todo *planToDo, inputs []Input, maxRetries int) (*toDoResult, error) {
+	logger := LoggerFromContext(ctx)
+
+	result := &toDoResult{
+		Output:     "",
+		ToolCalls:  []*FunctionCall{},
+		ExecutedAt: clock.Now(ctx),
+		Data:       make(map[string]any),
+	}
+
+	// Add timeout for processing
+	stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	response, err := session.GenerateContent(stepCtx, inputs...)
+	if err != nil {
+		return nil, goerr.Wrap(err, "session GenerateContent failed")
+	}
+
+	logger.Debug("executeStepWithInput: received response", "texts_count", len(response.Texts), "function_calls_count", len(response.FunctionCalls))
+
+	// Process text response
+	if len(response.Texts) > 0 {
+		textOutput := strings.Join(response.Texts, "\n")
+		if result.Output == "" {
+			result.Output = textOutput
+		} else {
+			result.Output += "\n" + textOutput
+		}
+	}
+
+	// Add function calls to result
+	result.ToolCalls = append(result.ToolCalls, response.FunctionCalls...)
+
+	// Check retry limit
+	var additionalInput []Input
+	if maxRetries <= -3 {
+		return nil, goerr.New("maximum hard-limit retries exceeded", goerr.V("todo", todo))
+	}
+	if maxRetries <= 0 {
+		logger.Warn("maximum retries exceeded, stopping tool processing", "max_retries", maxRetries)
+
+		if len(result.ToolCalls) == 0 {
+			return result, nil
+		}
+
+		additionalInput = append(additionalInput, Text("IMPORTANT: maximum retries already exceeded, more tool call is not allowed"))
+	}
+
+	logger.Debug("executeStepWithInput: processing tool calls", "tool_calls_count", len(response.FunctionCalls), "retries_remaining", maxRetries)
+
+	// Process tool calls
+	newInput, err := handleResponse(ctx, config, response, toolMap)
+	if err != nil {
+		logger.Debug("executeStepWithInput: tool processing failed", "error", err)
+		return nil, goerr.Wrap(err, "tool execution failed")
+	}
+	newInput = append(newInput, additionalInput...)
+
+	// Store tool results in Data
+	for _, input := range newInput {
+		if funcResp, ok := input.(FunctionResponse); ok {
+			result.Data[funcResp.Name] = funcResp.Data
+		}
+	}
+
+	// Recursively process with tool results if any
+	if len(newInput) > 0 {
+		logger.Debug("executeStepWithInput: recursively processing tool results", "input_count", len(newInput), "retries_remaining", maxRetries-1)
+
+		recursiveResult, err := executeStepWithInput(ctx, session, config, toolMap, todo, newInput, maxRetries-1)
+		if err != nil {
+			return nil, goerr.Wrap(err, "recursive processing failed")
+		}
+
+		// Merge recursive results
+		if recursiveResult.Output != "" {
+			if result.Output == "" {
+				result.Output = recursiveResult.Output
+			} else {
+				result.Output += "\n" + recursiveResult.Output
+			}
+		}
+		result.ToolCalls = append(result.ToolCalls, recursiveResult.ToolCalls...)
+		maps.Copy(result.Data, recursiveResult.Data)
+	}
+
+	return result, nil
+}
+
 // executeStep executes a single plan step
 func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, error) {
 	logger := LoggerFromContext(ctx)
@@ -821,7 +849,6 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 	if p.mainSession == nil {
 		return nil, goerr.Wrap(ErrPlanNotInitialized, "plan main session is not initialized")
 	}
-	executorSession := p.mainSession
 
 	// Generate execution prompt (using template)
 	var promptBuffer bytes.Buffer
@@ -833,142 +860,10 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 		return nil, goerr.Wrap(err, "failed to execute executor template")
 	}
 
-	// Tool execution (process tools with GenerateContent return value)
-	// Add timeout for step execution to prevent hanging
-	stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	response, err := executorSession.GenerateContent(stepCtx, Text(promptBuffer.String()))
+	// Execute with initial prompt and configured maximum retries
+	result, err := executeStepWithInput(ctx, p.mainSession, p.config.gollemConfig, p.toolMap, todo, []Input{Text(promptBuffer.String())}, p.config.maxToolRetries)
 	if err != nil {
-		return nil, goerr.Wrap(err, "executor session failed")
-	}
-	logger.Debug("executeStep: initial response", "response", response)
-
-	// Process response (use existing handleResponse)
-	// Requirement: Tool usage must process Tools from GenerateContent return value
-	output := strings.Join(response.Texts, "\n")
-
-	result := &toDoResult{
-		Output:     output,
-		ToolCalls:  response.FunctionCalls, // []*FunctionCall type
-		ExecutedAt: clock.Now(ctx),
-	}
-
-	// Process tool call results (use existing handleResponse pattern)
-	logger.Debug("executeStep: processing tool calls", "tool_calls_count", len(response.FunctionCalls))
-
-	newInput, err := handleResponse(ctx, p.config.gollemConfig, response, p.toolMap)
-	if err != nil {
-		logger.Debug("executeStep: handleResponse failed", "error", err)
-		return nil, goerr.Wrap(err, "tool execution failed")
-	}
-	logger.Debug("executeStep: function responses generated", "new_input", newInput)
-
-	// Store tool results in Data
-	result.Data = make(map[string]any)
-	for _, input := range newInput {
-		if funcResp, ok := input.(FunctionResponse); ok {
-			result.Data[funcResp.Name] = funcResp.Data
-		}
-	}
-
-	// Send tool results back to LLM to get final response
-	if len(newInput) > 0 {
-		// Add timeout for tool result processing
-		toolResultCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-
-		logger.Debug("executeStep: calling GenerateContent with tool results", "input_count", len(newInput))
-		finalResponse, err := executorSession.GenerateContent(toolResultCtx, newInput...)
-		if err != nil {
-			logger.Debug("executeStep: failed to get final response from LLM", "error", err)
-			return nil, goerr.Wrap(err, "failed to get final response from LLM")
-		}
-		logger.Debug("executeStep: received final response from LLM", "texts_count", len(finalResponse.Texts), "function_calls_count", len(finalResponse.FunctionCalls))
-
-		// Update result with final response
-		if len(finalResponse.Texts) > 0 {
-			finalOutput := strings.Join(finalResponse.Texts, "\n")
-			result.Output += "\n" + finalOutput
-			logger.Debug("got final response from LLM", "output_length", len(finalOutput))
-
-			// Send final response message through hook
-			responseMessage := PlanExecutionMessage{
-				Type:      PlanMessageTypeResponse,
-				Content:   finalOutput,
-				TodoID:    todo.ID,
-				Timestamp: time.Now(),
-			}
-			if err := p.callMessageHook(ctx, responseMessage); err != nil {
-				logger.Warn("failed to call message hook for final response", "error", err)
-			}
-		}
-
-		// Handle any additional tool calls in the final response (recursive tool calls)
-		if len(finalResponse.FunctionCalls) > 0 {
-			logger.Debug("executeStep: final response contains additional tool calls", "response", finalResponse)
-
-			// Process recursive tool calls
-			for {
-				logger.Debug("executeStep: processing recursive tool calls", "tool_calls_count", len(finalResponse.FunctionCalls))
-
-				// Process additional tool calls
-				additionalInput, err := handleResponse(ctx, p.config.gollemConfig, finalResponse, p.toolMap)
-				if err != nil {
-					logger.Debug("executeStep: recursive tool call processing failed", "error", err)
-					return nil, goerr.Wrap(err, "recursive tool call processing failed")
-				}
-
-				logger.Debug("executeStep: recursive tool calls processed", "additional_input_count", len(additionalInput))
-
-				// Send additional tool results back to LLM
-				if len(additionalInput) > 0 {
-					recursiveCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-					defer cancel()
-
-					logger.Debug("executeStep: sending recursive tool results to LLM", "input_count", len(additionalInput))
-
-					recursiveResponse, err := executorSession.GenerateContent(recursiveCtx, additionalInput...)
-					if err != nil {
-						logger.Debug("executeStep: recursive tool result processing failed", "error", err)
-						return nil, goerr.Wrap(err, "recursive tool result processing failed")
-					}
-
-					logger.Debug("executeStep: received recursive response from LLM", "texts_count", len(recursiveResponse.Texts), "function_calls_count", len(recursiveResponse.FunctionCalls))
-
-					// Add recursive response to result
-					if len(recursiveResponse.Texts) > 0 {
-						recursiveOutput := strings.Join(recursiveResponse.Texts, "\n")
-						result.Output += "\n" + recursiveOutput
-
-						// Send recursive response message through hook
-						responseMessage := PlanExecutionMessage{
-							Type:      PlanMessageTypeResponse,
-							Content:   recursiveOutput,
-							TodoID:    todo.ID,
-							Timestamp: time.Now(),
-						}
-						if err := p.callMessageHook(ctx, responseMessage); err != nil {
-							logger.Warn("failed to call message hook for recursive response", "error", err)
-						}
-					}
-
-					// Check if there are more tool calls
-					if len(recursiveResponse.FunctionCalls) > 0 {
-						logger.Debug("executeStep: found more recursive tool calls", "tool_calls_count", len(recursiveResponse.FunctionCalls))
-						finalResponse = recursiveResponse
-						continue // Continue the loop to process more tool calls
-					} else {
-						logger.Debug("executeStep: no more recursive tool calls")
-						break // No more tool calls, exit the loop
-					}
-				} else {
-					logger.Debug("executeStep: no additional input from recursive processing")
-					break
-				}
-
-			}
-		}
+		return nil, goerr.Wrap(err, "executeStepWithInput failed")
 	}
 
 	return result, nil
@@ -1640,13 +1535,6 @@ func WithPlanToDoUpdatedHook(hook PlanToDoUpdatedHook) PlanOption {
 	}
 }
 
-// WithPlanMessageHook sets a hook for plan execution messages
-func WithPlanMessageHook(hook PlanMessageHook) PlanOption {
-	return func(cfg *planConfig) {
-		cfg.planMessageHook = hook
-	}
-}
-
 // These hooks are already provided by WithPlanToDoUpdatedHook and WithPlanMessageHook
 
 // WithPlanHistory sets the history for plan execution (plan-specific)
@@ -1677,5 +1565,13 @@ func WithSkipConfidenceThreshold(threshold float64) PlanOption {
 func WithSkipConfirmationHook(hook PlanSkipConfirmationHook) PlanOption {
 	return func(cfg *planConfig) {
 		cfg.skipConfirmationHook = hook
+	}
+}
+
+// WithMaxToolRetries sets the maximum number of recursive tool calls allowed during step execution.
+// Default: 10
+func WithMaxToolRetries(maxRetries int) PlanOption {
+	return func(cfg *planConfig) {
+		cfg.maxToolRetries = maxRetries
 	}
 }

@@ -217,10 +217,6 @@ func TestPlanBasicFunctionality(t *testing.T) {
 				hooksCalled = append(hooksCalled, "completed")
 				return nil
 			}),
-			gollem.WithPlanMessageHook(func(ctx context.Context, plan *gollem.Plan, message gollem.PlanExecutionMessage) error {
-				hooksCalled = append(hooksCalled, "message")
-				return nil
-			}),
 		)
 		gt.NoError(t, err)
 		gt.Array(t, hooksCalled).Has("created")
@@ -232,7 +228,6 @@ func TestPlanBasicFunctionality(t *testing.T) {
 
 		// Verify hooks were called
 		gt.Array(t, hooksCalled).Has("completed")
-		gt.Array(t, hooksCalled).Has("message")
 	})
 
 	t.Run("PlanAlreadyExecutedError", func(t *testing.T) {
