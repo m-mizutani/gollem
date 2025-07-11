@@ -8,10 +8,17 @@ import (
 // convertTool converts gollem.Tool to Gemini tool
 func convertTool(tool gollem.Tool) *genai.FunctionDeclaration {
 	spec := tool.Spec()
+
+	// Ensure Required is never nil - Gemini requires an empty slice, not nil
+	required := spec.Required
+	if required == nil {
+		required = []string{}
+	}
+
 	parameters := &genai.Schema{
 		Type:       genai.TypeObject,
 		Properties: make(map[string]*genai.Schema),
-		Required:   spec.Required,
+		Required:   required,
 	}
 
 	for name, param := range spec.Parameters {
@@ -44,6 +51,8 @@ func convertParameterToSchema(param *gollem.Parameter) *genai.Schema {
 		}
 		if len(param.Required) > 0 {
 			schema.Required = param.Required
+		} else {
+			schema.Required = []string{}
 		}
 	}
 

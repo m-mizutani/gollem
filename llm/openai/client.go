@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
@@ -243,6 +242,19 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 			if v.Error != nil {
 				response = fmt.Sprintf(`Error message: %+v`, v.Error)
 			}
+
+			// DEBUG: Log tool result creation for OpenAI
+			// Note: This log is commented out by default to avoid spamming logs
+			// Uncomment for debugging tool_call_id issues
+			/*
+				logger := slog.Default()
+				logger.Debug("creating tool response for OpenAI",
+					"tool_call_id", v.ID,
+					"tool_name", v.Name,
+					"has_error", v.Error != nil,
+					"response_length", len(response))
+			*/
+
 			s.messages = append(s.messages, openai.ChatCompletionMessage{
 				Role:       openai.ChatMessageRoleTool,
 				Content:    response,
@@ -304,10 +316,6 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	message := resp.Choices[0].Message
 	if message.Content != "" {
 		response.Texts = append(response.Texts, message.Content)
-		s.messages = append(s.messages, openai.ChatCompletionMessage{
-			Role:    openai.ChatMessageRoleAssistant,
-			Content: message.Content,
-		})
 	}
 
 	if message.ToolCalls != nil {
@@ -322,62 +330,23 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 				Name:      toolCall.Function.Name,
 				Arguments: args,
 			})
-			s.messages = append(s.messages, openai.ChatCompletionMessage{
-				Role:      openai.ChatMessageRoleAssistant,
-				Content:   message.Content,
-				ToolCalls: []openai.ToolCall{toolCall},
-			})
 		}
+
+		// Add a single assistant message with all tool calls
+		s.messages = append(s.messages, openai.ChatCompletionMessage{
+			Role:      openai.ChatMessageRoleAssistant,
+			Content:   message.Content,
+			ToolCalls: message.ToolCalls,
+		})
+	} else if message.Content != "" {
+		// Add assistant message only if there are no tool calls
+		s.messages = append(s.messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleAssistant,
+			Content: message.Content,
+		})
 	}
 
 	return response, nil
-}
-
-// accumulator accumulates streaming responses for function calls
-type accumulator struct {
-	ID   string
-	Name string
-	Args string
-}
-
-func newAccumulator() *accumulator {
-	return &accumulator{}
-}
-
-func (a *accumulator) addFunctionCall(toolCall *openai.ToolCall) {
-	if toolCall.ID != "" {
-		a.ID = toolCall.ID
-	}
-	if toolCall.Function.Name != "" {
-		a.Name = toolCall.Function.Name
-	}
-	if toolCall.Function.Arguments != "" {
-		a.Args += toolCall.Function.Arguments
-	}
-}
-
-func (a *accumulator) accumulate() (*openai.ToolCall, *gollem.FunctionCall, error) {
-	if a.ID == "" || a.Name == "" || a.Args == "" {
-		return nil, nil, goerr.Wrap(gollem.ErrInvalidParameter, "function call is not complete")
-	}
-
-	var args map[string]any
-	if err := json.Unmarshal([]byte(a.Args), &args); err != nil {
-		return nil, nil, goerr.Wrap(err, "failed to unmarshal function call arguments", goerr.V("accumulator", a))
-	}
-
-	return &openai.ToolCall{
-			ID:   a.ID,
-			Type: openai.ToolTypeFunction,
-			Function: openai.FunctionCall{
-				Name:      a.Name,
-				Arguments: a.Args,
-			},
-		}, &gollem.FunctionCall{
-			ID:        a.ID,
-			Name:      a.Name,
-			Arguments: args,
-		}, nil
 }
 
 // GenerateStream processes the input and generates a response stream.
@@ -394,35 +363,20 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	}
 
 	responseChan := make(chan *gollem.Response)
-	acc := newAccumulator()
-
-	callHistory := make([]openai.ToolCall, 0)
-	textHistory := make([]string, 0)
 
 	go func() {
 		defer close(responseChan)
 		defer stream.Close()
 
-		defer func() {
-			if len(textHistory) > 0 {
-				s.messages = append(s.messages, openai.ChatCompletionMessage{
-					Role:    openai.ChatMessageRoleAssistant,
-					Content: strings.Join(textHistory, ""),
-				})
-			}
-			if len(callHistory) > 0 {
-				s.messages = append(s.messages, openai.ChatCompletionMessage{
-					Role:      openai.ChatMessageRoleAssistant,
-					ToolCalls: callHistory,
-				})
-			}
-		}()
+		var textContent string
+		var toolCalls []openai.ToolCall
 
+		// Process streaming chunks
 		for {
 			resp, err := stream.Recv()
 			if err != nil {
 				if err == io.EOF {
-					return
+					break
 				}
 				responseChan <- &gollem.Response{
 					Error: goerr.Wrap(err, "failed to receive chat completion stream"),
@@ -431,40 +385,100 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 			}
 
 			if len(resp.Choices) == 0 {
-				return
+				continue
 			}
 
-			for _, choice := range resp.Choices {
-				if choice.Delta.Content != "" {
-					// Send text immediately for each delta.Content
-					responseChan <- &gollem.Response{
-						Texts: []string{choice.Delta.Content},
+			choice := resp.Choices[0]
+			delta := choice.Delta
+
+			// Handle text content
+			if delta.Content != "" {
+				textContent += delta.Content
+				responseChan <- &gollem.Response{
+					Texts: []string{delta.Content},
+				}
+			}
+
+			// Handle tool calls - accumulate them
+			if delta.ToolCalls != nil {
+				for _, toolCall := range delta.ToolCalls {
+					// Get the index, defaulting to 0 if nil
+					index := 0
+					if toolCall.Index != nil {
+						index = *toolCall.Index
+					}
+
+					// Ensure we have enough space in the slice
+					for len(toolCalls) <= index {
+						toolCalls = append(toolCalls, openai.ToolCall{
+							Function: openai.FunctionCall{},
+						})
+					}
+
+					tc := &toolCalls[index]
+
+					if toolCall.ID != "" {
+						tc.ID = toolCall.ID
+					}
+					if toolCall.Type != "" {
+						tc.Type = toolCall.Type
+					}
+					if toolCall.Function.Name != "" {
+						tc.Function.Name = toolCall.Function.Name
+					}
+					if toolCall.Function.Arguments != "" {
+						tc.Function.Arguments += toolCall.Function.Arguments
 					}
 				}
+			}
 
-				if choice.Delta.ToolCalls != nil {
-					for _, toolCall := range choice.Delta.ToolCalls {
-						acc.addFunctionCall(&toolCall)
-					}
-				}
+			// Check if we're done
+			if choice.FinishReason == openai.FinishReasonToolCalls {
+				break
+			}
+			if choice.FinishReason == openai.FinishReasonStop {
+				break
+			}
+		}
 
-				if choice.FinishReason == openai.FinishReasonToolCalls {
-					openaiCall, funcCall, err := acc.accumulate()
-					if err != nil {
+		// Process accumulated tool calls
+		if len(toolCalls) > 0 {
+			var functionCalls []*gollem.FunctionCall
+			for _, toolCall := range toolCalls {
+				if toolCall.ID != "" && toolCall.Function.Name != "" && toolCall.Function.Arguments != "" {
+					var args map[string]any
+					if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
 						responseChan <- &gollem.Response{
-							Error: err,
+							Error: goerr.Wrap(err, "failed to unmarshal function call arguments"),
 						}
 						return
 					}
 
-					callHistory = append(callHistory, *openaiCall)
-					responseChan <- &gollem.Response{
-						FunctionCalls: []*gollem.FunctionCall{funcCall},
-					}
-
-					acc = newAccumulator()
+					functionCalls = append(functionCalls, &gollem.FunctionCall{
+						ID:        toolCall.ID,
+						Name:      toolCall.Function.Name,
+						Arguments: args,
+					})
 				}
 			}
+
+			if len(functionCalls) > 0 {
+				responseChan <- &gollem.Response{
+					FunctionCalls: functionCalls,
+				}
+			}
+
+			// Add tool calls to message history
+			s.messages = append(s.messages, openai.ChatCompletionMessage{
+				Role:      openai.ChatMessageRoleAssistant,
+				ToolCalls: toolCalls,
+			})
+		} else if textContent != "" {
+			// Add text content to message history
+			s.messages = append(s.messages, openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleAssistant,
+				Content: textContent,
+			})
 		}
 	}()
 

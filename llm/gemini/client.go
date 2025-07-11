@@ -3,6 +3,9 @@ package gemini
 import (
 	"context"
 	"fmt"
+	"math"
+	"strings"
+	"time"
 
 	"cloud.google.com/go/vertexai/genai"
 	"github.com/m-mizutani/goerr/v2"
@@ -173,7 +176,8 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 	// Convert gollem.Tool to *genai.Tool
 	genaiFunctions := make([]*genai.FunctionDeclaration, len(cfg.Tools()))
 	for i, tool := range cfg.Tools() {
-		genaiFunctions[i] = convertTool(tool)
+		converted := convertTool(tool)
+		genaiFunctions[i] = converted
 	}
 
 	var messages []*genai.Content
@@ -261,9 +265,9 @@ func (s *Session) convertInputs(input ...gollem.Input) ([]genai.Part, error) {
 }
 
 // processResponse converts Gemini response to gollem.Response
-func processResponse(resp *genai.GenerateContentResponse) *gollem.Response {
+func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, error) {
 	if len(resp.Candidates) == 0 {
-		return &gollem.Response{}
+		return &gollem.Response{}, nil
 	}
 
 	response := &gollem.Response{
@@ -271,7 +275,20 @@ func processResponse(resp *genai.GenerateContentResponse) *gollem.Response {
 		FunctionCalls: make([]*gollem.FunctionCall, 0),
 	}
 
-	for _, candidate := range resp.Candidates {
+	for i, candidate := range resp.Candidates {
+		// Check for malformed function call errors with improved error details
+		if candidate.FinishReason.String() == "FinishReasonMalformedFunctionCall" {
+			return nil, goerr.New("malformed function call detected",
+				goerr.V("candidate_index", i),
+				goerr.V("content_parts", len(candidate.Content.Parts)),
+				goerr.V("finish_reason", candidate.FinishReason.String()),
+				goerr.V("suggested_action", "retry with simplified parameters or check tool schema"))
+		}
+
+		if len(candidate.Content.Parts) == 0 {
+			continue
+		}
+
 		for _, part := range candidate.Content.Parts {
 			switch v := part.(type) {
 			case genai.Text:
@@ -285,7 +302,7 @@ func processResponse(resp *genai.GenerateContentResponse) *gollem.Response {
 		}
 	}
 
-	return response
+	return response, nil
 }
 
 // GenerateContent processes the input and generates a response.
@@ -304,7 +321,33 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		return nil, goerr.Wrap(err, "failed to send message")
 	}
 
-	return processResponse(resp), nil
+	return processResponse(resp)
+}
+
+// GenerateContentWithRetry adds retry logic for malformed function call errors
+func (s *Session) GenerateContentWithRetry(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	const maxRetries = 3
+	const baseDelay = 1 * time.Second
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		resp, err := s.GenerateContent(ctx, input...)
+		if err != nil {
+			if strings.Contains(err.Error(), "malformed function call") {
+				// Exponential backoff
+				delay := time.Duration(float64(baseDelay) * math.Pow(2, float64(attempt)))
+				select {
+				case <-time.After(delay):
+					continue
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			return nil, err
+		}
+		return resp, nil
+	}
+
+	return nil, goerr.New("max retries exceeded for malformed function call")
 }
 
 // filterEmptyHistoryParts removes history entries with empty parts
@@ -360,7 +403,14 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				return
 			}
 
-			responseChan <- processResponse(resp)
+			processedResp, err := processResponse(resp)
+			if err != nil {
+				responseChan <- &gollem.Response{
+					Error: goerr.Wrap(err, "failed to process response"),
+				}
+				return
+			}
+			responseChan <- processedResp
 		}
 	}()
 

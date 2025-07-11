@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -52,6 +54,9 @@ type Client struct {
 
 	// systemPrompt is the system prompt to use for chat completions.
 	systemPrompt string
+
+	// timeout for API requests
+	timeout time.Duration
 }
 
 // Option is a function that configures a Client.
@@ -103,7 +108,14 @@ func WithMaxTokens(maxTokens int64) Option {
 	}
 }
 
-// WithSystemPrompt sets the system prompt to use for chat completions.
+// WithTimeout sets the timeout for API requests
+func WithTimeout(timeout time.Duration) Option {
+	return func(c *Client) {
+		c.timeout = timeout
+	}
+}
+
+// WithSystemPrompt sets the system prompt for the client
 func WithSystemPrompt(prompt string) Option {
 	return func(c *Client) {
 		c.systemPrompt = prompt
@@ -122,15 +134,26 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 			TopP:        1.0,
 			MaxTokens:   4096,
 		},
+		timeout: 30 * time.Second, // Default timeout
 	}
 
 	for _, option := range options {
 		option(client)
 	}
 
-	newClient := anthropic.NewClient(
+	clientOptions := []option.RequestOption{
 		option.WithAPIKey(apiKey),
-	)
+	}
+
+	// Add timeout if specified
+	if client.timeout > 0 {
+		httpClient := &http.Client{
+			Timeout: client.timeout,
+		}
+		clientOptions = append(clientOptions, option.WithHTTPClient(httpClient))
+	}
+
+	newClient := anthropic.NewClient(clientOptions...)
 	client.client = &newClient
 
 	return client, nil
@@ -194,7 +217,8 @@ func (s *Session) History() *gollem.History {
 }
 
 // convertInputs converts gollem.Input to Claude messages and tool results
-func (s *Session) convertInputs(input ...gollem.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
+func (s *Session) convertInputs(ctx context.Context, input ...gollem.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
+	logger := gollem.LoggerFromContext(ctx)
 	var toolResults []anthropic.ContentBlockParamUnion
 	var messages []anthropic.MessageParam
 
@@ -211,10 +235,25 @@ func (s *Session) convertInputs(input ...gollem.Input) ([]anthropic.MessageParam
 				return nil, nil, goerr.Wrap(err, "failed to marshal function response")
 			}
 			response := string(data)
-			if v.Error != nil {
-				response = fmt.Sprintf(`Error message: %+v`, v.Error)
+
+			// Handle error cases properly
+			isError := v.Error != nil
+			if isError {
+				response = fmt.Sprintf("Error: %v", v.Error)
 			}
-			toolResults = append(toolResults, anthropic.NewToolResultBlock(v.ID, response, v.Error != nil))
+
+			// DEBUG: Log tool result creation
+			// Note: This log is commented out by default to avoid spamming logs
+			// Uncomment for debugging tool_use/tool_result issues
+			logger.Debug("creating tool_result",
+				"tool_use_id", v.ID,
+				"tool_name", v.Name,
+				"is_error", isError,
+				"response_length", len(response))
+
+			// Create tool result - try original argument order: tool_use_id, content, is_error
+			toolResult := anthropic.NewToolResultBlock(v.ID, response, isError)
+			toolResults = append(toolResults, toolResult)
 
 		default:
 			return nil, nil, goerr.Wrap(gollem.ErrInvalidParameter, "invalid input")
@@ -301,21 +340,50 @@ func processResponse(resp *anthropic.Message) *gollem.Response {
 // GenerateContent processes the input and generates a response.
 // It handles both text messages and function responses.
 func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-	messages, _, err := s.convertInputs(input...)
+	logger := gollem.LoggerFromContext(ctx)
+	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
+	}
+
+	// DEBUG: Log message history for debugging
+	logger.Debug("Claude API request",
+		"message_count", len(s.messages),
+		"input_count", len(input))
+
+	// Log the last few messages to understand the conversation state
+	for i, msg := range s.messages[max(0, len(s.messages)-5):] {
+		logger.Debug("Claude message",
+			"index", i,
+			"role", msg.Role,
+			"content_blocks", len(msg.Content))
 	}
 
 	s.messages = append(s.messages, messages...)
 	params := s.createRequest()
 
+	logger.Debug("Claude API calling anthropic",
+		"total_messages", len(s.messages),
+		"max_tokens", params.MaxTokens,
+		"model", params.Model)
+
 	resp, err := s.client.Messages.New(ctx, params)
 	if err != nil {
+		logger.Debug("Claude API request failed", "error", err)
 		return nil, goerr.Wrap(err, "failed to create message")
 	}
 
+	logger.Debug("Claude API response received",
+		"content_blocks", len(resp.Content),
+		"stop_reason", resp.StopReason)
+
 	// Add assistant's response to message history
+	// This is critical for tool_use/tool_result consistency
 	s.messages = append(s.messages, resp.ToParam())
+
+	logger.Debug("Added assistant response to message history",
+		"content_blocks", len(resp.Content),
+		"total_messages", len(s.messages))
 
 	return processResponse(resp), nil
 }
@@ -355,7 +423,7 @@ func (a *FunctionCallAccumulator) accumulate() (*gollem.FunctionCall, error) {
 // GenerateStream processes the input and generates a response stream.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
 func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
-	messages, _, err := s.convertInputs(input...)
+	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
 	}

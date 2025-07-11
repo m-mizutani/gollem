@@ -65,6 +65,28 @@ This directory contains various examples demonstrating the usage of Gollem with 
 - Multiple LLM provider support
 - Simple text generation
 
+## 📋 Plan Mode Example
+**[Plan Mode Example](plan_mode/main.go)** - Demonstrates advanced plan-and-execute functionality with adaptive skip capabilities.
+
+**Features:**
+- **Multi-Step Planning**: Automatic breakdown of complex goals into actionable steps
+- **Adaptive Skip Intelligence**: Three execution modes (Complete, Balanced, Efficient)
+- **Skip Decision Transparency**: Confidence-based decisions with detailed reasoning
+- **Custom Confirmation Hooks**: User-defined logic for skip approval
+- **Progress Monitoring**: Real-time execution tracking and statistics
+- **Dynamic Plan Adaptation**: Plans that evolve based on execution results
+
+**Execution Modes:**
+- **Complete Mode**: Execute all tasks without skipping for thoroughness
+- **Balanced Mode (Default)**: Smart skipping with confidence thresholds and confirmation
+- **Efficient Mode**: Aggressive skipping for rapid task completion
+
+**Skip Decision Intelligence:**
+- Confidence levels (0.0-1.0) indicating certainty
+- Detailed reasoning for why tasks should be skipped
+- Evidence from previous execution results
+- Transparent decision-making process
+
 ## Key Improvements
 
 All examples have been updated to use the new `Execute` method which provides:

@@ -309,7 +309,7 @@ func TestHistoryClone(t *testing.T) {
 			gt.Equal(t, original.OpenAI[i].Role, cloned.OpenAI[i].Role)
 			gt.Equal(t, original.OpenAI[i].Content, cloned.OpenAI[i].Content)
 			gt.Equal(t, original.OpenAI[i].Name, cloned.OpenAI[i].Name)
-			
+
 			// Check function call equality
 			if original.OpenAI[i].FunctionCall != nil {
 				gt.NotNil(t, cloned.OpenAI[i].FunctionCall)
@@ -371,7 +371,7 @@ func TestHistoryClone(t *testing.T) {
 		for i := range original.Claude {
 			gt.Equal(t, original.Claude[i].Role, cloned.Claude[i].Role)
 			gt.Equal(t, len(original.Claude[i].Content), len(cloned.Claude[i].Content))
-			
+
 			for j := range original.Claude[i].Content {
 				gt.Equal(t, original.Claude[i].Content[j].Type, cloned.Claude[i].Content[j].Type)
 			}

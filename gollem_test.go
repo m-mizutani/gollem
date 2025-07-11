@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"log/slog"
 
@@ -56,6 +57,7 @@ func (t *RandomNumberTool) Run(ctx context.Context, args map[string]any) (map[st
 }
 
 func TestGollemWithTool(t *testing.T) {
+	t.Parallel()
 	respModes := []gollem.ResponseMode{
 		gollem.ResponseModeBlocking,
 		gollem.ResponseModeStreaming,
@@ -64,6 +66,8 @@ func TestGollemWithTool(t *testing.T) {
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
 		for _, respMode := range respModes {
 			t.Run(fmt.Sprintf("ResponseMode=%s", respMode), func(t *testing.T) {
+				// Disable parallel execution for individual response modes to reduce API load
+				// t.Parallel()
 				client, err := newClient(t)
 				gt.NoError(t, err)
 
@@ -81,7 +85,30 @@ func TestGollemWithTool(t *testing.T) {
 					gollem.WithResponseMode(respMode),
 				)
 
-				err = s.Execute(t.Context(), "Generate a random number between 1 and 100.")
+				// Execute with retry logic for API errors
+				maxRetries := 3
+				for i := 0; i < maxRetries; i++ {
+					err = s.Execute(t.Context(), "Generate a random number between 1 and 100.")
+					if err == nil {
+						break
+					}
+
+					// Check if it's a temporary API error
+					if strings.Contains(err.Error(), "overloaded") || strings.Contains(err.Error(), "rate limit") || strings.Contains(err.Error(), "529") {
+						t.Logf("API error (attempt %d/%d): %v", i+1, maxRetries, err)
+						time.Sleep(time.Duration(i+1) * time.Second)
+						continue
+					}
+
+					// If it's not a temporary error, break
+					break
+				}
+
+				// Skip if API is temporarily unavailable
+				if err != nil && (strings.Contains(err.Error(), "overloaded") || strings.Contains(err.Error(), "rate limit") || strings.Contains(err.Error(), "529")) {
+					t.Skipf("API temporarily unavailable after %d retries: %v", maxRetries, err)
+				}
+
 				gt.NoError(t, err)
 				gt.True(t, randomNumberToolCalled)
 			})
@@ -89,6 +116,7 @@ func TestGollemWithTool(t *testing.T) {
 	}
 
 	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
 		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
 		if !ok {
 			t.Skip("TEST_OPENAI_API_KEY is not set")
@@ -99,6 +127,8 @@ func TestGollemWithTool(t *testing.T) {
 	})
 
 	t.Run("Claude", func(t *testing.T) {
+		// Disable parallel execution for Claude to reduce API load
+		// t.Parallel()
 		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
 		if !ok {
 			t.Skip("TEST_CLAUDE_API_KEY is not set")
@@ -109,6 +139,7 @@ func TestGollemWithTool(t *testing.T) {
 	})
 
 	t.Run("Gemini", func(t *testing.T) {
+		t.Parallel()
 		projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
 		if !ok {
 			t.Skip("TEST_GCP_PROJECT_ID is not set")
@@ -124,6 +155,7 @@ func TestGollemWithTool(t *testing.T) {
 }
 
 func TestGollemWithHooks(t *testing.T) {
+	t.Parallel()
 	mockClient := &mock.LLMClientMock{
 		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 			mockSession := &mock.SessionMock{
@@ -185,6 +217,7 @@ func TestGollemWithHooks(t *testing.T) {
 	}
 
 	t.Run("ToolRequestHook", func(t *testing.T) {
+		t.Parallel()
 		toolRequestCalled := false
 		s := gollem.New(mockClient,
 			gollem.WithTools(&RandomNumberTool{}),
@@ -205,6 +238,7 @@ func TestGollemWithHooks(t *testing.T) {
 	})
 
 	t.Run("ToolResponseHook", func(t *testing.T) {
+		t.Parallel()
 		// Create a tool that returns a test result
 		testTool := &mockTool{
 			spec: gollem.ToolSpec{
@@ -238,6 +272,7 @@ func TestGollemWithHooks(t *testing.T) {
 	})
 
 	t.Run("ToolErrorHook", func(t *testing.T) {
+		t.Parallel()
 		// Create a tool that always returns an error
 		errorTool := &mockTool{
 			spec: gollem.ToolSpec{
@@ -269,6 +304,7 @@ func TestGollemWithHooks(t *testing.T) {
 	})
 
 	t.Run("MessageHook", func(t *testing.T) {
+		t.Parallel()
 		messageHookCalled := false
 		s := gollem.New(mockClient,
 			gollem.WithMessageHook(func(ctx context.Context, msg string) error {
@@ -318,7 +354,7 @@ func newMockClient(generateContentFunc func(ctx context.Context, input ...gollem
 						// Check if this is already a proceed prompt from DefaultFacilitator
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "Respond in JSON format") {
+								if strings.Contains(string(text), "Choose your next action or complete") {
 									// Return JSON response for facilitator
 									return &gollem.Response{
 										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
@@ -353,7 +389,7 @@ func TestGollemWithOptions(t *testing.T) {
 			// Check if input is DefaultFacilitator's proceed prompt and return JSON response
 			if len(input) > 0 {
 				if text, ok := input[0].(gollem.Text); ok {
-					if strings.Contains(string(text), "choose your next action or complete") {
+					if strings.Contains(string(text), "Choose your next action or complete") {
 						return &gollem.Response{
 							Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 						}, nil
@@ -402,7 +438,7 @@ func TestGollemWithOptions(t *testing.T) {
 						// Check if it's DefaultFacilitator's proceed prompt and return JSON response
 						if len(input) > 1 {
 							if text, ok := input[1].(gollem.Text); ok {
-								if strings.Contains(string(text), "Respond in JSON format") {
+								if strings.Contains(string(text), "Choose your next action or complete") {
 									return &gollem.Response{
 										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 									}, nil
@@ -430,7 +466,7 @@ func TestGollemWithOptions(t *testing.T) {
 			// Check if input is DefaultFacilitator's proceed prompt and return JSON response
 			if len(input) > 0 {
 				if text, ok := input[0].(gollem.Text); ok {
-					if strings.Contains(string(text), "choose your next action or complete") {
+					if strings.Contains(string(text), "Choose your next action or complete") {
 						return &gollem.Response{
 							Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 						}, nil
@@ -483,7 +519,7 @@ func TestGollemWithOptions(t *testing.T) {
 						// Check if this is DefaultFacilitator's proceed prompt
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "choose your next action or complete") {
+								if strings.Contains(string(text), "Choose your next action or complete") {
 									// Return JSON response for facilitator
 									return &gollem.Response{
 										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
@@ -540,7 +576,7 @@ func TestGollemWithOptions(t *testing.T) {
 						// Check if this is DefaultFacilitator's proceed prompt
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "choose your next action or complete") {
+								if strings.Contains(string(text), "Choose your next action or complete") {
 									// Return JSON response for facilitator
 									return &gollem.Response{
 										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
@@ -600,7 +636,7 @@ func TestGollemWithOptions(t *testing.T) {
 						// Check if this is DefaultFacilitator's proceed prompt
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "choose your next action or complete") {
+								if strings.Contains(string(text), "Choose your next action or complete") {
 									// Return JSON response for facilitator
 									return &gollem.Response{
 										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
@@ -680,7 +716,7 @@ func TestGollemWithOptions(t *testing.T) {
 						// Check if this is DefaultFacilitator's proceed prompt
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "choose your next action or complete") {
+								if strings.Contains(string(text), "Choose your next action or complete") {
 									// Return JSON response for facilitator
 									return &gollem.Response{
 										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
@@ -730,7 +766,7 @@ func TestGollemWithOptions(t *testing.T) {
 			// Check if input is DefaultFacilitator's proceed prompt and return JSON response
 			if len(input) > 0 {
 				if text, ok := input[0].(gollem.Text); ok {
-					if strings.Contains(string(text), "choose your next action or complete") {
+					if strings.Contains(string(text), "Choose your next action or complete") {
 						return &gollem.Response{
 							Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 						}, nil
@@ -769,7 +805,7 @@ func TestGollemWithOptions(t *testing.T) {
 						// Check if this is DefaultFacilitator's proceed prompt
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "choose your next action or complete") {
+								if strings.Contains(string(text), "Choose your next action or complete") {
 									// Return JSON response for facilitator
 									return &gollem.Response{
 										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
@@ -840,302 +876,15 @@ func (t *mockToolSet) Run(ctx context.Context, name string, args map[string]any)
 	return t.run(ctx, name, args)
 }
 
-func TestErrExitConversation(t *testing.T) {
-	type testCase struct {
-		name string
-		test func(t *testing.T)
-	}
-
-	runTest := func(tc testCase) func(t *testing.T) {
-		return func(t *testing.T) {
-			tc.test(t)
-		}
-	}
-
-	t.Run("single tool returns ErrExitConversation", runTest(testCase{
-		name: "single tool returns ErrExitConversation",
-		test: func(t *testing.T) {
-			toolCalled := false
-			mockClient := &mock.LLMClientMock{
-				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
-					mockSession := &mock.SessionMock{
-						GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-							return &gollem.Response{
-								Texts: []string{"Calling exit tool"},
-								FunctionCalls: []*gollem.FunctionCall{
-									{
-										Name:      "exit_tool",
-										Arguments: map[string]any{},
-									},
-								},
-							}, nil
-						},
-						HistoryFunc: func() *gollem.History {
-							return &gollem.History{}
-						},
-					}
-					return mockSession, nil
-				},
-			}
-
-			exitTool := &mockTool{
-				spec: gollem.ToolSpec{
-					Name:        "exit_tool",
-					Description: "Tool that exits conversation",
-				},
-				run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
-					toolCalled = true
-					return nil, gollem.ErrExitConversation
-				},
-			}
-
-			s := gollem.New(mockClient, gollem.WithTools(exitTool))
-			err := s.Execute(t.Context(), "test prompt")
-
-			gt.NoError(t, err)
-			gt.True(t, toolCalled)
-			history := s.Session().History()
-			gt.NotNil(t, history)
-		},
-	}))
-
-	t.Run("multiple tools with one returning ErrExitConversation", runTest(testCase{
-		name: "multiple tools with one returning ErrExitConversation",
-		test: func(t *testing.T) {
-			tool1Called := false
-			tool2Called := false
-			mockClient := &mock.LLMClientMock{
-				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
-					mockSession := &mock.SessionMock{
-						GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-							return &gollem.Response{
-								Texts: []string{"Calling multiple tools"},
-								FunctionCalls: []*gollem.FunctionCall{
-									{
-										Name:      "normal_tool",
-										Arguments: map[string]any{},
-									},
-									{
-										Name:      "exit_tool",
-										Arguments: map[string]any{},
-									},
-								},
-							}, nil
-						},
-						HistoryFunc: func() *gollem.History {
-							return &gollem.History{}
-						},
-					}
-					return mockSession, nil
-				},
-			}
-
-			normalTool := &mockTool{
-				spec: gollem.ToolSpec{
-					Name:        "normal_tool",
-					Description: "Normal tool that succeeds",
-				},
-				run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
-					tool1Called = true
-					return map[string]any{"result": "success"}, nil
-				},
-			}
-
-			exitTool := &mockTool{
-				spec: gollem.ToolSpec{
-					Name:        "exit_tool",
-					Description: "Tool that exits conversation",
-				},
-				run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
-					tool2Called = true
-					return nil, gollem.ErrExitConversation
-				},
-			}
-
-			s := gollem.New(mockClient, gollem.WithTools(normalTool, exitTool))
-			err := s.Execute(t.Context(), "test prompt")
-
-			gt.NoError(t, err)
-			gt.True(t, tool1Called)
-			gt.True(t, tool2Called)
-			history := s.Session().History()
-			gt.NotNil(t, history)
-		},
-	}))
-
-	t.Run("ErrExitConversation vs normal error behavior", runTest(testCase{
-		name: "ErrExitConversation vs normal error behavior",
-		test: func(t *testing.T) {
-			// Test normal error continues conversation
-			normalErrorToolCalled := false
-			mockClient1 := &mock.LLMClientMock{
-				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
-					mockSession := &mock.SessionMock{
-						GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-							// If input is error response, check and return respond_to_user
-							if len(input) > 0 {
-								if funcResp, ok := input[0].(gollem.FunctionResponse); ok && funcResp.Error != nil {
-									return &gollem.Response{
-										Texts: []string{"Error handled, completing task"},
-										FunctionCalls: []*gollem.FunctionCall{
-											{
-												Name:      "respond_to_user",
-												Arguments: map[string]any{},
-											},
-										},
-									}, nil
-								}
-								if funcResp, ok := input[0].(gollem.FunctionResponse); ok && funcResp.Name == "respond_to_user" {
-									return &gollem.Response{}, nil
-								}
-							}
-							return &gollem.Response{
-								Texts: []string{"Calling error tool"},
-								FunctionCalls: []*gollem.FunctionCall{
-									{
-										Name:      "error_tool",
-										Arguments: map[string]any{},
-									},
-								},
-							}, nil
-						},
-						HistoryFunc: func() *gollem.History {
-							return &gollem.History{}
-						},
-					}
-					return mockSession, nil
-				},
-			}
-
-			errorTool := &mockTool{
-				spec: gollem.ToolSpec{
-					Name:        "error_tool",
-					Description: "Tool that returns normal error",
-				},
-				run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
-					normalErrorToolCalled = true
-					return nil, errors.New("normal error")
-				},
-			}
-
-			s1 := gollem.New(mockClient1, gollem.WithTools(errorTool))
-			err1 := s1.Execute(t.Context(), "test prompt")
-
-			gt.NoError(t, err1) // Normal error doesn't terminate session
-			gt.True(t, normalErrorToolCalled)
-			history1 := s1.Session().History()
-			gt.NotNil(t, history1)
-
-			// Test ErrExitConversation terminates immediately
-			exitToolCalled := false
-			mockClient2 := &mock.LLMClientMock{
-				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
-					mockSession := &mock.SessionMock{
-						GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-							return &gollem.Response{
-								Texts: []string{"Calling exit tool"},
-								FunctionCalls: []*gollem.FunctionCall{
-									{
-										Name:      "exit_tool",
-										Arguments: map[string]any{},
-									},
-								},
-							}, nil
-						},
-						HistoryFunc: func() *gollem.History {
-							return &gollem.History{}
-						},
-					}
-					return mockSession, nil
-				},
-			}
-
-			exitTool := &mockTool{
-				spec: gollem.ToolSpec{
-					Name:        "exit_tool",
-					Description: "Tool that exits conversation",
-				},
-				run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
-					exitToolCalled = true
-					return nil, gollem.ErrExitConversation
-				},
-			}
-
-			s2 := gollem.New(mockClient2, gollem.WithTools(exitTool))
-			err2 := s2.Execute(t.Context(), "test prompt")
-
-			gt.NoError(t, err2) // ErrExitConversation is treated as success
-			gt.True(t, exitToolCalled)
-			history2 := s2.Session().History()
-			gt.NotNil(t, history2)
-		},
-	}))
-
-	t.Run("ErrExitConversation with streaming mode", runTest(testCase{
-		name: "ErrExitConversation with streaming mode",
-		test: func(t *testing.T) {
-			toolCalled := false
-			mockClient := &mock.LLMClientMock{
-				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
-					mockSession := &mock.SessionMock{
-						GenerateStreamFunc: func(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
-							ch := make(chan *gollem.Response, 1)
-							go func() {
-								defer close(ch)
-								ch <- &gollem.Response{
-									Texts: []string{"Calling exit tool"},
-									FunctionCalls: []*gollem.FunctionCall{
-										{
-											Name:      "exit_tool",
-											Arguments: map[string]any{},
-										},
-									},
-								}
-							}()
-							return ch, nil
-						},
-						HistoryFunc: func() *gollem.History {
-							return &gollem.History{}
-						},
-					}
-					return mockSession, nil
-				},
-			}
-
-			exitTool := &mockTool{
-				spec: gollem.ToolSpec{
-					Name:        "exit_tool",
-					Description: "Tool that exits conversation",
-				},
-				run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
-					toolCalled = true
-					return nil, gollem.ErrExitConversation
-				},
-			}
-
-			s := gollem.New(mockClient,
-				gollem.WithTools(exitTool),
-				gollem.WithResponseMode(gollem.ResponseModeStreaming),
-			)
-			err := s.Execute(t.Context(), "test prompt")
-
-			gt.NoError(t, err)
-			gt.True(t, toolCalled)
-			history := s.Session().History()
-			gt.NotNil(t, history)
-		},
-	}))
-}
-
 func TestFacilitationHook(t *testing.T) {
 	t.Run("WithFacilitationHook", func(t *testing.T) {
 		facilitationCalls := []gollem.Facilitation{}
-		
+
 		mockClient := newMockClient(func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 			// Check if input is DefaultFacilitator's proceed prompt and return JSON response
 			if len(input) > 0 {
 				if text, ok := input[0].(gollem.Text); ok {
-					if strings.Contains(string(text), "choose your next action or complete") {
+					if strings.Contains(string(text), "Choose your next action or complete") {
 						return &gollem.Response{
 							Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 						}, nil
@@ -1153,10 +902,10 @@ func TestFacilitationHook(t *testing.T) {
 				return nil
 			}),
 		)
-		
+
 		err := s.Execute(t.Context(), "test message")
 		gt.NoError(t, err)
-		
+
 		// Verify that FacilitationHook was called
 		gt.A(t, facilitationCalls).Length(1)
 		gt.Equal(t, facilitationCalls[0].Action, gollem.ActionComplete)
@@ -1169,7 +918,7 @@ func TestFacilitationHook(t *testing.T) {
 			// Check if input is DefaultFacilitator's proceed prompt and return JSON response
 			if len(input) > 0 {
 				if text, ok := input[0].(gollem.Text); ok {
-					if strings.Contains(string(text), "choose your next action or complete") {
+					if strings.Contains(string(text), "Choose your next action or complete") {
 						return &gollem.Response{
 							Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
 						}, nil
@@ -1187,7 +936,7 @@ func TestFacilitationHook(t *testing.T) {
 				return expectedError
 			}),
 		)
-		
+
 		err := s.Execute(t.Context(), "test message")
 		gt.Error(t, err)
 		gt.Equal(t, err, expectedError)

@@ -61,9 +61,23 @@ func (t *randomNumberTool) Run(ctx context.Context, args map[string]any) (map[st
 func testGenerateContent(t *testing.T, session gollem.Session) {
 	ctx := t.Context()
 
-	// Test case 1: Generate random number
-	resp1, err := session.GenerateContent(ctx, gollem.Text("Please generate a random number between 1 and 10"))
+	// Test case 1: Generate random number with retry logic
+	resp1, err := retryAPICall(t, func() (*gollem.Response, error) {
+		return session.GenerateContent(ctx, gollem.Text("Please generate a random number between 1 and 10"))
+	}, "generate random number")
+
+	// Skip if API is temporarily unavailable
+	if err != nil && isTemporaryAPIError(err) {
+		t.Skipf("API temporarily unavailable after retries: %v", err)
+	}
+
 	gt.NoError(t, err)
+
+	// Check if response is valid
+	if resp1 == nil {
+		t.Fatal("Response is nil despite no error")
+	}
+
 	gt.Array(t, resp1.FunctionCalls).Length(1).Required()
 	gt.Value(t, resp1.FunctionCalls[0].Name).Equal("random_number")
 
@@ -71,12 +85,27 @@ func testGenerateContent(t *testing.T, session gollem.Session) {
 	gt.Value(t, args["min"]).Equal(1.0)
 	gt.Value(t, args["max"]).Equal(10.0)
 
-	resp2, err := session.GenerateContent(ctx, gollem.FunctionResponse{
-		ID:   resp1.FunctionCalls[0].ID,
-		Name: "random_number",
-		Data: map[string]any{"result": 5.5},
-	})
+	// Test case 2: Function response with retry
+	resp2, err := retryAPICall(t, func() (*gollem.Response, error) {
+		return session.GenerateContent(ctx, gollem.FunctionResponse{
+			ID:   resp1.FunctionCalls[0].ID,
+			Name: "random_number",
+			Data: map[string]any{"result": 5.5},
+		})
+	}, "function response")
+
+	// Skip if API is temporarily unavailable
+	if err != nil && isTemporaryAPIError(err) {
+		t.Skipf("API temporarily unavailable after retries: %v", err)
+	}
+
 	gt.NoError(t, err).Required()
+
+	// Check if response is valid
+	if resp2 == nil {
+		t.Fatal("Response is nil despite no error")
+	}
+
 	gt.Array(t, resp2.Texts).Length(1).Required()
 }
 
@@ -158,47 +187,67 @@ func newClaudeClient(t *testing.T) gollem.LLMClient {
 }
 
 func TestGemini(t *testing.T) {
+	t.Parallel()
 	client := newGeminiClient(t)
 
 	// Setup tools
 	tools := []gollem.Tool{&randomNumberTool{}}
-	session, err := client.NewSession(t.Context(), gollem.WithSessionTools(tools...))
-	gt.NoError(t, err)
 
 	t.Run("generate content", func(t *testing.T) {
+		t.Parallel()
+		session, err := client.NewSession(t.Context(), gollem.WithSessionTools(tools...))
+		gt.NoError(t, err)
 		testGenerateContent(t, session)
 	})
 	t.Run("generate stream", func(t *testing.T) {
+		t.Parallel()
+		session, err := client.NewSession(t.Context(), gollem.WithSessionTools(tools...))
+		gt.NoError(t, err)
 		testGenerateStream(t, session)
 	})
 }
 
 func TestOpenAI(t *testing.T) {
+	t.Parallel()
 	client := newOpenAIClient(t)
 
 	// Setup tools
 	tools := []gollem.Tool{&randomNumberTool{}}
-	session, err := client.NewSession(t.Context(), gollem.WithSessionTools(tools...))
-	gt.NoError(t, err)
 
 	t.Run("generate content", func(t *testing.T) {
+		t.Parallel()
+		session, err := client.NewSession(t.Context(), gollem.WithSessionTools(tools...))
+		gt.NoError(t, err)
 		testGenerateContent(t, session)
 	})
 	t.Run("generate stream", func(t *testing.T) {
+		t.Parallel()
+		session, err := client.NewSession(t.Context(), gollem.WithSessionTools(tools...))
+		gt.NoError(t, err)
 		testGenerateStream(t, session)
 	})
 }
 
 func TestClaude(t *testing.T) {
+	// Disable parallel execution for Claude to reduce API load
+	// t.Parallel()
 	client := newClaudeClient(t)
 
-	session, err := client.NewSession(context.Background(), gollem.WithSessionTools(&randomNumberTool{}))
-	gt.NoError(t, err)
+	// Setup tools
+	tools := []gollem.Tool{&randomNumberTool{}}
 
 	t.Run("generate content", func(t *testing.T) {
+		// Disable parallel execution for Claude subtests to reduce API load
+		// t.Parallel()
+		session, err := client.NewSession(context.Background(), gollem.WithSessionTools(tools...))
+		gt.NoError(t, err)
 		testGenerateContent(t, session)
 	})
 	t.Run("generate stream", func(t *testing.T) {
+		// Disable parallel execution for Claude subtests to reduce API load
+		// t.Parallel()
+		session, err := client.NewSession(context.Background(), gollem.WithSessionTools(tools...))
+		gt.NoError(t, err)
 		testGenerateStream(t, session)
 	})
 }
@@ -227,11 +276,13 @@ func (t *weatherTool) Run(ctx context.Context, input map[string]any) (map[string
 }
 
 func TestCallToolNameConvention(t *testing.T) {
+	t.Parallel()
 	if _, ok := os.LookupEnv("TEST_FLAG_TOOL_NAME_CONVENTION"); !ok {
 		t.Skip("TEST_FLAG_TOOL_NAME_CONVENTION is not set")
 	}
 
 	testFunc := func(t *testing.T, client gollem.LLMClient) {
+		t.Parallel()
 		testCases := map[string]struct {
 			name    string
 			isError bool
@@ -279,6 +330,8 @@ func TestCallToolNameConvention(t *testing.T) {
 
 		for name, tc := range testCases {
 			t.Run(name, func(t *testing.T) {
+				// Disable parallel execution for individual tool validation tests to reduce API load
+				// t.Parallel()
 				ctx := t.Context()
 				tool := &weatherTool{name: tc.name}
 
@@ -301,6 +354,7 @@ func TestCallToolNameConvention(t *testing.T) {
 	}
 
 	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
 		ctx := t.Context()
 		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
 		if !ok {
@@ -313,6 +367,7 @@ func TestCallToolNameConvention(t *testing.T) {
 	})
 
 	t.Run("gemini", func(t *testing.T) {
+		t.Parallel()
 		ctx := t.Context()
 		projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
 		if !ok {
@@ -330,6 +385,8 @@ func TestCallToolNameConvention(t *testing.T) {
 	})
 
 	t.Run("claude", func(t *testing.T) {
+		// Disable parallel execution for Claude to reduce API load
+		// t.Parallel()
 		ctx := t.Context()
 		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
 		if !ok {
@@ -343,7 +400,10 @@ func TestCallToolNameConvention(t *testing.T) {
 }
 
 func TestSessionHistory(t *testing.T) {
+	t.Parallel()
 	testFn := func(t *testing.T, client gollem.LLMClient) {
+		// Disable parallel execution for individual session history tests to reduce API load
+		// t.Parallel()
 		ctx := t.Context()
 		session, err := client.NewSession(ctx, gollem.WithSessionTools(&weatherTool{name: "weather"}))
 		gt.NoError(t, err).Required()
@@ -393,6 +453,7 @@ func TestSessionHistory(t *testing.T) {
 	})
 
 	t.Run("claude", func(t *testing.T) {
+		// Claude runs sequentially to reduce API load
 		client := newClaudeClient(t)
 		testFn(t, client)
 	})
@@ -409,7 +470,7 @@ func TestFacilitator(t *testing.T) {
 		s := gollem.New(client,
 			gollem.WithFacilitator(facilitator),
 			gollem.WithTools(&randomNumberTool{}),
-			gollem.WithSystemPrompt("You are an assistant that can use tools. When asked to complete a task and end the session, you must use the finalize_task tool to properly end the session."),
+			gollem.WithSystemPrompt("You are an assistant that can use tools. When asked to complete a task and end the session, you must use the respond_to_user tool to properly end the session."),
 			gollem.WithLoopHook(func(ctx context.Context, loop int, input []gollem.Input) error {
 				loopCount++
 				t.Logf("Loop called: %d", loop)
@@ -447,6 +508,7 @@ func TestFacilitator(t *testing.T) {
 	})
 
 	t.Run("Claude", func(t *testing.T) {
+		// Claude runs sequentially to reduce API load
 		testFn(t, newClaudeClient)
 	})
 }
