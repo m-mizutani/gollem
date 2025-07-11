@@ -247,7 +247,7 @@ func extractJSONFromResponse(text string) string {
 	text = strings.TrimSpace(text)
 	
 	// Try to extract JSON from markdown code blocks
-	codeBlockRegex := regexp.MustCompile("```(?:json)?\n?(.*?)\n?```")
+	codeBlockRegex := regexp.MustCompile("(?s)```(?:json)?\n?(.*?)\n?```")
 	matches := codeBlockRegex.FindStringSubmatch(text)
 	if len(matches) > 1 {
 		return strings.TrimSpace(matches[1])
