@@ -6,10 +6,32 @@ import (
 
 	"cloud.google.com/go/vertexai/genai"
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gt"
 	"github.com/sashabaranov/go-openai"
 )
+
+// newTestToolResultBlock creates a test tool result block with the given ID and content
+// This helper reduces the verbosity of creating anthropic.ToolResultBlock for test data.
+func newTestToolResultBlock(id, content string) anthropic.ContentBlockParamUnion {
+	return newTestToolResultBlockWithError(id, content, false)
+}
+
+// newTestToolResultBlockWithError creates a test tool result block with the given ID, content, and error status
+// This helper reduces the verbosity of creating anthropic.ToolResultBlock for test data that may represent errors.
+func newTestToolResultBlockWithError(id, content string, isError bool) anthropic.ContentBlockParamUnion {
+	toolResult := anthropic.NewToolResultBlock(id)
+	if content != "" {
+		toolResult.OfToolResult.Content = []anthropic.ToolResultBlockParamContentUnion{
+			{OfText: &anthropic.TextBlockParam{Text: content}},
+		}
+	}
+	if isError {
+		toolResult.OfToolResult.IsError = param.NewOpt(true)
+	}
+	return toolResult
+}
 
 func TestHistoryOpenAI(t *testing.T) {
 	// Create OpenAI messages with various content types
@@ -113,13 +135,7 @@ func TestHistoryClaude(t *testing.T) {
 		{
 			Role: anthropic.MessageParamRoleUser,
 			Content: []anthropic.ContentBlockParamUnion{
-				func() anthropic.ContentBlockParamUnion {
-					toolResult := anthropic.NewToolResultBlock("tool_2")
-					toolResult.OfToolResult.Content = []anthropic.ToolResultBlockParamContentUnion{
-						{OfText: &anthropic.TextBlockParam{Text: `{"temperature": 30, "condition": "cloudy"}`}},
-					}
-					return toolResult
-				}(),
+				newTestToolResultBlock("tool_2", `{"temperature": 30, "condition": "cloudy"}`),
 			},
 		},
 		{
@@ -131,13 +147,7 @@ func TestHistoryClaude(t *testing.T) {
 		{
 			Role: anthropic.MessageParamRoleUser,
 			Content: []anthropic.ContentBlockParamUnion{
-				func() anthropic.ContentBlockParamUnion {
-					toolResult := anthropic.NewToolResultBlock("tool_3")
-					toolResult.OfToolResult.Content = []anthropic.ToolResultBlockParamContentUnion{
-						{OfText: &anthropic.TextBlockParam{Text: `{"temperature": 35, "condition": "rainy"}`}},
-					}
-					return toolResult
-				}(),
+				newTestToolResultBlock("tool_3", `{"temperature": 35, "condition": "rainy"}`),
 			},
 		},
 		{
@@ -365,13 +375,7 @@ func TestHistoryClone(t *testing.T) {
 			{
 				Role: anthropic.MessageParamRoleUser,
 				Content: []anthropic.ContentBlockParamUnion{
-					func() anthropic.ContentBlockParamUnion {
-						toolResult := anthropic.NewToolResultBlock("tool_1")
-						toolResult.OfToolResult.Content = []anthropic.ToolResultBlockParamContentUnion{
-							{OfText: &anthropic.TextBlockParam{Text: `{"temperature": 25}`}},
-						}
-						return toolResult
-					}(),
+					newTestToolResultBlock("tool_1", `{"temperature": 25}`),
 				},
 			},
 		}
