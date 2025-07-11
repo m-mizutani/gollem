@@ -18,11 +18,11 @@ import (
 // Plan represents an executable plan
 type Plan struct {
 	// Internal state (may be processed asynchronously except during Execute execution)
-	id               string
-	input            string
-	interpretedGoal  string      // LLM-interpreted and articulated goal from user input
-	todos            []planToDo
-	state            PlanState
+	id              string
+	input           string
+	interpretedGoal string // LLM-interpreted and articulated goal from user input
+	todos           []planToDo
+	state           PlanState
 
 	// Fields reconstructed at runtime (not serialized)
 	agent       *Agent          `json:"-"`
@@ -347,7 +347,7 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 		interpretedGoal = prompt // Fallback to original prompt
 	}
 
-	logger.Debug("user goal interpreted", 
+	logger.Debug("user goal interpreted",
 		"original_prompt", prompt,
 		"interpreted_goal", interpretedGoal)
 

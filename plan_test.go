@@ -321,7 +321,7 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 		// Create plan with timeout to prevent hanging
 		planCtx, planCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer planCancel()
-		
+
 		plan, err := agent.Plan(planCtx,
 			simplePrompt,
 			gollem.WithToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {

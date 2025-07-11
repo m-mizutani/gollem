@@ -248,20 +248,20 @@ func toClaudeMessages(messages []claudeMessage) ([]anthropic.MessageParam, error
 				if c.ToolResult == nil {
 					return nil, goerr.New("tool_result block has no tool_result field")
 				}
-toolResult := anthropic.NewToolResultBlock(c.ToolResult.ToolUseID)
-				
+				toolResult := anthropic.NewToolResultBlock(c.ToolResult.ToolUseID)
+
 				// Set content
 				if c.ToolResult.Content != "" {
 					toolResult.OfToolResult.Content = []anthropic.ToolResultBlockParamContentUnion{
 						{OfText: &anthropic.TextBlockParam{Text: c.ToolResult.Content}},
 					}
 				}
-				
+
 				// Set error flag
 				if c.ToolResult.IsError.Valid() {
 					toolResult.OfToolResult.IsError = param.NewOpt(c.ToolResult.IsError.Value)
 				}
-				
+
 				content = append(content, toolResult)
 			case "":
 				// Skip empty content blocks
