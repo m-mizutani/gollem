@@ -375,6 +375,7 @@ func (p *Plan) Execute(ctx context.Context) (string, error) {
 	// Embed logger into context for internal methods to use
 	logger := p.logger.With("gollem.plan_id", p.id)
 	ctx = ctxWithLogger(ctx, logger)
+	ctx = ctxWithPlan(ctx, p)
 
 	logger.Debug("plan execute started", "state", p.state)
 
@@ -412,36 +413,38 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 	logger.Debug("executeSteps started", "pending_todos_count", len(p.getPendingToDos()))
 
 	for len(p.getPendingToDos()) > 0 {
-		currentStep := p.getNextPendingToDo()
-		if currentStep == nil {
+		currentToDo := p.getNextPendingToDo()
+		if currentToDo == nil {
 			logger.Debug("no more pending todos found")
 			break
 		}
 
+		ctx = ctxWithPlanToDo(ctx, currentToDo)
+
 		logger.Debug("processing plan step",
-			"step_id", currentStep.ID,
-			"step_description", currentStep.Description,
+			"todo_id", currentToDo.ID,
+			"step_description", currentToDo.Description,
 			"pending_count", len(p.getPendingToDos()))
 
 		// Process single step
-		result, shouldComplete, err := p.processSingleStep(ctx, currentStep)
+		result, shouldComplete, err := p.processSingleStep(ctx, currentToDo)
 		if err != nil {
 			logger.Error("plan step processing failed",
-				"step_id", currentStep.ID,
+				"todo_id", currentToDo.ID,
 				"error", err)
 			return "", err
 		}
 
 		if shouldComplete {
 			logger.Debug("plan completed successfully by reflection",
-				"step_id", currentStep.ID,
+				"todo_id", currentToDo.ID,
 				"todos_executed", len(p.getCompletedToDos()),
 				"result", result)
 			return result, nil
 		}
 
 		logger.Debug("plan step completed, continuing to next step",
-			"step_id", currentStep.ID,
+			"todo_id", currentToDo.ID,
 			"remaining_pending", len(p.getPendingToDos()))
 	}
 
@@ -1384,16 +1387,7 @@ func (p *Plan) UnmarshalJSON(data []byte) error {
 func (p *Plan) GetToDos() []PlanToDo {
 	todos := make([]PlanToDo, len(p.todos))
 	for i, todo := range p.todos {
-		todos[i] = PlanToDo{
-			ID:          todo.ID,
-			Description: todo.Description,
-			Intent:      todo.Intent,
-			Status:      toDoStatusToString(todo.Status),
-			Completed:   todo.Status == ToDoStatusCompleted,
-			Error:       todo.Error,
-			ErrorMsg:    todo.ErrorMsg,
-			Result:      todo.copyResult(),
-		}
+		todos[i] = todo.toPlanToDo()
 	}
 	return todos
 }
