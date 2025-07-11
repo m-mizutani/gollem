@@ -753,7 +753,7 @@ func (g *Agent) generatePlan(ctx context.Context, session Session, prompt string
 	}
 
 	if err := json.Unmarshal([]byte(response.Texts[0]), &planData); err != nil {
-		return nil, goerr.Wrap(err, "failed to parse plan")
+		return nil, goerr.Wrap(err, "failed to parse plan", goerr.V("response_text", response.Texts[0]))
 	}
 
 	todos := make([]planToDo, 0, len(planData.Steps))

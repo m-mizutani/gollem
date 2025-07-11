@@ -492,6 +492,8 @@ func TestSkipDecisions(t *testing.T) {
 			mockClient := &mockLLMClient{
 				responses: []string{
 					`{"steps": [{"description": "Test step", "intent": "Test intent"}]}`,
+					`{"steps": [{"description": "Test step", "intent": "Test intent"}]}`,
+					`{"steps": [{"description": "Test step", "intent": "Test intent"}]}`,
 				},
 			}
 
@@ -627,6 +629,8 @@ func TestSkipDecisionValidation(t *testing.T) {
 func TestPlanExecutionModeOptions(t *testing.T) {
 	mockClient := &mockLLMClient{
 		responses: []string{
+			`{"steps": [{"description": "Test step", "intent": "Test intent"}]}`,
+			`{"steps": [{"description": "Test step", "intent": "Test intent"}]}`,
 			`{"steps": [{"description": "Test step", "intent": "Test intent"}]}`,
 		},
 	}
