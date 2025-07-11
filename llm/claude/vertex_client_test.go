@@ -29,7 +29,11 @@ func TestNewWithVertex(t *testing.T) {
 	})
 
 	t.Run("valid parameters with options", func(t *testing.T) {
-		client, err := claude.NewWithVertex(ctx, "us-central1", "test-project",
+		prj, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+		if !ok {
+			t.Skip("TEST_GCP_PROJECT_ID is not set")
+		}
+		client, err := claude.NewWithVertex(ctx, "us-central1", prj,
 			claude.WithVertexModel("claude-sonnet-4@20250514"),
 			claude.WithVertexTemperature(0.5),
 			claude.WithVertexTopP(0.8),
