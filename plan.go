@@ -451,7 +451,15 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 	p.state = PlanStateCompleted
 
 	logger.Info("plan completed - all steps processed")
-	return "Plan completed", nil
+
+	// Generate comprehensive execution summary
+	summary, err := p.generateExecutionSummary(ctx)
+	if err != nil {
+		logger.Warn("failed to generate execution summary, using fallback", "error", err)
+		return "Plan completed successfully", nil
+	}
+
+	return summary, nil
 }
 
 // processSingleStep processes a single step including hooks, execution, and reflection
@@ -532,12 +540,19 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 
 		logger.Debug("plan completed - no pending todos remaining", "step_id", currentStep.ID)
 
+		// Generate comprehensive execution summary
+		summary, err := p.generateExecutionSummary(ctx)
+		if err != nil {
+			logger.Warn("failed to generate execution summary, using reflection response", "error", err)
+			summary = reflection.Response
+		}
+
 		// Call PlanCompletedHook
-		if err := p.config.planCompletedHook(ctx, p, reflection.Response); err != nil {
+		if err := p.config.planCompletedHook(ctx, p, summary); err != nil {
 			return "", false, goerr.Wrap(err, "failed to call PlanCompletedHook")
 		}
 
-		return reflection.Response, true, nil
+		return summary, true, nil
 	}
 
 	// Continue execution with remaining todos
@@ -962,6 +977,161 @@ func (g *Agent) createReflectorSession(ctx context.Context, cfg *planConfig) (Se
 	}
 
 	return g.llm.NewSession(ctx, sessionOptions...)
+}
+
+// generateExecutionSummary creates a comprehensive summary of plan execution results
+func (p *Plan) generateExecutionSummary(ctx context.Context) (string, error) {
+	logger := LoggerFromContext(ctx)
+	logger.Debug("generating execution summary")
+
+	// Create summarizer session
+	summarizerSession, err := p.agent.createSummarizerSession(ctx, p.config)
+	if err != nil {
+		logger.Debug("failed to create summarizer session", "error", err)
+		return "", err
+	}
+
+	// Prepare execution details
+	executionDetails := p.getDetailedExecutionReport()
+	overallStatus := p.getCurrentPlanStatus()
+
+	// Generate summary prompt using template
+	var promptBuffer bytes.Buffer
+	templateData := summarizerTemplateData{
+		Goal:             p.input,
+		ExecutionDetails: executionDetails,
+		OverallStatus:    overallStatus,
+		SystemPrompt:     p.config.systemPrompt,
+	}
+
+	if err := summarizerTmpl.Execute(&promptBuffer, templateData); err != nil {
+		logger.Debug("failed to execute summarizer template", "error", err)
+		return "", goerr.Wrap(err, "failed to execute summarizer template")
+	}
+
+	// Add timeout for summary generation
+	summaryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	logger.Debug("sending summary request to LLM")
+	response, err := summarizerSession.GenerateContent(summaryCtx, Text(promptBuffer.String()))
+	if err != nil {
+		logger.Debug("summary request failed", "error", err)
+		return "", err
+	}
+
+	if len(response.Texts) == 0 {
+		logger.Debug("no response from summarizer")
+		return "", goerr.New("no response from summarizer")
+	}
+
+	summary := strings.Join(response.Texts, "\n")
+	logger.Debug("execution summary generated", "summary_length", len(summary))
+
+	return summary, nil
+}
+
+// createSummarizerSession creates a session for summary generation
+func (g *Agent) createSummarizerSession(ctx context.Context, cfg *planConfig) (Session, error) {
+	sessionOptions := []SessionOption{}
+
+	if cfg.history != nil {
+		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
+	}
+
+	return g.llm.NewSession(ctx, sessionOptions...)
+}
+
+// getDetailedExecutionReport provides detailed information about plan execution
+func (p *Plan) getDetailedExecutionReport() string {
+	var report strings.Builder
+
+	// Count todos by status
+	var completed, pending, failed, skipped int
+	for _, todo := range p.todos {
+		switch todo.Status {
+		case ToDoStatusCompleted:
+			completed++
+		case ToDoStatusPending:
+			pending++
+		case ToDoStatusFailed:
+			failed++
+		case ToDoStatusSkipped:
+			skipped++
+		}
+	}
+
+	report.WriteString("## Execution Statistics\n")
+	report.WriteString(fmt.Sprintf("- Total Tasks: %d\n", len(p.todos)))
+	report.WriteString(fmt.Sprintf("- Completed: %d\n", completed))
+	if pending > 0 {
+		report.WriteString(fmt.Sprintf("- Pending: %d\n", pending))
+	}
+	if failed > 0 {
+		report.WriteString(fmt.Sprintf("- Failed: %d\n", failed))
+	}
+	if skipped > 0 {
+		report.WriteString(fmt.Sprintf("- Skipped: %d\n", skipped))
+	}
+
+	// Detailed task breakdown
+	report.WriteString("\n## Task Details\n")
+
+	// Completed tasks
+	if completed > 0 {
+		report.WriteString("\n### ✅ Completed Tasks\n")
+		for _, todo := range p.todos {
+			if todo.Status == ToDoStatusCompleted {
+				report.WriteString(fmt.Sprintf("- **%s**: %s\n", todo.Description, todo.Intent))
+				if todo.Result != nil && todo.Result.Output != "" {
+					// Truncate long outputs
+					output := todo.Result.Output
+					if len(output) > 200 {
+						output = output[:200] + "..."
+					}
+					report.WriteString(fmt.Sprintf("  Result: %s\n", output))
+				}
+				if todo.Result != nil && len(todo.Result.ToolCalls) > 0 {
+					report.WriteString(fmt.Sprintf("  Tools used: %d\n", len(todo.Result.ToolCalls)))
+				}
+			}
+		}
+	}
+
+	// Failed tasks
+	if failed > 0 {
+		report.WriteString("\n### ❌ Failed Tasks\n")
+		for _, todo := range p.todos {
+			if todo.Status == ToDoStatusFailed {
+				report.WriteString(fmt.Sprintf("- **%s**: %s\n", todo.Description, todo.Intent))
+				if todo.ErrorMsg != "" {
+					report.WriteString(fmt.Sprintf("  Error: %s\n", todo.ErrorMsg))
+				}
+			}
+		}
+	}
+
+	// Skipped tasks
+	if skipped > 0 {
+		report.WriteString("\n### ⏭️ Skipped Tasks\n")
+		for _, todo := range p.todos {
+			if todo.Status == ToDoStatusSkipped {
+				report.WriteString(fmt.Sprintf("- **%s**: %s\n", todo.Description, todo.Intent))
+			}
+		}
+	}
+
+	// Pending tasks (if any)
+	if pending > 0 {
+		report.WriteString("\n### ⏳ Remaining Tasks\n")
+		for _, todo := range p.todos {
+			if todo.Status == ToDoStatusPending {
+				report.WriteString(fmt.Sprintf("- **%s**: %s\n", todo.Description, todo.Intent))
+			}
+		}
+	}
+
+	return report.String()
 }
 
 // Helper methods for Plan

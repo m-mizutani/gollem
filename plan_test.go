@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"errors"
-
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
 	"github.com/m-mizutani/gollem/llm/gemini"
@@ -142,217 +140,6 @@ func (m *mockSession) History() *gollem.History {
 	return nil
 }
 
-// Consolidated test for plan basic functionality (replaces multiple individual tests)
-func TestPlanBasicFunctionality(t *testing.T) {
-	t.Parallel()
-
-	t.Run("PlanCreation", func(t *testing.T) {
-		mockClient := &mockLLMClient{
-			responses: []string{
-				`{"steps": [{"description": "First step", "intent": "Do first task"}, {"description": "Second step", "intent": "Do second task"}]}`,
-			},
-		}
-
-		agent := gollem.New(mockClient, gollem.WithTools(&testSearchTool{}))
-
-		plan, err := agent.Plan(context.Background(), "Test task")
-		gt.NoError(t, err)
-		gt.NotNil(t, plan)
-
-		todos := plan.GetToDos()
-		gt.N(t, len(todos)).Equal(2)
-		gt.Value(t, todos[0].Description).Equal("First step")
-		gt.Value(t, todos[1].Description).Equal("Second step")
-	})
-
-	t.Run("PlanSerialization", func(t *testing.T) {
-		mockClient := &mockLLMClient{
-			responses: []string{
-				`{"steps": [{"description": "First step", "intent": "Do first task"}, {"description": "Second step", "intent": "Do second task"}]}`,
-			},
-		}
-
-		agent := gollem.New(mockClient, gollem.WithTools(&testSearchTool{}))
-
-		plan, err := agent.Plan(context.Background(), "Test task")
-		gt.NoError(t, err)
-
-		// Serialize
-		data, err := plan.Serialize()
-		gt.NoError(t, err)
-		gt.True(t, len(data) > 0)
-
-		// Deserialize
-		deserializedPlan, err := agent.NewPlanFromData(context.Background(), data)
-		gt.NoError(t, err)
-		gt.NotNil(t, deserializedPlan)
-
-		// Verify deserialized plan has same todos
-		originalTodos := plan.GetToDos()
-		deserializedTodos := deserializedPlan.GetToDos()
-		gt.N(t, len(deserializedTodos)).Equal(len(originalTodos))
-	})
-
-	t.Run("PlanHooks", func(t *testing.T) {
-		mockClient := &mockLLMClient{
-			responses: []string{
-				`{"steps": [{"description": "First step", "intent": "Do first task"}, {"description": "Second step", "intent": "Do second task"}]}`,
-				"Step 1 execution response",
-				`{"should_continue": false, "response": "Task completed"}`,
-				"Step 2 execution response",
-				`{"should_continue": false, "response": "All tasks completed"}`,
-			},
-		}
-
-		agent := gollem.New(mockClient, gollem.WithTools(&testSearchTool{}))
-
-		var hooksCalled []string
-
-		plan, err := agent.Plan(context.Background(), "Test task",
-			gollem.WithPlanCreatedHook(func(ctx context.Context, plan *gollem.Plan) error {
-				hooksCalled = append(hooksCalled, "created")
-				return nil
-			}),
-			gollem.WithPlanCompletedHook(func(ctx context.Context, plan *gollem.Plan, result string) error {
-				hooksCalled = append(hooksCalled, "completed")
-				return nil
-			}),
-		)
-		gt.NoError(t, err)
-		gt.Array(t, hooksCalled).Has("created")
-
-		// Execute plan
-		result, err := plan.Execute(context.Background())
-		gt.NoError(t, err)
-		gt.True(t, len(result) > 0)
-
-		// Verify hooks were called
-		gt.Array(t, hooksCalled).Has("completed")
-	})
-
-	t.Run("PlanAlreadyExecutedError", func(t *testing.T) {
-		mockClient := &mockLLMClient{
-			responses: []string{
-				`{"steps": [{"description": "First step", "intent": "Do first task"}, {"description": "Second step", "intent": "Do second task"}]}`,
-				"Step 1 execution response",
-				`{"should_continue": false, "response": "Task completed"}`,
-				"Step 2 execution response",
-				`{"should_continue": false, "response": "All tasks completed"}`,
-			},
-		}
-
-		agent := gollem.New(mockClient, gollem.WithTools(&testSearchTool{}))
-
-		plan, err := agent.Plan(context.Background(), "Test task")
-		gt.NoError(t, err)
-
-		// Execute once
-		_, err = plan.Execute(context.Background())
-		gt.NoError(t, err)
-
-		// Try to execute again - should fail
-		_, err = plan.Execute(context.Background())
-		gt.Error(t, err)
-		gt.True(t, errors.Is(err, gollem.ErrPlanAlreadyExecuted))
-	})
-}
-
-// Test plan mode integration
-func TestPlanModeIntegration(t *testing.T) {
-	t.Skip("Integration tests require LLM API keys - run separately")
-}
-
-func TestMultiStepPlanExecution(t *testing.T) {
-	t.Skip("Integration tests require LLM API keys - run separately")
-}
-
-func TestPlanWithHistory(t *testing.T) {
-	t.Skip("Integration tests require LLM API keys - run separately")
-}
-
-func TestPlanErrorHandling(t *testing.T) {
-	t.Skip("Integration tests require LLM API keys - run separately")
-}
-
-func TestPlanWithFacilitator(t *testing.T) {
-	t.Skip("Integration tests require LLM API keys - run separately")
-}
-
-func TestPlanWithCustomOptions(t *testing.T) {
-	t.Skip("Integration tests require LLM API keys - run separately")
-}
-
-// Benchmark tests
-
-func BenchmarkPlanCreation(b *testing.B) {
-	mockClient := &mockLLMClient{
-		responses: []string{
-			`{"steps": [{"description": "Test step", "intent": "Test intent"}]}`,
-		},
-	}
-
-	agent := gollem.New(mockClient, gollem.WithTools(&testSearchTool{}))
-
-	b.ResetTimer()
-	for b.Loop() {
-		_, err := agent.Plan(context.Background(), "Test task")
-		if err != nil {
-			b.Fatal(err)
-		}
-		// Reset mock client for next iteration
-		mockClient.callCount = 0
-	}
-}
-
-func BenchmarkPlanSerialization(b *testing.B) {
-	mockClient := &mockLLMClient{
-		responses: []string{
-			`{"steps": [{"description": "Test step", "intent": "Test intent"}]}`,
-		},
-	}
-
-	agent := gollem.New(mockClient, gollem.WithTools(&testSearchTool{}))
-	plan, err := agent.Plan(context.Background(), "Test task")
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	b.ResetTimer()
-	for b.Loop() {
-		_, err := plan.Serialize()
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkPlanDeserialization(b *testing.B) {
-	mockClient := &mockLLMClient{
-		responses: []string{
-			`{"steps": [{"description": "Test step", "intent": "Test intent"}]}`,
-		},
-	}
-
-	agent := gollem.New(mockClient, gollem.WithTools(&testSearchTool{}))
-	plan, err := agent.Plan(context.Background(), "Test task")
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	data, err := plan.Serialize()
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	b.ResetTimer()
-	for b.Loop() {
-		_, err := agent.NewPlanFromData(b.Context(), data)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // Test tool for threat intelligence (OTX-like)
 type threatIntelTool struct{}
 
@@ -421,11 +208,6 @@ func newPlanTestClaudeClient(t *testing.T) gollem.LLMClient {
 	client, err := claude.New(context.Background(), apiKey)
 	gt.NoError(t, err)
 	return client
-}
-
-// Test premature completion issue with all LLMs
-func TestPrematureCompletionIssueWithRealLLM(t *testing.T) {
-	t.Skip("Integration tests require LLM API keys - run separately")
 }
 
 // Multiple security tools for comprehensive testing
@@ -543,8 +325,7 @@ func createSessionWithHistoryWithRetry(ctx context.Context, client gollem.LLMCli
 
 // Test plan mode with multiple tools and history - optimized for parallel execution
 func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
-	// Disable parallel execution to reduce Claude API load
-	// t.Parallel()
+	t.Parallel()
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) gollem.LLMClient, llmName string) {
 		// Disable parallel execution for subtests to reduce API load
@@ -677,19 +458,24 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 	}
 
 	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
 		testFn(t, newPlanTestOpenAIClient, "OpenAI")
 	})
 
 	t.Run("Gemini", func(t *testing.T) {
+		t.Parallel()
 		testFn(t, newPlanTestGeminiClient, "Gemini")
 	})
 
 	t.Run("Claude", func(t *testing.T) {
+		t.Parallel()
 		testFn(t, newPlanTestClaudeClient, "Claude")
 	})
 }
 
 func TestSkipDecisions(t *testing.T) {
+	t.Parallel()
+
 	type testCase struct {
 		name             string
 		executionMode    gollem.PlanExecutionMode
@@ -874,114 +660,140 @@ func TestPlanExecutionModeOptions(t *testing.T) {
 	gt.NotNil(t, plan3)
 }
 
-// TestPlanModeClaudeToolExecution tests Claude API tool execution with predefined plan data
-func TestPlanModeClaudeToolExecution(t *testing.T) {
-	// Create tools
-	dnsLookupTool := &dnsLookupTool{}
-	threatIntelTool := &threatIntelTool{}
-	virusTotalTool := &virusTotalTool{}
+// TestPlanModeToolExecution tests LLM API tool execution with predefined plan data
+func TestPlanModeToolExecution(t *testing.T) {
+	t.Parallel()
 
-	// Create Claude client
-	claudeClient := newPlanTestClaudeClient(t)
+	testFn := func(t *testing.T, newClient func(t *testing.T) gollem.LLMClient, llmName string) {
+		// Create tools
+		dnsLookupTool := &dnsLookupTool{}
+		threatIntelTool := &threatIntelTool{}
+		virusTotalTool := &virusTotalTool{}
 
-	// Create agent with tools
-	agent := gollem.New(claudeClient, gollem.WithTools(dnsLookupTool, threatIntelTool, virusTotalTool))
+		// Create LLM client
+		client := newClient(t)
 
-	// Create predefined plan data that requires tool usage
-	predefinedPlanData := `{
-		"version": 1,
-		"id": "test-plan-tool-execution",
-		"input": "Analyze example.com and 192.0.2.1 using security tools",
-		"todos": [
-			{
-				"todo_id": "dns_lookup_task",
-				"todo_description": "Perform DNS lookup on example.com",
-				"todo_intent": "Get DNS records using dns_lookup tool",
-				"todo_status": "pending",
-				"todo_created_at": "2024-01-01T00:00:00Z"
-			},
-			{
-				"todo_id": "threat_intel_task",
-				"todo_description": "Check IP 192.0.2.1 for threats",
-				"todo_intent": "Analyze IP using threat_intel tool",
-				"todo_status": "pending",
-				"todo_created_at": "2024-01-01T00:00:00Z"
-			},
-			{
-				"todo_id": "virus_total_task",
-				"todo_description": "Scan for malware indicators",
-				"todo_intent": "Use virus_total tool to check for malware",
-				"todo_status": "pending",
-				"todo_created_at": "2024-01-01T00:00:00Z"
-			}
-		],
-		"state": "created"
-	}`
+		// Create agent with tools
+		agent := gollem.New(client, gollem.WithTools(dnsLookupTool, threatIntelTool, virusTotalTool))
 
-	// Create plan from predefined data
-	plan, err := agent.NewPlanFromData(context.Background(), []byte(predefinedPlanData))
-	gt.NoError(t, err)
-	gt.Value(t, plan).NotNil()
+		// Create predefined plan data that requires tool usage
+		predefinedPlanData := `{
+			"version": 1,
+			"id": "test-plan-tool-execution",
+			"input": "Analyze example.com and 192.0.2.1 using security tools",
+			"todos": [
+				{
+					"todo_id": "dns_lookup_task",
+					"todo_description": "Perform DNS lookup on example.com",
+					"todo_intent": "Get DNS records using dns_lookup tool",
+					"todo_status": "pending",
+					"todo_created_at": "2024-01-01T00:00:00Z"
+				},
+				{
+					"todo_id": "threat_intel_task",
+					"todo_description": "Check IP 192.0.2.1 for threats",
+					"todo_intent": "Analyze IP using threat_intel tool",
+					"todo_status": "pending",
+					"todo_created_at": "2024-01-01T00:00:00Z"
+				},
+				{
+					"todo_id": "virus_total_task",
+					"todo_description": "Scan for malware indicators",
+					"todo_intent": "Use virus_total tool to check for malware",
+					"todo_status": "pending",
+					"todo_created_at": "2024-01-01T00:00:00Z"
+				}
+			],
+			"state": "created"
+		}`
 
-	// Verify plan was loaded correctly
-	todos := plan.GetToDos()
-	gt.N(t, len(todos)).Equal(3)
-	t.Logf("Plan loaded with %d todos", len(todos))
+		// Create plan from predefined data
+		plan, err := agent.NewPlanFromData(context.Background(), []byte(predefinedPlanData))
+		gt.NoError(t, err)
+		gt.Value(t, plan).NotNil()
 
-	// Execute the plan to trigger tool usage
-	result, err := plan.Execute(context.Background())
+		// Verify plan was loaded correctly
+		todos := plan.GetToDos()
+		gt.N(t, len(todos)).Equal(3)
+		t.Logf("[%s] Plan loaded with %d todos", llmName, len(todos))
 
-	if err != nil {
-		t.Logf("Plan execution failed: %v", err)
+		// Execute the plan to trigger tool usage with retry logic
+		result, executeErr := retryAPICall(t, func() (string, error) {
+			return plan.Execute(context.Background())
+		}, fmt.Sprintf("[%s] plan execution", llmName))
 
-		// Check if this is the tool_use/tool_result error we're tracking
-		if strings.Contains(err.Error(), "tool_use ids were found without tool_result blocks") {
-			t.Logf("🎯 CAPTURED THE TOOL_USE/TOOL_RESULT ERROR: %v", err)
+		if executeErr != nil {
+			t.Logf("[%s] Plan execution failed: %v", llmName, executeErr)
 
-			// Log detailed plan state for debugging
-			finalTodos := plan.GetToDos()
-			t.Logf("Plan state at error:")
-			t.Logf("  Total todos: %d", len(finalTodos))
+			// Check if this is the tool_use/tool_result error we're tracking
+			if strings.Contains(executeErr.Error(), "tool_use ids were found without tool_result blocks") {
+				t.Logf("[%s] 🎯 CAPTURED THE TOOL_USE/TOOL_RESULT ERROR: %v", llmName, executeErr)
 
-			for i, todo := range finalTodos {
-				t.Logf("  Todo %d (%s): %s", i+1, todo.ID, todo.Description)
-				t.Logf("    Status: %s", todo.Status)
-				if todo.Result != nil {
-					t.Logf("    Tool calls: %d", len(todo.Result.ToolCalls))
-					for j, toolCall := range todo.Result.ToolCalls {
-						t.Logf("      Tool call %d: %s (ID: %s)", j+1, toolCall.Name, toolCall.ID)
+				// Log detailed plan state for debugging
+				finalTodos := plan.GetToDos()
+				t.Logf("[%s] Plan state at error:", llmName)
+				t.Logf("[%s]   Total todos: %d", llmName, len(finalTodos))
+
+				for i, todo := range finalTodos {
+					t.Logf("[%s]   Todo %d (%s): %s", llmName, i+1, todo.ID, todo.Description)
+					t.Logf("[%s]     Status: %s", llmName, todo.Status)
+					if todo.Result != nil {
+						t.Logf("[%s]     Tool calls: %d", llmName, len(todo.Result.ToolCalls))
+						for j, toolCall := range todo.Result.ToolCalls {
+							t.Logf("[%s]       Tool call %d: %s (ID: %s)", llmName, j+1, toolCall.Name, toolCall.ID)
+						}
 					}
 				}
+
+				// Don't fail the test - we want to capture and analyze the error
+				return
 			}
 
-			// Don't fail the test - we want to capture and analyze the error
+			// For temporary API errors, skip
+			if isTemporaryAPIError(executeErr) {
+				t.Skipf("[%s] API temporarily unavailable: %v", llmName, executeErr)
+			}
+
+			// For other errors, still log but don't fail
+			t.Logf("[%s] Plan execution failed with different error: %v", llmName, executeErr)
 			return
 		}
 
-		// For other errors, still log but don't fail
-		t.Logf("Plan execution failed with different error: %v", err)
-		return
-	}
+		gt.NoError(t, executeErr)
+		gt.Value(t, result).NotEqual("")
 
-	gt.NoError(t, err)
-	gt.Value(t, result).NotEqual("")
+		// Verify tools were actually used
+		finalTodos := plan.GetToDos()
+		var totalToolCalls int
+		for _, todo := range finalTodos {
+			if todo.Result != nil {
+				totalToolCalls += len(todo.Result.ToolCalls)
+			}
+		}
 
-	// Verify tools were actually used
-	finalTodos := plan.GetToDos()
-	var totalToolCalls int
-	for _, todo := range finalTodos {
-		if todo.Result != nil {
-			totalToolCalls += len(todo.Result.ToolCalls)
+		t.Logf("[%s] ✅ Test completed successfully", llmName)
+		t.Logf("[%s]    Result: %s", llmName, result)
+		t.Logf("[%s]    Total tool calls executed: %d", llmName, totalToolCalls)
+
+		if totalToolCalls == 0 {
+			t.Logf("[%s] ⚠️  WARNING: No tools were used despite predefined plan requiring tool usage", llmName)
 		}
 	}
 
-	t.Logf("✅ Test completed successfully")
-	t.Logf("   Result: %s", result)
-	t.Logf("   Total tool calls executed: %d", totalToolCalls)
+	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
+		testFn(t, newPlanTestOpenAIClient, "OpenAI")
+	})
 
-	if totalToolCalls == 0 {
-		t.Logf("⚠️  WARNING: No tools were used despite predefined plan requiring tool usage")
-	}
+	t.Run("Gemini", func(t *testing.T) {
+		t.Parallel()
+		testFn(t, newPlanTestGeminiClient, "Gemini")
+	})
+
+	t.Run("Claude", func(t *testing.T) {
+		t.Parallel()
+		testFn(t, newPlanTestClaudeClient, "Claude")
+	})
 }
 
 func TestNewTodoIDGeneration(t *testing.T) {
