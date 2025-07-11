@@ -194,7 +194,6 @@ func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...g
 	return processResponseWithContentType(resp, s.cfg.ContentType()), nil
 }
 
-
 // GenerateStream processes the input and generates a response stream.
 func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
 	messages, _, err := s.convertInputs(ctx, input...)

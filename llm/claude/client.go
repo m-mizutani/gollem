@@ -484,10 +484,18 @@ func generateClaudeStream(
 // extractJSONFromResponse cleans the response text to extract valid JSON
 // This is necessary because Claude returns JSON wrapped in markdown code blocks
 // even when ContentTypeJSON is specified.
+//
+// This function uses heuristics to find JSON boundaries and is not a full JSON parser.
+// It handles basic cases like { and } inside string literals, but has limitations:
+// - Does not handle all JSON escape sequences perfectly
+// - May struggle with complex nested structures in unusual formatting
+// - Works well for typical LLM-generated JSON responses
+//
+// For most Claude responses, this pragmatic approach provides reliable JSON extraction.
 func extractJSONFromResponse(text string) string {
 	// Remove leading/trailing whitespace
 	text = strings.TrimSpace(text)
-	
+
 	// Try to extract JSON from markdown code blocks using pre-compiled regex
 	matches := codeBlockRegex.FindStringSubmatch(text)
 	if len(matches) > 1 {
@@ -500,16 +508,39 @@ func extractJSONFromResponse(text string) string {
 		return text // No JSON found, return original
 	}
 
-	// Find the matching closing brace
+	// Find the matching closing brace with basic string literal handling
+	// Note: This is a heuristic approach that handles most common cases but
+	// is not a full JSON parser. It accounts for { and } inside string literals.
 	braceCount := 0
+	inString := false
+	escaped := false
+
 	for i := start; i < len(text); i++ {
-		switch text[i] {
+		char := text[i]
+
+		if escaped {
+			// Skip escaped characters
+			escaped = false
+			continue
+		}
+
+		switch char {
+		case '\\':
+			if inString {
+				escaped = true
+			}
+		case '"':
+			inString = !inString
 		case '{':
-			braceCount++
+			if !inString {
+				braceCount++
+			}
 		case '}':
-			braceCount--
-			if braceCount == 0 {
-				return text[start : i+1]
+			if !inString {
+				braceCount--
+				if braceCount == 0 {
+					return text[start : i+1]
+				}
 			}
 		}
 	}

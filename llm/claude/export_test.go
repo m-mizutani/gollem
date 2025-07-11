@@ -4,6 +4,7 @@ package claude
 var (
 	ConvertTool              = convertTool
 	ConvertParameterToSchema = convertParameterToSchema
+	ExtractJSONFromResponse  = extractJSONFromResponse
 )
 
 type JsonSchema = jsonSchema
