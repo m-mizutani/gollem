@@ -186,6 +186,28 @@ func newClaudeClient(t *testing.T) gollem.LLMClient {
 	return client
 }
 
+func newClaudeVertexClient(t *testing.T) gollem.LLMClient {
+	var testProjectID, testLocation string
+	v, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+	if !ok {
+		t.Skip("TEST_GCP_PROJECT_ID is not set")
+	} else {
+		testProjectID = v
+	}
+
+	v, ok = os.LookupEnv("TEST_GCP_LOCATION")
+	if !ok {
+		testLocation = "us-east5" // Default to us-east5 where Claude Sonnet 4 is working
+	} else {
+		testLocation = v
+	}
+
+	ctx := t.Context()
+	client, err := claude.NewWithVertex(ctx, testLocation, testProjectID)
+	gt.NoError(t, err)
+	return client
+}
+
 func TestGemini(t *testing.T) {
 	t.Parallel()
 	client := newGeminiClient(t)
@@ -245,6 +267,30 @@ func TestClaude(t *testing.T) {
 	})
 	t.Run("generate stream", func(t *testing.T) {
 		// Disable parallel execution for Claude subtests to reduce API load
+		// t.Parallel()
+		session, err := client.NewSession(context.Background(), gollem.WithSessionTools(tools...))
+		gt.NoError(t, err)
+		testGenerateStream(t, session)
+	})
+}
+
+func TestClaudeVertex(t *testing.T) {
+	// Disable parallel execution for Claude Vertex to reduce API load
+	// t.Parallel()
+	client := newClaudeVertexClient(t)
+
+	// Setup tools
+	tools := []gollem.Tool{&randomNumberTool{}}
+
+	t.Run("generate content", func(t *testing.T) {
+		// Disable parallel execution for Claude Vertex subtests to reduce API load
+		// t.Parallel()
+		session, err := client.NewSession(context.Background(), gollem.WithSessionTools(tools...))
+		gt.NoError(t, err)
+		testGenerateContent(t, session)
+	})
+	t.Run("generate stream", func(t *testing.T) {
+		// Disable parallel execution for Claude Vertex subtests to reduce API load
 		// t.Parallel()
 		session, err := client.NewSession(context.Background(), gollem.WithSessionTools(tools...))
 		gt.NoError(t, err)
@@ -397,6 +443,13 @@ func TestCallToolNameConvention(t *testing.T) {
 		gt.NoError(t, err)
 		testFunc(t, client)
 	})
+
+	t.Run("claude-vertex", func(t *testing.T) {
+		// Disable parallel execution for Claude Vertex to reduce API load
+		// t.Parallel()
+		client := newClaudeVertexClient(t)
+		testFunc(t, client)
+	})
 }
 
 func TestSessionHistory(t *testing.T) {
@@ -457,6 +510,12 @@ func TestSessionHistory(t *testing.T) {
 		client := newClaudeClient(t)
 		testFn(t, client)
 	})
+
+	t.Run("claude-vertex", func(t *testing.T) {
+		// Claude Vertex runs sequentially to reduce API load
+		client := newClaudeVertexClient(t)
+		testFn(t, client)
+	})
 }
 
 func TestFacilitator(t *testing.T) {
@@ -510,6 +569,11 @@ func TestFacilitator(t *testing.T) {
 	t.Run("Claude", func(t *testing.T) {
 		// Claude runs sequentially to reduce API load
 		testFn(t, newClaudeClient)
+	})
+
+	t.Run("ClaudeVertex", func(t *testing.T) {
+		// Claude Vertex runs sequentially to reduce API load
+		testFn(t, newClaudeVertexClient)
 	})
 }
 

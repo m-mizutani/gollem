@@ -113,7 +113,13 @@ func TestHistoryClaude(t *testing.T) {
 		{
 			Role: anthropic.MessageParamRoleUser,
 			Content: []anthropic.ContentBlockParamUnion{
-				anthropic.NewToolResultBlock("tool_2", `{"temperature": 30, "condition": "cloudy"}`, false),
+				func() anthropic.ContentBlockParamUnion {
+					toolResult := anthropic.NewToolResultBlock("tool_2")
+					toolResult.OfToolResult.Content = []anthropic.ToolResultBlockParamContentUnion{
+						{OfText: &anthropic.TextBlockParam{Text: `{"temperature": 30, "condition": "cloudy"}`}},
+					}
+					return toolResult
+				}(),
 			},
 		},
 		{
@@ -125,7 +131,13 @@ func TestHistoryClaude(t *testing.T) {
 		{
 			Role: anthropic.MessageParamRoleUser,
 			Content: []anthropic.ContentBlockParamUnion{
-				anthropic.NewToolResultBlock("tool_3", `{"temperature": 35, "condition": "rainy"}`, false),
+				func() anthropic.ContentBlockParamUnion {
+					toolResult := anthropic.NewToolResultBlock("tool_3")
+					toolResult.OfToolResult.Content = []anthropic.ToolResultBlockParamContentUnion{
+						{OfText: &anthropic.TextBlockParam{Text: `{"temperature": 35, "condition": "rainy"}`}},
+					}
+					return toolResult
+				}(),
 			},
 		},
 		{
@@ -353,7 +365,13 @@ func TestHistoryClone(t *testing.T) {
 			{
 				Role: anthropic.MessageParamRoleUser,
 				Content: []anthropic.ContentBlockParamUnion{
-					anthropic.NewToolResultBlock("tool_1", `{"temperature": 25}`, false),
+					func() anthropic.ContentBlockParamUnion {
+						toolResult := anthropic.NewToolResultBlock("tool_1")
+						toolResult.OfToolResult.Content = []anthropic.ToolResultBlockParamContentUnion{
+							{OfText: &anthropic.TextBlockParam{Text: `{"temperature": 25}`}},
+						}
+						return toolResult
+					}(),
 				},
 			},
 		}

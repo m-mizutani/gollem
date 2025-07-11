@@ -8,6 +8,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/anthropics/anthropic-sdk-go/vertex"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
@@ -188,7 +189,21 @@ func (s *VertexAnthropicSession) convertInputs(ctx context.Context, input ...gol
 				"is_error", isError,
 				"response_length", len(response))
 
-			toolResult := anthropic.NewToolResultBlock(v.ID, response, isError)
+			// Create tool result block with new API
+			toolResult := anthropic.NewToolResultBlock(v.ID)
+			
+			// Set content
+			if response != "" {
+				toolResult.OfToolResult.Content = []anthropic.ToolResultBlockParamContentUnion{
+					{OfText: &anthropic.TextBlockParam{Text: response}},
+				}
+			}
+			
+			// Set error flag
+			if isError {
+				toolResult.OfToolResult.IsError = param.NewOpt(true)
+			}
+			
 			toolResults = append(toolResults, toolResult)
 
 		default:
@@ -236,10 +251,8 @@ func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...g
 	}
 
 	// Add system prompt if available
-	if s.cfg.SystemPrompt() != "" {
-		msgParams.System = []anthropic.TextBlockParam{
-			{Text: s.cfg.SystemPrompt()},
-		}
+	if systemPrompt := s.createSystemPrompt(); len(systemPrompt) > 0 {
+		msgParams.System = systemPrompt
 	}
 
 	logger.Debug("Claude Vertex API calling",
@@ -261,6 +274,29 @@ func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...g
 	s.messages = append(s.messages, resp.ToParam())
 
 	return processResponse(resp), nil
+}
+
+// createSystemPrompt creates system prompt with content type handling
+func (s *VertexAnthropicSession) createSystemPrompt() []anthropic.TextBlockParam {
+	var systemPrompt []anthropic.TextBlockParam
+	if s.cfg.SystemPrompt() != "" {
+		systemPrompt = []anthropic.TextBlockParam{
+			{Text: s.cfg.SystemPrompt()},
+		}
+	}
+
+	// Add content type instruction to system prompt
+	if s.cfg.ContentType() == gollem.ContentTypeJSON {
+		if len(systemPrompt) > 0 {
+			systemPrompt[0].Text += "\nPlease format your response as valid JSON."
+		} else {
+			systemPrompt = []anthropic.TextBlockParam{
+				{Text: "Please format your response as valid JSON."},
+			}
+		}
+	}
+
+	return systemPrompt
 }
 
 // GenerateStream processes the input and generates a response stream.
@@ -295,10 +331,8 @@ func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...go
 	}
 
 	// Add system prompt if available
-	if s.cfg.SystemPrompt() != "" {
-		msgParams.System = []anthropic.TextBlockParam{
-			{Text: s.cfg.SystemPrompt()},
-		}
+	if systemPrompt := s.createSystemPrompt(); len(systemPrompt) > 0 {
+		msgParams.System = systemPrompt
 	}
 
 	stream := s.client.Messages.NewStreaming(ctx, msgParams)

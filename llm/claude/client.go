@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 )
@@ -251,8 +252,21 @@ func (s *Session) convertInputs(ctx context.Context, input ...gollem.Input) ([]a
 				"is_error", isError,
 				"response_length", len(response))
 
-			// Create tool result - try original argument order: tool_use_id, content, is_error
-			toolResult := anthropic.NewToolResultBlock(v.ID, response, isError)
+			// Create tool result block with new API
+			toolResult := anthropic.NewToolResultBlock(v.ID)
+			
+			// Set content
+			if response != "" {
+				toolResult.OfToolResult.Content = []anthropic.ToolResultBlockParamContentUnion{
+					{OfText: &anthropic.TextBlockParam{Text: response}},
+				}
+			}
+			
+			// Set error flag
+			if isError {
+				toolResult.OfToolResult.IsError = param.NewOpt(true)
+			}
+			
 			toolResults = append(toolResults, toolResult)
 
 		default:
