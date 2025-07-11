@@ -1,6 +1,8 @@
 module github.com/m-mizutani/gollem
 
-go 1.24
+go 1.24.0
+
+toolchain go1.24.3
 
 require (
 	cloud.google.com/go/aiplatform v1.90.0
@@ -10,6 +12,7 @@ require (
 	github.com/m-mizutani/goerr/v2 v2.0.0-beta.2
 	github.com/m-mizutani/gt v0.0.16
 	github.com/sashabaranov/go-openai v1.40.1
+	github.com/secmon-lab/warren v0.0.1
 	google.golang.org/api v0.236.0
 	google.golang.org/protobuf v1.36.6
 )

@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem/internal"
+	"github.com/secmon-lab/warren/pkg/utils/clock"
 )
 
 // Plan represents an executable plan
@@ -414,16 +414,17 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 // Execute executes the plan and returns the final result
 func (p *Plan) Execute(ctx context.Context) (string, error) {
 	// Embed logger into context for internal methods to use
-	ctx = ctxWithLogger(ctx, p.logger)
+	logger := p.logger.With("gollem.plan_id", p.id)
+	ctx = ctxWithLogger(ctx, logger)
 
-	p.logger.Debug("plan execute started", "plan_id", p.id, "state", p.state)
+	logger.Debug("plan execute started", "state", p.state)
 
 	if err := p.validateAndPrepareExecution(); err != nil {
-		p.logger.Debug("plan validation failed", "plan_id", p.id, "error", err)
+		logger.Debug("plan validation failed", "error", err)
 		return "", err
 	}
 
-	p.logger.Debug("plan validation passed, starting execution", "plan_id", p.id)
+	logger.Debug("plan validation passed, starting execution")
 	return p.executeSteps(ctx)
 }
 
@@ -449,17 +450,16 @@ func (p *Plan) validateAndPrepareExecution() error {
 // executeSteps executes all pending steps in the plan
 func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 	logger := LoggerFromContext(ctx) // Use existing context.go function
-	logger.Debug("executeSteps started", "plan_id", p.id, "pending_todos_count", len(p.getPendingToDos()))
+	logger.Debug("executeSteps started", "pending_todos_count", len(p.getPendingToDos()))
 
 	for len(p.getPendingToDos()) > 0 {
 		currentStep := p.getNextPendingToDo()
 		if currentStep == nil {
-			logger.Debug("no more pending todos found", "plan_id", p.id)
+			logger.Debug("no more pending todos found")
 			break
 		}
 
 		logger.Debug("processing plan step",
-			"plan_id", p.id,
 			"step_id", currentStep.ID,
 			"step_description", currentStep.Description,
 			"pending_count", len(p.getPendingToDos()))
@@ -468,7 +468,6 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 		result, shouldComplete, err := p.processSingleStep(ctx, currentStep)
 		if err != nil {
 			logger.Error("plan step processing failed",
-				"plan_id", p.id,
 				"step_id", currentStep.ID,
 				"error", err)
 			return "", err
@@ -476,7 +475,6 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 
 		if shouldComplete {
 			logger.Debug("plan completed successfully by reflection",
-				"plan_id", p.id,
 				"step_id", currentStep.ID,
 				"todos_executed", len(p.getCompletedToDos()),
 				"result", result)
@@ -484,36 +482,35 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 		}
 
 		logger.Debug("plan step completed, continuing to next step",
-			"plan_id", p.id,
 			"step_id", currentStep.ID,
 			"remaining_pending", len(p.getPendingToDos()))
 	}
 
 	p.state = PlanStateCompleted
 
-	logger.Info("plan completed - all steps processed", "plan_id", p.id)
+	logger.Info("plan completed - all steps processed")
 	return "Plan completed", nil
 }
 
 // processSingleStep processes a single step including hooks, execution, and reflection
 func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (string, bool, error) {
 	logger := LoggerFromContext(ctx)
-	logger.Debug("starting step processing", "plan_id", p.id, "step_id", currentStep.ID, "step_intent", currentStep.Intent)
+	logger.Debug("starting step processing", "step_id", currentStep.ID, "step_intent", currentStep.Intent)
 
 	// Call step start hooks
 	if err := p.callStepStartHooks(ctx, currentStep); err != nil {
 		return "", false, err
 	}
 
-	logger.Debug("executing step", "plan_id", p.id, "step_id", currentStep.ID)
+	logger.Debug("executing step", "step_id", currentStep.ID)
 	// Execute step
 	result, err := p.executeStep(ctx, currentStep)
 	if err != nil {
-		logger.Debug("step execution failed", "plan_id", p.id, "step_id", currentStep.ID, "error", err)
+		logger.Debug("step execution failed", "step_id", currentStep.ID, "error", err)
 		return "", false, p.handleStepError(currentStep, err)
 	}
 
-	logger.Debug("step execution completed", "plan_id", p.id, "step_id", currentStep.ID, "output_length", len(result.Output), "tool_calls_count", len(result.ToolCalls))
+	logger.Debug("step execution completed", "step_id", currentStep.ID, "output_length", len(result.Output), "tool_calls_count", len(result.ToolCalls))
 	currentStep.Status = ToDoStatusCompleted
 	currentStep.Result = result
 
@@ -523,10 +520,10 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 	}
 
 	// Reflection and re-planning
-	logger.Debug("starting plan reflection", "plan_id", p.id, "step_id", currentStep.ID)
+	logger.Debug("starting plan reflection", "step_id", currentStep.ID)
 	reflection, err := p.reflect(ctx)
 	if err != nil {
-		logger.Debug("plan reflection failed", "plan_id", p.id, "step_id", currentStep.ID, "error", err)
+		logger.Debug("plan reflection failed", "step_id", currentStep.ID, "error", err)
 		return "", false, goerr.Wrap(err, "plan reflection failed")
 	}
 
@@ -545,9 +542,9 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 	}
 
 	// Update plan
-	logger.Debug("updating plan based on reflection", "plan_id", p.id, "step_id", currentStep.ID)
+	logger.Debug("updating plan based on reflection", "step_id", currentStep.ID)
 	if err := p.updatePlan(reflection); err != nil {
-		logger.Debug("plan update failed", "plan_id", p.id, "step_id", currentStep.ID, "error", err)
+		logger.Debug("plan update failed", "step_id", currentStep.ID, "error", err)
 		return "", false, goerr.Wrap(err, "failed to update plan")
 	}
 
@@ -571,7 +568,7 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 			reflection.Type = PlanReflectionTypeComplete
 		}
 
-		logger.Debug("plan completed - no pending todos remaining", "plan_id", p.id, "step_id", currentStep.ID)
+		logger.Debug("plan completed - no pending todos remaining", "step_id", currentStep.ID)
 
 		// Send completion message
 		if reflection.Response != "" {
@@ -595,7 +592,7 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 	}
 
 	// Continue execution with remaining todos
-	logger.Debug("plan updated successfully, continuing execution", "plan_id", p.id, "step_id", currentStep.ID)
+	logger.Debug("plan updated successfully, continuing execution", "step_id", currentStep.ID)
 	return "", false, nil
 }
 
@@ -828,13 +825,11 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 
 	// Generate execution prompt (using template)
 	var promptBuffer bytes.Buffer
-	templateData := executorTemplateData{
+	if err := executorTmpl.Execute(&promptBuffer, executorTemplateData{
 		Intent:          todo.Intent,
 		ProgressSummary: p.getProgressSummary(),
 		SystemPrompt:    p.config.systemPrompt,
-	}
-
-	if err := executorTmpl.Execute(&promptBuffer, templateData); err != nil {
+	}); err != nil {
 		return nil, goerr.Wrap(err, "failed to execute executor template")
 	}
 
@@ -847,28 +842,7 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 	if err != nil {
 		return nil, goerr.Wrap(err, "executor session failed")
 	}
-	logger.Debug("got response", "response", response)
-
-	// DEBUG: Log function calls from initial response (CRITICAL FOR DEBUGGING)
-	internal.TestLogger().Info("executeStep: initial response", "plan_id", p.id, "function_calls_count", len(response.FunctionCalls), "texts_count", len(response.Texts))
-	if len(response.FunctionCalls) > 0 {
-		for i, toolCall := range response.FunctionCalls {
-			internal.TestLogger().Info("executeStep: initial function call", "plan_id", p.id, "index", i, "tool_id", toolCall.ID, "tool_name", toolCall.Name)
-		}
-	}
-
-	// Send response message through hook
-	if len(response.Texts) > 0 {
-		responseMessage := PlanExecutionMessage{
-			Type:      PlanMessageTypeResponse,
-			Content:   strings.Join(response.Texts, "\n"),
-			TodoID:    todo.ID,
-			Timestamp: time.Now(),
-		}
-		if err := p.callMessageHook(ctx, responseMessage); err != nil {
-			logger.Warn("failed to call message hook for response", "error", err)
-		}
-	}
+	logger.Debug("executeStep: initial response", "response", response)
 
 	// Process response (use existing handleResponse)
 	// Requirement: Tool usage must process Tools from GenerateContent return value
@@ -877,149 +851,122 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 	result := &toDoResult{
 		Output:     output,
 		ToolCalls:  response.FunctionCalls, // []*FunctionCall type
-		ExecutedAt: time.Now(),
+		ExecutedAt: clock.Now(ctx),
 	}
 
 	// Process tool call results (use existing handleResponse pattern)
-	if len(response.FunctionCalls) > 0 {
-		logger := LoggerFromContext(ctx)
-		internal.TestLogger().Info("executeStep: processing tool calls", "plan_id", p.id, "tool_calls_count", len(response.FunctionCalls))
+	logger.Debug("executeStep: processing tool calls", "tool_calls_count", len(response.FunctionCalls))
 
-		// DEBUG: Log all tool calls and their IDs
-		for i, toolCall := range response.FunctionCalls {
-			internal.TestLogger().Info("executeStep: tool call details", "plan_id", p.id, "index", i, "tool_id", toolCall.ID, "tool_name", toolCall.Name)
+	newInput, err := handleResponse(ctx, p.config.gollemConfig, response, p.toolMap)
+	if err != nil {
+		logger.Debug("executeStep: handleResponse failed", "error", err)
+		return nil, goerr.Wrap(err, "tool execution failed")
+	}
+	logger.Debug("executeStep: function responses generated", "new_input", newInput)
+
+	// Store tool results in Data
+	result.Data = make(map[string]any)
+	for _, input := range newInput {
+		if funcResp, ok := input.(FunctionResponse); ok {
+			result.Data[funcResp.Name] = funcResp.Data
 		}
+	}
 
-		internal.TestLogger().Info("executeStep: calling handleResponse", "plan_id", p.id, "function_calls_count", len(response.FunctionCalls))
-		newInput, err := handleResponse(ctx, p.config.gollemConfig, response, p.toolMap)
+	// Send tool results back to LLM to get final response
+	if len(newInput) > 0 {
+		// Add timeout for tool result processing
+		toolResultCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+
+		logger.Debug("executeStep: calling GenerateContent with tool results", "input_count", len(newInput))
+		finalResponse, err := executorSession.GenerateContent(toolResultCtx, newInput...)
 		if err != nil {
-			internal.TestLogger().Info("executeStep: handleResponse failed", "plan_id", p.id, "error", err)
-			logger.Info("tool execution failed", "plan_id", p.id, "error", err)
-			return nil, goerr.Wrap(err, "tool execution failed")
+			logger.Debug("executeStep: failed to get final response from LLM", "error", err)
+			return nil, goerr.Wrap(err, "failed to get final response from LLM")
 		}
-		internal.TestLogger().Info("executeStep: handleResponse completed", "plan_id", p.id, "newInput_count", len(newInput))
+		logger.Debug("executeStep: received final response from LLM", "texts_count", len(finalResponse.Texts), "function_calls_count", len(finalResponse.FunctionCalls))
 
-		// DEBUG: Log all function responses
-		internal.TestLogger().Info("executeStep: function responses generated", "plan_id", p.id, "response_count", len(newInput))
-		for i, input := range newInput {
-			if funcResp, ok := input.(FunctionResponse); ok {
-				internal.TestLogger().Info("executeStep: function response details", "plan_id", p.id, "index", i, "response_id", funcResp.ID, "response_name", funcResp.Name, "has_error", funcResp.Error != nil)
+		// Update result with final response
+		if len(finalResponse.Texts) > 0 {
+			finalOutput := strings.Join(finalResponse.Texts, "\n")
+			result.Output += "\n" + finalOutput
+			logger.Debug("got final response from LLM", "output_length", len(finalOutput))
+
+			// Send final response message through hook
+			responseMessage := PlanExecutionMessage{
+				Type:      PlanMessageTypeResponse,
+				Content:   finalOutput,
+				TodoID:    todo.ID,
+				Timestamp: time.Now(),
+			}
+			if err := p.callMessageHook(ctx, responseMessage); err != nil {
+				logger.Warn("failed to call message hook for final response", "error", err)
 			}
 		}
 
-		// Store tool results in Data
-		result.Data = make(map[string]any)
-		for _, input := range newInput {
-			if funcResp, ok := input.(FunctionResponse); ok {
-				result.Data[funcResp.Name] = funcResp.Data
-			}
-		}
+		// Handle any additional tool calls in the final response (recursive tool calls)
+		if len(finalResponse.FunctionCalls) > 0 {
+			logger.Debug("executeStep: final response contains additional tool calls", "response", finalResponse)
 
-		// Send tool results back to LLM to get final response
-		if len(newInput) > 0 {
-			internal.TestLogger().Info("executeStep: sending tool results back to LLM", "plan_id", p.id, "input_count", len(newInput))
-			// DEBUG: Log input details
-			for i, input := range newInput {
-				if funcResp, ok := input.(FunctionResponse); ok {
-					internal.TestLogger().Info("executeStep: sending function response", "plan_id", p.id, "index", i, "response_id", funcResp.ID, "response_name", funcResp.Name)
+			// Process recursive tool calls
+			for {
+				logger.Debug("executeStep: processing recursive tool calls", "tool_calls_count", len(finalResponse.FunctionCalls))
+
+				// Process additional tool calls
+				additionalInput, err := handleResponse(ctx, p.config.gollemConfig, finalResponse, p.toolMap)
+				if err != nil {
+					logger.Debug("executeStep: recursive tool call processing failed", "error", err)
+					return nil, goerr.Wrap(err, "recursive tool call processing failed")
 				}
-			}
 
-			// Add timeout for tool result processing
-			toolResultCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel()
+				logger.Debug("executeStep: recursive tool calls processed", "additional_input_count", len(additionalInput))
 
-			internal.TestLogger().Info("executeStep: calling GenerateContent with tool results", "plan_id", p.id, "input_count", len(newInput))
-			finalResponse, err := executorSession.GenerateContent(toolResultCtx, newInput...)
-			if err != nil {
-				internal.TestLogger().Info("executeStep: failed to get final response from LLM", "plan_id", p.id, "error", err)
-				logger.Debug("executeStep: failed to get final response from LLM", "plan_id", p.id, "error", err)
-				return nil, goerr.Wrap(err, "failed to get final response from LLM")
-			}
-			internal.TestLogger().Info("executeStep: received final response from LLM", "plan_id", p.id, "texts_count", len(finalResponse.Texts), "function_calls_count", len(finalResponse.FunctionCalls))
+				// Send additional tool results back to LLM
+				if len(additionalInput) > 0 {
+					recursiveCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+					defer cancel()
 
-			// Update result with final response
-			if len(finalResponse.Texts) > 0 {
-				finalOutput := strings.Join(finalResponse.Texts, "\n")
-				result.Output += "\n" + finalOutput
-				logger.Debug("got final response from LLM", "plan_id", p.id, "output_length", len(finalOutput))
+					logger.Debug("executeStep: sending recursive tool results to LLM", "input_count", len(additionalInput))
 
-				// Send final response message through hook
-				responseMessage := PlanExecutionMessage{
-					Type:      PlanMessageTypeResponse,
-					Content:   finalOutput,
-					TodoID:    todo.ID,
-					Timestamp: time.Now(),
-				}
-				if err := p.callMessageHook(ctx, responseMessage); err != nil {
-					logger.Warn("failed to call message hook for final response", "error", err)
-				}
-			}
-
-			// Handle any additional tool calls in the final response (recursive tool calls)
-			if len(finalResponse.FunctionCalls) > 0 {
-				internal.TestLogger().Info("executeStep: final response contains additional tool calls", "plan_id", p.id, "tool_calls_count", len(finalResponse.FunctionCalls))
-				logger.Debug("final response contains additional tool calls", "plan_id", p.id, "tool_calls_count", len(finalResponse.FunctionCalls))
-
-				// Process recursive tool calls
-				for {
-					internal.TestLogger().Info("executeStep: processing recursive tool calls", "plan_id", p.id, "tool_calls_count", len(finalResponse.FunctionCalls))
-
-					// Process additional tool calls
-					additionalInput, err := handleResponse(ctx, p.config.gollemConfig, finalResponse, p.toolMap)
+					recursiveResponse, err := executorSession.GenerateContent(recursiveCtx, additionalInput...)
 					if err != nil {
-						internal.TestLogger().Info("executeStep: recursive tool call processing failed", "plan_id", p.id, "error", err)
-						return nil, goerr.Wrap(err, "recursive tool call processing failed")
+						logger.Debug("executeStep: recursive tool result processing failed", "error", err)
+						return nil, goerr.Wrap(err, "recursive tool result processing failed")
 					}
 
-					internal.TestLogger().Info("executeStep: recursive tool calls processed", "plan_id", p.id, "additional_input_count", len(additionalInput))
+					logger.Debug("executeStep: received recursive response from LLM", "texts_count", len(recursiveResponse.Texts), "function_calls_count", len(recursiveResponse.FunctionCalls))
 
-					// Send additional tool results back to LLM
-					if len(additionalInput) > 0 {
-						recursiveCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-						defer cancel()
+					// Add recursive response to result
+					if len(recursiveResponse.Texts) > 0 {
+						recursiveOutput := strings.Join(recursiveResponse.Texts, "\n")
+						result.Output += "\n" + recursiveOutput
 
-						internal.TestLogger().Info("executeStep: sending recursive tool results to LLM", "plan_id", p.id, "input_count", len(additionalInput))
-
-						recursiveResponse, err := executorSession.GenerateContent(recursiveCtx, additionalInput...)
-						if err != nil {
-							internal.TestLogger().Info("executeStep: recursive tool result processing failed", "plan_id", p.id, "error", err)
-							return nil, goerr.Wrap(err, "recursive tool result processing failed")
+						// Send recursive response message through hook
+						responseMessage := PlanExecutionMessage{
+							Type:      PlanMessageTypeResponse,
+							Content:   recursiveOutput,
+							TodoID:    todo.ID,
+							Timestamp: time.Now(),
 						}
-
-						internal.TestLogger().Info("executeStep: received recursive response from LLM", "plan_id", p.id, "texts_count", len(recursiveResponse.Texts), "function_calls_count", len(recursiveResponse.FunctionCalls))
-
-						// Add recursive response to result
-						if len(recursiveResponse.Texts) > 0 {
-							recursiveOutput := strings.Join(recursiveResponse.Texts, "\n")
-							result.Output += "\n" + recursiveOutput
-
-							// Send recursive response message through hook
-							responseMessage := PlanExecutionMessage{
-								Type:      PlanMessageTypeResponse,
-								Content:   recursiveOutput,
-								TodoID:    todo.ID,
-								Timestamp: time.Now(),
-							}
-							if err := p.callMessageHook(ctx, responseMessage); err != nil {
-								logger.Warn("failed to call message hook for recursive response", "error", err)
-							}
+						if err := p.callMessageHook(ctx, responseMessage); err != nil {
+							logger.Warn("failed to call message hook for recursive response", "error", err)
 						}
+					}
 
-						// Check if there are more tool calls
-						if len(recursiveResponse.FunctionCalls) > 0 {
-							internal.TestLogger().Info("executeStep: found more recursive tool calls", "plan_id", p.id, "tool_calls_count", len(recursiveResponse.FunctionCalls))
-							finalResponse = recursiveResponse
-							continue // Continue the loop to process more tool calls
-						} else {
-							internal.TestLogger().Info("executeStep: no more recursive tool calls", "plan_id", p.id)
-							break // No more tool calls, exit the loop
-						}
+					// Check if there are more tool calls
+					if len(recursiveResponse.FunctionCalls) > 0 {
+						logger.Debug("executeStep: found more recursive tool calls", "tool_calls_count", len(recursiveResponse.FunctionCalls))
+						finalResponse = recursiveResponse
+						continue // Continue the loop to process more tool calls
 					} else {
-						internal.TestLogger().Info("executeStep: no additional input from recursive processing", "plan_id", p.id)
-						break
+						logger.Debug("executeStep: no more recursive tool calls")
+						break // No more tool calls, exit the loop
 					}
+				} else {
+					logger.Debug("executeStep: no additional input from recursive processing")
+					break
 				}
+
 			}
 		}
 	}
@@ -1030,15 +977,15 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 // reflect analyzes execution results and determines next actions
 func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 	logger := LoggerFromContext(ctx)
-	logger.Debug("starting reflection", "plan_id", p.id)
+	logger.Debug("starting reflection")
 
 	// Create reflection session
 	reflectorSession, err := p.agent.createReflectorSession(ctx, p.config)
 	if err != nil {
-		logger.Debug("failed to create reflector session", "plan_id", p.id, "error", err)
+		logger.Debug("failed to create reflector session", "error", err)
 		return nil, err
 	}
-	logger.Debug("reflector session created", "plan_id", p.id)
+	logger.Debug("reflector session created")
 
 	// Generate reflection prompt (using template)
 	var promptBuffer bytes.Buffer
@@ -1052,34 +999,33 @@ func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 	}
 
 	if err := reflectorTmpl.Execute(&promptBuffer, templateData); err != nil {
-		logger.Debug("failed to execute reflector template", "plan_id", p.id, "error", err)
+		logger.Debug("failed to execute reflector template", "error", err)
 		return nil, goerr.Wrap(err, "failed to execute reflector template")
 	}
-	logger.Debug("reflector prompt generated", "plan_id", p.id, "prompt_length", promptBuffer.Len())
+	logger.Debug("reflector prompt generated", "prompt_length", promptBuffer.Len())
 
 	// Add timeout for reflection to prevent hanging
 	reflectionCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	logger.Debug("sending reflection request to LLM", "plan_id", p.id)
+	logger.Debug("sending reflection request to LLM")
 	response, err := reflectorSession.GenerateContent(reflectionCtx, Text(promptBuffer.String()))
 	if err != nil {
-		logger.Debug("reflection request failed", "plan_id", p.id, "error", err)
+		logger.Debug("reflection request failed", "error", err)
 		return nil, err
 	}
-	logger.Debug("reflection response received", "plan_id", p.id, "response_length", len(response.Texts))
+	logger.Debug("reflection response received", "response_length", len(response.Texts))
 
 	if len(response.Texts) == 0 {
-		logger.Debug("no response from reflector", "plan_id", p.id)
+		logger.Debug("no response from reflector")
 		return nil, goerr.New("no response from reflector")
 	}
 
-	logger.Debug("parsing reflection response", "plan_id", p.id, "response_text", response.Texts[0])
+	logger.Debug("parsing reflection response", "response_text", response.Texts[0])
 	var reflection planReflection
 	if err := json.Unmarshal([]byte(response.Texts[0]), &reflection); err != nil {
 		// If JSON parsing fails, process as text response
 		logger.Debug("reflection JSON parse failed, using fallback",
-			"plan_id", p.id,
 			"error", err,
 			"response_text", response.Texts[0])
 
@@ -1091,7 +1037,6 @@ func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 		// Validate reflection
 		if err := reflection.Validate(); err != nil {
 			logger.Debug("reflection validation failed, using fallback",
-				"plan_id", p.id,
 				"error", err,
 				"response_text", response.Texts[0])
 
@@ -1100,11 +1045,11 @@ func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 				CompletionReason: "reflection_validation_failed",
 			}
 		} else {
-			logger.Debug("reflection validation successful", "plan_id", p.id, "type", reflection.Type)
+			logger.Debug("reflection validation successful", "type", reflection.Type)
 		}
 	}
 
-	logger.Debug("reflection completed", "plan_id", p.id, "type", reflection.Type)
+	logger.Debug("reflection completed", "type", reflection.Type)
 	return &reflection, nil
 }
 

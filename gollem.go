@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem/internal"
 )
 
 // ResponseMode is the type for the response mode of the gollem agent.
@@ -439,15 +438,7 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 
 	// DEBUG: Log all function calls received (minimal logging for debugging)
 	if len(output.FunctionCalls) > 0 {
-		internal.TestLogger().Info("handleResponse: processing response",
-			"function_calls_count", len(output.FunctionCalls))
-
-		for i, toolCall := range output.FunctionCalls {
-			internal.TestLogger().Info("handleResponse: function call",
-				"index", i,
-				"tool_id", toolCall.ID,
-				"tool_name", toolCall.Name)
-		}
+		logger.Debug("handleResponse: processing response", "function_calls", output.FunctionCalls)
 	}
 
 	// Call the MessageHook for all texts
@@ -476,7 +467,7 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 
 		tool, ok := toolMap[toolCall.Name]
 		if !ok {
-			internal.TestLogger().Info("handleResponse: tool not found, creating error response",
+			logger.Debug("handleResponse: tool not found, creating error response",
 				"tool_name", toolCall.Name,
 				"tool_id", toolCall.ID)
 			logger.Info("gollem tool not found", "call", toolCall)
@@ -491,7 +482,7 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 		result, err := tool.Run(ctx, toolCall.Arguments)
 		logger.Debug("gollem tool result", "tool", toolCall.Name, "result", result)
 		if err != nil {
-			internal.TestLogger().Info("handleResponse: tool error, creating error response",
+			logger.Debug("handleResponse: tool error, creating error response",
 				"tool_name", toolCall.Name,
 				"tool_id", toolCall.ID,
 				"error", err)
@@ -528,7 +519,7 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 				result = unmarshaled
 			}
 
-			internal.TestLogger().Info("handleResponse: tool success, creating data response",
+			logger.Debug("handleResponse: tool success, creating data response",
 				"tool_name", toolCall.Name,
 				"tool_id", toolCall.ID,
 				"result_keys", func() []string {
@@ -552,7 +543,7 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 
 	// DEBUG: Log final function response count
 	if len(output.FunctionCalls) > 0 {
-		internal.TestLogger().Info("handleResponse: completed processing",
+		logger.Debug("handleResponse: completed processing",
 			"function_responses_created", len(newInput),
 			"original_function_calls", len(output.FunctionCalls))
 	}

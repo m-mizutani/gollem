@@ -1,7 +1,5 @@
 package gollem
 
-import "github.com/m-mizutani/gollem/internal"
-
 var NewDefaultFacilitator = newDefaultFacilitator
 
 // Plan internal types and methods for testing
@@ -34,10 +32,9 @@ func (p *Plan) TestUpdatePlan(reflection *planReflection) error {
 // Helper to create a test plan
 func NewTestPlan(id string, input string, todos []planToDo) *Plan {
 	return &Plan{
-		id:     id,
-		input:  input,
-		todos:  todos,
-		logger: internal.TestLogger(),
+		id:    id,
+		input: input,
+		todos: todos,
 	}
 }
 

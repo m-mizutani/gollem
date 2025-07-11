@@ -12,7 +12,6 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
-	"github.com/m-mizutani/gollem/internal"
 )
 
 const (
@@ -218,7 +217,8 @@ func (s *Session) History() *gollem.History {
 }
 
 // convertInputs converts gollem.Input to Claude messages and tool results
-func (s *Session) convertInputs(input ...gollem.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
+func (s *Session) convertInputs(ctx context.Context, input ...gollem.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
+	logger := gollem.LoggerFromContext(ctx)
 	var toolResults []anthropic.ContentBlockParamUnion
 	var messages []anthropic.MessageParam
 
@@ -245,7 +245,7 @@ func (s *Session) convertInputs(input ...gollem.Input) ([]anthropic.MessageParam
 			// DEBUG: Log tool result creation
 			// Note: This log is commented out by default to avoid spamming logs
 			// Uncomment for debugging tool_use/tool_result issues
-			internal.TestLogger().Info("creating tool_result",
+			logger.Debug("creating tool_result",
 				"tool_use_id", v.ID,
 				"tool_name", v.Name,
 				"is_error", isError,
@@ -340,19 +340,20 @@ func processResponse(resp *anthropic.Message) *gollem.Response {
 // GenerateContent processes the input and generates a response.
 // It handles both text messages and function responses.
 func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-	messages, _, err := s.convertInputs(input...)
+	logger := gollem.LoggerFromContext(ctx)
+	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
 	}
 
 	// DEBUG: Log message history for debugging
-	internal.TestLogger().Info("Claude API request",
+	logger.Debug("Claude API request",
 		"message_count", len(s.messages),
 		"input_count", len(input))
 
 	// Log the last few messages to understand the conversation state
 	for i, msg := range s.messages[max(0, len(s.messages)-5):] {
-		internal.TestLogger().Info("Claude message",
+		logger.Debug("Claude message",
 			"index", i,
 			"role", msg.Role,
 			"content_blocks", len(msg.Content))
@@ -361,18 +362,18 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	s.messages = append(s.messages, messages...)
 	params := s.createRequest()
 
-	internal.TestLogger().Info("Claude API calling anthropic",
+	logger.Debug("Claude API calling anthropic",
 		"total_messages", len(s.messages),
 		"max_tokens", params.MaxTokens,
 		"model", params.Model)
 
 	resp, err := s.client.Messages.New(ctx, params)
 	if err != nil {
-		internal.TestLogger().Info("Claude API request failed", "error", err)
+		logger.Debug("Claude API request failed", "error", err)
 		return nil, goerr.Wrap(err, "failed to create message")
 	}
 
-	internal.TestLogger().Info("Claude API response received",
+	logger.Debug("Claude API response received",
 		"content_blocks", len(resp.Content),
 		"stop_reason", resp.StopReason)
 
@@ -380,7 +381,7 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	// This is critical for tool_use/tool_result consistency
 	s.messages = append(s.messages, resp.ToParam())
 
-	internal.TestLogger().Info("Added assistant response to message history",
+	logger.Debug("Added assistant response to message history",
 		"content_blocks", len(resp.Content),
 		"total_messages", len(s.messages))
 
@@ -422,7 +423,7 @@ func (a *FunctionCallAccumulator) accumulate() (*gollem.FunctionCall, error) {
 // GenerateStream processes the input and generates a response stream.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
 func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
-	messages, _, err := s.convertInputs(input...)
+	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
 	}
