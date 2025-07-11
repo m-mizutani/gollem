@@ -20,6 +20,12 @@ const (
 	DefaultEmbeddingModel = "claude-3-sonnet-20240229"
 )
 
+var (
+	// codeBlockRegex is a compiled regular expression for extracting JSON from markdown code blocks
+	// This is compiled once at package initialization for performance
+	codeBlockRegex = regexp.MustCompile(`(?s)` + "```" + `(?:json)?\n?(.*?)\n?` + "```" + ``)
+)
+
 // generationParameters represents the parameters for text generation.
 type generationParameters struct {
 	// Temperature controls randomness in the output.
@@ -481,8 +487,8 @@ func generateClaudeStream(
 func extractJSONFromResponse(text string) string {
 	// Remove leading/trailing whitespace
 	text = strings.TrimSpace(text)
-	// Try to extract JSON from markdown code blocks
-	codeBlockRegex := regexp.MustCompile("(?s)```(?:json)?\n?(.*?)\n?```")
+	
+	// Try to extract JSON from markdown code blocks using pre-compiled regex
 	matches := codeBlockRegex.FindStringSubmatch(text)
 	if len(matches) > 1 {
 		return strings.TrimSpace(matches[1])
