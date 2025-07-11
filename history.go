@@ -248,7 +248,7 @@ func toClaudeMessages(messages []claudeMessage) ([]anthropic.MessageParam, error
 				if c.ToolResult == nil {
 					return nil, goerr.New("tool_result block has no tool_result field")
 				}
-				toolResult := anthropic.NewToolResultBlock(c.ToolResult.ToolUseID)
+toolResult := anthropic.NewToolResultBlock(c.ToolResult.ToolUseID)
 				
 				// Set content
 				if c.ToolResult.Content != "" {
