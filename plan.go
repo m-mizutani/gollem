@@ -18,10 +18,11 @@ import (
 // Plan represents an executable plan
 type Plan struct {
 	// Internal state (may be processed asynchronously except during Execute execution)
-	id    string
-	input string
-	todos []planToDo
-	state PlanState
+	id               string
+	input            string
+	interpretedGoal  string      // LLM-interpreted and articulated goal from user input
+	todos            []planToDo
+	state            PlanState
 
 	// Fields reconstructed at runtime (not serialized)
 	agent       *Agent          `json:"-"`
@@ -339,20 +340,31 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 		return names
 	}())
 
+	// Interpret user goal first
+	interpretedGoal, err := g.interpretUserGoal(ctx, prompt, cfg)
+	if err != nil {
+		logger.Warn("failed to interpret user goal, using original prompt", "error", err)
+		interpretedGoal = prompt // Fallback to original prompt
+	}
+
+	logger.Debug("user goal interpreted", 
+		"original_prompt", prompt,
+		"interpreted_goal", interpretedGoal)
+
 	// Create planner session
 	plannerSession, err := g.createPlannerSession(ctx, cfg, toolList)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create planner session")
 	}
 
-	// Generate plan (provide tool information)
-	todos, err := g.generatePlan(ctx, plannerSession, prompt, toolList, cfg.systemPrompt)
+	// Generate plan (use interpreted goal for planning)
+	todos, err := g.generatePlan(ctx, plannerSession, interpretedGoal, toolList, cfg.systemPrompt)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to generate plan")
 	}
 
 	// Create plan with runtime fields
-	plan, err := g.createPlanWithRuntime(planID, prompt, todos, PlanStateCreated, toolMap, toolList, cfg, logger, ctx)
+	plan, err := g.createPlanWithRuntime(planID, prompt, interpretedGoal, todos, PlanStateCreated, toolMap, toolList, cfg, logger, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -642,7 +654,7 @@ func (g *Agent) createPlanConfig(options ...PlanOption) *planConfig {
 }
 
 // createPlanWithRuntime creates a plan with all runtime fields initialized
-func (g *Agent) createPlanWithRuntime(id, input string, todos []planToDo, state PlanState, toolMap map[string]Tool, toolList []Tool, cfg *planConfig, logger *slog.Logger, ctx context.Context) (*Plan, error) {
+func (g *Agent) createPlanWithRuntime(id, input, interpretedGoal string, todos []planToDo, state PlanState, toolMap map[string]Tool, toolList []Tool, cfg *planConfig, logger *slog.Logger, ctx context.Context) (*Plan, error) {
 	// Create independent session for this plan (not connected to Agent session)
 	sessionOptions := []SessionOption{}
 	if cfg.history != nil {
@@ -672,10 +684,11 @@ func (g *Agent) createPlanWithRuntime(id, input string, todos []planToDo, state 
 	}
 
 	plan := &Plan{
-		id:    id,
-		input: input,
-		todos: todos,
-		state: state,
+		id:              id,
+		input:           input,
+		interpretedGoal: interpretedGoal,
+		todos:           todos,
+		state:           state,
 
 		// Runtime fields
 		agent:       g,
@@ -904,6 +917,7 @@ func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 	var promptBuffer bytes.Buffer
 	templateData := reflectorTemplateData{
 		Goal:              p.input,
+		InterpretedGoal:   p.interpretedGoal,
 		CurrentPlanStatus: p.getCurrentPlanStatus(),
 		OriginalPlan:      p.getPlanSummary(),
 		CompletedSteps:    p.getCompletedStepsSummary(),
@@ -979,6 +993,45 @@ func (g *Agent) createReflectorSession(ctx context.Context, cfg *planConfig) (Se
 	return g.llm.NewSession(ctx, sessionOptions...)
 }
 
+// interpretUserGoal interprets and articulates the user's input goal using LLM
+func (g *Agent) interpretUserGoal(ctx context.Context, userInput string, cfg *planConfig) (string, error) {
+	// Create goal interpretation session
+	sessionOptions := []SessionOption{}
+	if cfg.history != nil {
+		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
+	}
+
+	goalSession, err := g.llm.NewSession(ctx, sessionOptions...)
+	if err != nil {
+		return "", goerr.Wrap(err, "failed to create goal interpretation session")
+	}
+
+	// Generate goal interpretation prompt using template
+	var promptBuffer bytes.Buffer
+	templateData := goalInterpreterTemplateData{
+		UserInput:    userInput,
+		SystemPrompt: cfg.systemPrompt,
+	}
+
+	if err := goalInterpreterTmpl.Execute(&promptBuffer, templateData); err != nil {
+		return "", goerr.Wrap(err, "failed to execute goal interpreter template")
+	}
+
+	response, err := goalSession.GenerateContent(ctx, Text(promptBuffer.String()))
+	if err != nil {
+		return "", goerr.Wrap(err, "failed to interpret user goal")
+	}
+
+	if len(response.Texts) == 0 {
+		return "", goerr.New("no response from goal interpretation")
+	}
+
+	interpretedGoal := strings.Join(response.Texts, "\n")
+	interpretedGoal = strings.TrimSpace(interpretedGoal)
+
+	return interpretedGoal, nil
+}
+
 // generateExecutionSummary creates a comprehensive summary of plan execution results
 func (p *Plan) generateExecutionSummary(ctx context.Context) (string, error) {
 	logger := LoggerFromContext(ctx)
@@ -999,6 +1052,7 @@ func (p *Plan) generateExecutionSummary(ctx context.Context) (string, error) {
 	var promptBuffer bytes.Buffer
 	templateData := summarizerTemplateData{
 		Goal:             p.input,
+		InterpretedGoal:  p.interpretedGoal,
 		ExecutionDetails: executionDetails,
 		OverallStatus:    overallStatus,
 		SystemPrompt:     p.config.systemPrompt,
@@ -1457,11 +1511,12 @@ func (p *Plan) updatePlan(reflection *planReflection) error {
 
 // planData represents serializable plan data (private)
 type planData struct {
-	Version int        `json:"version"`
-	ID      string     `json:"id"`
-	Input   string     `json:"input"`
-	ToDos   []planToDo `json:"todos"`
-	State   PlanState  `json:"state"`
+	Version         int        `json:"version"`
+	ID              string     `json:"id"`
+	Input           string     `json:"input"`
+	InterpretedGoal string     `json:"interpreted_goal"`
+	ToDos           []planToDo `json:"todos"`
+	State           PlanState  `json:"state"`
 }
 
 const (
@@ -1476,11 +1531,12 @@ func (p *Plan) Serialize() ([]byte, error) {
 // MarshalJSON implements json.Marshaler interface for Plan
 func (p *Plan) MarshalJSON() ([]byte, error) {
 	data := planData{
-		Version: PlanVersion,
-		ID:      p.id,
-		Input:   p.input,
-		ToDos:   p.todos,
-		State:   p.state,
+		Version:         PlanVersion,
+		ID:              p.id,
+		Input:           p.input,
+		InterpretedGoal: p.interpretedGoal,
+		ToDos:           p.todos,
+		State:           p.state,
 	}
 	return json.Marshal(data)
 }
@@ -1508,7 +1564,7 @@ func (g *Agent) NewPlanFromData(ctx context.Context, data []byte, options ...Pla
 
 	// Create plan with runtime fields using shared logic
 	logger := cfg.logger.With("gollem.plan_id", planData.ID)
-	plan, err := g.createPlanWithRuntime(planData.ID, planData.Input, planData.ToDos, planData.State, toolMap, toolList, cfg, logger, context.Background())
+	plan, err := g.createPlanWithRuntime(planData.ID, planData.Input, planData.InterpretedGoal, planData.ToDos, planData.State, toolMap, toolList, cfg, logger, context.Background())
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to recreate plan with runtime fields")
 	}
@@ -1542,6 +1598,7 @@ func (p *Plan) UnmarshalJSON(data []byte) error {
 	// Set the unmarshaled data
 	p.id = planData.ID
 	p.input = planData.Input
+	p.interpretedGoal = planData.InterpretedGoal
 	p.todos = planData.ToDos
 	p.state = planData.State
 
@@ -1560,6 +1617,16 @@ func (p *Plan) GetToDos() []PlanToDo {
 		todos[i] = todo.toPlanToDo()
 	}
 	return todos
+}
+
+// GetInterpretedGoal returns the LLM-interpreted and articulated goal from user input
+func (p *Plan) GetInterpretedGoal() string {
+	return p.interpretedGoal
+}
+
+// GetOriginalInput returns the original user input prompt
+func (p *Plan) GetOriginalInput() string {
+	return p.input
 }
 
 // PlanToDo represents a public view of a todo (external reference structure)
