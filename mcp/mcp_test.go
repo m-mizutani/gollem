@@ -19,11 +19,11 @@ func TestMCPLocalDryRun(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	
+
 	// Create MCP client using npx @modelcontextprotocol/server-filesystem
 	// This server provides filesystem access tools like read_file, write_file, list_directory
 	// The filesystem server requires a directory argument to set allowed access
-	mcpClient, err := mcp.NewStdio(ctx, "npx", []string{"@modelcontextprotocol/server-filesystem", "."})
+	mcpClient, err := mcp.NewStdio(ctx, "npx", []string{"-y", "@modelcontextprotocol/server-filesystem", "."})
 	if err != nil {
 		t.Skip("Could not create MCP filesystem client (requires npx and @modelcontextprotocol/server-filesystem):", err)
 	}
@@ -72,7 +72,7 @@ func TestMCPLocalDryRun(t *testing.T) {
 	default:
 		// Generic test - try with minimal arguments
 		testArgs = map[string]any{}
-		
+
 		// Add required parameters if any
 		for _, reqParam := range testTool.Required {
 			if param, exists := testTool.Parameters[reqParam]; exists {
