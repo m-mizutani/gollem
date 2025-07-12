@@ -6,8 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Development and Testing
 - `task` or `task mock` - Generate mock files for testing (uses moq)
-- `go test ./...` - Run all tests
+- `go test ./...` - Run all tests (MUST run before exiting tasks)
 - `go test -v ./llm/openai/` - Run tests for specific package
+- `go test -v ./path/to/package` - Run specific package tests when developing
 - `go build ./...` - Build all packages
 - `go mod tidy` - Clean up dependencies
 
@@ -16,6 +17,11 @@ Tests may require API keys for integration testing:
 - OpenAI: `OPENAI_API_KEY`
 - Anthropic: `ANTHROPIC_API_KEY`  
 - Gemini: `GEMINI_PROJECT_ID`, `GEMINI_LOCATION`
+
+### Code Quality
+- MUST run `go test ./...` before completing any task
+- Use `export_test.go` files to access internal packages for testing
+- Clean up any test binaries after checking
 
 ## Architecture
 
@@ -81,3 +87,41 @@ See `examples/` directory for usage patterns:
 - `embedding/` - Vector generation
 - `mcp/` - MCP server integration
 - `tools/` - Custom tool creation
+- `plan_mode/` - Plan mode agent with goal-oriented task execution
+- `query/` - Simple LLM query without conversation state
+- `simple/` - Minimal example
+
+## Development Guidelines
+
+### Error Handling
+Use `github.com/m-mizutani/goerr/v2` for error wrapping:
+```go
+if err := validateData(t.Data); err != nil {
+    return goerr.Wrap(err, "failed to validate data", goerr.Value("name", t.Name))
+}
+```
+
+### Testing Framework
+- Use `github.com/m-mizutani/gt` for testing (leverages Go generics)
+- Use Helper Driven Testing style instead of Table Driven Tests
+- All comments and literals MUST be in English
+
+Example test pattern:
+```go
+type testCase struct {
+    input    string
+    expected string
+}
+
+runTest := func(tc testCase) func(t *testing.T) {
+    return func(t *testing.T) {
+        actual := someFunc(tc.input)
+        gt.Equal(t, tc.expected, actual)
+    }
+}
+
+t.Run("success case", runTest(testCase{
+    input: "blue",
+    expected: "BLUE",
+}))
+```
