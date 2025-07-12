@@ -188,13 +188,13 @@ func newClaudeClient(t *testing.T) gollem.LLMClient {
 
 func newClaudeVertexClient(t *testing.T) gollem.LLMClient {
 	var testProjectID, testLocation string
-	if v, ok := os.LookupEnv("TEST_GCP_PROJECT_ID"); !ok {
-		t.Skip("TEST_GCP_PROJECT_ID is not set")
+	if v, ok := os.LookupEnv("TEST_CLAUDE_VERTEX_AI_PROJECT_ID"); !ok {
+		t.Skip("TEST_CLAUDE_VERTEX_AI_PROJECT_ID is not set")
 	} else {
 		testProjectID = v
 	}
 
-	if v, ok := os.LookupEnv("TEST_GCP_LOCATION"); !ok {
+	if v, ok := os.LookupEnv("TEST_CLAUDE_VERTEX_AI_LOCATION"); !ok {
 		testLocation = "us-east5" // Default to us-east5 where Claude Sonnet 4 is working
 	} else {
 		testLocation = v

@@ -29,9 +29,9 @@ func TestNewWithVertex(t *testing.T) {
 	})
 
 	t.Run("valid parameters with options", func(t *testing.T) {
-		prj, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+		prj, ok := os.LookupEnv("TEST_CLAUDE_VERTEX_AI_PROJECT_ID")
 		if !ok {
-			t.Skip("TEST_GCP_PROJECT_ID is not set")
+			t.Skip("TEST_CLAUDE_VERTEX_AI_PROJECT_ID is not set")
 		}
 		client, err := claude.NewWithVertex(ctx, "us-central1", prj,
 			claude.WithVertexModel("claude-sonnet-4@20250514"),
@@ -55,12 +55,12 @@ func TestNewWithVertex(t *testing.T) {
 }
 
 func TestVertexClient(t *testing.T) {
-	projectID := os.Getenv("TEST_GCP_PROJECT_ID")
+	projectID := os.Getenv("TEST_CLAUDE_VERTEX_AI_PROJECT_ID")
 	if projectID == "" {
-		t.Skip("TEST_GCP_PROJECT_ID not set, skipping test")
+		t.Skip("TEST_CLAUDE_VERTEX_AI_PROJECT_ID not set, skipping test")
 	}
 
-	location := os.Getenv("TEST_GCP_LOCATION")
+	location := os.Getenv("TEST_CLAUDE_VERTEX_AI_LOCATION")
 	if location == "" {
 		location = "us-east5" // Default to us-east5 where Claude Sonnet 4 is working
 	}
@@ -90,12 +90,12 @@ func TestVertexClient(t *testing.T) {
 }
 
 func TestVertexClientWithTools(t *testing.T) {
-	projectID := os.Getenv("TEST_GCP_PROJECT_ID")
+	projectID := os.Getenv("TEST_CLAUDE_VERTEX_AI_PROJECT_ID")
 	if projectID == "" {
-		t.Skip("TEST_GCP_PROJECT_ID not set, skipping test")
+		t.Skip("TEST_CLAUDE_VERTEX_AI_PROJECT_ID not set, skipping test")
 	}
 
-	location := os.Getenv("TEST_GCP_LOCATION")
+	location := os.Getenv("TEST_CLAUDE_VERTEX_AI_LOCATION")
 	if location == "" {
 		location = "us-east5" // Default to us-east5 where Claude Sonnet 4 is working
 	}
