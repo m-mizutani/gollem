@@ -13,7 +13,7 @@ The user has provided the following input as their goal:
 
 Your task is to interpret and clearly articulate what the user wants to achieve. Please:
 
-1. Understand the core objective the user is trying to accomplish
+1. Understand the core objective the user is trying to accomplish with background
 2. Identify any specific requirements, constraints, or context mentioned
 3. Clarify any implicit needs or expectations
 4. Present a clear, comprehensive statement of their goal

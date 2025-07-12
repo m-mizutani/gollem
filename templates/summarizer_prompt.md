@@ -23,5 +23,6 @@ Generate a comprehensive summary that includes:
 Please structure your response in a clear, user-friendly format. Focus on being informative yet concise. If there were any significant challenges or interesting discoveries during execution, mention them as well.
 
 {{if .SystemPrompt}}
-Additional Context: {{.SystemPrompt}}
+## Additional Context:
+{{.SystemPrompt}}
 {{end}}
