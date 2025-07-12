@@ -14,30 +14,87 @@ import (
 )
 
 func TestMCPLocalDryRun(t *testing.T) {
-	mcpExecPath, ok := os.LookupEnv("TEST_MCP_EXEC_PATH")
-	if !ok {
-		t.Skip("TEST_MCP_EXEC_PATH is not set")
+	if _, ok := os.LookupEnv("TEST_MCP_LOCAL"); !ok {
+		t.Skip("TEST_MCP_LOCAL is not set")
 	}
 
-	client := mcp.NewLocalMCPClient(mcpExecPath)
+	ctx := context.Background()
 
-	err := client.Start(t.Context())
+	// Create MCP client using npx @modelcontextprotocol/server-filesystem
+	// This server provides filesystem access tools like read_file, write_file, list_directory
+	// The filesystem server requires a directory argument to set allowed access
+	mcpClient, err := mcp.NewStdio(ctx, "npx", []string{"-y", "@modelcontextprotocol/server-filesystem", "."})
+	if err != nil {
+		t.Skip("Could not create MCP filesystem client (requires npx and @modelcontextprotocol/server-filesystem):", err)
+	}
+	defer mcpClient.Close()
+
+	// Test Specs method - get available tools
+	specs, err := mcpClient.Specs(ctx)
 	gt.NoError(t, err)
+	gt.Array(t, specs).Longer(0)
 
-	tools, err := client.ListTools(t.Context())
+	t.Logf("Available tools: %v", func() []string {
+		names := make([]string, len(specs))
+		for i, spec := range specs {
+			names[i] = spec.Name
+		}
+		return names
+	}())
+
+	// Find a tool to test with - filesystem server typically provides read_file, write_file, list_directory
+	var testTool *gollem.ToolSpec
+	for _, spec := range specs {
+		if spec.Name == "list_directory" {
+			testTool = &spec
+			break
+		}
+	}
+
+	if testTool == nil {
+		// Fallback to first available tool
+		testTool = &specs[0]
+	}
+
+	// Test Run method with appropriate arguments based on the tool
+	var testArgs map[string]any
+	switch testTool.Name {
+	case "list_directory":
+		// List current directory
+		testArgs = map[string]any{
+			"path": ".",
+		}
+	case "read_file":
+		// Try to read a common file
+		testArgs = map[string]any{
+			"path": "go.mod",
+		}
+	default:
+		// Generic test - try with minimal arguments
+		testArgs = map[string]any{}
+
+		// Add required parameters if any
+		for _, reqParam := range testTool.Required {
+			if param, exists := testTool.Parameters[reqParam]; exists {
+				switch param.Type {
+				case gollem.TypeString:
+					testArgs[reqParam] = "test"
+				case gollem.TypeInteger:
+					testArgs[reqParam] = 1
+				case gollem.TypeNumber:
+					testArgs[reqParam] = 1.0
+				case gollem.TypeBoolean:
+					testArgs[reqParam] = true
+				}
+			}
+		}
+	}
+
+	result, err := mcpClient.Run(ctx, testTool.Name, testArgs)
 	gt.NoError(t, err)
-	gt.Array(t, tools).Longer(0)
+	gt.NotNil(t, result)
 
-	_, err = mcp.InputSchemaToParameter(tools[0].InputSchema)
-	gt.NoError(t, err)
-
-	tool := tools[0]
-	callTool, err := client.CallTool(t.Context(), tool.Name, map[string]any{
-		"length": 10,
-	})
-	gt.NoError(t, err)
-
-	t.Log("callTool:", callTool)
+	t.Logf("Tool %s result: %+v", testTool.Name, result)
 }
 
 func TestMCPContentToMap(t *testing.T) {

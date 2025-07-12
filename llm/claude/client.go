@@ -20,6 +20,12 @@ const (
 	DefaultEmbeddingModel = "claude-3-sonnet-20240229"
 )
 
+var (
+	// codeBlockRegex is a compiled regular expression for extracting JSON from markdown code blocks
+	// This is compiled once at package initialization for performance
+	codeBlockRegex = regexp.MustCompile(`(?s)` + "```" + `(?:json)?\n?(.*?)\n?` + "```" + ``)
+)
+
 // generationParameters represents the parameters for text generation.
 type generationParameters struct {
 	// Temperature controls randomness in the output.
@@ -478,37 +484,88 @@ func generateClaudeStream(
 // extractJSONFromResponse cleans the response text to extract valid JSON
 // This is necessary because Claude returns JSON wrapped in markdown code blocks
 // even when ContentTypeJSON is specified.
+//
+// This function uses heuristics to find JSON boundaries and is not a full JSON parser.
+// It handles basic cases like { and } inside string literals, but has limitations:
+// - Does not handle all JSON escape sequences perfectly
+// - May struggle with complex nested structures in unusual formatting
+// - Works well for typical LLM-generated JSON responses
+//
+// For most Claude responses, this pragmatic approach provides reliable JSON extraction.
 func extractJSONFromResponse(text string) string {
 	// Remove leading/trailing whitespace
 	text = strings.TrimSpace(text)
-	// Try to extract JSON from markdown code blocks
-	codeBlockRegex := regexp.MustCompile("(?s)```(?:json)?\n?(.*?)\n?```")
+
+	// Try to extract JSON from markdown code blocks using pre-compiled regex
 	matches := codeBlockRegex.FindStringSubmatch(text)
 	if len(matches) > 1 {
 		return strings.TrimSpace(matches[1])
 	}
 
-	// Try to find JSON object boundaries
-	start := strings.Index(text, "{")
-	if start == -1 {
+	// Try to find JSON object or array boundaries
+	firstBrace := strings.Index(text, "{")
+	firstBracket := strings.Index(text, "[")
+
+	if firstBrace == -1 && firstBracket == -1 {
 		return text // No JSON found, return original
 	}
 
-	// Find the matching closing brace
+	var start int
+	if firstBracket == -1 || (firstBrace != -1 && firstBrace < firstBracket) {
+		start = firstBrace
+	} else {
+		start = firstBracket
+	}
+
+	// Find the matching closing brace/bracket with basic string literal handling
+	// Note: This is a heuristic approach that handles most common cases but
+	// is not a full JSON parser. It accounts for delimiters inside string literals.
 	braceCount := 0
+	bracketCount := 0
+	inString := false
+	escaped := false
+
 	for i := start; i < len(text); i++ {
-		switch text[i] {
-		case '{':
-			braceCount++
-		case '}':
-			braceCount--
-			if braceCount == 0 {
-				return text[start : i+1]
+		char := text[i]
+
+		if escaped {
+			// Skip escaped characters
+			escaped = false
+			continue
+		}
+
+		switch char {
+		case '\\':
+			if inString {
+				escaped = true
 			}
+		case '"':
+			inString = !inString
+		case '{':
+			if !inString {
+				braceCount++
+			}
+		case '}':
+			if !inString {
+				braceCount--
+			}
+		case '[':
+			if !inString {
+				bracketCount++
+			}
+		case ']':
+			if !inString {
+				bracketCount--
+			}
+		}
+
+		if !inString && braceCount == 0 && bracketCount == 0 {
+			// The first character at start must be a brace or bracket, so the counts will be > 0.
+			// This condition is met only when all brackets and braces are balanced.
+			return text[start : i+1]
 		}
 	}
 
-	// If no matching brace found, try from start to end
 	return text[start:]
 }
 
