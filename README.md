@@ -20,6 +20,8 @@ GO for Large LanguagE Model (GOLLEM)
 
 - [x] **Gemini** (see [models](https://ai.google.dev/gemini-api/docs/models?hl=ja))
 - [x] **Anthropic Claude** (see [models](https://docs.anthropic.com/en/docs/about-claude/models/all-models))
+  - Direct access via Anthropic API
+  - Via Google Vertex AI (see [Claude on Vertex AI](#claude-via-vertex-ai))
 - [x] **OpenAI** (see [models](https://platform.openai.com/docs/models))
 
 ## Quick Start
@@ -498,6 +500,69 @@ agent := gollem.New(client,
 )
 ```
 
+### Plan Mode - Goal-Oriented Agent
+
+Plan mode enables goal-oriented task execution with intelligent planning and adaptive execution. The agent breaks down complex goals into structured steps and can intelligently skip redundant tasks based on previous execution results.
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/llm/openai"
+)
+
+func main() {
+	ctx := context.Background()
+
+	// Create LLM client
+	client, err := openai.New(ctx, os.Getenv("OPENAI_API_KEY"))
+	if err != nil {
+		panic(err)
+	}
+
+	// Create agent with plan mode configuration
+	agent := gollem.New(client,
+		gollem.WithTools(&SearchTool{}, &AnalysisTool{}, &ReportTool{}),
+		gollem.WithPlanExecutionMode(gollem.PlanExecutionModeBalanced), // Default: intelligent skipping
+		gollem.WithSkipConfidenceThreshold(0.8), // Skip tasks with 80%+ confidence
+		gollem.WithSkipConfirmationHook(func(ctx context.Context, plan *gollem.Plan, decision gollem.SkipDecision) bool {
+			// Custom skip confirmation logic
+			fmt.Printf("🤔 Skip decision (confidence: %.2f): %s\n", decision.Confidence, decision.Reason)
+			return decision.Confidence >= 0.8 // Auto-approve high confidence skips
+		}),
+		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
+			fmt.Printf("🤖 %s\n", msg)
+			return nil
+		}),
+	)
+
+	// Create and execute a plan
+	plan, err := agent.Plan(ctx, "Research and analyze the latest trends in AI for 2024, then create a comprehensive report")
+	if err != nil {
+		panic(err)
+	}
+
+	// Execute the plan (agent automatically handles step-by-step execution)
+	err = agent.ExecutePlan(ctx, plan)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("✅ Plan completed with %d steps executed\n", plan.CompletedSteps())
+}
+```
+
+**Key Features:**
+- **Intelligent Planning**: Automatically breaks down complex goals into manageable steps
+- **Adaptive Execution**: Skips redundant tasks based on previous results and confidence levels
+- **Execution Modes**: Complete (no skipping), Balanced (default, smart skipping), Efficient (aggressive skipping)
+- **Transparency**: Detailed reasoning for all skip decisions with confidence scores
+
 ### Facilitator - Conversation Flow Control
 
 Facilitators control the conversation flow and determine when conversations should continue or end. gollem includes a default facilitator, but you can implement custom ones:
@@ -580,6 +645,7 @@ See the [examples](https://github.com/m-mizutani/gollem/tree/main/examples) dire
 - **[MCP](examples/mcp)**: Integration with MCP servers
 - **[Tools](examples/tools)**: Custom tool development
 - **[Embedding](examples/embedding)**: Text embedding generation
+- **[Plan Mode](examples/plan_mode)**: Goal-oriented agent with intelligent task planning
 
 ## Documentation
 
@@ -589,6 +655,81 @@ For detailed documentation and advanced usage:
 - **[Tool Development](doc/tools.md)**
 - **[MCP Integration](doc/mcp.md)**
 - **[API Reference](https://pkg.go.dev/github.com/m-mizutani/gollem)**
+
+## Claude via Vertex AI
+
+gollem supports accessing Claude models through Google Vertex AI, allowing you to use Claude within Google Cloud's infrastructure with unified billing and enhanced security features.
+
+### Setup
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/llm/claude"
+)
+
+func main() {
+	ctx := context.Background()
+
+	// Create Vertex AI Claude client
+	client, err := claude.NewVertex(ctx, "your-project-id", "your-region",
+		claude.WithVertexModel("claude-sonnet-4@20250514"), // Default model
+		claude.WithVertexSystemPrompt("You are a helpful assistant."),
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	// Use the same agent interface as other providers
+	agent := gollem.New(client,
+		gollem.WithTools(&YourCustomTool{}),
+		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
+			fmt.Printf("🤖 %s\n", msg)
+			return nil
+		}),
+	)
+
+	// Execute tasks normally
+	err = agent.Execute(ctx, "Hello! Can you help me with my project?")
+	if err != nil {
+		panic(err)
+	}
+}
+```
+
+### Authentication
+
+Vertex AI Claude client uses Google Cloud credentials:
+
+```bash
+# Option 1: Service account key file
+export GOOGLE_APPLICATION_CREDENTIALS="path/to/service-account-key.json"
+
+# Option 2: gcloud CLI authentication
+gcloud auth application-default login
+
+# Option 3: Use workload identity in GKE/Cloud Run (automatic)
+```
+
+### Available Models
+
+- `claude-sonnet-4@20250514` (default) - Latest Claude Sonnet model
+- `claude-haiku-3@20240307` - Fast, cost-effective model
+- `claude-opus-3@20240229` - Most capable model
+
+### Benefits of Vertex AI Integration
+
+- **Unified Google Cloud billing** and cost management
+- **Enterprise security** with VPC, private endpoints, and audit logs
+- **Regional deployment** for data residency requirements
+- **Vertex AI MLOps** integration for monitoring and management
+- **Consistent API** - same gollem interface across all providers
 
 ## License
 
