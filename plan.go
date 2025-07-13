@@ -681,6 +681,10 @@ func (g *Agent) createPlanWithRuntime(id, input, interpretedGoal string, todos [
 	if logger != nil {
 		// Try to access session config to verify tools were set
 		logger.Debug("plan session created successfully", "session_type", fmt.Sprintf("%T", mainSession))
+		logger.Debug("plan session tools verification", "tools_added_count", len(toolList))
+		for i, tool := range toolList {
+			logger.Debug("plan session tool", "index", i, "name", tool.Spec().Name, "description", tool.Spec().Description)
+		}
 	}
 
 	plan := &Plan{
@@ -798,6 +802,16 @@ func executeStepWithInput(ctx context.Context, session Session, config gollemCon
 	}
 
 	logger.Debug("executeStepWithInput: received response", "texts_count", len(response.Texts), "function_calls_count", len(response.FunctionCalls))
+	
+	// DEBUG: Log all function calls in detail
+	for i, fc := range response.FunctionCalls {
+		logger.Debug("executeStepWithInput: function call detail", "index", i, "name", fc.Name, "args", fc.Arguments)
+	}
+	
+	// DEBUG: Log actual response text to understand why tools weren't called
+	for i, text := range response.Texts {
+		logger.Debug("executeStepWithInput: response text", "index", i, "content", text)
+	}
 
 	// Process text response
 	if len(response.Texts) > 0 {

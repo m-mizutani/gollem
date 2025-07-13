@@ -284,10 +284,13 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 		// Disable parallel execution for subtests to reduce API load
 		// t.Parallel()
 
+		// Add debug logger to context
+		ctx := gollem.CtxWithLogger(context.Background(), gollem.DebugLogger())
+
 		client := newClient(t)
 
 		// Create session with history using retry logic
-		session, err := createSessionWithHistoryWithRetry(context.Background(), client, t)
+		session, err := createSessionWithHistoryWithRetry(ctx, client, t)
 		if err != nil {
 			t.Skipf("Failed to create session with history after retries: %v", err)
 		}
@@ -308,6 +311,10 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 			gollem.WithTools(tools...),
 			gollem.WithHistory(history),
 			gollem.WithSystemPrompt(systemPrompt),
+			gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
+				t.Logf("[%s] Request tool: %s", llmName, tool.Name)
+				return nil
+			}),
 		)
 
 		// Track execution progress
@@ -316,10 +323,10 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 		var toolsUsed []string
 
 		// Very specific and limited prompt for faster execution
-		simplePrompt := `Analyze 'example.com' with these steps: 1) DNS lookup 2) Threat intelligence check. Keep it simple with just 2 tasks total. No additional analysis needed.`
+		simplePrompt := `Analyze '3322.org' with these steps: 1) DNS lookup 2) Threat intelligence check. Keep it simple with just 2 tasks total. No additional analysis needed.`
 
 		// Create plan with timeout to prevent hanging
-		planCtx, planCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		planCtx, planCancel := context.WithTimeout(ctx, 30*time.Second)
 		defer planCancel()
 
 		plan, err := agent.Plan(planCtx,
@@ -340,6 +347,13 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 				}
 				return nil
 			}),
+			gollem.WithPlanToDoUpdatedHook(func(ctx context.Context, plan *gollem.Plan, changes []gollem.PlanToDoChange) error {
+				t.Logf("[%s] Plan updated", llmName)
+				for _, change := range changes {
+					t.Logf("  [%s] %s > %s", llmName, change.Type, change.Description)
+				}
+				return nil
+			}),
 		)
 		gt.NoError(t, err)
 		gt.NotNil(t, plan)
@@ -353,9 +367,9 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 		// Execute plan with timeout and retry logic for API errors
 		result, executeErr := retryAPICall(t, func() (string, error) {
 			// Set a timeout to prevent tests from running too long
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			execCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 			defer cancel()
-			return plan.Execute(ctx)
+			return plan.Execute(execCtx)
 		}, fmt.Sprintf("[%s] plan execution", llmName))
 
 		// Only fail if we couldn't execute after retries
@@ -375,6 +389,11 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 		t.Logf("[%s] Todos completed: %d", llmName, len(completedTodos))
 		t.Logf("[%s] Tools used: %v", llmName, toolsUsed)
 		t.Logf("[%s] Final result length: %d characters", llmName, len(result))
+
+		// DEBUG: Log final result content for analysis
+		if llmName == "Gemini" {
+			t.Logf("[%s] Final result content: %s", llmName, result)
+		}
 
 		// Verify that tools were available and used (reduced from 3 to 2)
 		gt.N(t, len(tools)).GreaterOrEqual(2)
