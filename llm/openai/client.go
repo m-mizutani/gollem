@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/internal"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -224,7 +226,7 @@ func (s *Session) History() *gollem.History {
 }
 
 // convertInputs converts gollem.Input to OpenAI messages
-func (s *Session) convertInputs(input ...gollem.Input) error {
+func (s *Session) convertInputs(ctx context.Context, input ...gollem.Input) error {
 	for _, in := range input {
 		switch v := in.(type) {
 		case gollem.Text:
@@ -244,16 +246,12 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 			}
 
 			// DEBUG: Log tool result creation for OpenAI
-			// Note: This log is commented out by default to avoid spamming logs
-			// Uncomment for debugging tool_call_id issues
-			/*
-				logger := slog.Default()
-				logger.Debug("creating tool response for OpenAI",
-					"tool_call_id", v.ID,
-					"tool_name", v.Name,
-					"has_error", v.Error != nil,
-					"response_length", len(response))
-			*/
+			logger := ctxlog.From(ctx, internal.ScopeOpenAIConvert)
+			logger.Debug("creating tool response for OpenAI",
+				"tool_call_id", v.ID,
+				"tool_name", v.Name,
+				"has_error", v.Error != nil,
+				"response_length", len(response))
 
 			s.messages = append(s.messages, openai.ChatCompletionMessage{
 				Role:       openai.ChatMessageRoleTool,
@@ -294,15 +292,26 @@ func (s *Session) createRequest(stream bool) openai.ChatCompletionRequest {
 // GenerateContent processes the input and generates a response.
 // It handles both text messages and function responses.
 func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-	if err := s.convertInputs(input...); err != nil {
+	logger := ctxlog.From(ctx, internal.ScopeOpenAIGenerate)
+	logger.Debug("OpenAI GenerateContent starting",
+		"model", s.defaultModel,
+		"input_count", len(input),
+		"message_count", len(s.messages))
+	
+	if err := s.convertInputs(ctx, input...); err != nil {
 		return nil, err
 	}
 
 	req := s.createRequest(false)
 	resp, err := s.client.CreateChatCompletion(ctx, req)
 	if err != nil {
+		logger.Debug("OpenAI API request failed", "error", err)
 		return nil, goerr.Wrap(err, "failed to create chat completion")
 	}
+	
+	logger.Debug("OpenAI API response received",
+		"choices_count", len(resp.Choices),
+		"usage_tokens", resp.Usage.TotalTokens)
 
 	if len(resp.Choices) == 0 {
 		return &gollem.Response{}, nil
@@ -352,13 +361,20 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 // GenerateStream processes the input and generates a response stream.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
 func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
-	if err := s.convertInputs(input...); err != nil {
+	logger := ctxlog.From(ctx, internal.ScopeOpenAIStream)
+	logger.Debug("OpenAI GenerateStream starting",
+		"model", s.defaultModel,
+		"input_count", len(input),
+		"message_count", len(s.messages))
+	
+	if err := s.convertInputs(ctx, input...); err != nil {
 		return nil, err
 	}
 
 	req := s.createRequest(true)
 	stream, err := s.client.CreateChatCompletionStream(ctx, req)
 	if err != nil {
+		logger.Debug("OpenAI stream creation failed", "error", err)
 		return nil, goerr.Wrap(err, "failed to create chat completion stream")
 	}
 

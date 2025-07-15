@@ -18,6 +18,30 @@ Tests may require API keys for integration testing:
 - Anthropic: `ANTHROPIC_API_KEY`  
 - Gemini: `GEMINI_PROJECT_ID`, `GEMINI_LOCATION`
 
+### Debug Logging
+Scoped logging can be enabled using environment variables for debugging specific LLM operations:
+
+#### Provider-level logging:
+- `GOLLEM_LOGGING_LLM=1` - Enable all LLM logging
+- `GOLLEM_LOGGING_CLAUDE=1` - Enable all Claude logging
+- `GOLLEM_LOGGING_GEMINI=1` - Enable all Gemini logging
+- `GOLLEM_LOGGING_OPENAI=1` - Enable all OpenAI logging
+
+#### Granular operation logging:
+- `GOLLEM_LOGGING_CLAUDE_GENERATE=1` - Claude content generation
+- `GOLLEM_LOGGING_CLAUDE_STREAM=1` - Claude streaming operations
+- `GOLLEM_LOGGING_CLAUDE_CONVERT=1` - Claude input conversion
+
+- `GOLLEM_LOGGING_GEMINI_GENERATE=1` - Gemini content generation
+- `GOLLEM_LOGGING_GEMINI_STREAM=1` - Gemini streaming operations
+- `GOLLEM_LOGGING_GEMINI_HISTORY=1` - Gemini history filtering
+
+- `GOLLEM_LOGGING_OPENAI_GENERATE=1` - OpenAI content generation
+- `GOLLEM_LOGGING_OPENAI_STREAM=1` - OpenAI streaming operations
+- `GOLLEM_LOGGING_OPENAI_CONVERT=1` - OpenAI input conversion
+
+Use these for fine-grained debugging when investigating specific LLM provider issues.
+
 ### Code Quality
 - MUST run `go test ./...` before completing any task
 - Use `export_test.go` files to access internal packages for testing

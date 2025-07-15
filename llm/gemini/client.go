@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"cloud.google.com/go/vertexai/genai"
+	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/internal"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
@@ -308,6 +310,11 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 // GenerateContent processes the input and generates a response.
 // It handles both text messages and function responses.
 func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	logger := ctxlog.From(ctx, internal.ScopeGeminiGenerate)
+	logger.Debug("Gemini GenerateContent starting",
+		"input_count", len(input),
+		"history_count", len(s.session.History))
+	
 	parts, err := s.convertInputs(input...)
 	if err != nil {
 		return nil, err
@@ -318,8 +325,12 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 
 	resp, err := s.session.SendMessage(ctx, parts...)
 	if err != nil {
+		logger.Debug("Gemini API request failed", "error", err)
 		return nil, goerr.Wrap(err, "failed to send message")
 	}
+	
+	logger.Debug("Gemini API response received",
+		"candidates_count", len(resp.Candidates))
 
 	return processResponse(resp)
 }
@@ -352,7 +363,7 @@ func (s *Session) GenerateContentWithRetry(ctx context.Context, input ...gollem.
 
 // filterEmptyHistoryParts removes history entries with empty parts
 func (s *Session) filterEmptyHistoryParts(ctx context.Context) {
-	logger := gollem.LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx, internal.ScopeGeminiHistory)
 	originalCount := len(s.session.History)
 
 	filteredHistory := make([]*genai.Content, 0, len(s.session.History))
@@ -377,6 +388,11 @@ func (s *Session) filterEmptyHistoryParts(ctx context.Context) {
 // GenerateStream processes the input and generates a response stream.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
 func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+	logger := ctxlog.From(ctx, internal.ScopeGeminiStream)
+	logger.Debug("Gemini GenerateStream starting",
+		"input_count", len(input),
+		"history_count", len(s.session.History))
+	
 	parts, err := s.convertInputs(input...)
 	if err != nil {
 		return nil, err

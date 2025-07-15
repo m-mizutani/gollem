@@ -1,6 +1,6 @@
 module github.com/m-mizutani/gollem
 
-go 1.24.0
+go 1.24.2
 
 toolchain go1.24.3
 
@@ -16,6 +16,8 @@ require (
 	google.golang.org/api v0.236.0
 	google.golang.org/protobuf v1.36.6
 )
+
+require github.com/m-mizutani/ctxlog v0.2.0
 
 require (
 	cloud.google.com/go v0.121.2 // indirect

@@ -12,8 +12,10 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
+	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/internal"
 )
 
 const (
@@ -232,7 +234,7 @@ func (s *Session) convertInputs(ctx context.Context, input ...gollem.Input) ([]a
 // convertGollemInputsToClaude is a shared helper function that converts gollem.Input to Claude messages and tool results
 // This function is used by both the standard Claude client and the Vertex AI Claude client to avoid code duplication.
 func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
-	logger := gollem.LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx, internal.ScopeClaudeConvert)
 	var toolResults []anthropic.ContentBlockParamUnion
 	var messages []anthropic.MessageParam
 
@@ -329,7 +331,7 @@ func generateClaudeContent(
 	cfg gollem.SessionConfig,
 	apiName string,
 ) (*anthropic.Message, error) {
-	logger := gollem.LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx, internal.ScopeClaudeGenerate)
 
 	// Prepare message parameters
 	msgParams := anthropic.MessageNewParams{
@@ -379,6 +381,11 @@ func generateClaudeStream(
 	cfg gollem.SessionConfig,
 	messageHistory *[]anthropic.MessageParam,
 ) (<-chan *gollem.Response, error) {
+	logger := ctxlog.From(ctx, internal.ScopeClaudeStream)
+	logger.Debug("Claude stream starting",
+		"model", model,
+		"message_count", len(messages),
+		"tools_count", len(tools))
 	// Prepare message parameters
 	msgParams := anthropic.MessageNewParams{
 		Model:       anthropic.Model(model),
@@ -614,7 +621,7 @@ func processResponseWithContentType(resp *anthropic.Message, contentType gollem.
 // GenerateContent processes the input and generates a response.
 // It handles both text messages and function responses.
 func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-	logger := gollem.LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx, internal.ScopeClaudeGenerate)
 	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
