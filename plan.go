@@ -364,7 +364,7 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 	}
 
 	// Create plan with runtime fields
-	plan, err := g.createPlanWithRuntime(planID, prompt, interpretedGoal, todos, PlanStateCreated, toolMap, toolList, cfg, logger, ctx)
+	plan, err := g.createPlanWithRuntime(ctx, planID, prompt, interpretedGoal, todos, PlanStateCreated, toolMap, toolList, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -654,7 +654,9 @@ func (g *Agent) createPlanConfig(options ...PlanOption) *planConfig {
 }
 
 // createPlanWithRuntime creates a plan with all runtime fields initialized
-func (g *Agent) createPlanWithRuntime(id, input, interpretedGoal string, todos []planToDo, state PlanState, toolMap map[string]Tool, toolList []Tool, cfg *planConfig, logger *slog.Logger, ctx context.Context) (*Plan, error) {
+func (g *Agent) createPlanWithRuntime(ctx context.Context, id, input, interpretedGoal string, todos []planToDo, state PlanState, toolMap map[string]Tool, toolList []Tool, cfg *planConfig) (*Plan, error) {
+	logger := LoggerFromContext(ctx)
+
 	// Create independent session for this plan (not connected to Agent session)
 	sessionOptions := []SessionOption{}
 	if cfg.history != nil {
@@ -664,13 +666,11 @@ func (g *Agent) createPlanWithRuntime(id, input, interpretedGoal string, todos [
 	sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
 
 	// DEBUG: Log tools being added to session
-	if logger != nil {
-		toolNames := make([]string, len(toolList))
-		for i, tool := range toolList {
-			toolNames[i] = tool.Spec().Name
-		}
-		logger.Debug("creating plan session with tools", "tool_count", len(toolList), "tools", toolNames)
+	toolNames := make([]string, len(toolList))
+	for i, tool := range toolList {
+		toolNames[i] = tool.Spec().Name
 	}
+	logger.Debug("creating plan session with tools", "tool_count", len(toolList), "tools", toolNames)
 
 	mainSession, err := g.llm.NewSession(ctx, sessionOptions...)
 	if err != nil {
@@ -678,13 +678,10 @@ func (g *Agent) createPlanWithRuntime(id, input, interpretedGoal string, todos [
 	}
 
 	// DEBUG: Verify session was created with tools
-	if logger != nil {
-		// Try to access session config to verify tools were set
-		logger.Debug("plan session created successfully", "session_type", fmt.Sprintf("%T", mainSession))
-		logger.Debug("plan session tools verification", "tools_added_count", len(toolList))
-		for i, tool := range toolList {
-			logger.Debug("plan session tool", "index", i, "name", tool.Spec().Name, "description", tool.Spec().Description)
-		}
+	// Try to access session config to verify tools were set
+	logger.Debug("plan session created successfully", "session_type", fmt.Sprintf("%T", mainSession), "tools_added_count", len(toolList))
+	for i, tool := range toolList {
+		logger.Debug("plan session tool", "index", i, "name", tool.Spec().Name, "description", tool.Spec().Description)
 	}
 
 	plan := &Plan{
@@ -802,12 +799,12 @@ func executeStepWithInput(ctx context.Context, session Session, config gollemCon
 	}
 
 	logger.Debug("executeStepWithInput: received response", "texts_count", len(response.Texts), "function_calls_count", len(response.FunctionCalls))
-	
+
 	// DEBUG: Log all function calls in detail
 	for i, fc := range response.FunctionCalls {
 		logger.Debug("executeStepWithInput: function call detail", "index", i, "name", fc.Name, "args", fc.Arguments)
 	}
-	
+
 	// DEBUG: Log actual response text to understand why tools weren't called
 	for i, text := range response.Texts {
 		logger.Debug("executeStepWithInput: response text", "index", i, "content", text)
@@ -1578,7 +1575,9 @@ func (g *Agent) NewPlanFromData(ctx context.Context, data []byte, options ...Pla
 
 	// Create plan with runtime fields using shared logic
 	logger := cfg.logger.With("gollem.plan_id", planData.ID)
-	plan, err := g.createPlanWithRuntime(planData.ID, planData.Input, planData.InterpretedGoal, planData.ToDos, planData.State, toolMap, toolList, cfg, logger, context.Background())
+	ctx = ctxWithLogger(ctx, logger)
+
+	plan, err := g.createPlanWithRuntime(ctx, planData.ID, planData.Input, planData.InterpretedGoal, planData.ToDos, planData.State, toolMap, toolList, cfg)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to recreate plan with runtime fields")
 	}
