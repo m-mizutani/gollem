@@ -17,15 +17,15 @@ var reflectorPromptTemplate string
 //go:embed templates/summarizer_prompt.md
 var summarizerPromptTemplate string
 
-//go:embed templates/goal_interpreter_prompt.md
-var goalInterpreterPromptTemplate string
+//go:embed templates/goal_clarifier_prompt.md
+var goalClarifierPromptTemplate string
 
 var (
-	plannerTmpl         *template.Template
-	executorTmpl        *template.Template
-	reflectorTmpl       *template.Template
-	summarizerTmpl      *template.Template
-	goalInterpreterTmpl *template.Template
+	plannerTmpl      *template.Template
+	executorTmpl     *template.Template
+	reflectorTmpl    *template.Template
+	summarizerTmpl   *template.Template
+	goalClarifierTmpl *template.Template
 )
 
 func init() {
@@ -33,7 +33,7 @@ func init() {
 	executorTmpl = template.Must(template.New("executor").Parse(executorPromptTemplate))
 	reflectorTmpl = template.Must(template.New("reflector").Parse(reflectorPromptTemplate))
 	summarizerTmpl = template.Must(template.New("summarizer").Parse(summarizerPromptTemplate))
-	goalInterpreterTmpl = template.Must(template.New("goalInterpreter").Parse(goalInterpreterPromptTemplate))
+	goalClarifierTmpl = template.Must(template.New("goalClarifier").Parse(goalClarifierPromptTemplate))
 }
 
 type plannerTemplateData struct {
@@ -50,7 +50,7 @@ type executorTemplateData struct {
 
 type reflectorTemplateData struct {
 	Goal              string
-	InterpretedGoal   string
+	ClarifiedGoal   string
 	CurrentPlanStatus string
 	OriginalPlan      string
 	CompletedSteps    string
@@ -60,13 +60,13 @@ type reflectorTemplateData struct {
 
 type summarizerTemplateData struct {
 	Goal             string
-	InterpretedGoal  string
+	ClarifiedGoal  string
 	ExecutionDetails string
 	OverallStatus    string
 	SystemPrompt     string
 }
 
-type goalInterpreterTemplateData struct {
+type goalClarifierTemplateData struct {
 	UserInput    string
 	SystemPrompt string
 }
