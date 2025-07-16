@@ -532,7 +532,7 @@ func main() {
 		gollem.WithSkipConfidenceThreshold(0.8), // Skip tasks with 80%+ confidence
 		gollem.WithSkipConfirmationHook(func(ctx context.Context, plan *gollem.Plan, decision gollem.SkipDecision) bool {
 			// Custom skip confirmation logic
-			fmt.Printf("🤔 Skip decision (confidence: %.2f): %s\n", decision.Confidence, decision.Reason)
+			fmt.Printf("🤔 Skip decision (confidence: %.2f): %s\n", decision.Confidence, decision.SkipReason)
 			return decision.Confidence >= 0.8 // Auto-approve high confidence skips
 		}),
 		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
@@ -547,13 +547,22 @@ func main() {
 		panic(err)
 	}
 
-	// Execute the plan (agent automatically handles step-by-step execution)
-	err = agent.ExecutePlan(ctx, plan)
+	// Execute the plan (plan automatically handles step-by-step execution)
+	result, err := plan.Execute(ctx)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("✅ Plan completed with %d steps executed\n", plan.CompletedSteps())
+	// Get plan progress
+	todos := plan.GetToDos()
+	completed := 0
+	for _, todo := range todos {
+		if todo.Status == "Completed" {
+			completed++
+		}
+	}
+	fmt.Printf("✅ Plan completed: %s\n", result)
+	fmt.Printf("📊 Executed %d out of %d steps\n", completed, len(todos))
 }
 ```
 
@@ -678,7 +687,7 @@ func main() {
 	ctx := context.Background()
 
 	// Create Vertex AI Claude client
-	client, err := claude.NewVertex(ctx, "your-project-id", "your-region",
+	client, err := claude.NewWithVertex(ctx, "your-region", "your-project-id",
 		claude.WithVertexModel("claude-sonnet-4@20250514"), // Default model
 		claude.WithVertexSystemPrompt("You are a helpful assistant."),
 	)
