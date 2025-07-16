@@ -3,6 +3,7 @@ package gollem
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -37,15 +38,16 @@ type Plan struct {
 
 // planToDo represents a single task in the plan (private to avoid API confusion)
 type planToDo struct {
-	ID          string      `json:"todo_id"`
-	Description string      `json:"todo_description"`
-	Intent      string      `json:"todo_intent"` // High-level intention
-	Status      ToDoStatus  `json:"todo_status"`
-	Result      *toDoResult `json:"todo_result,omitempty"`
-	Error       error       `json:"-"` // Not serialized
-	ErrorMsg    string      `json:"todo_error,omitempty"`
-	UpdatedAt   time.Time   `json:"todo_updated_at,omitempty"` // When todo was last updated
-	CreatedAt   time.Time   `json:"todo_created_at,omitempty"` // When todo was created
+	ID              string         `json:"todo_id"`
+	Description     string         `json:"todo_description"`
+	Intent          string         `json:"todo_intent"` // High-level intention
+	Status          ToDoStatus     `json:"todo_status"`
+	Result          *toDoResult    `json:"todo_result,omitempty"`
+	Error           error          `json:"-"` // Not serialized
+	ErrorMsg        string         `json:"todo_error,omitempty"`
+	UpdatedAt       time.Time      `json:"todo_updated_at,omitempty"` // When todo was last updated
+	CreatedAt       time.Time      `json:"todo_created_at,omitempty"` // When todo was created
+	toolCallTracker map[string]int `json:"-"`                         // Track tool call frequency to prevent loops
 }
 
 // PlanState represents the current state of plan execution (private)
@@ -810,6 +812,11 @@ func executeStepWithInput(ctx context.Context, session Session, config gollemCon
 		Data:       make(map[string]any),
 	}
 
+	// Track tool call frequency to prevent infinite loops
+	if todo.toolCallTracker == nil {
+		todo.toolCallTracker = make(map[string]int)
+	}
+
 	// Add timeout for processing
 	stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -831,6 +838,36 @@ func executeStepWithInput(ctx context.Context, session Session, config gollemCon
 		}
 	}
 
+	// Filter function calls to prevent infinite loops
+	const maxSameToolCalls = 3
+	filteredCalls := []*FunctionCall{}
+	var blockedCalls []string
+
+	for _, call := range response.FunctionCalls {
+		// Create a key for tracking: tool_name:arguments_hash
+		toolKey := call.Name
+		if len(call.Arguments) > 0 {
+			// Simple hash of arguments for tracking
+			argsStr := fmt.Sprintf("%v", call.Arguments)
+			toolKey = fmt.Sprintf("%s:%x", call.Name, sha256.Sum256([]byte(argsStr)))
+		}
+
+		todo.toolCallTracker[toolKey]++
+
+		if todo.toolCallTracker[toolKey] > maxSameToolCalls {
+			logger.Warn("tool call frequency exceeded limit",
+				"tool", call.Name,
+				"count", todo.toolCallTracker[toolKey],
+				"limit", maxSameToolCalls)
+			blockedCalls = append(blockedCalls, call.Name)
+		} else {
+			filteredCalls = append(filteredCalls, call)
+		}
+	}
+
+	// Update response with filtered calls
+	response.FunctionCalls = filteredCalls
+
 	// Add function calls to result
 	result.ToolCalls = append(result.ToolCalls, response.FunctionCalls...)
 
@@ -847,6 +884,13 @@ func executeStepWithInput(ctx context.Context, session Session, config gollemCon
 		}
 
 		additionalInput = append(additionalInput, Text("IMPORTANT: maximum retries already exceeded, more tool call is not allowed"))
+	}
+
+	// Add warning about blocked calls if any
+	if len(blockedCalls) > 0 {
+		warning := fmt.Sprintf("WARNING: The following tools were blocked due to excessive repetition (%d+ calls): %v. Please try a different approach or be more specific with your requests.",
+			maxSameToolCalls, blockedCalls)
+		additionalInput = append(additionalInput, Text(warning))
 	}
 
 	// Process tool calls
