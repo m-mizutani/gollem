@@ -26,3 +26,7 @@ Please structure your response in a clear, user-friendly format. Focus on being 
 ## Additional Context:
 {{.SystemPrompt}}
 {{end}}
+
+{{if .Language}}
+Please provide the entire summary in {{.Language}}.
+{{end}}

@@ -38,3 +38,7 @@ IMPORTANT:
 - The final step should typically integrate findings and provide a complete answer
 
 Goal: {{.Goal}}
+
+{{if .Language}}
+Please respond in {{.Language}} and ensure all step descriptions and intentions are written in {{.Language}}.
+{{end}}

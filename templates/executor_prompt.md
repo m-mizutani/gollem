@@ -14,3 +14,7 @@ Progress so far:
 4. Tools are provided specifically to help you complete tasks - use them actively
 
 Select and execute the appropriate tools to complete this task.
+
+{{if .Language}}
+Please provide all responses and explanations in {{.Language}}.
+{{end}}

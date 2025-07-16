@@ -265,7 +265,8 @@ type planConfig struct {
 	executionMode           PlanExecutionMode
 	skipConfidenceThreshold float64
 	skipConfirmationHook    PlanSkipConfirmationHook
-	maxToolRetries          int // Maximum number of recursive tool calls
+	maxToolRetries          int    // Maximum number of recursive tool calls
+	language                string // Language preference for plan execution
 }
 
 // PlanOption represents configuration options for plan creation and execution
@@ -361,7 +362,7 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 	}
 
 	// Generate plan (use clarified goal for planning)
-	todos, err := g.generatePlan(ctx, plannerSession, clarifiedGoal, toolList, cfg.systemPrompt)
+	todos, err := g.generatePlan(ctx, plannerSession, clarifiedGoal, toolList, cfg)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to generate plan")
 	}
@@ -647,6 +648,7 @@ func (g *Agent) createPlanConfig(options ...PlanOption) *planConfig {
 		executionMode:           PlanExecutionModeBalanced,
 		skipConfidenceThreshold: 0.8,
 		maxToolRetries:          10,
+		language:                "English", // Default language
 	}
 
 	for _, opt := range options {
@@ -719,7 +721,7 @@ func (g *Agent) createPlannerSession(ctx context.Context, cfg *planConfig, _ []T
 }
 
 // generatePlan generates initial plan using LLM
-func (g *Agent) generatePlan(ctx context.Context, session Session, prompt string, availableTools []Tool, systemPrompt string) ([]planToDo, error) {
+func (g *Agent) generatePlan(ctx context.Context, session Session, prompt string, availableTools []Tool, cfg *planConfig) ([]planToDo, error) {
 	// Organize tool information (direct specification is prohibited, but provide information about capabilities)
 	toolCapabilities := make([]string, len(availableTools))
 	for i, tool := range availableTools {
@@ -733,7 +735,8 @@ func (g *Agent) generatePlan(ctx context.Context, session Session, prompt string
 	templateData := plannerTemplateData{
 		ToolInfo:     toolInfo,
 		Goal:         prompt,
-		SystemPrompt: systemPrompt,
+		SystemPrompt: cfg.systemPrompt,
+		Language:     cfg.language,
 	}
 
 	if err := plannerTmpl.Execute(&promptBuffer, templateData); err != nil {
@@ -901,6 +904,7 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 		Intent:          todo.Intent,
 		ProgressSummary: p.getProgressSummary(),
 		SystemPrompt:    p.config.systemPrompt,
+		Language:        p.config.language,
 	}); err != nil {
 		return nil, goerr.Wrap(err, "failed to execute executor template")
 	}
@@ -937,6 +941,7 @@ func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 		CompletedSteps:    p.getCompletedStepsSummary(),
 		LastStepResult:    p.getLastStepResult(),
 		SystemPrompt:      p.config.systemPrompt,
+		Language:          p.config.language,
 	}
 
 	if err := reflectorTmpl.Execute(&promptBuffer, templateData); err != nil {
@@ -1025,6 +1030,7 @@ func (g *Agent) clarifyUserGoal(ctx context.Context, userInput string, cfg *plan
 	templateData := goalClarifierTemplateData{
 		UserInput:    userInput,
 		SystemPrompt: cfg.systemPrompt,
+		Language:     cfg.language,
 	}
 
 	if err := goalClarifierTmpl.Execute(&promptBuffer, templateData); err != nil {
@@ -1070,6 +1076,7 @@ func (p *Plan) generateExecutionSummary(ctx context.Context) (string, error) {
 		ExecutionDetails: executionDetails,
 		OverallStatus:    overallStatus,
 		SystemPrompt:     p.config.systemPrompt,
+		Language:         p.config.language,
 	}
 
 	if err := summarizerTmpl.Execute(&promptBuffer, templateData); err != nil {
@@ -1820,5 +1827,13 @@ func WithSkipConfirmationHook(hook PlanSkipConfirmationHook) PlanOption {
 func WithMaxToolRetries(maxRetries int) PlanOption {
 	return func(cfg *planConfig) {
 		cfg.maxToolRetries = maxRetries
+	}
+}
+
+// WithPlanLanguage sets the language preference for plan execution responses.
+// Default: "English"
+func WithPlanLanguage(language string) PlanOption {
+	return func(cfg *planConfig) {
+		cfg.language = language
 	}
 }

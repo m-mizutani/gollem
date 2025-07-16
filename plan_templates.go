@@ -5,6 +5,8 @@ import (
 	"text/template"
 )
 
+// templates
+
 //go:embed templates/planner_prompt.md
 var plannerPromptTemplate string
 
@@ -21,10 +23,10 @@ var summarizerPromptTemplate string
 var goalClarifierPromptTemplate string
 
 var (
-	plannerTmpl      *template.Template
-	executorTmpl     *template.Template
-	reflectorTmpl    *template.Template
-	summarizerTmpl   *template.Template
+	plannerTmpl       *template.Template
+	executorTmpl      *template.Template
+	reflectorTmpl     *template.Template
+	summarizerTmpl    *template.Template
 	goalClarifierTmpl *template.Template
 )
 
@@ -40,33 +42,38 @@ type plannerTemplateData struct {
 	ToolInfo     string
 	Goal         string
 	SystemPrompt string
+	Language     string
 }
 
 type executorTemplateData struct {
 	Intent          string
 	ProgressSummary string
 	SystemPrompt    string
+	Language        string
 }
 
 type reflectorTemplateData struct {
 	Goal              string
-	ClarifiedGoal   string
+	ClarifiedGoal     string
 	CurrentPlanStatus string
 	OriginalPlan      string
 	CompletedSteps    string
 	LastStepResult    string
 	SystemPrompt      string
+	Language          string
 }
 
 type summarizerTemplateData struct {
 	Goal             string
-	ClarifiedGoal  string
+	ClarifiedGoal    string
 	ExecutionDetails string
 	OverallStatus    string
 	SystemPrompt     string
+	Language         string
 }
 
 type goalClarifierTemplateData struct {
 	UserInput    string
 	SystemPrompt string
+	Language     string
 }

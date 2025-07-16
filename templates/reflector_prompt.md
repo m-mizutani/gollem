@@ -91,3 +91,7 @@ You MUST respond with valid JSON in the following format:
 - Below 0.5: Low confidence (avoid skipping)
 
 The plan continues as long as pending todos exist and completes when all are done or skipped.
+
+{{if .Language}}
+Please ensure all todo descriptions, intentions, and responses are written in {{.Language}}.
+{{end}}
