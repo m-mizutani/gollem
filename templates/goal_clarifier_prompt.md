@@ -1,25 +1,17 @@
-{{if .SystemPrompt}}
-# Background system prompt
-{{.SystemPrompt}}
--------------------------------------
-{{end}}
+# Objective
 
-# Current main objective
-
-You are an expert at understanding user intent and clarifying what they want to accomplish.
+You need to restate the user's request in a clear, simple way.
 
 The user has provided the following input:
 "{{.UserInput}}"
 
-Your task is to clarify and express what the user wants to achieve. Help make their goal clear and actionable by understanding their purpose and intent.
+Your task is to restate what the user wants in simple, direct terms. Do not interpret hidden meanings or assume complex intentions.
 
-Please respond with a clear statement that captures what the user wants to accomplish. Focus on:
-- What specific action or investigation they want performed
-- What subject or target they're interested in
-- What outcome they're seeking
-- The underlying purpose or intent behind their request
+Simply rephrase their request to be clear and actionable, focusing on:
+- What they explicitly asked for
+- Any specific targets or subjects they mentioned
 
-Be direct and specific while preserving the user's intent. Provide enough clarity to understand their goal without being unnecessarily verbose.
+Keep it straightforward and avoid adding interpretations beyond what was directly stated.
 
 {{if .Language}}
 Please respond in {{.Language}}.

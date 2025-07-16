@@ -1025,6 +1025,9 @@ func (g *Agent) clarifyUserGoal(ctx context.Context, userInput string, cfg *plan
 	if cfg.history != nil {
 		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
 	}
+	if cfg.systemPrompt != "" {
+		sessionOptions = append(sessionOptions, WithSessionSystemPrompt(cfg.systemPrompt))
+	}
 
 	goalSession, err := g.llm.NewSession(ctx, sessionOptions...)
 	if err != nil {
