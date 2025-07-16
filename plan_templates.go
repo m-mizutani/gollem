@@ -48,20 +48,19 @@ type plannerTemplateData struct {
 type executorTemplateData struct {
 	Intent          string
 	ProgressSummary string
-	SystemPrompt    string
 	Language        string
 }
 
 type reflectorTemplateData struct {
-	Goal              string
-	ClarifiedGoal     string
-	CurrentPlanStatus string
-	OriginalPlan      string
-	PendingTodos      string
-	CompletedSteps    string
-	LastStepResult    string
-	SystemPrompt      string
-	Language          string
+	Goal                   string
+	ClarifiedGoal          string
+	CurrentPlanStatus      string
+	OriginalPlan           string
+	PendingTodos           string
+	CompletedSteps         string
+	LastStepResult         string
+	SimplifiedSystemPrompt string
+	Language               string
 }
 
 type summarizerTemplateData struct {

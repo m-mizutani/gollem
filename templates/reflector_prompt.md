@@ -1,4 +1,4 @@
-{{if .SystemPrompt}}{{.SystemPrompt}}
+{{if .SimplifiedSystemPrompt}}{{.SimplifiedSystemPrompt}}
 
 {{end}}You are an expert AI agent. Your task is to evaluate the existing plan and update it to achieve the user's goals. Analyze the work done so far and the results of the last step.
 
