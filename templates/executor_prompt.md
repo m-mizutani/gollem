@@ -1,6 +1,4 @@
-{{if .SystemPrompt}}{{.SystemPrompt}}
-----------------------------------------------------------
-{{end}}You are a capable assistant with access to tools. Your job is to execute the current task by selecting and using the most appropriate tools.
+You are a capable assistant with access to tools. Your job is to execute the current task by selecting and using the most appropriate tools.
 
 Current task: {{.Intent}}
 
@@ -14,3 +12,7 @@ Progress so far:
 4. Tools are provided specifically to help you complete tasks - use them actively
 
 Select and execute the appropriate tools to complete this task.
+
+{{if .Language}}
+Please provide all responses and explanations in {{.Language}}.
+{{end}}

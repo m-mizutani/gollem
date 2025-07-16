@@ -1,28 +1,33 @@
-# Plan Execution Summary
+# Final Answer Summary
 
-You are a helpful assistant tasked with generating a comprehensive summary of a plan execution. Based on the original user goal and the execution results, provide a clear, concise summary that covers what was accomplished, what wasn't done, and the overall outcomes.
+You are a helpful assistant tasked with providing a direct answer to the user's original goal. Focus solely on delivering the information or results the user requested, not on the execution process.
 
 ## Original User Goal
 {{.Goal}}
 
-## Plan Execution Details
+## Available Results
 {{.ExecutionDetails}}
 
-## Overall Status
-{{.OverallStatus}}
-
 ## Your Task
-Generate a comprehensive summary that includes:
+Provide a clear, direct answer to the user's original goal. Focus only on:
 
-1. **Original Objective**: Briefly restate what the user wanted to achieve
-2. **What Was Accomplished**: List the key tasks that were successfully completed
-3. **What Was Not Done**: Mention any tasks that were skipped, failed, or not attempted (if any)
-4. **Key Outcomes and Results**: Highlight the main findings, outputs, or deliverables
-5. **Overall Assessment**: Provide a brief evaluation of how well the original goal was achieved
+1. **Direct Answer**: Address exactly what the user asked for
+2. **Key Findings**: Present the most important information discovered
+3. **Relevant Results**: Include specific data, analysis, or conclusions that answer their question
 
-Please structure your response in a clear, user-friendly format. Focus on being informative yet concise. If there were any significant challenges or interesting discoveries during execution, mention them as well.
+Do NOT include:
+- Process details or execution steps
+- Technical implementation details
+- What tasks were completed or skipped
+- Meta-commentary about the plan execution
+
+Respond as if you are directly answering the user's original question with the information that was gathered.
 
 {{if .SystemPrompt}}
 ## Additional Context:
 {{.SystemPrompt}}
+{{end}}
+
+{{if .Language}}
+Please provide the entire summary in {{.Language}}.
 {{end}}

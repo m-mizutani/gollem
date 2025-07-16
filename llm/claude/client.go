@@ -408,6 +408,8 @@ func generateClaudeStream(
 	var textContent strings.Builder
 	var toolCalls []anthropic.ContentBlockParamUnion
 	acc := newFunctionCallAccumulator()
+	var totalInputTokens int
+	var totalOutputTokens int
 
 	go func() {
 		defer close(responseChan)
@@ -438,12 +440,27 @@ func generateClaudeStream(
 			}
 
 			switch event.Type {
+			case "message_delta":
+				messageDelta := event.AsMessageDelta()
+				if messageDelta.Usage.OutputTokens > 0 {
+					totalOutputTokens = int(messageDelta.Usage.OutputTokens)
+				}
+			case "message_start":
+				messageStart := event.AsMessageStart()
+				if messageStart.Message.Usage.InputTokens > 0 {
+					totalInputTokens = int(messageStart.Message.Usage.InputTokens)
+				}
+				if messageStart.Message.Usage.OutputTokens > 0 {
+					totalOutputTokens = int(messageStart.Message.Usage.OutputTokens)
+				}
 			case "content_block_delta":
 				deltaEvent := event.AsContentBlockDelta()
 				switch deltaEvent.Delta.Type {
 				case "text_delta":
 					textDelta := deltaEvent.Delta.AsTextDelta()
 					response.Texts = append(response.Texts, textDelta.Text)
+					response.InputToken = totalInputTokens
+					response.OutputToken = totalOutputTokens
 					textContent.WriteString(textDelta.Text)
 				case "input_json_delta":
 					jsonDelta := deltaEvent.Delta.AsInputJSONDelta()
@@ -467,6 +484,8 @@ func generateClaudeStream(
 						return
 					}
 					response.FunctionCalls = append(response.FunctionCalls, funcCall)
+					response.InputToken = totalInputTokens
+					response.OutputToken = totalOutputTokens
 					toolCalls = append(toolCalls, anthropic.NewToolUseBlock(funcCall.ID, funcCall.Arguments, funcCall.Name))
 					acc = newFunctionCallAccumulator()
 				}
@@ -578,6 +597,8 @@ func processResponseWithContentType(resp *anthropic.Message, contentType gollem.
 	response := &gollem.Response{
 		Texts:         make([]string, 0),
 		FunctionCalls: make([]*gollem.FunctionCall, 0),
+		InputToken:    int(resp.Usage.InputTokens),
+		OutputToken:   int(resp.Usage.OutputTokens),
 	}
 
 	for _, content := range resp.Content {
@@ -620,25 +641,27 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		return nil, err
 	}
 
+	// Create a copy of messages for the API call, but don't update session history yet
+	apiMessages := append([]anthropic.MessageParam{}, s.messages...)
+	apiMessages = append(apiMessages, messages...)
+
 	// DEBUG: Log message history for debugging
 	logger.Debug("Claude API request",
-		"message_count", len(s.messages),
+		"message_count", len(apiMessages),
 		"input_count", len(input))
 
 	// Log the last few messages to understand the conversation state
-	for i, msg := range s.messages[max(0, len(s.messages)-5):] {
+	for i, msg := range apiMessages[max(0, len(apiMessages)-5):] {
 		logger.Debug("Claude message",
 			"index", i,
 			"role", msg.Role,
 			"content_blocks", len(msg.Content))
 	}
 
-	s.messages = append(s.messages, messages...)
-
 	resp, err := generateClaudeContent(
 		ctx,
 		s.client,
-		s.messages,
+		apiMessages,
 		s.defaultModel,
 		s.params,
 		s.tools,
@@ -649,8 +672,9 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		return nil, err
 	}
 
-	// Add assistant's response to message history
+	// Only update session history after successful API call
 	// This is critical for tool_use/tool_result consistency
+	s.messages = append(s.messages, messages...)
 	s.messages = append(s.messages, resp.ToParam())
 
 	logger.Debug("Added assistant response to message history",

@@ -1,4 +1,4 @@
-{{if .SystemPrompt}}{{.SystemPrompt}}
+{{if .SimplifiedSystemPrompt}}{{.SimplifiedSystemPrompt}}
 
 {{end}}You are an expert AI agent. Your task is to evaluate the existing plan and update it to achieve the user's goals. Analyze the work done so far and the results of the last step.
 
@@ -14,6 +14,9 @@ Otherwise, provide a new updated plan containing only the steps that "still need
 
 ## Original plan:
 {{.OriginalPlan}}
+
+## Currently pending todos (only these can be updated or skipped):
+{{.PendingTodos}}
 
 ## Completed steps and their results:
 {{.CompletedSteps}}
@@ -71,7 +74,7 @@ You MUST respond with valid JSON in the following format:
 
 ## skip_decisions (optional)
 - Skip todos with detailed reasoning
-- `todo_id`: Must match existing todo ID
+- `todo_id`: Must match a pending todo ID from the "Currently pending todos" section above
 - `skip_reason`: Clear explanation why task should be skipped
 - `confidence`: 0.0-1.0 (0.8+ recommended for skipping)
 - `evidence`: Specific evidence supporting the decision
@@ -82,8 +85,10 @@ You MUST respond with valid JSON in the following format:
 # Guidelines
 
 **When to update todos**: Task needs clarification, scope changed, or approach adjustment needed
-**When to add new todos**: Analysis reveals genuinely required additional work
+**When to add new todos**: Analysis reveals genuinely required additional work (data collection only)
 **When to skip todos**: Tasks become redundant or unnecessary due to completed work
+**AVOID these todo types**: Do not add todos for "analysis", "integration", "summarization", "judgment", "conclusion", or "evaluation" - these are handled automatically in the summarization phase
+**Focus on**: Concrete data gathering, investigation, and information retrieval tasks only
 
 **Confidence levels**:
 - 0.8-1.0: High confidence (clear evidence task is redundant)
@@ -91,3 +96,7 @@ You MUST respond with valid JSON in the following format:
 - Below 0.5: Low confidence (avoid skipping)
 
 The plan continues as long as pending todos exist and completes when all are done or skipped.
+
+{{if .Language}}
+Please ensure all todo descriptions, intentions, and responses are written in {{.Language}}.
+{{end}}

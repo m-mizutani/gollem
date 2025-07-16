@@ -1,6 +1,7 @@
 package gollem
 
 import (
+	"context"
 	"log/slog"
 	"os"
 )
@@ -33,7 +34,7 @@ func (p *Plan) TestSetTodos(todos []planToDo) {
 }
 
 func (p *Plan) TestUpdatePlan(reflection *planReflection) error {
-	return p.updatePlan(reflection)
+	return p.updatePlan(context.Background(), reflection)
 }
 
 // Helper to create a test plan
