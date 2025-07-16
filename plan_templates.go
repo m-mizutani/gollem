@@ -39,10 +39,9 @@ func init() {
 }
 
 type plannerTemplateData struct {
-	ToolInfo     string
-	Goal         string
-	SystemPrompt string
-	Language     string
+	ToolInfo string
+	Goal     string
+	Language string
 }
 
 type executorTemplateData struct {
