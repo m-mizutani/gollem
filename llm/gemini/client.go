@@ -275,6 +275,12 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 		FunctionCalls: make([]*gollem.FunctionCall, 0),
 	}
 
+	// Add token usage information if available
+	if resp.UsageMetadata != nil {
+		response.InputToken = int(resp.UsageMetadata.PromptTokenCount)
+		response.OutputToken = int(resp.UsageMetadata.CandidatesTokenCount)
+	}
+
 	for i, candidate := range resp.Candidates {
 		// Check for malformed function call errors with improved error details
 		if candidate.FinishReason.String() == "FinishReasonMalformedFunctionCall" {
@@ -390,6 +396,8 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 
 	go func() {
 		defer close(responseChan)
+		var totalInputTokens int
+		var totalOutputTokens int
 
 		for {
 			resp, err := iter.Next()
@@ -403,6 +411,12 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				return
 			}
 
+			// Accumulate token usage if available
+			if resp.UsageMetadata != nil {
+				totalInputTokens = int(resp.UsageMetadata.PromptTokenCount)
+				totalOutputTokens = int(resp.UsageMetadata.CandidatesTokenCount)
+			}
+
 			processedResp, err := processResponse(resp)
 			if err != nil {
 				responseChan <- &gollem.Response{
@@ -410,6 +424,11 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				}
 				return
 			}
+
+			// Override with accumulated token counts for streaming
+			processedResp.InputToken = totalInputTokens
+			processedResp.OutputToken = totalOutputTokens
+
 			responseChan <- processedResp
 		}
 	}()

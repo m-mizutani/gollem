@@ -18,6 +18,8 @@ type FunctionCall struct {
 type Response struct {
 	Texts         []string
 	FunctionCalls []*FunctionCall
+	InputToken    int
+	OutputToken   int
 
 	// Error is an error that occurred during the generation for streaming response.
 	Error error

@@ -311,6 +311,8 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	response := &gollem.Response{
 		Texts:         make([]string, 0),
 		FunctionCalls: make([]*gollem.FunctionCall, 0),
+		InputToken:    resp.Usage.PromptTokens,
+		OutputToken:   resp.Usage.CompletionTokens,
 	}
 
 	message := resp.Choices[0].Message
@@ -357,6 +359,10 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	}
 
 	req := s.createRequest(true)
+	// Enable stream options to get usage data
+	req.StreamOptions = &openai.StreamOptions{
+		IncludeUsage: true,
+	}
 	stream, err := s.client.CreateChatCompletionStream(ctx, req)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create chat completion stream")
@@ -370,6 +376,8 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 
 		var textContent string
 		var toolCalls []openai.ToolCall
+		var totalInputTokens int
+		var totalOutputTokens int
 
 		// Process streaming chunks
 		for {
@@ -384,6 +392,12 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				return
 			}
 
+			// Handle token usage if available (comes in final chunk)
+			if resp.Usage != nil {
+				totalInputTokens = resp.Usage.PromptTokens
+				totalOutputTokens = resp.Usage.CompletionTokens
+			}
+
 			if len(resp.Choices) == 0 {
 				continue
 			}
@@ -395,7 +409,9 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 			if delta.Content != "" {
 				textContent += delta.Content
 				responseChan <- &gollem.Response{
-					Texts: []string{delta.Content},
+					Texts:       []string{delta.Content},
+					InputToken:  totalInputTokens,
+					OutputToken: totalOutputTokens,
 				}
 			}
 
@@ -465,6 +481,8 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 			if len(functionCalls) > 0 {
 				responseChan <- &gollem.Response{
 					FunctionCalls: functionCalls,
+					InputToken:    totalInputTokens,
+					OutputToken:   totalOutputTokens,
 				}
 			}
 
@@ -479,6 +497,14 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				Role:    openai.ChatMessageRoleAssistant,
 				Content: textContent,
 			})
+		}
+
+		// Send final response with complete token usage if available
+		if totalInputTokens > 0 || totalOutputTokens > 0 {
+			responseChan <- &gollem.Response{
+				InputToken:  totalInputTokens,
+				OutputToken: totalOutputTokens,
+			}
 		}
 	}()
 
