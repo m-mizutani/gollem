@@ -163,7 +163,9 @@ func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...g
 		return nil, err
 	}
 
-	s.messages = append(s.messages, messages...)
+	// Create a copy of messages for the API call, but don't update session history yet
+	apiMessages := append([]anthropic.MessageParam{}, s.messages...)
+	apiMessages = append(apiMessages, messages...)
 
 	// Convert gollem tools to anthropic tools
 	var tools []anthropic.ToolUnionParam
@@ -177,7 +179,7 @@ func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...g
 	resp, err := generateClaudeContent(
 		ctx,
 		s.client,
-		s.messages,
+		apiMessages,
 		s.defaultModel,
 		s.params,
 		tools,
@@ -188,7 +190,8 @@ func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...g
 		return nil, err
 	}
 
-	// Add assistant's response to message history
+	// Only update session history after successful API call
+	s.messages = append(s.messages, messages...)
 	s.messages = append(s.messages, resp.ToParam())
 
 	return processResponseWithContentType(resp, s.cfg.ContentType()), nil

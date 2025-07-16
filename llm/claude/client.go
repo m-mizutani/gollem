@@ -641,25 +641,27 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		return nil, err
 	}
 
+	// Create a copy of messages for the API call, but don't update session history yet
+	apiMessages := append([]anthropic.MessageParam{}, s.messages...)
+	apiMessages = append(apiMessages, messages...)
+
 	// DEBUG: Log message history for debugging
 	logger.Debug("Claude API request",
-		"message_count", len(s.messages),
+		"message_count", len(apiMessages),
 		"input_count", len(input))
 
 	// Log the last few messages to understand the conversation state
-	for i, msg := range s.messages[max(0, len(s.messages)-5):] {
+	for i, msg := range apiMessages[max(0, len(apiMessages)-5):] {
 		logger.Debug("Claude message",
 			"index", i,
 			"role", msg.Role,
 			"content_blocks", len(msg.Content))
 	}
 
-	s.messages = append(s.messages, messages...)
-
 	resp, err := generateClaudeContent(
 		ctx,
 		s.client,
-		s.messages,
+		apiMessages,
 		s.defaultModel,
 		s.params,
 		s.tools,
@@ -670,8 +672,9 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		return nil, err
 	}
 
-	// Add assistant's response to message history
+	// Only update session history after successful API call
 	// This is critical for tool_use/tool_result consistency
+	s.messages = append(s.messages, messages...)
 	s.messages = append(s.messages, resp.ToParam())
 
 	logger.Debug("Added assistant response to message history",
