@@ -85,8 +85,10 @@ You MUST respond with valid JSON in the following format:
 # Guidelines
 
 **When to update todos**: Task needs clarification, scope changed, or approach adjustment needed
-**When to add new todos**: Analysis reveals genuinely required additional work
+**When to add new todos**: Analysis reveals genuinely required additional work (data collection only)
 **When to skip todos**: Tasks become redundant or unnecessary due to completed work
+**AVOID these todo types**: Do not add todos for "analysis", "integration", "summarization", "judgment", "conclusion", or "evaluation" - these are handled automatically in the summarization phase
+**Focus on**: Concrete data gathering, investigation, and information retrieval tasks only
 
 **Confidence levels**:
 - 0.8-1.0: High confidence (clear evidence task is redundant)

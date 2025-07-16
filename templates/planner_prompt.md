@@ -37,7 +37,9 @@ IMPORTANT:
 - Each step MUST have a non-empty "description" field
 - Do not create steps with empty descriptions
 - Focus on logical progression toward the goal
-- The final step should typically integrate findings and provide a complete answer
+- Focus ONLY on data collection and investigation steps
+- Do NOT create steps for "analysis", "integration", "summarization", "judgment", or "conclusion" - these are handled automatically
+- End with concrete data gathering tasks, not synthesis tasks
 
 Goal: {{.Goal}}
 
