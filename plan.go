@@ -727,10 +727,13 @@ func (g *Agent) createPlanWithRuntime(ctx context.Context, id, input, clarifiedG
 }
 
 // createPlannerSession creates a session for plan generation
-func (g *Agent) createPlannerSession(ctx context.Context, _ *planConfig, _ []Tool) (Session, error) {
+func (g *Agent) createPlannerSession(ctx context.Context, cfg *planConfig, _ []Tool) (Session, error) {
 	// Create clean session without history to avoid confusion with previous conversation
 	sessionOptions := []SessionOption{
 		WithSessionContentType(ContentTypeJSON),
+	}
+	if cfg.history != nil {
+		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
 	}
 
 	return g.llm.NewSession(ctx, sessionOptions...)
@@ -749,10 +752,9 @@ func (g *Agent) generatePlan(ctx context.Context, session Session, prompt string
 	// Use template for prompt generation
 	var promptBuffer bytes.Buffer
 	templateData := plannerTemplateData{
-		ToolInfo:     toolInfo,
-		Goal:         prompt,
-		SystemPrompt: cfg.systemPrompt,
-		Language:     cfg.language,
+		ToolInfo: toolInfo,
+		Goal:     prompt,
+		Language: cfg.language,
 	}
 
 	if err := plannerTmpl.Execute(&promptBuffer, templateData); err != nil {
