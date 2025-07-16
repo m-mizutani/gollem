@@ -15,6 +15,9 @@ Otherwise, provide a new updated plan containing only the steps that "still need
 ## Original plan:
 {{.OriginalPlan}}
 
+## Currently pending todos (only these can be updated or skipped):
+{{.PendingTodos}}
+
 ## Completed steps and their results:
 {{.CompletedSteps}}
 
@@ -71,7 +74,7 @@ You MUST respond with valid JSON in the following format:
 
 ## skip_decisions (optional)
 - Skip todos with detailed reasoning
-- `todo_id`: Must match existing todo ID
+- `todo_id`: Must match a pending todo ID from the "Currently pending todos" section above
 - `skip_reason`: Clear explanation why task should be skipped
 - `confidence`: 0.0-1.0 (0.8+ recommended for skipping)
 - `evidence`: Specific evidence supporting the decision

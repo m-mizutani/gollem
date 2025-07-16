@@ -383,14 +383,17 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 		"todos_count", len(todos),
 		"prompt", prompt)
 
+	// Log initial plan status
+	plan.logging()
+
 	return plan, nil
 }
 
 // Execute executes the plan and returns the final result
 func (p *Plan) Execute(ctx context.Context) (string, error) {
 	// Embed logger into context for internal methods to use
-	logger := p.logger.With("gollem.plan_id", p.id)
-	ctx = ctxWithLogger(ctx, logger)
+	logger := p.logger
+	ctx = ctxWithLogger(ctx, logger) // Add logger to context
 	ctx = ctxWithPlan(ctx, p)
 
 	logger.Debug("plan execute started", "state", p.state)
@@ -401,6 +404,10 @@ func (p *Plan) Execute(ctx context.Context) (string, error) {
 	}
 
 	logger.Debug("plan validation passed, starting execution")
+	for _, todo := range p.todos {
+		logger.Debug("ToDo", "id", todo.ID, "description", todo.Description)
+	}
+
 	return p.executeSteps(ctx)
 }
 
@@ -529,7 +536,7 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 
 	// Update plan
 	logger.Debug("updating plan based on reflection", "step_id", currentStep.ID)
-	if err := p.updatePlan(reflection); err != nil {
+	if err := p.updatePlan(ctx, reflection); err != nil {
 		logger.Debug("plan update failed", "step_id", currentStep.ID, "error", err)
 		return "", false, goerr.Wrap(err, "failed to update plan")
 	}
@@ -938,6 +945,7 @@ func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 		ClarifiedGoal:     p.clarifiedGoal,
 		CurrentPlanStatus: p.getCurrentPlanStatus(),
 		OriginalPlan:      p.getPlanSummary(),
+		PendingTodos:      p.getPendingTodosSummary(),
 		CompletedSteps:    p.getCompletedStepsSummary(),
 		LastStepResult:    p.getLastStepResult(),
 		SystemPrompt:      p.config.systemPrompt,
@@ -1267,6 +1275,23 @@ func (p *Plan) getPlanSummary() string {
 	return summary.String()
 }
 
+// getPendingTodosSummary returns only pending todos with their IDs for reflection
+func (p *Plan) getPendingTodosSummary() string {
+	var summary strings.Builder
+	pendingCount := 0
+	for _, step := range p.todos {
+		if step.Status == ToDoStatusPending {
+			pendingCount++
+			summary.WriteString(fmt.Sprintf("- ID: %s, Description: %s, Intent: %s\n",
+				step.ID, step.Description, step.Intent))
+		}
+	}
+	if pendingCount == 0 {
+		summary.WriteString("No pending todos remaining.\n")
+	}
+	return summary.String()
+}
+
 func (p *Plan) getCompletedStepsSummary() string {
 	var summary strings.Builder
 	for _, step := range p.todos {
@@ -1322,9 +1347,11 @@ func (p *Plan) getCurrentPlanStatus() string {
 	return summary.String()
 }
 
-func (p *Plan) updatePlan(reflection *planReflection) error {
+func (p *Plan) updatePlan(ctx context.Context, reflection *planReflection) error {
 	now := time.Now()
 	var changes []PlanToDoChange
+
+	defer p.logging()
 
 	// Validate skip decisions and legacy skipped todos for conflicts
 	skipMap := make(map[string]bool)
@@ -1411,6 +1438,15 @@ func (p *Plan) updatePlan(reflection *planReflection) error {
 	// Process enhanced skip decisions with confirmation
 	if len(reflection.SkipDecisions) > 0 {
 		logger := p.logger
+
+		// Debug: Log current todo IDs for comparison
+		currentTodoIDs := make([]string, len(p.todos))
+		for i, todo := range p.todos {
+			currentTodoIDs[i] = fmt.Sprintf("%s(%s)", todo.ID, todo.Status)
+		}
+		logger.Debug("current todos when processing skip decisions",
+			"todos", currentTodoIDs, "skip_decisions_count", len(reflection.SkipDecisions))
+
 		for _, skipDecision := range reflection.SkipDecisions {
 			// Check execution mode
 			shouldSkip := false
@@ -1429,10 +1465,11 @@ func (p *Plan) updatePlan(reflection *planReflection) error {
 			case PlanExecutionModeBalanced:
 				// Check confidence and get confirmation
 				if skipDecision.Confidence >= p.config.skipConfidenceThreshold {
-					shouldSkip = p.config.skipConfirmationHook(context.Background(), p, skipDecision)
+					confirmed := p.config.skipConfirmationHook(ctx, p, skipDecision)
+					shouldSkip = confirmed
 					logger.Debug("skip decision in balanced mode",
 						"todo_id", skipDecision.TodoID, "confidence", skipDecision.Confidence,
-						"confirmed", shouldSkip)
+						"threshold", p.config.skipConfidenceThreshold, "confirmed", confirmed, "shouldSkip", shouldSkip)
 				} else {
 					logger.Debug("skip denied due to low confidence",
 						"todo_id", skipDecision.TodoID, "confidence", skipDecision.Confidence,
@@ -1440,11 +1477,32 @@ func (p *Plan) updatePlan(reflection *planReflection) error {
 				}
 			}
 
+			logger.Debug("skip decision result", "todo_id", skipDecision.TodoID, "shouldSkip", shouldSkip)
+
 			if shouldSkip {
 				// Find the todo to skip
+				todoFound := false
 				for i := range p.todos {
 					if p.todos[i].ID == skipDecision.TodoID {
+						todoFound = true
 						oldTodo := p.todos[i]
+						logger.Debug("found todo for skip decision", "todo_id", skipDecision.TodoID, "old_status", oldTodo.Status)
+
+						// Check if todo is already completed or failed
+						if oldTodo.Status == ToDoStatusCompleted || oldTodo.Status == ToDoStatusFailed {
+							logger.Debug("skip decision ignored - todo already completed/failed",
+								"todo_id", skipDecision.TodoID, "current_status", oldTodo.Status)
+							break
+						}
+
+						// Check if todo is already skipped
+						if oldTodo.Status == ToDoStatusSkipped {
+							logger.Debug("skip decision ignored - todo already skipped",
+								"todo_id", skipDecision.TodoID)
+							break
+						}
+
+						logger.Debug("applying skip to todo", "todo_id", skipDecision.TodoID, "old_status", oldTodo.Status)
 						p.todos[i].Status = ToDoStatusSkipped
 						p.todos[i].UpdatedAt = now
 						changes = append(changes, PlanToDoChange{
@@ -1462,6 +1520,11 @@ func (p *Plan) updatePlan(reflection *planReflection) error {
 						break
 					}
 				}
+				if !todoFound {
+					logger.Warn("todo not found for skip decision", "todo_id", skipDecision.TodoID)
+				}
+			} else {
+				logger.Debug("skip decision denied", "todo_id", skipDecision.TodoID)
 			}
 		}
 	}
@@ -1486,6 +1549,7 @@ func (p *Plan) updatePlan(reflection *planReflection) error {
 		} else if hasAdded {
 			reflection.Type = PlanReflectionTypeExpand
 		}
+
 	} else {
 		reflection.Type = PlanReflectionTypeContinue
 	}
@@ -1725,6 +1789,41 @@ func toDoStatusToString(status ToDoStatus) string {
 	default:
 		return "Unknown"
 	}
+}
+
+// logging logs the current status of all todos in a single log entry for plan consumption tracking
+func (p *Plan) logging() {
+	// Skip logging if logger is not available (e.g., in tests)
+	if p.logger == nil {
+		return
+	}
+
+	var completed, pending, failed, skipped int
+	for _, todo := range p.todos {
+		switch todo.Status {
+		case ToDoStatusCompleted:
+			completed++
+		case ToDoStatusPending:
+			pending++
+		case ToDoStatusFailed:
+			failed++
+		case ToDoStatusSkipped:
+			skipped++
+		}
+	}
+
+	total := len(p.todos)
+	progress := float64(completed) / float64(total) * 100
+
+	p.logger.Info("plan consumption status",
+		"plan_id", p.id,
+		"total_todos", total,
+		"completed", completed,
+		"pending", pending,
+		"failed", failed,
+		"skipped", skipped,
+		"progress_pct", fmt.Sprintf("%.1f", progress),
+		"status", fmt.Sprintf("%d/%d completed", completed, total))
 }
 
 // Plan option methods

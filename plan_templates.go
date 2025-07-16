@@ -57,6 +57,7 @@ type reflectorTemplateData struct {
 	ClarifiedGoal     string
 	CurrentPlanStatus string
 	OriginalPlan      string
+	PendingTodos      string
 	CompletedSteps    string
 	LastStepResult    string
 	SystemPrompt      string
