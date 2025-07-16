@@ -725,13 +725,10 @@ func (g *Agent) createPlanWithRuntime(ctx context.Context, id, input, clarifiedG
 }
 
 // createPlannerSession creates a session for plan generation
-func (g *Agent) createPlannerSession(ctx context.Context, cfg *planConfig, _ []Tool) (Session, error) {
+func (g *Agent) createPlannerSession(ctx context.Context, _ *planConfig, _ []Tool) (Session, error) {
+	// Create clean session without history to avoid confusion with previous conversation
 	sessionOptions := []SessionOption{
 		WithSessionContentType(ContentTypeJSON),
-	}
-
-	if cfg.history != nil {
-		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
 	}
 
 	return g.llm.NewSession(ctx, sessionOptions...)
@@ -1006,13 +1003,10 @@ func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 }
 
 // createReflectorSession creates a session for reflection
-func (g *Agent) createReflectorSession(ctx context.Context, cfg *planConfig) (Session, error) {
+func (g *Agent) createReflectorSession(ctx context.Context, _ *planConfig) (Session, error) {
+	// Create clean session without history to avoid confusion with previous conversation
 	sessionOptions := []SessionOption{
 		WithSessionContentType(ContentTypeJSON),
-	}
-
-	if cfg.history != nil {
-		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
 	}
 
 	return g.llm.NewSession(ctx, sessionOptions...)
@@ -1020,7 +1014,7 @@ func (g *Agent) createReflectorSession(ctx context.Context, cfg *planConfig) (Se
 
 // clarifyUserGoal clarifies and refines the user's input goal using LLM
 func (g *Agent) clarifyUserGoal(ctx context.Context, userInput string, cfg *planConfig) (string, error) {
-	// Create goal clarification session
+	// Create goal clarification session with history to understand context
 	sessionOptions := []SessionOption{}
 	if cfg.history != nil {
 		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
@@ -1116,12 +1110,9 @@ func (p *Plan) generateExecutionSummary(ctx context.Context) (string, error) {
 }
 
 // createSummarizerSession creates a session for summary generation
-func (g *Agent) createSummarizerSession(ctx context.Context, cfg *planConfig) (Session, error) {
+func (g *Agent) createSummarizerSession(ctx context.Context, _ *planConfig) (Session, error) {
+	// Create clean session without history to avoid confusion with previous conversation
 	sessionOptions := []SessionOption{}
-
-	if cfg.history != nil {
-		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
-	}
 
 	return g.llm.NewSession(ctx, sessionOptions...)
 }
