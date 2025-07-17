@@ -325,11 +325,8 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 		// Very specific and limited prompt for faster execution
 		simplePrompt := `Analyze '3322.org' with these steps: 1) DNS lookup 2) Threat intelligence check. Keep it simple with just 2 tasks total. No additional analysis needed.`
 
-		// Create plan with timeout to prevent hanging
-		planCtx, planCancel := context.WithTimeout(ctx, 30*time.Second)
-		defer planCancel()
-
-		plan, err := agent.Plan(planCtx,
+		// Create plan
+		plan, err := agent.Plan(ctx,
 			simplePrompt,
 			gollem.WithToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
 				executedTodos = append(executedTodos, todo.ID)
@@ -364,12 +361,9 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 			t.Logf("[%s]   %d. %s - %s", llmName, i+1, todo.Description, todo.Intent)
 		}
 
-		// Execute plan with timeout and retry logic for API errors
+		// Execute plan with retry logic for API errors
 		result, executeErr := retryAPICall(t, func() (string, error) {
-			// Set a timeout to prevent tests from running too long
-			execCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-			defer cancel()
-			return plan.Execute(execCtx)
+			return plan.Execute(ctx)
 		}, fmt.Sprintf("[%s] plan execution", llmName))
 
 		// Only fail if we couldn't execute after retries

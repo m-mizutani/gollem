@@ -286,10 +286,6 @@ Example of robust error handling:
 
 ```go
 func robustAgentExecution(ctx context.Context, agent *gollem.Agent, prompt string) error {
-    // Set timeout for the entire operation
-    ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-    defer cancel()
-    
     // Execute with error handling
     err := agent.Execute(ctx, prompt)
     if err != nil {

@@ -819,11 +819,7 @@ func executeStepWithInput(ctx context.Context, session Session, config gollemCon
 		todo.toolCallTracker = make(map[string]int)
 	}
 
-	// Add timeout for processing
-	stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	response, err := session.GenerateContent(stepCtx, inputs...)
+	response, err := session.GenerateContent(ctx, inputs...)
 	if err != nil {
 		return nil, goerr.Wrap(err, "session GenerateContent failed")
 	}
@@ -999,12 +995,8 @@ func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 	}
 	logger.Debug("reflector prompt generated", "prompt_length", promptBuffer.Len())
 
-	// Add timeout for reflection to prevent hanging
-	reflectionCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
 	logger.Debug("sending reflection request to LLM")
-	response, err := reflectorSession.GenerateContent(reflectionCtx, Text(promptBuffer.String()))
+	response, err := reflectorSession.GenerateContent(ctx, Text(promptBuffer.String()))
 	if err != nil {
 		logger.Debug("reflection request failed", "error", err)
 		return nil, err
@@ -1133,12 +1125,8 @@ func (p *Plan) generateExecutionSummary(ctx context.Context) (string, error) {
 		return "", goerr.Wrap(err, "failed to execute summarizer template")
 	}
 
-	// Add timeout for summary generation
-	summaryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
 	logger.Debug("sending summary request to LLM")
-	response, err := summarizerSession.GenerateContent(summaryCtx, Text(promptBuffer.String()))
+	response, err := summarizerSession.GenerateContent(ctx, Text(promptBuffer.String()))
 	if err != nil {
 		logger.Debug("summary request failed", "error", err)
 		return "", err
