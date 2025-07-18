@@ -510,3 +510,54 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 
 	return responseChan, nil
 }
+
+// CountTokens counts the number of tokens in the history for OpenAI models.
+// This implementation uses a character-based estimation since the official
+// tiktoken library for Go is not available. For production use, consider
+// integrating with OpenAI's official token counting API or tiktoken-go library.
+func (c *Client) CountTokens(ctx context.Context, history *gollem.History) (int, error) {
+	if history == nil {
+		return 0, nil
+	}
+
+	messages, err := history.ToOpenAI()
+	if err != nil {
+		return 0, goerr.Wrap(err, "failed to convert history to OpenAI format")
+	}
+
+	totalChars := 0
+	for _, msg := range messages {
+		// Count role and content characters
+		totalChars += len(msg.Role) + len(msg.Content)
+
+		// Count tool calls
+		if msg.ToolCalls != nil {
+			for _, call := range msg.ToolCalls {
+				totalChars += len(call.Function.Name) + len(call.Function.Arguments)
+			}
+		}
+
+		// Count tool call ID if present
+		if msg.ToolCallID != "" {
+			totalChars += len(msg.ToolCallID)
+		}
+	}
+
+	// Enhanced estimation for OpenAI models
+	// GPT-4 typically uses about 3.5-4 characters per token for English text
+	// We also add overhead for message structure (role, content fields, etc.)
+	messageOverhead := len(messages) * 10 // Estimated overhead per message
+	estimatedTokens := (totalChars + messageOverhead) / 4
+
+	// Add model-specific adjustments
+	switch c.defaultModel {
+	case openai.GPT4, openai.GPT4TurboPreview, openai.GPT4Turbo:
+		// GPT-4 models tend to be more efficient
+		estimatedTokens = int(float64(estimatedTokens) * 0.9)
+	case openai.GPT3Dot5Turbo:
+		// GPT-3.5 tends to use slightly more tokens
+		estimatedTokens = int(float64(estimatedTokens) * 1.1)
+	}
+
+	return estimatedTokens, nil
+}

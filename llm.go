@@ -6,6 +6,7 @@ import "context"
 type LLMClient interface {
 	NewSession(ctx context.Context, options ...SessionOption) (Session, error)
 	GenerateEmbedding(ctx context.Context, dimension int, input []string) ([][]float64, error)
+	CountTokens(ctx context.Context, history *History) (int, error)
 }
 
 type FunctionCall struct {

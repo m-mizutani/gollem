@@ -313,7 +313,7 @@ func (t *problematicFieldClientTool) Spec() gollem.ToolSpec {
 			},
 			"unicode_field": {
 				Type:        gollem.TypeString,
-				Description: "Field with unicode: 測試 中文 🚀 emoji",
+				Description: "Field with unicode: test characters 🚀 emoji",
 			},
 		},
 		Required: []string{"type"},

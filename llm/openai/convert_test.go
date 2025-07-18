@@ -1,10 +1,11 @@
-package openai
+package openai_test
 
 import (
 	"context"
 	"testing"
 
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/llm/openai"
 	"github.com/m-mizutani/gt"
 )
 
@@ -64,7 +65,7 @@ func (t *complexTool) Run(ctx context.Context, args map[string]any) (map[string]
 
 func TestConvertTool(t *testing.T) {
 	tool := &complexTool{}
-	openaiTool := ConvertTool(tool)
+	openaiTool := openai.ConvertTool(tool)
 
 	gt.Value(t, openaiTool.Type).Equal("function")
 	gt.Value(t, openaiTool.Function.Name).Equal("complex_tool")
@@ -101,7 +102,7 @@ func TestConvertParameterToSchema(t *testing.T) {
 			Minimum: ptr(1.0),
 			Maximum: ptr(10.0),
 		}
-		schema := convertParameterToSchema(p)
+		schema := openai.ConvertParameterToSchema(p)
 		gt.Value(t, schema["minimum"]).Equal(1.0)
 		gt.Value(t, schema["maximum"]).Equal(10.0)
 	})
@@ -113,7 +114,7 @@ func TestConvertParameterToSchema(t *testing.T) {
 			MaxLength: ptr(10),
 			Pattern:   "^[a-z]+$",
 		}
-		schema := convertParameterToSchema(p)
+		schema := openai.ConvertParameterToSchema(p)
 		gt.Value(t, schema["minLength"]).Equal(1)
 		gt.Value(t, schema["maxLength"]).Equal(10)
 		gt.Value(t, schema["pattern"]).Equal("^[a-z]+$")
@@ -126,7 +127,7 @@ func TestConvertParameterToSchema(t *testing.T) {
 			MinItems: ptr(1),
 			MaxItems: ptr(10),
 		}
-		schema := convertParameterToSchema(p)
+		schema := openai.ConvertParameterToSchema(p)
 		gt.Value(t, schema["minItems"]).Equal(1)
 		gt.Value(t, schema["maxItems"]).Equal(10)
 		gt.Value(t, schema["items"].(map[string]interface{})["type"]).Equal("string")
@@ -137,7 +138,7 @@ func TestConvertParameterToSchema(t *testing.T) {
 			Type:    gollem.TypeString,
 			Default: "default value",
 		}
-		schema := convertParameterToSchema(p)
+		schema := openai.ConvertParameterToSchema(p)
 		gt.Value(t, schema["default"]).Equal("default value")
 	})
 }

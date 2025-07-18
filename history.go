@@ -34,6 +34,11 @@ type History struct {
 	Claude []claudeMessage                `json:"claude,omitempty"`
 	OpenAI []openai.ChatCompletionMessage `json:"OpenAI,omitempty"`
 	Gemini []geminiMessage                `json:"gemini,omitempty"`
+
+	// Compression related fields
+	Summary     string `json:"summary,omitempty"`      // Summary information
+	Compressed  bool   `json:"compressed,omitempty"`   // Compression flag
+	OriginalLen int    `json:"original_len,omitempty"` // Original length
 }
 
 func (x *History) ToCount() int {
