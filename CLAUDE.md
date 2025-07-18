@@ -2,6 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Restriction & Rules
+
+- In principle, do not trust developers who use this library from outside
+  - Do not export unnecessary methods, structs, and variables
+  - Assume that exposed items will be changed. Never expose fields that would be problematic if changed
+  - Use `export_test.go` for items that need to be exposed for testing purposes
+- When making changes, before finishing the task, always:
+  - Run `go vet ./...`, `go fmt ./...` to format the code
+  - Run `golangci-lint run ./...` to check lint error
+  - Run `gosec -quiet ./...` to check security issue
+  - Run tests to ensure no impact on other code
+- All comment and character literal in source code must be in English
+- Test files should have `package {name}_test`. Do not use same package name
+- Use named empty structure (e.g. `type ctxHogeKey struct{}` ) as private context key
+- Do not create binary. If you need to run, use `go run` command instead
+
 ## Commands
 
 ### Development and Testing
@@ -15,7 +31,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Test Execution
 Tests may require API keys for integration testing:
 - OpenAI: `OPENAI_API_KEY`
-- Anthropic: `ANTHROPIC_API_KEY`  
+- Anthropic: `ANTHROPIC_API_KEY`
 - Gemini: `GEMINI_PROJECT_ID`, `GEMINI_LOCATION`
 
 ### Code Quality
@@ -69,7 +85,7 @@ type ToolSet interface {
 
 Each provider in `llm/` handles format conversion between gollem's unified interface and provider-specific APIs:
 - **OpenAI**: GPT models with function calling
-- **Claude**: Anthropic models with tool use  
+- **Claude**: Anthropic models with tool use
 - **Gemini**: Google Vertex AI models with function calling
 
 ### Testing Patterns

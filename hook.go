@@ -149,6 +149,31 @@ type (
 	//       return nil // Continue with normal error handling
 	//   })
 	ToolErrorHook func(ctx context.Context, err error, tool FunctionCall) error
+
+	// CompressionHook is a hook for history compression events. This hook is called when
+	// the history is compressed to reduce memory usage and token count.
+	//
+	// Parameters:
+	// - original: The original history before compression
+	// - compressed: The compressed history after compression
+	//
+	// This hook is useful for:
+	// - Monitoring compression efficiency and frequency
+	// - Logging compression events for debugging
+	// - Recording compression metrics for performance analysis
+	// - Implementing custom post-compression logic
+	//
+	// If the hook returns an error, the compression will still succeed but the error
+	// will be logged as a warning.
+	//
+	// Example usage:
+	//   gollem.WithCompressionHook(func(ctx context.Context, original, compressed *gollem.History) error {
+	//       ratio := float64(compressed.ToCount()) / float64(original.ToCount())
+	//       log.Printf("History compressed: %d -> %d messages (%.2f%% reduction)",
+	//           original.ToCount(), compressed.ToCount(), (1-ratio)*100)
+	//       return nil
+	//   })
+	CompressionHook func(ctx context.Context, original, compressed *History) error
 )
 
 // defaultLoopHook is the default implementation of LoopHook that does nothing.
@@ -184,5 +209,11 @@ func defaultFacilitationHook(ctx context.Context, resp *Facilitation) error {
 // defaultToolErrorHook is the default implementation of ToolErrorHook that does nothing.
 // This is used when no custom ToolErrorHook is provided.
 func defaultToolErrorHook(ctx context.Context, err error, tool FunctionCall) error {
+	return nil
+}
+
+// defaultCompressionHook is the default implementation of CompressionHook that does nothing.
+// This is used when no custom CompressionHook is provided.
+func defaultCompressionHook(ctx context.Context, original, compressed *History) error {
 	return nil
 }

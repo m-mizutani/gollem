@@ -75,6 +75,12 @@ type gollemConfig struct {
 	facilitator Facilitator
 
 	history *History
+
+	// History management related fields
+	historyCompressor HistoryCompressor
+	autoCompress      bool
+	compressOptions   HistoryCompressionOptions
+	compressionHook   CompressionHook
 }
 
 func (c *gollemConfig) Clone() *gollemConfig {
@@ -98,6 +104,12 @@ func (c *gollemConfig) Clone() *gollemConfig {
 		facilitator: c.facilitator,
 
 		history: c.history,
+
+		// History management related field cloning
+		historyCompressor: c.historyCompressor,
+		autoCompress:      c.autoCompress,
+		compressOptions:   c.compressOptions,
+		compressionHook:   c.compressionHook,
 	}
 }
 
@@ -119,6 +131,12 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 			responseMode:     ResponseModeBlocking,
 			logger:           slog.New(slog.DiscardHandler),
 			facilitator:      newDefaultFacilitator(llmClient),
+
+			// Default settings for history management
+			historyCompressor: nil,   // No default compressor - user must specify with LLM
+			autoCompress:      false, // Disabled by default - requires explicit LLM setup
+			compressOptions:   DefaultHistoryCompressionOptions(),
+			compressionHook:   defaultCompressionHook,
 		},
 	}
 
@@ -290,6 +308,28 @@ func WithHistory(history *History) Option {
 	}
 }
 
+// WithHistoryCompressor sets the history compressor for the gollem agent.
+func WithHistoryCompressor(compressor HistoryCompressor) Option {
+	return func(s *gollemConfig) {
+		s.historyCompressor = compressor
+	}
+}
+
+// WithHistoryCompression enables or disables automatic history compression.
+func WithHistoryCompression(enabled bool, options HistoryCompressionOptions) Option {
+	return func(s *gollemConfig) {
+		s.autoCompress = enabled
+		s.compressOptions = options
+	}
+}
+
+// WithCompressionHook sets a callback function for compression events.
+func WithCompressionHook(callback func(ctx context.Context, original, compressed *History) error) Option {
+	return func(s *gollemConfig) {
+		s.compressionHook = callback
+	}
+}
+
 func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool, error) {
 	allTools := cfg.tools[:]
 
@@ -359,6 +399,14 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 	input := []Input{Text(prompt)}
 
 	for i := 0; i < cfg.loopLimit; i++ {
+		// History compression check within loop
+		if cfg.autoCompress && i > 0 { // Skip compression on first iteration
+			if err := g.performLoopCompression(ctx, cfg, i); err != nil {
+				logger.Warn("loop compression failed", "error", err, "loop", i)
+				// Continue execution even if compression fails (log only)
+			}
+		}
+
 		if err := cfg.loopHook(ctx, i, input); err != nil {
 			return err
 		}
@@ -594,4 +642,91 @@ func buildToolMap(ctx context.Context, tools []Tool, toolSets []ToolSet) (map[st
 	}
 
 	return toolMap, nil
+}
+
+// performLoopCompression performs history compression within the execution loop
+func (g *Agent) performLoopCompression(ctx context.Context, cfg *gollemConfig, loop int) error {
+	if !cfg.autoCompress || g.currentSession == nil || cfg.historyCompressor == nil {
+		return nil
+	}
+
+	history := g.currentSession.History()
+	logger := LoggerFromContext(ctx)
+
+	// Use unified compression logic that handles both normal and emergency cases
+	compressedHistory, err := cfg.historyCompressor(ctx, history, g.llm, cfg.compressOptions)
+	if err != nil {
+		return goerr.Wrap(err, "failed to perform compression")
+	}
+
+	// If compression occurred (history changed), replace the session
+	if compressedHistory != history {
+		logger.Info("compression triggered during loop", "loop", loop,
+			"original_count", history.ToCount(),
+			"compressed_count", compressedHistory.ToCount())
+
+		return g.replaceSessionWithCompressedHistory(ctx, cfg, compressedHistory)
+	}
+
+	return nil
+}
+
+// replaceSessionWithCompressedHistory replaces the current session with a new one using compressed history
+func (g *Agent) replaceSessionWithCompressedHistory(ctx context.Context, cfg *gollemConfig, compressedHistory *History) error {
+	if g.currentSession == nil {
+		return goerr.New("no current session to replace")
+	}
+
+	logger := LoggerFromContext(ctx)
+	originalHistory := g.currentSession.History()
+
+	// Call compression hook
+	if err := cfg.compressionHook(ctx, originalHistory, compressedHistory); err != nil {
+		logger.Warn("compression hook failed", "error", err)
+		// Continue processing even if hook fails
+	}
+
+	// Create new session with compressed history
+	sessionOptions := []SessionOption{
+		WithSessionHistory(compressedHistory),
+		WithSessionSystemPrompt(cfg.systemPrompt),
+	}
+
+	// Get current tools
+	if tools := g.getCurrentTools(ctx, cfg); len(tools) > 0 {
+		sessionOptions = append(sessionOptions, WithSessionTools(tools...))
+	}
+
+	newSession, err := g.llm.NewSession(ctx, sessionOptions...)
+	if err != nil {
+		return goerr.Wrap(err, "failed to create new session with compressed history")
+	}
+
+	// Replace session
+	g.currentSession = newSession
+
+	return nil
+}
+
+// getCurrentTools gets the list of tools from current configuration
+func (g *Agent) getCurrentTools(ctx context.Context, cfg *gollemConfig) []Tool {
+	// Logic extracted from setupTools
+	allTools := cfg.tools[:]
+
+	if cfg.facilitator != nil {
+		allTools = append(allTools, cfg.facilitator)
+	}
+
+	toolMap, err := buildToolMap(ctx, allTools, cfg.toolSets)
+	if err != nil {
+		// Return empty slice on error
+		return []Tool{}
+	}
+
+	toolList := make([]Tool, 0, len(toolMap))
+	for _, tool := range toolMap {
+		toolList = append(toolList, tool)
+	}
+
+	return toolList
 }

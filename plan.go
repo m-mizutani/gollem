@@ -441,6 +441,7 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 	logger := LoggerFromContext(ctx) // Use existing context.go function
 	logger.Debug("executeSteps started", "pending_todos_count", len(p.getPendingToDos()))
 
+	stepCount := 0
 	for len(p.getPendingToDos()) > 0 {
 		currentToDo := p.getNextPendingToDo()
 		if currentToDo == nil {
@@ -449,6 +450,15 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 		}
 
 		ctx = ctxWithPlanToDo(ctx, currentToDo)
+		stepCount++
+
+		// Plan history compression check (skip compression on first step)
+		if p.config.autoCompress && stepCount > 1 {
+			if err := p.performPlanCompression(ctx, stepCount); err != nil {
+				logger.Warn("plan compression failed", "error", err, "step", stepCount)
+				// Continue execution even if compression fails (log only)
+			}
+		}
 
 		logger.Debug("processing plan step",
 			"todo_id", currentToDo.ID,
@@ -1990,4 +2000,105 @@ func WithPlanLanguage(language string) PlanOption {
 	return func(cfg *planConfig) {
 		cfg.language = language
 	}
+}
+
+// WithPlanHistoryCompression enables or disables automatic history compression during plan execution.
+func WithPlanHistoryCompression(enabled bool, options HistoryCompressionOptions) PlanOption {
+	return func(cfg *planConfig) {
+		cfg.autoCompress = enabled
+		cfg.compressOptions = options
+	}
+}
+
+// WithPlanHistoryCompressor sets the history compressor for plan execution.
+func WithPlanHistoryCompressor(compressor HistoryCompressor) PlanOption {
+	return func(cfg *planConfig) {
+		cfg.historyCompressor = compressor
+	}
+}
+
+// WithPlanCompressionHook sets a callback function for compression events during plan execution.
+func WithPlanCompressionHook(callback func(ctx context.Context, original, compressed *History) error) PlanOption {
+	return func(cfg *planConfig) {
+		cfg.compressionHook = callback
+	}
+}
+
+// performPlanCompression performs history compression during plan execution
+func (p *Plan) performPlanCompression(ctx context.Context, step int) error {
+	if !p.config.autoCompress || p.mainSession == nil || p.config.historyCompressor == nil {
+		return nil
+	}
+
+	history := p.mainSession.History()
+	logger := LoggerFromContext(ctx)
+
+	// Use unified compression logic that handles both normal and emergency cases
+	compressedHistory, err := p.config.historyCompressor(ctx, history, p.agent.llm, p.config.compressOptions)
+	if err != nil {
+		return goerr.Wrap(err, "failed to perform plan compression")
+	}
+
+	// If compression occurred (history changed), replace the session
+	if compressedHistory != history {
+		logger.Info("compression triggered during plan execution", "step", step,
+			"original_count", history.ToCount(),
+			"compressed_count", compressedHistory.ToCount())
+
+		return p.replaceSessionWithCompressedHistory(ctx, compressedHistory)
+	}
+
+	return nil
+}
+
+// replaceSessionWithCompressedHistory replaces the plan session with a new one using compressed history
+func (p *Plan) replaceSessionWithCompressedHistory(ctx context.Context, compressedHistory *History) error {
+	if p.mainSession == nil {
+		return goerr.New("no plan session to replace")
+	}
+
+	logger := LoggerFromContext(ctx)
+	originalHistory := p.mainSession.History()
+
+	// Call compression hook
+	if err := p.config.compressionHook(ctx, originalHistory, compressedHistory); err != nil {
+		logger.Warn("plan compression hook failed", "error", err)
+		// Continue processing even if hook fails
+	}
+
+	// Create new session with compressed history
+	sessionOptions := []SessionOption{
+		WithSessionHistory(compressedHistory),
+		WithSessionSystemPrompt(p.config.systemPrompt),
+	}
+
+	// Get current tools for the plan session
+	if tools := p.getCurrentPlanTools(ctx); len(tools) > 0 {
+		sessionOptions = append(sessionOptions, WithSessionTools(tools...))
+	}
+
+	newSession, err := p.agent.llm.NewSession(ctx, sessionOptions...)
+	if err != nil {
+		return goerr.Wrap(err, "failed to create new plan session with compressed history")
+	}
+
+	// Replace plan session
+	p.mainSession = newSession
+
+	return nil
+}
+
+// getCurrentPlanTools gets the list of tools from current plan configuration
+func (p *Plan) getCurrentPlanTools(_ context.Context) []Tool {
+	// Convert toolMap to slice
+	if p.toolMap == nil {
+		return []Tool{}
+	}
+
+	toolList := make([]Tool, 0, len(p.toolMap))
+	for _, tool := range p.toolMap {
+		toolList = append(toolList, tool)
+	}
+
+	return toolList
 }

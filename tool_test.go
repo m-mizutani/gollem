@@ -1,16 +1,17 @@
-package gollem
+package gollem_test
 
 import (
 	"testing"
 
+	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gt"
 )
 
 func TestParameterValidation(t *testing.T) {
 	t.Run("number constraints", func(t *testing.T) {
 		t.Run("valid minimum and maximum", func(t *testing.T) {
-			p := &Parameter{
-				Type:    TypeNumber,
+			p := &gollem.Parameter{
+				Type:    gollem.TypeNumber,
 				Minimum: ptr(1.0),
 				Maximum: ptr(10.0),
 			}
@@ -18,8 +19,8 @@ func TestParameterValidation(t *testing.T) {
 		})
 
 		t.Run("invalid minimum and maximum", func(t *testing.T) {
-			p := &Parameter{
-				Type:    TypeNumber,
+			p := &gollem.Parameter{
+				Type:    gollem.TypeNumber,
 				Minimum: ptr(10.0),
 				Maximum: ptr(1.0),
 			}
@@ -29,8 +30,8 @@ func TestParameterValidation(t *testing.T) {
 
 	t.Run("string constraints", func(t *testing.T) {
 		t.Run("valid minLength and maxLength", func(t *testing.T) {
-			p := &Parameter{
-				Type:      TypeString,
+			p := &gollem.Parameter{
+				Type:      gollem.TypeString,
 				MinLength: ptr(1),
 				MaxLength: ptr(10),
 			}
@@ -38,8 +39,8 @@ func TestParameterValidation(t *testing.T) {
 		})
 
 		t.Run("invalid minLength and maxLength", func(t *testing.T) {
-			p := &Parameter{
-				Type:      TypeString,
+			p := &gollem.Parameter{
+				Type:      gollem.TypeString,
 				MinLength: ptr(10),
 				MaxLength: ptr(1),
 			}
@@ -47,16 +48,16 @@ func TestParameterValidation(t *testing.T) {
 		})
 
 		t.Run("valid pattern", func(t *testing.T) {
-			p := &Parameter{
-				Type:    TypeString,
+			p := &gollem.Parameter{
+				Type:    gollem.TypeString,
 				Pattern: "^[a-z]+$",
 			}
 			gt.NoError(t, p.Validate())
 		})
 
 		t.Run("invalid pattern", func(t *testing.T) {
-			p := &Parameter{
-				Type:    TypeString,
+			p := &gollem.Parameter{
+				Type:    gollem.TypeString,
 				Pattern: "[invalid",
 			}
 			gt.Error(t, p.Validate())
@@ -65,9 +66,9 @@ func TestParameterValidation(t *testing.T) {
 
 	t.Run("array constraints", func(t *testing.T) {
 		t.Run("valid minItems and maxItems", func(t *testing.T) {
-			p := &Parameter{
-				Type:     TypeArray,
-				Items:    &Parameter{Type: TypeString},
+			p := &gollem.Parameter{
+				Type:     gollem.TypeArray,
+				Items:    &gollem.Parameter{Type: gollem.TypeString},
 				MinItems: ptr(1),
 				MaxItems: ptr(10),
 			}
@@ -75,9 +76,9 @@ func TestParameterValidation(t *testing.T) {
 		})
 
 		t.Run("invalid minItems and maxItems", func(t *testing.T) {
-			p := &Parameter{
-				Type:     TypeArray,
-				Items:    &Parameter{Type: TypeString},
+			p := &gollem.Parameter{
+				Type:     gollem.TypeArray,
+				Items:    &gollem.Parameter{Type: gollem.TypeString},
 				MinItems: ptr(10),
 				MaxItems: ptr(1),
 			}
@@ -87,15 +88,15 @@ func TestParameterValidation(t *testing.T) {
 
 	t.Run("object constraints", func(t *testing.T) {
 		t.Run("valid properties", func(t *testing.T) {
-			p := &Parameter{
-				Type: TypeObject,
-				Properties: map[string]*Parameter{
+			p := &gollem.Parameter{
+				Type: gollem.TypeObject,
+				Properties: map[string]*gollem.Parameter{
 					"name": {
-						Type:        TypeString,
+						Type:        gollem.TypeString,
 						Description: "User name",
 					},
 					"age": {
-						Type:        TypeNumber,
+						Type:        gollem.TypeNumber,
 						Description: "User age",
 					},
 				},
@@ -104,25 +105,25 @@ func TestParameterValidation(t *testing.T) {
 		})
 
 		t.Run("duplicate property names", func(t *testing.T) {
-			p := &Parameter{
-				Type:       TypeObject,
-				Properties: make(map[string]*Parameter),
+			p := &gollem.Parameter{
+				Type:       gollem.TypeObject,
+				Properties: make(map[string]*gollem.Parameter),
 			}
-			p.Properties["name"] = &Parameter{
-				Type:        TypeString,
+			p.Properties["name"] = &gollem.Parameter{
+				Type:        gollem.TypeString,
 				Description: "User name",
 			}
-			p.Properties["name"] = &Parameter{
-				Type:        TypeString,
+			p.Properties["name"] = &gollem.Parameter{
+				Type:        gollem.TypeString,
 				Description: "Duplicate name",
 			}
 			gt.NoError(t, p.Validate())
 		})
 
 		t.Run("invalid property type", func(t *testing.T) {
-			p := &Parameter{
-				Type: TypeObject,
-				Properties: map[string]*Parameter{
+			p := &gollem.Parameter{
+				Type: gollem.TypeObject,
+				Properties: map[string]*gollem.Parameter{
 					"name": {
 						Type:        "invalid",
 						Description: "User name",
@@ -140,12 +141,12 @@ func ptr[T any](v T) *T {
 
 func TestToolSpecValidation(t *testing.T) {
 	t.Run("valid tool spec", func(t *testing.T) {
-		spec := ToolSpec{
+		spec := gollem.ToolSpec{
 			Name:        "test",
 			Description: "test description",
-			Parameters: map[string]*Parameter{
+			Parameters: map[string]*gollem.Parameter{
 				"param1": {
-					Type:        TypeString,
+					Type:        gollem.TypeString,
 					Description: "test parameter",
 				},
 			},
@@ -155,11 +156,11 @@ func TestToolSpecValidation(t *testing.T) {
 	})
 
 	t.Run("empty name", func(t *testing.T) {
-		spec := ToolSpec{
+		spec := gollem.ToolSpec{
 			Description: "test description",
-			Parameters: map[string]*Parameter{
+			Parameters: map[string]*gollem.Parameter{
 				"param1": {
-					Type:        TypeString,
+					Type:        gollem.TypeString,
 					Description: "test parameter",
 				},
 			},
@@ -168,10 +169,10 @@ func TestToolSpecValidation(t *testing.T) {
 	})
 
 	t.Run("invalid parameter type", func(t *testing.T) {
-		spec := ToolSpec{
+		spec := gollem.ToolSpec{
 			Name:        "test",
 			Description: "test description",
-			Parameters: map[string]*Parameter{
+			Parameters: map[string]*gollem.Parameter{
 				"param1": {
 					Type:        "invalid",
 					Description: "test parameter",
@@ -182,12 +183,12 @@ func TestToolSpecValidation(t *testing.T) {
 	})
 
 	t.Run("required parameter not found", func(t *testing.T) {
-		spec := ToolSpec{
+		spec := gollem.ToolSpec{
 			Name:        "test",
 			Description: "test description",
-			Parameters: map[string]*Parameter{
+			Parameters: map[string]*gollem.Parameter{
 				"param1": {
-					Type:        TypeString,
+					Type:        gollem.TypeString,
 					Description: "test parameter",
 				},
 			},
@@ -197,12 +198,12 @@ func TestToolSpecValidation(t *testing.T) {
 	})
 
 	t.Run("invalid parameter", func(t *testing.T) {
-		spec := ToolSpec{
+		spec := gollem.ToolSpec{
 			Name:        "test",
 			Description: "test description",
-			Parameters: map[string]*Parameter{
+			Parameters: map[string]*gollem.Parameter{
 				"param1": {
-					Type:    TypeNumber,
+					Type:    gollem.TypeNumber,
 					Minimum: ptr(10.0),
 					Maximum: ptr(1.0),
 				},
@@ -212,12 +213,12 @@ func TestToolSpecValidation(t *testing.T) {
 	})
 
 	t.Run("object parameter without properties", func(t *testing.T) {
-		spec := ToolSpec{
+		spec := gollem.ToolSpec{
 			Name:        "test",
 			Description: "test description",
-			Parameters: map[string]*Parameter{
+			Parameters: map[string]*gollem.Parameter{
 				"param1": {
-					Type:        TypeObject,
+					Type:        gollem.TypeObject,
 					Description: "test parameter",
 				},
 			},
@@ -226,12 +227,12 @@ func TestToolSpecValidation(t *testing.T) {
 	})
 
 	t.Run("array parameter without items", func(t *testing.T) {
-		spec := ToolSpec{
+		spec := gollem.ToolSpec{
 			Name:        "test",
 			Description: "test description",
-			Parameters: map[string]*Parameter{
+			Parameters: map[string]*gollem.Parameter{
 				"param1": {
-					Type:        TypeArray,
+					Type:        gollem.TypeArray,
 					Description: "test parameter",
 				},
 			},
