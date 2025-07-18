@@ -2003,10 +2003,10 @@ func WithPlanLanguage(language string) PlanOption {
 }
 
 // WithPlanHistoryCompression enables or disables automatic history compression during plan execution.
-func WithPlanHistoryCompression(enabled bool, options HistoryCompressionOptions) PlanOption {
+// To configure compression options, pass them when creating the compressor with DefaultHistoryCompressor.
+func WithPlanHistoryCompression(enabled bool) PlanOption {
 	return func(cfg *planConfig) {
 		cfg.autoCompress = enabled
-		cfg.compressOptions = options
 	}
 }
 
@@ -2034,7 +2034,7 @@ func (p *Plan) performPlanCompression(ctx context.Context, step int) error {
 	logger := LoggerFromContext(ctx)
 
 	// Use unified compression logic that handles both normal and emergency cases
-	compressedHistory, err := p.config.historyCompressor(ctx, history, p.agent.llm, p.config.compressOptions)
+	compressedHistory, err := p.config.historyCompressor(ctx, history, p.agent.llm)
 	if err != nil {
 		return goerr.Wrap(err, "failed to perform plan compression")
 	}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/sashabaranov/go-openai"
 )
@@ -13,7 +12,7 @@ import (
 // HistoryCompressor is a function type that handles compression of conversation history
 // It evaluates if compression is needed and performs it if necessary.
 // Returns the compressed history if compression was performed, or the original history if no compression was needed.
-type HistoryCompressor func(ctx context.Context, history *History, llmClient LLMClient, options HistoryCompressionOptions) (*History, error)
+type HistoryCompressor func(ctx context.Context, history *History, llmClient LLMClient) (*History, error)
 
 // HistoryCompressionOptions contains simple configuration options for history compression.
 // These options control basic compression behavior.
@@ -39,7 +38,14 @@ func DefaultHistoryCompressionOptions() HistoryCompressionOptions {
 
 // DefaultHistoryCompressor creates a history compressor that uses summarization to preserve context.
 // summarizerLLM: LLM client used for generating summaries of old messages while preserving context.
-func DefaultHistoryCompressor(summarizerLLM LLMClient) HistoryCompressor {
+// options: Configuration options for controlling compression behavior (optional, uses defaults if not provided).
+func DefaultHistoryCompressor(summarizerLLM LLMClient, options ...HistoryCompressionOptions) HistoryCompressor {
+	// Use provided options or defaults
+	opts := DefaultHistoryCompressionOptions()
+	if len(options) > 0 {
+		opts = options[0]
+	}
+
 	// Latest LLM context window sizes (as of 2024)
 	contextLimits := map[llmType]int{
 		llmTypeOpenAI: 128000,  // GPT-4 Turbo/GPT-4o
@@ -60,19 +66,19 @@ func DefaultHistoryCompressor(summarizerLLM LLMClient) HistoryCompressor {
 		llmTypeGemini: 950000, // ~95% of 1M
 	}
 
-	return func(ctx context.Context, history *History, llmClient LLMClient, options HistoryCompressionOptions) (*History, error) {
+	return func(ctx context.Context, history *History, llmClient LLMClient) (*History, error) {
 		if history == nil {
 			return nil, goerr.New("history is nil")
 		}
 
 		// Check if compression is needed using unified logic
-		if !shouldCompress(ctx, history, llmClient, options, contextLimits, targetTokens, emergencyTokens) {
+		if !shouldCompress(ctx, history, llmClient, opts, contextLimits, targetTokens, emergencyTokens) {
 			// No compression needed, return the original history as-is
 			return history, nil
 		}
 
 		// Compression is needed, perform it using summarization
-		return summarizeCompress(ctx, history, summarizerLLM, options.PreserveRecent)
+		return summarizeCompress(ctx, history, summarizerLLM, opts.PreserveRecent)
 	}
 }
 
@@ -226,16 +232,16 @@ func summarizeCompress(ctx context.Context, history *History, llmClient LLMClien
 	}
 
 	// Extract messages to be summarized
-	oldMessages, recentMessages := extractMessages(history, preserveRecent)
+	oldHistory, recentHistory := extractMessages(history, preserveRecent)
 
 	// Generate summary
-	summary, err := generateSummary(ctx, llmClient, oldMessages)
+	summary, err := generateSummary(ctx, llmClient, oldHistory)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to generate summary")
 	}
 
 	// Build new history with summary + recent messages
-	compressed := buildCompressedHistory(history, summary, recentMessages)
+	compressed := buildCompressedHistory(history, summary, recentHistory)
 	compressed.Compressed = true
 	compressed.OriginalLen = totalCount
 
@@ -243,46 +249,57 @@ func summarizeCompress(ctx context.Context, history *History, llmClient LLMClien
 }
 
 // extractMessages separates old messages from recent messages
-func extractMessages(history *History, preserveRecent int) (old, recent []string) {
+func extractMessages(history *History, preserveRecent int) (old, recent *History) {
+	if history == nil {
+		return nil, nil
+	}
+
+	// Create base History objects
+	oldHistory := &History{
+		LLType:  history.LLType,
+		Version: history.Version,
+	}
+	recentHistory := &History{
+		LLType:  history.LLType,
+		Version: history.Version,
+	}
+
 	switch history.LLType {
 	case llmTypeOpenAI:
 		totalMsgs := len(history.OpenAI)
 		oldCount := totalMsgs - preserveRecent
 		if oldCount <= 0 {
-			return nil, openAIToStrings(history.OpenAI)
+			recentHistory.OpenAI = append([]openai.ChatCompletionMessage{}, history.OpenAI...)
+			return nil, recentHistory
 		}
 
-		oldMsgs := history.OpenAI[:oldCount]
-		recentMsgs := history.OpenAI[oldCount:]
-
-		return openAIToStrings(oldMsgs), openAIToStrings(recentMsgs)
+		oldHistory.OpenAI = append([]openai.ChatCompletionMessage{}, history.OpenAI[:oldCount]...)
+		recentHistory.OpenAI = append([]openai.ChatCompletionMessage{}, history.OpenAI[oldCount:]...)
 
 	case llmTypeClaude:
 		totalMsgs := len(history.Claude)
 		oldCount := totalMsgs - preserveRecent
 		if oldCount <= 0 {
-			return nil, claudeToStrings(history.Claude)
+			recentHistory.Claude = append([]claudeMessage{}, history.Claude...)
+			return nil, recentHistory
 		}
 
-		oldMsgs := history.Claude[:oldCount]
-		recentMsgs := history.Claude[oldCount:]
-
-		return claudeToStrings(oldMsgs), claudeToStrings(recentMsgs)
+		oldHistory.Claude = append([]claudeMessage{}, history.Claude[:oldCount]...)
+		recentHistory.Claude = append([]claudeMessage{}, history.Claude[oldCount:]...)
 
 	case llmTypeGemini:
 		totalMsgs := len(history.Gemini)
 		oldCount := totalMsgs - preserveRecent
 		if oldCount <= 0 {
-			return nil, geminiToStrings(history.Gemini)
+			recentHistory.Gemini = append([]geminiMessage{}, history.Gemini...)
+			return nil, recentHistory
 		}
 
-		oldMsgs := history.Gemini[:oldCount]
-		recentMsgs := history.Gemini[oldCount:]
-
-		return geminiToStrings(oldMsgs), geminiToStrings(recentMsgs)
+		oldHistory.Gemini = append([]geminiMessage{}, history.Gemini[:oldCount]...)
+		recentHistory.Gemini = append([]geminiMessage{}, history.Gemini[oldCount:]...)
 	}
 
-	return nil, nil
+	return oldHistory, recentHistory
 }
 
 // openAIToStrings converts OpenAI messages to string array
@@ -325,7 +342,22 @@ func geminiToStrings(msgs []geminiMessage) []string {
 }
 
 // generateSummary generates a summary from messages
-func generateSummary(ctx context.Context, llmClient LLMClient, messages []string) (string, error) {
+func generateSummary(ctx context.Context, llmClient LLMClient, history *History) (string, error) {
+	if history == nil || history.ToCount() == 0 {
+		return "", nil
+	}
+
+	// Convert history to string format for summarization
+	var messages []string
+	switch history.LLType {
+	case llmTypeOpenAI:
+		messages = openAIToStrings(history.OpenAI)
+	case llmTypeClaude:
+		messages = claudeToStrings(history.Claude)
+	case llmTypeGemini:
+		messages = geminiToStrings(history.Gemini)
+	}
+
 	if len(messages) == 0 {
 		return "", nil
 	}
@@ -359,11 +391,15 @@ Summary:`, conversationText)
 }
 
 // buildCompressedHistory builds compressed history from summary and recent messages
-func buildCompressedHistory(original *History, summary string, recentMessages []string) *History {
+func buildCompressedHistory(original *History, summary string, recentHistory *History) *History {
 	compressed := &History{
 		LLType:  original.LLType,
 		Version: original.Version,
 		Summary: summary,
+	}
+
+	if recentHistory == nil {
+		return compressed
 	}
 
 	switch original.LLType {
@@ -383,66 +419,17 @@ func buildCompressedHistory(original *History, summary string, recentMessages []
 			}
 		}
 
-		// Restore recent messages
-		for _, msgStr := range recentMessages {
-			parts := strings.SplitN(msgStr, ": ", 2)
-			if len(parts) == 2 {
-				msgs = append(msgs, openai.ChatCompletionMessage{
-					Role:    parts[0],
-					Content: parts[1],
-				})
-			}
-		}
-
+		// Add recent messages directly (no string conversion needed)
+		msgs = append(msgs, recentHistory.OpenAI...)
 		compressed.OpenAI = msgs
 
 	case llmTypeClaude:
 		// For Claude, store in Summary field and keep only recent messages
-		var msgs []claudeMessage
-		for _, msgStr := range recentMessages {
-			parts := strings.SplitN(msgStr, ": ", 2)
-			if len(parts) == 2 {
-				var role anthropic.MessageParamRole
-				switch parts[0] {
-				case "user":
-					role = anthropic.MessageParamRoleUser
-				case "assistant":
-					role = anthropic.MessageParamRoleAssistant
-				default:
-					continue // Skip unknown roles
-				}
-
-				msgs = append(msgs, claudeMessage{
-					Role: role,
-					Content: []claudeContentBlock{
-						{
-							Type: "text",
-							Text: &parts[1],
-						},
-					},
-				})
-			}
-		}
-		compressed.Claude = msgs
+		compressed.Claude = append([]claudeMessage{}, recentHistory.Claude...)
 
 	case llmTypeGemini:
 		// For Gemini, same approach
-		var msgs []geminiMessage
-		for _, msgStr := range recentMessages {
-			parts := strings.SplitN(msgStr, ": ", 2)
-			if len(parts) == 2 {
-				msgs = append(msgs, geminiMessage{
-					Role: parts[0],
-					Parts: []geminiPart{
-						{
-							Type: "text",
-							Text: parts[1],
-						},
-					},
-				})
-			}
-		}
-		compressed.Gemini = msgs
+		compressed.Gemini = append([]geminiMessage{}, recentHistory.Gemini...)
 	}
 
 	return compressed

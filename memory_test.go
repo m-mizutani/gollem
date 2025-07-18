@@ -13,22 +13,21 @@ func TestDefaultHistoryCompressor_PerformCompress_ShouldCompressLogic(t *testing
 	mockClient := &mockLLMClient{
 		responses: []string{"Summary of the conversation"},
 	}
-	compressor := gollem.DefaultHistoryCompressor(mockClient)
+	options := gollem.DefaultHistoryCompressionOptions()
+	compressor := gollem.DefaultHistoryCompressor(mockClient, options)
 	ctx := context.Background()
 
 	t.Run("empty history should not compress", func(t *testing.T) {
 		history := &gollem.History{}
-		options := gollem.DefaultHistoryCompressionOptions()
 
-		result, err := compressor(ctx, history, mockClient, options)
+		result, err := compressor(ctx, history, mockClient)
 		gt.NoError(t, err)
 		gt.Equal(t, history, result) // Should return same instance when no compression needed
 	})
 
 	t.Run("nil history should return error", func(t *testing.T) {
-		options := gollem.DefaultHistoryCompressionOptions()
 
-		_, err := compressor(ctx, nil, mockClient, options)
+		_, err := compressor(ctx, nil, mockClient)
 		gt.Error(t, err)
 	})
 
@@ -37,9 +36,8 @@ func TestDefaultHistoryCompressor_PerformCompress_ShouldCompressLogic(t *testing
 			LLType: gollem.LlmTypeOpenAI,
 			OpenAI: make([]openai.ChatCompletionMessage, 60), // 60 > default 50
 		}
-		options := gollem.DefaultHistoryCompressionOptions()
 
-		result, err := compressor(ctx, history, mockClient, options)
+		result, err := compressor(ctx, history, mockClient)
 		gt.NoError(t, err)
 		gt.True(t, result != history) // Should return compressed version
 	})
@@ -49,9 +47,8 @@ func TestDefaultHistoryCompressor_PerformCompress_ShouldCompressLogic(t *testing
 			LLType: gollem.LlmTypeOpenAI,
 			OpenAI: make([]openai.ChatCompletionMessage, 10), // 10 < default 50
 		}
-		options := gollem.DefaultHistoryCompressionOptions()
 
-		result, err := compressor(ctx, history, mockClient, options)
+		result, err := compressor(ctx, history, mockClient)
 		gt.NoError(t, err)
 		gt.Equal(t, history, result) // Should return same instance when no compression needed
 	})
@@ -61,7 +58,8 @@ func TestDefaultHistoryCompressor_PerformCompress(t *testing.T) {
 	mockClient := &mockLLMClient{
 		responses: []string{"Summary of the conversation"},
 	}
-	compressor := gollem.DefaultHistoryCompressor(mockClient)
+	options := gollem.DefaultHistoryCompressionOptions()
+	compressor := gollem.DefaultHistoryCompressor(mockClient, options)
 	ctx := context.Background()
 
 	t.Run("no compression needed returns original history", func(t *testing.T) {
@@ -71,10 +69,12 @@ func TestDefaultHistoryCompressor_PerformCompress(t *testing.T) {
 				{Role: "user", Content: "Hello"},
 			},
 		}
-		options := gollem.DefaultHistoryCompressionOptions()
-		options.MaxMessages = 10 // High threshold to avoid compression
+		// Create a new compressor with high threshold to avoid compression
+		noCompressOptions := gollem.DefaultHistoryCompressionOptions()
+		noCompressOptions.MaxMessages = 10
+		noCompressor := gollem.DefaultHistoryCompressor(mockClient, noCompressOptions)
 
-		result, err := compressor(ctx, history, mockClient, options)
+		result, err := noCompressor(ctx, history, mockClient)
 		gt.NoError(t, err)
 		gt.Equal(t, history, result) // Should return same instance
 	})
@@ -90,20 +90,20 @@ func TestDefaultHistoryCompressor_PerformCompress(t *testing.T) {
 				{Role: "user", Content: "Message 3"},
 			},
 		}
-		options := gollem.DefaultHistoryCompressionOptions()
-		options.MaxMessages = 3    // Force compression
-		options.PreserveRecent = 2 // Preserve only 2 recent messages
+		// Create a new compressor with low threshold to force compression
+		compressOptions := gollem.DefaultHistoryCompressionOptions()
+		compressOptions.MaxMessages = 3    // Force compression
+		compressOptions.PreserveRecent = 2 // Preserve only 2 recent messages
+		forceCompressor := gollem.DefaultHistoryCompressor(mockClient, compressOptions)
 
-		result, err := compressor(ctx, history, mockClient, options)
+		result, err := forceCompressor(ctx, history, mockClient)
 		gt.NoError(t, err)
 		gt.True(t, result != history)                     // Should return different instance
 		gt.True(t, result.ToCount() <= history.ToCount()) // Should be smaller or equal
 	})
 
 	t.Run("nil history returns error", func(t *testing.T) {
-		options := gollem.DefaultHistoryCompressionOptions()
-
-		_, err := compressor(ctx, nil, mockClient, options)
+		_, err := compressor(ctx, nil, mockClient)
 		gt.True(t, err != nil)
 	})
 }

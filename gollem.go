@@ -79,7 +79,6 @@ type gollemConfig struct {
 	// History management related fields
 	historyCompressor HistoryCompressor
 	autoCompress      bool
-	compressOptions   HistoryCompressionOptions
 	compressionHook   CompressionHook
 }
 
@@ -108,7 +107,6 @@ func (c *gollemConfig) Clone() *gollemConfig {
 		// History management related field cloning
 		historyCompressor: c.historyCompressor,
 		autoCompress:      c.autoCompress,
-		compressOptions:   c.compressOptions,
 		compressionHook:   c.compressionHook,
 	}
 }
@@ -135,7 +133,6 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 			// Default settings for history management
 			historyCompressor: nil,   // No default compressor - user must specify with LLM
 			autoCompress:      false, // Disabled by default - requires explicit LLM setup
-			compressOptions:   DefaultHistoryCompressionOptions(),
 			compressionHook:   defaultCompressionHook,
 		},
 	}
@@ -316,10 +313,10 @@ func WithHistoryCompressor(compressor HistoryCompressor) Option {
 }
 
 // WithHistoryCompression enables or disables automatic history compression.
-func WithHistoryCompression(enabled bool, options HistoryCompressionOptions) Option {
+// To configure compression options, pass them when creating the compressor with DefaultHistoryCompressor.
+func WithHistoryCompression(enabled bool) Option {
 	return func(s *gollemConfig) {
 		s.autoCompress = enabled
-		s.compressOptions = options
 	}
 }
 
@@ -654,7 +651,7 @@ func (g *Agent) performLoopCompression(ctx context.Context, cfg *gollemConfig, l
 	logger := LoggerFromContext(ctx)
 
 	// Use unified compression logic that handles both normal and emergency cases
-	compressedHistory, err := cfg.historyCompressor(ctx, history, g.llm, cfg.compressOptions)
+	compressedHistory, err := cfg.historyCompressor(ctx, history, g.llm)
 	if err != nil {
 		return goerr.Wrap(err, "failed to perform compression")
 	}

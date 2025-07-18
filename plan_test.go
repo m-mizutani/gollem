@@ -848,7 +848,8 @@ func TestPlanCompression_DuringExecution(t *testing.T) {
 
 	// Create plan with compression enabled
 	plan, err := agent.Plan(ctx, "Test plan with compression",
-		gollem.WithPlanHistoryCompression(true, compressOptions),
+		gollem.WithPlanHistoryCompression(true),
+		gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(mockClient, compressOptions)),
 		gollem.WithPlanCompressionHook(compressionHook),
 	)
 	gt.NoError(t, err)
@@ -924,7 +925,8 @@ func TestPlanCompression_EmergencyScenario(t *testing.T) {
 
 	// Create plan with emergency compression settings
 	plan, err := agent.Plan(ctx, "Emergency compression test",
-		gollem.WithPlanHistoryCompression(true, compressOptions),
+		gollem.WithPlanHistoryCompression(true),
+		gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(mockClient, compressOptions)),
 		gollem.WithPlanCompressionHook(compressionHook),
 	)
 	gt.NoError(t, err)
@@ -985,7 +987,8 @@ func TestPlanCompression_Summarization(t *testing.T) {
 		ctx := context.Background()
 
 		plan, err := agent.Plan(ctx, "Strategy test plan",
-			gollem.WithPlanHistoryCompression(true, compressOptions),
+			gollem.WithPlanHistoryCompression(true),
+			gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(mockClient, compressOptions)),
 			gollem.WithPlanCompressionHook(compressionHook),
 		)
 		gt.NoError(t, err)
@@ -1030,7 +1033,8 @@ func TestPlanCompression_SessionReplacement(t *testing.T) {
 	ctx := context.Background()
 
 	plan, err := agent.Plan(ctx, "Session replacement test",
-		gollem.WithPlanHistoryCompression(true, compressOptions),
+		gollem.WithPlanHistoryCompression(true),
+		gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(mockClient, compressOptions)),
 		gollem.WithPlanCompressionHook(compressionHook),
 	)
 	gt.NoError(t, err)
@@ -1068,8 +1072,8 @@ func TestPlanCompression_BasicConfiguration(t *testing.T) {
 	ctx := context.Background()
 
 	plan, err := agent.Plan(ctx, "Basic configuration test",
-		gollem.WithPlanHistoryCompression(true, compressOptions),
-		gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(mockClient)),
+		gollem.WithPlanHistoryCompression(true),
+		gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(mockClient, compressOptions)),
 	)
 	gt.NoError(t, err)
 	gt.NotNil(t, plan)
@@ -1108,8 +1112,8 @@ func TestPlanCompression_ConfigurationInheritance(t *testing.T) {
 	ctx := context.Background()
 
 	plan, err := agent.Plan(ctx, "Configuration inheritance test",
-		gollem.WithPlanHistoryCompression(true, agentCompressOptions),
-		gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(mockClient)),
+		gollem.WithPlanHistoryCompression(true),
+		gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(mockClient, agentCompressOptions)),
 	)
 	gt.NoError(t, err)
 	gt.NotNil(t, plan) // Basic verification that plan was created

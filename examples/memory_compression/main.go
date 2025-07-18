@@ -31,10 +31,10 @@ func main() {
 
 	// Create agent with history compression features
 	agent := gollem.New(llmClient,
-		gollem.WithHistoryCompressor(gollem.DefaultHistoryCompressor(llmClient)), // Set compressor with LLM for summarization
-		gollem.WithHistoryCompression(true, compressOptions),                     // Enable history compression
-		gollem.WithCompressionHook(compressionHook),                              // Compression event logging
-		gollem.WithSystemPrompt("You are a helpful AI assistant."),               // System prompt
+		gollem.WithHistoryCompressor(gollem.DefaultHistoryCompressor(llmClient, compressOptions)), // Set compressor with LLM and options
+		gollem.WithHistoryCompression(true),                        // Enable history compression
+		gollem.WithCompressionHook(compressionHook),                // Compression event logging
+		gollem.WithSystemPrompt("You are a helpful AI assistant."), // System prompt
 	)
 
 	ctx := context.Background()

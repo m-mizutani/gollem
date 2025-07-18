@@ -39,10 +39,10 @@ func main() {
 	// Create a plan with compression enabled
 	plan, err := agent.Plan(ctx,
 		"Create a comprehensive research plan about renewable energy sources. Include wind, solar, hydro, and geothermal energy. For each type, research current technology, efficiency rates, environmental impact, and cost analysis.",
-		gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(llmClient)), // Set compressor with LLM for summarization
-		gollem.WithPlanHistoryCompression(true, compressOptions),                     // Enable history compression
-		gollem.WithPlanCompressionHook(planCompressionHook),                          // Compression event logging
-		gollem.WithPlanLanguage("English"),                                           // Language preference
+		gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(llmClient, compressOptions)), // Set compressor with LLM and options
+		gollem.WithPlanHistoryCompression(true),             // Enable history compression
+		gollem.WithPlanCompressionHook(planCompressionHook), // Compression event logging
+		gollem.WithPlanLanguage("English"),                  // Language preference
 	)
 	if err != nil {
 		log.Fatal("Failed to create plan:", err)
