@@ -83,6 +83,15 @@ var BuildCompactedHistory = buildCompactedHistory
 
 // Export message types for testing
 type (
-	ClaudeMessage = claudeMessage
-	GeminiMessage = geminiMessage
+	ClaudeMessage      = claudeMessage
+	GeminiMessage      = geminiMessage
+	ClaudeContentBlock = claudeContentBlock
+	ClaudeToolUse      = claudeToolUse
+	GeminiPart         = geminiPart
+)
+
+// Export conversion functions for testing
+var (
+	ClaudeToTemplateMessages = claudeToTemplateMessages
+	GeminiToTemplateMessages = geminiToTemplateMessages
 )

@@ -955,3 +955,90 @@ func TestHistoryCompactor_SummaryInMessageHistory(t *testing.T) {
 		gt.True(t, strings.Contains(firstMsg.Parts[0].Text, "--- Previous Conversation Summary ---"))
 	})
 }
+
+// TestCompactorJSONMarshalErrorHandling tests that JSON marshaling errors are handled gracefully
+func TestCompactorJSONMarshalErrorHandling(t *testing.T) {
+	// Test with a structure that causes json.Marshal to fail
+	type UnmarshalableType struct {
+		Ch chan int // channels cannot be marshaled to JSON
+	}
+
+	t.Run("Claude message with unmarshalable content", func(t *testing.T) {
+		// Create a Claude message with unmarshalable tool input
+		msgs := []gollem.ClaudeMessage{
+			{
+				Role: "assistant",
+				Content: []gollem.ClaudeContentBlock{
+					{
+						Type: "tool_use",
+						ToolUse: &gollem.ClaudeToolUse{
+							ID:    "tool_123",
+							Name:  "test_tool",
+							Input: UnmarshalableType{Ch: make(chan int)}, // This will fail to marshal
+						},
+					},
+				},
+			},
+		}
+
+		// Convert to template messages
+		templateMsgs := gollem.ClaudeToTemplateMessages(msgs)
+
+		// Verify the error placeholder is used
+		gt.Equal(t, len(templateMsgs), 1)
+		gt.Equal(t, len(templateMsgs[0].ToolCalls), 1)
+		gt.Equal(t, templateMsgs[0].ToolCalls[0].Arguments, `{"error": "failed to marshal arguments"}`)
+	})
+
+	t.Run("Gemini message with unmarshalable content", func(t *testing.T) {
+		// Create a Gemini message with unmarshalable function call args
+		msgs := []gollem.GeminiMessage{
+			{
+				Role: "model",
+				Parts: []gollem.GeminiPart{
+					{
+						Type: "function_call",
+						Name: "test_function",
+						Args: map[string]interface{}{
+							"data": UnmarshalableType{Ch: make(chan int)}, // This will fail to marshal
+						},
+					},
+				},
+			},
+		}
+
+		// Convert to template messages
+		templateMsgs := gollem.GeminiToTemplateMessages(msgs)
+
+		// Verify the error placeholder is used
+		gt.Equal(t, len(templateMsgs), 1)
+		gt.Equal(t, len(templateMsgs[0].ToolCalls), 1)
+		gt.Equal(t, templateMsgs[0].ToolCalls[0].Arguments, `{"error": "failed to marshal arguments"}`)
+	})
+
+	t.Run("Gemini function response with unmarshalable content", func(t *testing.T) {
+		// Create a Gemini message with unmarshalable function response
+		msgs := []gollem.GeminiMessage{
+			{
+				Role: "function",
+				Parts: []gollem.GeminiPart{
+					{
+						Type: "function_response",
+						Name: "test_function",
+						Response: map[string]interface{}{
+							"result": UnmarshalableType{Ch: make(chan int)}, // This will fail to marshal
+						},
+					},
+				},
+			},
+		}
+
+		// Convert to template messages
+		templateMsgs := gollem.GeminiToTemplateMessages(msgs)
+
+		// Verify the error placeholder is used
+		gt.Equal(t, len(templateMsgs), 1)
+		gt.Equal(t, len(templateMsgs[0].ToolResponses), 1)
+		gt.Equal(t, templateMsgs[0].ToolResponses[0].Content, `{"error": "failed to marshal response"}`)
+	})
+}

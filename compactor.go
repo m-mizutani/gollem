@@ -546,7 +546,11 @@ func claudeToTemplateMessages(msgs []claudeMessage) []TemplateMessage {
 			// Handle tool use (Claude's way of making tool calls)
 			if c.ToolUse != nil {
 				// Convert Input (interface{}) to JSON string
-				argsJSON, _ := json.Marshal(c.ToolUse.Input)
+				argsJSON, err := json.Marshal(c.ToolUse.Input)
+				if err != nil {
+					// Use error placeholder if marshaling fails
+					argsJSON = []byte(`{"error": "failed to marshal arguments"}`)
+				}
 				toolCalls = append(toolCalls, TemplateToolCall{
 					Name:      c.ToolUse.Name,
 					Arguments: string(argsJSON),
@@ -587,7 +591,11 @@ func geminiToTemplateMessages(msgs []geminiMessage) []TemplateMessage {
 
 			// Handle function calls (when Type is "function_call")
 			if part.Type == "function_call" && part.Name != "" {
-				argsJSON, _ := json.Marshal(part.Args)
+				argsJSON, err := json.Marshal(part.Args)
+				if err != nil {
+					// Use error placeholder if marshaling fails
+					argsJSON = []byte(`{"error": "failed to marshal arguments"}`)
+				}
 				toolCalls = append(toolCalls, TemplateToolCall{
 					Name:      part.Name,
 					Arguments: string(argsJSON),
@@ -596,7 +604,11 @@ func geminiToTemplateMessages(msgs []geminiMessage) []TemplateMessage {
 
 			// Handle function responses (when Type is "function_response")
 			if part.Type == "function_response" && part.Name != "" {
-				respJSON, _ := json.Marshal(part.Response)
+				respJSON, err := json.Marshal(part.Response)
+				if err != nil {
+					// Use error placeholder if marshaling fails
+					respJSON = []byte(`{"error": "failed to marshal response"}`)
+				}
 				toolResponses = append(toolResponses, TemplateToolResponse{
 					Name:    part.Name,
 					Content: string(respJSON),
