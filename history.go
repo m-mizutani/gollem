@@ -35,9 +35,9 @@ type History struct {
 	OpenAI []openai.ChatCompletionMessage `json:"OpenAI,omitempty"`
 	Gemini []geminiMessage                `json:"gemini,omitempty"`
 
-	// Compression related fields
+	// Compaction related fields
 	Summary     string `json:"summary,omitempty"`      // Summary information
-	Compressed  bool   `json:"compressed,omitempty"`   // Compression flag
+	Compacted   bool   `json:"compacted,omitempty"`    // Compaction flag
 	OriginalLen int    `json:"original_len,omitempty"` // Original length
 }
 

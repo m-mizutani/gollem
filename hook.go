@@ -150,30 +150,30 @@ type (
 	//   })
 	ToolErrorHook func(ctx context.Context, err error, tool FunctionCall) error
 
-	// CompressionHook is a hook for history compression events. This hook is called when
-	// the history is compressed to reduce memory usage and token count.
+	// CompactionHook is a hook for history compaction events. This hook is called when
+	// the history is compacted to reduce memory usage and token count.
 	//
 	// Parameters:
-	// - original: The original history before compression
-	// - compressed: The compressed history after compression
+	// - original: The original history before compaction
+	// - compacted: The compacted history after compaction
 	//
 	// This hook is useful for:
-	// - Monitoring compression efficiency and frequency
-	// - Logging compression events for debugging
-	// - Recording compression metrics for performance analysis
-	// - Implementing custom post-compression logic
+	// - Monitoring compaction efficiency and frequency
+	// - Logging compaction events for debugging
+	// - Recording compaction metrics for performance analysis
+	// - Implementing custom post-compaction logic
 	//
-	// If the hook returns an error, the compression will still succeed but the error
+	// If the hook returns an error, the compaction will still succeed but the error
 	// will be logged as a warning.
 	//
 	// Example usage:
-	//   gollem.WithCompressionHook(func(ctx context.Context, original, compressed *gollem.History) error {
-	//       ratio := float64(compressed.ToCount()) / float64(original.ToCount())
-	//       log.Printf("History compressed: %d -> %d messages (%.2f%% reduction)",
-	//           original.ToCount(), compressed.ToCount(), (1-ratio)*100)
+	//   gollem.WithCompactionHook(func(ctx context.Context, original, compacted *gollem.History) error {
+	//       ratio := float64(compacted.ToCount()) / float64(original.ToCount())
+	//       log.Printf("History compacted: %d -> %d messages (%.2f%% reduction)",
+	//           original.ToCount(), compacted.ToCount(), (1-ratio)*100)
 	//       return nil
 	//   })
-	CompressionHook func(ctx context.Context, original, compressed *History) error
+	CompactionHook func(ctx context.Context, original, compacted *History) error
 )
 
 // defaultLoopHook is the default implementation of LoopHook that does nothing.
@@ -212,8 +212,8 @@ func defaultToolErrorHook(ctx context.Context, err error, tool FunctionCall) err
 	return nil
 }
 
-// defaultCompressionHook is the default implementation of CompressionHook that does nothing.
-// This is used when no custom CompressionHook is provided.
-func defaultCompressionHook(ctx context.Context, original, compressed *History) error {
+// defaultCompactionHook is the default implementation of CompactionHook that does nothing.
+// This is used when no custom CompactionHook is provided.
+func defaultCompactionHook(ctx context.Context, original, compacted *History) error {
 	return nil
 }

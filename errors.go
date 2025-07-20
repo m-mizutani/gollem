@@ -41,4 +41,7 @@ var (
 
 	// ErrPlanStepFailed is returned when a plan step fails during execution
 	ErrPlanStepFailed = errors.New("plan step execution failed")
+
+	// ErrTokenSizeExceeded is returned when the token size exceeds the limit
+	ErrTokenSizeExceeded = errors.New("token size exceeded")
 )

@@ -23,17 +23,16 @@ func main() {
 		log.Fatal("Failed to create OpenAI client:", err)
 	}
 
-	// Configure history compression options
-	compressOptions := gollem.HistoryCompressionOptions{
-		MaxMessages:    10, // Start compression at 10 messages
-		PreserveRecent: 5,  // Preserve 5 recent messages
-	}
+	// Create history compactor with custom options
+	compactor := gollem.NewHistoryCompactor(llmClient,
+		gollem.WithMaxTokens(10000),           // Start compaction at 10k tokens
+		gollem.WithPreserveRecentTokens(3000)) // Preserve 3k tokens of recent context
 
-	// Create agent with history compression features
+	// Create agent with history compaction features
 	agent := gollem.New(llmClient,
-		gollem.WithHistoryCompressor(gollem.DefaultHistoryCompressor(llmClient, compressOptions)), // Set compressor with LLM and options
-		gollem.WithHistoryCompression(true),                        // Enable history compression
-		gollem.WithCompressionHook(compressionHook),                // Compression event logging
+		gollem.WithHistoryCompactor(compactor),                     // Set compactor
+		gollem.WithHistoryCompaction(true),                         // Enable history compaction
+		gollem.WithCompactionHook(compactionHook),                  // Compaction event logging
 		gollem.WithSystemPrompt("You are a helpful AI assistant."), // System prompt
 	)
 
@@ -53,16 +52,15 @@ func main() {
 		"What are some tips for optimizing performance?",
 	}
 
-	fmt.Println("=== History Compression Demo ===")
-	fmt.Printf("Compression settings: MaxMessages=%d, PreserveRecent=%d\n\n",
-		compressOptions.MaxMessages,
-		compressOptions.PreserveRecent)
+	fmt.Println("=== History Compaction Demo ===")
+	fmt.Println("Compaction settings: MaxTokens=10000, PreserveRecentTokens=3000")
+	fmt.Println()
 
 	for i, prompt := range conversations {
 		fmt.Printf("--- Conversation %d ---\n", i+1)
 		fmt.Printf("User: %s\n", prompt)
 
-		// History compression may occur automatically
+		// History compaction may occur automatically
 		err := agent.Execute(ctx, prompt)
 		if err != nil {
 			log.Printf("Error in conversation %d: %v", i+1, err)
@@ -73,8 +71,8 @@ func main() {
 		if session := agent.Session(); session != nil {
 			history := session.History()
 			fmt.Printf("History status: %d messages", history.ToCount())
-			if history.Compressed {
-				fmt.Printf(" (compressed, original length: %d)", history.OriginalLen)
+			if history.Compacted {
+				fmt.Printf(" (compacted, original length: %d)", history.OriginalLen)
 			}
 			fmt.Println()
 		}
@@ -84,16 +82,16 @@ func main() {
 	fmt.Println("=== Demo Complete ===")
 }
 
-// compressionHook is called when history compression occurs
-func compressionHook(ctx context.Context, original, compressed *gollem.History) error {
-	compressionRatio := float64(compressed.ToCount()) / float64(original.ToCount())
-	fmt.Printf("🗜️  History compression executed: %d → %d messages (%.1f%% reduction)\n",
+// compactionHook is called when history compaction occurs
+func compactionHook(ctx context.Context, original, compacted *gollem.History) error {
+	compactionRatio := float64(compacted.ToCount()) / float64(original.ToCount())
+	fmt.Printf("🗜️  History compaction executed: %d → %d messages (%.1f%% reduction)\n",
 		original.ToCount(),
-		compressed.ToCount(),
-		(1-compressionRatio)*100)
+		compacted.ToCount(),
+		(1-compactionRatio)*100)
 
-	if compressed.Summary != "" {
-		fmt.Printf("📄 Summary: %s\n", compressed.Summary)
+	if compacted.Summary != "" {
+		fmt.Printf("📄 Summary: %s\n", compacted.Summary)
 	}
 
 	return nil

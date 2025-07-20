@@ -812,12 +812,12 @@ func TestNewTodoIDGeneration(t *testing.T) {
 	}))
 }
 
-// Test plan compression during execution
-func TestPlanCompression_DuringExecution(t *testing.T) {
+// Test plan compaction during execution
+func TestPlanCompaction_DuringExecution(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
 			// Goal clarification response
-			"Create a comprehensive test plan with multiple steps to verify compression functionality",
+			"Create a comprehensive test plan with multiple steps to verify compaction functionality",
 			// Plan creation response
 			`{"steps": [{"description": "Step 1", "intent": "First step"}, {"description": "Step 2", "intent": "Second step"}], "simplified_system_prompt": "Simple system"}`,
 			// Step execution responses
@@ -831,26 +831,26 @@ func TestPlanCompression_DuringExecution(t *testing.T) {
 
 	agent := gollem.New(mockClient)
 
-	// Configure compression with very low thresholds to trigger compression
-	compressOptions := gollem.HistoryCompressionOptions{
-		MaxMessages:    1, // Extremely low to trigger compression
-		PreserveRecent: 1,
-	}
+	// Configure compaction with very low thresholds to trigger compaction
+	// Create compactor with extremely low threshold to trigger compaction
+	compactor := gollem.NewHistoryCompactor(mockClient,
+		gollem.WithMaxTokens(10),
+		gollem.WithPreserveRecentTokens(5))
 
-	compressionCallCount := 0
-	compressionHook := func(ctx context.Context, original, compressed *gollem.History) error {
-		compressionCallCount++
-		// Just verify that compression hook was called
+	compactionCallCount := 0
+	compactionHook := func(ctx context.Context, original, compacted *gollem.History) error {
+		compactionCallCount++
+		// Just verify that compaction hook was called
 		return nil
 	}
 
 	ctx := context.Background()
 
-	// Create plan with compression enabled
-	plan, err := agent.Plan(ctx, "Test plan with compression",
-		gollem.WithPlanHistoryCompression(true),
-		gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(mockClient, compressOptions)),
-		gollem.WithPlanCompressionHook(compressionHook),
+	// Create plan with compaction enabled
+	plan, err := agent.Plan(ctx, "Test plan with compaction",
+		gollem.WithPlanHistoryCompaction(true),
+		gollem.WithPlanHistoryCompactor(compactor),
+		gollem.WithPlanCompactionHook(compactionHook),
 	)
 	gt.NoError(t, err)
 	gt.NotNil(t, plan)
@@ -861,27 +861,27 @@ func TestPlanCompression_DuringExecution(t *testing.T) {
 	gt.Equal(t, "Step 1", todos[0].Description)
 	gt.Equal(t, "Step 2", todos[1].Description)
 
-	// Manually add messages to session to guarantee compression trigger
+	// Manually add messages to session to guarantee compaction trigger
 	session := plan.Session()
 	if session != nil && session.History() != nil {
 		history := session.History()
-		// Add enough messages to trigger compression
+		// Add enough messages to trigger compaction
 		for range 5 {
 			if history.LLType == gollem.LlmTypeOpenAI {
 				history.OpenAI = append(history.OpenAI, openai.ChatCompletionMessage{
 					Role:    "user",
-					Content: "Test message to increase history size for compression",
+					Content: "Test message to increase history size for compaction",
 				})
 			}
 		}
 	}
 
-	// Execute plan - compression should occur during execution
+	// Execute plan - compaction should occur during execution
 	result, err := plan.Execute(ctx)
 	gt.NoError(t, err)
 	gt.NotEqual(t, "", result)
 
-	// Verify plan completion regardless of compression
+	// Verify plan completion regardless of compaction
 	finalTodos := plan.GetToDos()
 	completedCount := 0
 	for _, todo := range finalTodos {
@@ -892,14 +892,14 @@ func TestPlanCompression_DuringExecution(t *testing.T) {
 	gt.True(t, completedCount > 0)
 }
 
-// Test emergency compression in plan mode
-func TestPlanCompression_EmergencyScenario(t *testing.T) {
+// Test emergency compaction in plan mode
+func TestPlanCompaction_EmergencyScenario(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
 			// Goal clarification
-			"Emergency compression test plan",
+			"Emergency compaction test plan",
 			// Plan creation
-			`{"steps": [{"description": "Emergency test step", "intent": "Test emergency compression"}], "simplified_system_prompt": "Emergency test"}`,
+			`{"steps": [{"description": "Emergency test step", "intent": "Test emergency compaction"}], "simplified_system_prompt": "Emergency test"}`,
 			// Step execution
 			"Emergency step completed",
 			// Reflection
@@ -909,25 +909,24 @@ func TestPlanCompression_EmergencyScenario(t *testing.T) {
 
 	agent := gollem.New(mockClient)
 
-	// Configure for emergency compression (very low emergency threshold)
-	compressOptions := gollem.HistoryCompressionOptions{
-		MaxMessages:    10,
-		PreserveRecent: 2,
-	}
+	// Configure for emergency compaction (very low emergency threshold)
+	compactor := gollem.NewHistoryCompactor(mockClient,
+		gollem.WithMaxTokens(100),
+		gollem.WithPreserveRecentTokens(20))
 
-	compressionHook := func(ctx context.Context, original, compressed *gollem.History) error {
-		// Check if this was emergency compression (aggressive mode)
-		// Emergency compression detection logic can be added here
+	compactionHook := func(ctx context.Context, original, compacted *gollem.History) error {
+		// Check if this was emergency compaction (aggressive mode)
+		// Emergency compaction detection logic can be added here
 		return nil
 	}
 
 	ctx := context.Background()
 
-	// Create plan with emergency compression settings
-	plan, err := agent.Plan(ctx, "Emergency compression test",
-		gollem.WithPlanHistoryCompression(true),
-		gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(mockClient, compressOptions)),
-		gollem.WithPlanCompressionHook(compressionHook),
+	// Create plan with emergency compaction settings
+	plan, err := agent.Plan(ctx, "Emergency compaction test",
+		gollem.WithPlanHistoryCompaction(true),
+		gollem.WithPlanHistoryCompactor(compactor),
+		gollem.WithPlanCompactionHook(compactionHook),
 	)
 	gt.NoError(t, err)
 
@@ -940,7 +939,7 @@ func TestPlanCompression_EmergencyScenario(t *testing.T) {
 			if history.LLType == gollem.LlmTypeOpenAI {
 				history.OpenAI = append(history.OpenAI, openai.ChatCompletionMessage{
 					Role:    "user",
-					Content: "This is a test message to increase history size for emergency compression testing",
+					Content: "This is a test message to increase history size for emergency compaction testing",
 				})
 			}
 		}
@@ -950,19 +949,19 @@ func TestPlanCompression_EmergencyScenario(t *testing.T) {
 	_, err = plan.Execute(ctx)
 	gt.NoError(t, err)
 
-	// Verify emergency compression logic was accessible (even if not triggered due to mock setup)
+	// Verify emergency compaction logic was accessible (even if not triggered due to mock setup)
 	// gt.NotNil(t, plan.config.memoryManager) // Cannot access private fields from external test package
 }
 
-// Test plan compression with summarization
-func TestPlanCompression_Summarization(t *testing.T) {
+// Test plan compaction with summarization
+func TestPlanCompaction_Summarization(t *testing.T) {
 	t.Run("summarization", func(t *testing.T) {
 		mockClient := &mockLLMClientForPlan{
 			responses: []string{
 				// Goal clarification
 				"Strategy test plan",
 				// Plan creation
-				`{"steps": [{"description": "Strategy test step", "intent": "Test different compression strategies"}], "simplified_system_prompt": "Strategy test"}`,
+				`{"steps": [{"description": "Strategy test step", "intent": "Test different compaction strategies"}], "simplified_system_prompt": "Strategy test"}`,
 				// Step execution
 				"Strategy test completed",
 				// Reflection
@@ -974,12 +973,11 @@ func TestPlanCompression_Summarization(t *testing.T) {
 
 		agent := gollem.New(mockClient)
 
-		compressOptions := gollem.HistoryCompressionOptions{
-			MaxMessages:    2,
-			PreserveRecent: 1,
-		}
+		compactor := gollem.NewHistoryCompactor(mockClient,
+			gollem.WithMaxTokens(20),
+			gollem.WithPreserveRecentTokens(10))
 
-		compressionHook := func(ctx context.Context, original, compressed *gollem.History) error {
+		compactionHook := func(ctx context.Context, original, compacted *gollem.History) error {
 			// Strategy verification can be added here
 			return nil
 		}
@@ -987,21 +985,21 @@ func TestPlanCompression_Summarization(t *testing.T) {
 		ctx := context.Background()
 
 		plan, err := agent.Plan(ctx, "Strategy test plan",
-			gollem.WithPlanHistoryCompression(true),
-			gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(mockClient, compressOptions)),
-			gollem.WithPlanCompressionHook(compressionHook),
+			gollem.WithPlanHistoryCompaction(true),
+			gollem.WithPlanHistoryCompactor(compactor),
+			gollem.WithPlanCompactionHook(compactionHook),
 		)
 		gt.NoError(t, err)
 
 		_, err = plan.Execute(ctx)
 		gt.NoError(t, err)
 
-		// Compression test completed successfully
+		// Compaction test completed successfully
 	})
 }
 
-// Test plan session replacement after compression
-func TestPlanCompression_SessionReplacement(t *testing.T) {
+// Test plan session replacement after compaction
+func TestPlanCompaction_SessionReplacement(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
 			// Goal clarification
@@ -1017,15 +1015,14 @@ func TestPlanCompression_SessionReplacement(t *testing.T) {
 
 	agent := gollem.New(mockClient)
 
-	compressOptions := gollem.HistoryCompressionOptions{
-		MaxMessages:    2,
-		PreserveRecent: 1,
-	}
+	compactor := gollem.NewHistoryCompactor(mockClient,
+		gollem.WithMaxTokens(20),
+		gollem.WithPreserveRecentTokens(10))
 
-	compressionHook := func(ctx context.Context, original, compressed *gollem.History) error {
-		gt.True(t, compressed.Compressed)
+	compactionHook := func(ctx context.Context, original, compacted *gollem.History) error {
+		gt.True(t, compacted.Compacted)
 		if original.ToCount() > 0 {
-			gt.Equal(t, original.ToCount(), compressed.OriginalLen)
+			gt.Equal(t, original.ToCount(), compacted.OriginalLen)
 		}
 		return nil
 	}
@@ -1033,9 +1030,9 @@ func TestPlanCompression_SessionReplacement(t *testing.T) {
 	ctx := context.Background()
 
 	plan, err := agent.Plan(ctx, "Session replacement test",
-		gollem.WithPlanHistoryCompression(true),
-		gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(mockClient, compressOptions)),
-		gollem.WithPlanCompressionHook(compressionHook),
+		gollem.WithPlanHistoryCompaction(true),
+		gollem.WithPlanHistoryCompactor(compactor),
+		gollem.WithPlanCompactionHook(compactionHook),
 	)
 	gt.NoError(t, err)
 
@@ -1051,8 +1048,8 @@ func TestPlanCompression_SessionReplacement(t *testing.T) {
 	gt.NotNil(t, finalSession)
 }
 
-// Test basic plan compression configuration
-func TestPlanCompression_BasicConfiguration(t *testing.T) {
+// Test basic plan compaction configuration
+func TestPlanCompaction_BasicConfiguration(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
 			// Goal clarification
@@ -1064,32 +1061,31 @@ func TestPlanCompression_BasicConfiguration(t *testing.T) {
 
 	agent := gollem.New(mockClient)
 
-	compressOptions := gollem.HistoryCompressionOptions{
-		MaxMessages:    5,
-		PreserveRecent: 3,
-	}
+	compactor := gollem.NewHistoryCompactor(mockClient,
+		gollem.WithMaxTokens(50),
+		gollem.WithPreserveRecentTokens(30))
 
 	ctx := context.Background()
 
 	plan, err := agent.Plan(ctx, "Basic configuration test",
-		gollem.WithPlanHistoryCompression(true),
-		gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(mockClient, compressOptions)),
+		gollem.WithPlanHistoryCompaction(true),
+		gollem.WithPlanHistoryCompactor(compactor),
 	)
 	gt.NoError(t, err)
 	gt.NotNil(t, plan)
 
 	// Verify configuration was properly set
-	// gt.Equal(t, compressOptions.MaxMessages, plan.config.compressOptions.MaxMessages) // Cannot access private fields
-	// gt.Equal(t, compressOptions.TargetTokens, plan.config.compressOptions.TargetTokens) // Cannot access private fields
-	// gt.Equal(t, compressOptions.Strategy, plan.config.compressOptions.Strategy) // Cannot access private fields
-	// gt.Equal(t, compressOptions.PreserveRecent, plan.config.compressOptions.PreserveRecent) // Cannot access private fields
-	// gt.True(t, plan.config.autoCompress) // Cannot access private fields
-	// gt.True(t, plan.config.loopCompression) // Cannot access private fields
+	// gt.Equal(t, compactOptions.MaxMessages, plan.config.compactOptions.MaxMessages) // Cannot access private fields
+	// gt.Equal(t, compactOptions.TargetTokens, plan.config.compactOptions.TargetTokens) // Cannot access private fields
+	// gt.Equal(t, compactOptions.Strategy, plan.config.compactOptions.Strategy) // Cannot access private fields
+	// gt.Equal(t, compactOptions.PreserveRecent, plan.config.compactOptions.PreserveRecent) // Cannot access private fields
+	// gt.True(t, plan.config.autoCompact) // Cannot access private fields
+	// gt.True(t, plan.config.loopCompaction) // Cannot access private fields
 	// gt.NotNil(t, plan.config.memoryManager) // Cannot access private fields
 }
 
-// Test plan compression configuration inheritance
-func TestPlanCompression_ConfigurationInheritance(t *testing.T) {
+// Test plan compaction configuration inheritance
+func TestPlanCompaction_ConfigurationInheritance(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
 			// Goal clarification
@@ -1103,26 +1099,25 @@ func TestPlanCompression_ConfigurationInheritance(t *testing.T) {
 
 	agent := gollem.New(mockClient)
 
-	// Test that plan inherits agent compression configuration
-	agentCompressOptions := gollem.HistoryCompressionOptions{
-		MaxMessages:    5,
-		PreserveRecent: 3,
-	}
+	// Test that plan inherits agent compaction configuration
+	agentCompactor := gollem.NewHistoryCompactor(mockClient,
+		gollem.WithMaxTokens(50),
+		gollem.WithPreserveRecentTokens(30))
 
 	ctx := context.Background()
 
 	plan, err := agent.Plan(ctx, "Configuration inheritance test",
-		gollem.WithPlanHistoryCompression(true),
-		gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(mockClient, agentCompressOptions)),
+		gollem.WithPlanHistoryCompaction(true),
+		gollem.WithPlanHistoryCompactor(agentCompactor),
 	)
 	gt.NoError(t, err)
 	gt.NotNil(t, plan) // Basic verification that plan was created
 
 	// Verify configuration was properly inherited
-	// gt.Equal(t, agentCompressOptions.MaxMessages, plan.config.compressOptions.MaxMessages) // Cannot access private fields
-	// gt.Equal(t, agentCompressOptions.TargetTokens, plan.config.compressOptions.TargetTokens) // Cannot access private fields
-	// gt.Equal(t, agentCompressOptions.Strategy, plan.config.compressOptions.Strategy) // Cannot access private fields
-	// gt.Equal(t, agentCompressOptions.PreserveRecent, plan.config.compressOptions.PreserveRecent) // Cannot access private fields
+	// gt.Equal(t, agentCompactOptions.MaxMessages, plan.config.compactOptions.MaxMessages) // Cannot access private fields
+	// gt.Equal(t, agentCompactOptions.TargetTokens, plan.config.compactOptions.TargetTokens) // Cannot access private fields
+	// gt.Equal(t, agentCompactOptions.Strategy, plan.config.compactOptions.Strategy) // Cannot access private fields
+	// gt.Equal(t, agentCompactOptions.PreserveRecent, plan.config.compactOptions.PreserveRecent) // Cannot access private fields
 	// gt.NotNil(t, plan.config.memoryManager) // Cannot access private fields
 }
 

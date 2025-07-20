@@ -15,6 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - Run tests to ensure no impact on other code
 - All comment and character literal in source code must be in English
 - Test files should have `package {name}_test`. Do not use same package name
+- Test must be included in same name test file. (e.g. test for `abc.go` must be in `abc_test.go`)
 - Use named empty structure (e.g. `type ctxHogeKey struct{}` ) as private context key
 - Do not create binary. If you need to run, use `go run` command instead
 
@@ -94,6 +95,7 @@ Each provider in `llm/` handles format conversion between gollem's unified inter
 - Provider-specific conversion tests (`convert_test.go` in each LLM package)
 - Integration tests that use real APIs when keys are available
 - Export tests for testing internal functionality
+- Private methods can be exported for testing via `export_test.go` (e.g., `var IsTokenLimitError = isTokenLimitError`)
 
 ### Examples
 

@@ -489,22 +489,16 @@ func (c *Client) CountTokens(ctx context.Context, history *gollem.History) (int,
 	// Model-specific adjustments for Gemini
 	modelName := c.defaultModel
 	if modelName == "" {
-		modelName = "gemini-pro" // Default fallback
+		modelName = "gemini-2.0-flash" // Default fallback
 	}
 
-	switch {
-	case strings.Contains(modelName, "gemini-1.5-pro"):
-		// Gemini 1.5 Pro is very efficient
-		estimatedTokens = int(float64(estimatedTokens) * 0.85)
-	case strings.Contains(modelName, "gemini-1.5-flash"):
-		// Gemini 1.5 Flash is most efficient
+	// Gemini 2.0 Flash and newer are highly efficient
+	// All older models (1.5 and below) are deprecated and not supported
+	if strings.Contains(modelName, "gemini-2.0") || strings.Contains(modelName, "gemini-2.5") {
+		estimatedTokens = int(float64(estimatedTokens) * 0.75)
+	} else {
+		// Default adjustment for newer models
 		estimatedTokens = int(float64(estimatedTokens) * 0.8)
-	case strings.Contains(modelName, "gemini-pro"):
-		// Standard Gemini Pro
-		estimatedTokens = int(float64(estimatedTokens) * 0.95)
-	default:
-		// Default adjustment
-		estimatedTokens = int(float64(estimatedTokens) * 0.9)
 	}
 
 	return estimatedTokens, nil

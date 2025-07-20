@@ -23,36 +23,34 @@ func main() {
 		log.Fatal("Failed to create OpenAI client:", err)
 	}
 
-	// Configure history compression options for plan execution
-	compressOptions := gollem.HistoryCompressionOptions{
-		MaxMessages:    8, // Start compression at 8 messages
-		PreserveRecent: 4, // Preserve 4 recent messages
-	}
+	// Create history compactor with custom options for plan execution
+	compactor := gollem.NewHistoryCompactor(llmClient,
+		gollem.WithMaxTokens(8000),            // Start compaction at 8k tokens
+		gollem.WithPreserveRecentTokens(3000)) // Preserve 3k tokens of recent context
 
-	// Create agent with plan compression features
+	// Create agent with plan compaction features
 	agent := gollem.New(llmClient,
 		gollem.WithSystemPrompt("You are a helpful AI assistant that can create and execute plans."),
 	)
 
 	ctx := context.Background()
 
-	// Create a plan with compression enabled
+	// Create a plan with compaction enabled
 	plan, err := agent.Plan(ctx,
 		"Create a comprehensive research plan about renewable energy sources. Include wind, solar, hydro, and geothermal energy. For each type, research current technology, efficiency rates, environmental impact, and cost analysis.",
-		gollem.WithPlanHistoryCompressor(gollem.DefaultHistoryCompressor(llmClient, compressOptions)), // Set compressor with LLM and options
-		gollem.WithPlanHistoryCompression(true),             // Enable history compression
-		gollem.WithPlanCompressionHook(planCompressionHook), // Compression event logging
-		gollem.WithPlanLanguage("English"),                  // Language preference
+		gollem.WithPlanHistoryCompactor(compactor),        // Set compactor
+		gollem.WithPlanHistoryCompaction(true),            // Enable history compaction
+		gollem.WithPlanCompactionHook(planCompactionHook), // Compaction event logging
+		gollem.WithPlanLanguage("English"),                // Language preference
 	)
 	if err != nil {
 		log.Fatal("Failed to create plan:", err)
 	}
 
-	fmt.Println("=== Plan Compression Demo ===")
+	fmt.Println("=== Plan Compaction Demo ===")
 	fmt.Printf("Plan created with %d todos\n", len(plan.GetToDos()))
-	fmt.Printf("Compression settings: MaxMessages=%d, PreserveRecent=%d\n\n",
-		compressOptions.MaxMessages,
-		compressOptions.PreserveRecent)
+	fmt.Println("Compaction settings: MaxTokens=8000, PreserveRecentTokens=3000")
+	fmt.Println()
 
 	// Print initial plan
 	fmt.Println("Initial Plan:")
@@ -62,7 +60,7 @@ func main() {
 	}
 	fmt.Println()
 
-	// Execute the plan - compression may occur automatically during execution
+	// Execute the plan - compaction may occur automatically during execution
 	fmt.Println("=== Executing Plan ===")
 	result, err := plan.Execute(ctx)
 	if err != nil {
@@ -96,23 +94,23 @@ func main() {
 	if session := plan.Session(); session != nil {
 		history := session.History()
 		fmt.Printf("Session History: %d messages", history.ToCount())
-		if history.Compressed {
-			fmt.Printf(" (compressed, original length: %d)", history.OriginalLen)
+		if history.Compacted {
+			fmt.Printf(" (compacted, original length: %d)", history.OriginalLen)
 		}
 		fmt.Println()
 	}
 }
 
-// planCompressionHook is called when history compression occurs during plan execution
-func planCompressionHook(ctx context.Context, original, compressed *gollem.History) error {
-	compressionRatio := float64(compressed.ToCount()) / float64(original.ToCount())
-	fmt.Printf("🗜️  Plan history compression executed: %d → %d messages (%.1f%% reduction)\n",
+// planCompactionHook is called when history compaction occurs during plan execution
+func planCompactionHook(ctx context.Context, original, compacted *gollem.History) error {
+	compactionRatio := float64(compacted.ToCount()) / float64(original.ToCount())
+	fmt.Printf("🗜️  Plan history compaction executed: %d → %d messages (%.1f%% reduction)\n",
 		original.ToCount(),
-		compressed.ToCount(),
-		(1-compressionRatio)*100)
+		compacted.ToCount(),
+		(1-compactionRatio)*100)
 
-	if compressed.Summary != "" {
-		fmt.Printf("📄 Summary: %s\n", compressed.Summary)
+	if compacted.Summary != "" {
+		fmt.Printf("📄 Summary: %s\n", compacted.Summary)
 	}
 
 	return nil

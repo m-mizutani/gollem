@@ -74,3 +74,6 @@ func init() {
 }
 
 func DebugLogger() *slog.Logger { return debugLogger }
+
+// IsTokenLimitError exports isTokenLimitError for testing
+var IsTokenLimitError = isTokenLimitError

@@ -452,11 +452,11 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 		ctx = ctxWithPlanToDo(ctx, currentToDo)
 		stepCount++
 
-		// Plan history compression check (skip compression on first step)
-		if p.config.autoCompress && stepCount > 1 {
-			if err := p.performPlanCompression(ctx, stepCount); err != nil {
-				logger.Warn("plan compression failed", "error", err, "step", stepCount)
-				// Continue execution even if compression fails (log only)
+		// Plan history compaction check (skip compaction on first step)
+		if p.config.autoCompact && stepCount > 1 {
+			if err := p.performPlanCompaction(ctx, stepCount); err != nil {
+				logger.Warn("plan compaction failed", "error", err, "step", stepCount)
+				// Continue execution even if compaction fails (log only)
 			}
 		}
 
@@ -2002,57 +2002,57 @@ func WithPlanLanguage(language string) PlanOption {
 	}
 }
 
-// WithPlanHistoryCompression enables or disables automatic history compression during plan execution.
-// To configure compression options, pass them when creating the compressor with DefaultHistoryCompressor.
-func WithPlanHistoryCompression(enabled bool) PlanOption {
+// WithPlanHistoryCompaction enables or disables automatic history compaction during plan execution.
+// To configure compaction options, pass them when creating the compactor with DefaultHistoryCompactor.
+func WithPlanHistoryCompaction(enabled bool) PlanOption {
 	return func(cfg *planConfig) {
-		cfg.autoCompress = enabled
+		cfg.autoCompact = enabled
 	}
 }
 
-// WithPlanHistoryCompressor sets the history compressor for plan execution.
-func WithPlanHistoryCompressor(compressor HistoryCompressor) PlanOption {
+// WithPlanHistoryCompactor sets the history compactor for plan execution.
+func WithPlanHistoryCompactor(compactor HistoryCompactor) PlanOption {
 	return func(cfg *planConfig) {
-		cfg.historyCompressor = compressor
+		cfg.historyCompactor = compactor
 	}
 }
 
-// WithPlanCompressionHook sets a callback function for compression events during plan execution.
-func WithPlanCompressionHook(callback func(ctx context.Context, original, compressed *History) error) PlanOption {
+// WithPlanCompactionHook sets a callback function for compaction events during plan execution.
+func WithPlanCompactionHook(callback func(ctx context.Context, original, compacted *History) error) PlanOption {
 	return func(cfg *planConfig) {
-		cfg.compressionHook = callback
+		cfg.compactionHook = callback
 	}
 }
 
-// performPlanCompression performs history compression during plan execution
-func (p *Plan) performPlanCompression(ctx context.Context, step int) error {
-	if !p.config.autoCompress || p.mainSession == nil || p.config.historyCompressor == nil {
+// performPlanCompaction performs history compaction during plan execution
+func (p *Plan) performPlanCompaction(ctx context.Context, step int) error {
+	if !p.config.autoCompact || p.mainSession == nil || p.config.historyCompactor == nil {
 		return nil
 	}
 
 	history := p.mainSession.History()
 	logger := LoggerFromContext(ctx)
 
-	// Use unified compression logic that handles both normal and emergency cases
-	compressedHistory, err := p.config.historyCompressor(ctx, history, p.agent.llm)
+	// Use unified compaction logic that handles both normal and emergency cases
+	compactedHistory, err := p.config.historyCompactor(ctx, history, p.agent.llm)
 	if err != nil {
-		return goerr.Wrap(err, "failed to perform plan compression")
+		return goerr.Wrap(err, "failed to perform plan compaction")
 	}
 
-	// If compression occurred (history changed), replace the session
-	if compressedHistory != history {
-		logger.Info("compression triggered during plan execution", "step", step,
+	// If compaction occurred (history changed), replace the session
+	if compactedHistory != history {
+		logger.Info("compaction triggered during plan execution", "step", step,
 			"original_count", history.ToCount(),
-			"compressed_count", compressedHistory.ToCount())
+			"compacted_count", compactedHistory.ToCount())
 
-		return p.replaceSessionWithCompressedHistory(ctx, compressedHistory)
+		return p.replaceSessionWithCompactedHistory(ctx, compactedHistory)
 	}
 
 	return nil
 }
 
-// replaceSessionWithCompressedHistory replaces the plan session with a new one using compressed history
-func (p *Plan) replaceSessionWithCompressedHistory(ctx context.Context, compressedHistory *History) error {
+// replaceSessionWithCompactedHistory replaces the plan session with a new one using compacted history
+func (p *Plan) replaceSessionWithCompactedHistory(ctx context.Context, compactedHistory *History) error {
 	if p.mainSession == nil {
 		return goerr.New("no plan session to replace")
 	}
@@ -2060,15 +2060,15 @@ func (p *Plan) replaceSessionWithCompressedHistory(ctx context.Context, compress
 	logger := LoggerFromContext(ctx)
 	originalHistory := p.mainSession.History()
 
-	// Call compression hook
-	if err := p.config.compressionHook(ctx, originalHistory, compressedHistory); err != nil {
-		logger.Warn("plan compression hook failed", "error", err)
+	// Call compaction hook
+	if err := p.config.compactionHook(ctx, originalHistory, compactedHistory); err != nil {
+		logger.Warn("plan compaction hook failed", "error", err)
 		// Continue processing even if hook fails
 	}
 
-	// Create new session with compressed history
+	// Create new session with compacted history
 	sessionOptions := []SessionOption{
-		WithSessionHistory(compressedHistory),
+		WithSessionHistory(compactedHistory),
 		WithSessionSystemPrompt(p.config.systemPrompt),
 	}
 
@@ -2079,7 +2079,7 @@ func (p *Plan) replaceSessionWithCompressedHistory(ctx context.Context, compress
 
 	newSession, err := p.agent.llm.NewSession(ctx, sessionOptions...)
 	if err != nil {
-		return goerr.Wrap(err, "failed to create new plan session with compressed history")
+		return goerr.Wrap(err, "failed to create new plan session with compacted history")
 	}
 
 	// Replace plan session
