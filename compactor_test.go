@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
 	"github.com/m-mizutani/gollem/llm/gemini"
@@ -858,4 +859,99 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// TestHistoryCompactor_SummaryInMessageHistory verifies that summaries are properly
+// prepended to the message history for all LLM types
+func TestHistoryCompactor_SummaryInMessageHistory(t *testing.T) {
+	ctx := context.Background()
+	testSummary := "This is a test summary of the previous conversation"
+
+	mockClient := &mockLLMClient{
+		responses: []string{testSummary},
+	}
+
+	compactor := gollem.NewHistoryCompactor(mockClient,
+		gollem.WithMaxTokens(50),
+		gollem.WithPreserveRecentTokens(20))
+
+	t.Run("OpenAI summary in system message", func(t *testing.T) {
+		// Create OpenAI history with enough messages to trigger compaction
+		history := &gollem.History{
+			LLType: gollem.LlmTypeOpenAI,
+			OpenAI: []openaiLib.ChatCompletionMessage{
+				{Role: "system", Content: "You are a helpful assistant"},
+				{Role: "user", Content: "Message 1"},
+				{Role: "assistant", Content: "Response 1"},
+				{Role: "user", Content: "Message 2"},
+				{Role: "assistant", Content: "Response 2"},
+				{Role: "user", Content: "Message 3"},
+				{Role: "assistant", Content: "Response 3"},
+			},
+		}
+
+		compacted, err := compactor(ctx, history, mockClient)
+		gt.NoError(t, err)
+		gt.True(t, compacted.Compacted)
+
+		// Verify summary is in first system message
+		gt.True(t, len(compacted.OpenAI) > 0)
+		firstMsg := compacted.OpenAI[0]
+		gt.Equal(t, "system", firstMsg.Role)
+		gt.True(t, strings.Contains(firstMsg.Content, testSummary))
+		gt.True(t, strings.Contains(firstMsg.Content, "Conversation history summary:"))
+	})
+
+	t.Run("Claude summary in user message", func(t *testing.T) {
+		// Create Claude history
+		history := &gollem.History{
+			LLType: gollem.LlmTypeClaude,
+			Claude: make([]gollem.ClaudeMessage, 10), // Simplified - would normally have content
+		}
+
+		// Manually set up for testing since our mock doesn't handle Claude properly
+		recentHistory := &gollem.History{
+			LLType: gollem.LlmTypeClaude,
+			Claude: history.Claude[5:],
+		}
+
+		// Use the internal function directly for testing
+		compacted := gollem.BuildCompactedHistory(history, testSummary, recentHistory)
+
+		// Verify summary is in first user message
+		gt.True(t, len(compacted.Claude) > 0)
+		firstMsg := compacted.Claude[0]
+		gt.Equal(t, anthropic.MessageParamRoleUser, firstMsg.Role)
+		gt.True(t, len(firstMsg.Content) > 0)
+		gt.Equal(t, "text", firstMsg.Content[0].Type)
+		gt.NotNil(t, firstMsg.Content[0].Text)
+		gt.True(t, strings.Contains(*firstMsg.Content[0].Text, testSummary))
+		gt.True(t, strings.Contains(*firstMsg.Content[0].Text, "--- Previous Conversation Summary ---"))
+	})
+
+	t.Run("Gemini summary in user message", func(t *testing.T) {
+		// Create Gemini history
+		history := &gollem.History{
+			LLType: gollem.LlmTypeGemini,
+			Gemini: make([]gollem.GeminiMessage, 10), // Simplified - would normally have content
+		}
+
+		// Manually set up for testing
+		recentHistory := &gollem.History{
+			LLType: gollem.LlmTypeGemini,
+			Gemini: history.Gemini[5:],
+		}
+
+		// Use the internal function directly for testing
+		compacted := gollem.BuildCompactedHistory(history, testSummary, recentHistory)
+
+		// Verify summary is in first user message
+		gt.True(t, len(compacted.Gemini) > 0)
+		firstMsg := compacted.Gemini[0]
+		gt.Equal(t, "user", firstMsg.Role)
+		gt.True(t, len(firstMsg.Parts) > 0)
+		gt.Equal(t, "text", firstMsg.Parts[0].Type)
+		gt.True(t, strings.Contains(firstMsg.Parts[0].Text, testSummary))
+		gt.True(t, strings.Contains(firstMsg.Parts[0].Text, "--- Previous Conversation Summary ---"))
+	})
 }

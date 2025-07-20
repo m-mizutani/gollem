@@ -77,3 +77,12 @@ func DebugLogger() *slog.Logger { return debugLogger }
 
 // IsTokenLimitError exports isTokenLimitError for testing
 var IsTokenLimitError = isTokenLimitError
+
+// Export buildCompactedHistory for testing
+var BuildCompactedHistory = buildCompactedHistory
+
+// Export message types for testing
+type (
+	ClaudeMessage = claudeMessage
+	GeminiMessage = geminiMessage
+)

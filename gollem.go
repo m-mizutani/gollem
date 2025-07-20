@@ -426,7 +426,7 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 	for i := 0; i < cfg.loopLimit; i++ {
 		// History compaction check within loop
 		if cfg.autoCompact && i > 0 { // Skip compaction on first iteration
-			if err := g.performLoopCompaction(ctx, cfg, i); err != nil {
+			if err := g.performLoopCompaction(ctx, cfg, i, toolList); err != nil {
 				logger.Warn("loop compaction failed", "error", err, "loop", i)
 				// Continue execution even if compaction fails (log only)
 			}
@@ -472,7 +472,7 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 
 		switch cfg.responseMode {
 		case ResponseModeBlocking:
-			output, err := g.generateContentWithRetry(ctx, cfg, input)
+			output, err := g.generateContentWithRetry(ctx, cfg, input, toolList)
 			if err != nil {
 				return err
 			}
@@ -670,7 +670,7 @@ func buildToolMap(ctx context.Context, tools []Tool, toolSets []ToolSet) (map[st
 }
 
 // performLoopCompaction performs history compaction within the execution loop
-func (g *Agent) performLoopCompaction(ctx context.Context, cfg *gollemConfig, loop int) error {
+func (g *Agent) performLoopCompaction(ctx context.Context, cfg *gollemConfig, loop int, toolList []Tool) error {
 	if !cfg.autoCompact || g.currentSession == nil || cfg.historyCompactor == nil {
 		return nil
 	}
@@ -690,14 +690,14 @@ func (g *Agent) performLoopCompaction(ctx context.Context, cfg *gollemConfig, lo
 			"original_count", history.ToCount(),
 			"compacted_count", compactedHistory.ToCount())
 
-		return g.replaceSessionWithCompactedHistory(ctx, cfg, compactedHistory)
+		return g.replaceSessionWithCompactedHistory(ctx, cfg, compactedHistory, toolList)
 	}
 
 	return nil
 }
 
 // replaceSessionWithCompactedHistory replaces the current session with a new one using compacted history
-func (g *Agent) replaceSessionWithCompactedHistory(ctx context.Context, cfg *gollemConfig, compactedHistory *History) error {
+func (g *Agent) replaceSessionWithCompactedHistory(ctx context.Context, cfg *gollemConfig, compactedHistory *History, toolList []Tool) error {
 	if g.currentSession == nil {
 		return goerr.New("no current session to replace")
 	}
@@ -717,9 +717,9 @@ func (g *Agent) replaceSessionWithCompactedHistory(ctx context.Context, cfg *gol
 		WithSessionSystemPrompt(cfg.systemPrompt),
 	}
 
-	// Get current tools
-	if tools := g.getCurrentTools(ctx, cfg); len(tools) > 0 {
-		sessionOptions = append(sessionOptions, WithSessionTools(tools...))
+	// Add tools if available
+	if len(toolList) > 0 {
+		sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
 	}
 
 	newSession, err := g.llm.NewSession(ctx, sessionOptions...)
@@ -733,31 +733,8 @@ func (g *Agent) replaceSessionWithCompactedHistory(ctx context.Context, cfg *gol
 	return nil
 }
 
-// getCurrentTools gets the list of tools from current configuration
-func (g *Agent) getCurrentTools(ctx context.Context, cfg *gollemConfig) []Tool {
-	// Logic extracted from setupTools
-	allTools := cfg.tools[:]
-
-	if cfg.facilitator != nil {
-		allTools = append(allTools, cfg.facilitator)
-	}
-
-	toolMap, err := buildToolMap(ctx, allTools, cfg.toolSets)
-	if err != nil {
-		// Return empty slice on error
-		return []Tool{}
-	}
-
-	toolList := make([]Tool, 0, len(toolMap))
-	for _, tool := range toolMap {
-		toolList = append(toolList, tool)
-	}
-
-	return toolList
-}
-
 // generateContentWithRetry handles token limit errors by compacting history and retrying once
-func (g *Agent) generateContentWithRetry(ctx context.Context, cfg *gollemConfig, input []Input) (*Response, error) {
+func (g *Agent) generateContentWithRetry(ctx context.Context, cfg *gollemConfig, input []Input, toolList []Tool) (*Response, error) {
 	logger := LoggerFromContext(ctx)
 
 	// First attempt
@@ -804,7 +781,7 @@ func (g *Agent) generateContentWithRetry(ctx context.Context, cfg *gollemConfig,
 		"compacted_count", compactedHistory.ToCount())
 
 	// Replace session with compacted history
-	if err := g.replaceSessionWithCompactedHistory(ctx, cfg, compactedHistory); err != nil {
+	if err := g.replaceSessionWithCompactedHistory(ctx, cfg, compactedHistory, toolList); err != nil {
 		logger.Warn("failed to replace session with compacted history", "error", err)
 		return nil, goerr.Wrap(ErrTokenSizeExceeded, "compaction succeeded but session replacement failed", goerr.V("replacement_error", err))
 	}

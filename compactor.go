@@ -7,6 +7,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/sashabaranov/go-openai"
 )
@@ -705,12 +706,35 @@ func buildCompactedHistory(original *History, summary string, recentHistory *His
 		compacted.OpenAI = msgs
 
 	case llmTypeClaude:
-		// For Claude, store in Summary field and keep only recent messages
-		compacted.Claude = append([]claudeMessage{}, recentHistory.Claude...)
+		// Add summary as a user message to provide context
+		summaryText := "--- Previous Conversation Summary ---\n" + summary + "\n--- End of Summary ---"
+		summaryMsg := claudeMessage{
+			Role: anthropic.MessageParamRoleUser,
+			Content: []claudeContentBlock{
+				{
+					Type: "text",
+					Text: &summaryText,
+				},
+			},
+		}
+
+		// Add summary message followed by recent messages
+		compacted.Claude = append([]claudeMessage{summaryMsg}, recentHistory.Claude...)
 
 	case llmTypeGemini:
-		// For Gemini, same approach
-		compacted.Gemini = append([]geminiMessage{}, recentHistory.Gemini...)
+		// Add summary as a user message to provide context
+		summaryMsg := geminiMessage{
+			Role: "user",
+			Parts: []geminiPart{
+				{
+					Type: "text",
+					Text: "--- Previous Conversation Summary ---\n" + summary + "\n--- End of Summary ---",
+				},
+			},
+		}
+
+		// Add summary message followed by recent messages
+		compacted.Gemini = append([]geminiMessage{summaryMsg}, recentHistory.Gemini...)
 	}
 
 	return compacted
