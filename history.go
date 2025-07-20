@@ -15,12 +15,12 @@ import (
 // It stores messages in a format specific to each LLM type (OpenAI, Claude, or Gemini).
 //
 // For detailed documentation, see doc/history.md
-type llmType string
+type LLMType string
 
 const (
-	llmTypeOpenAI llmType = "OpenAI"
-	llmTypeGemini llmType = "gemini"
-	llmTypeClaude llmType = "claude"
+	llmTypeOpenAI LLMType = "OpenAI"
+	llmTypeGemini LLMType = "gemini"
+	llmTypeClaude LLMType = "claude"
 )
 
 const (
@@ -28,7 +28,7 @@ const (
 )
 
 type History struct {
-	LLType  llmType `json:"type"`
+	LLType  LLMType `json:"type"`
 	Version int     `json:"version"`
 
 	Claude []claudeMessage                `json:"claude,omitempty"`

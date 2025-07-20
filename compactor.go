@@ -173,20 +173,20 @@ func NewHistoryCompactor(summarizerLLM LLMClient, options ...HistoryCompactionOp
 	}
 
 	// Latest LLM context window sizes (as of 2024)
-	contextLimits := map[llmType]int{
+	contextLimits := map[LLMType]int{
 		llmTypeOpenAI: 128000,  // GPT-4 Turbo/GPT-4o
 		llmTypeClaude: 200000,  // Claude 3.5 Sonnet / Claude 4
 		llmTypeGemini: 1000000, // Gemini 2.0 Flash and newer
 	}
 
 	// Per-LLM token thresholds based on context window size
-	targetTokens := map[llmType]int{
+	targetTokens := map[LLMType]int{
 		llmTypeOpenAI: 100000, // ~78% of 128k
 		llmTypeClaude: 150000, // ~75% of 200k
 		llmTypeGemini: 800000, // ~80% of 1M
 	}
 
-	emergencyTokens := map[llmType]int{
+	emergencyTokens := map[LLMType]int{
 		llmTypeOpenAI: 120000, // ~94% of 128k
 		llmTypeClaude: 190000, // ~95% of 200k
 		llmTypeGemini: 950000, // ~95% of 1M
@@ -209,7 +209,7 @@ func NewHistoryCompactor(summarizerLLM LLMClient, options ...HistoryCompactionOp
 }
 
 // shouldCompact checks if history compaction is needed
-func shouldCompact(ctx context.Context, history *History, llmClient LLMClient, options *historyCompactionOptions, contextLimits, targetTokens, emergencyTokens map[llmType]int) bool {
+func shouldCompact(ctx context.Context, history *History, llmClient LLMClient, options *historyCompactionOptions, contextLimits, targetTokens, emergencyTokens map[LLMType]int) bool {
 	if history == nil {
 		return false
 	}
@@ -316,7 +316,7 @@ func fallbackEstimateTokens(history *History) int {
 }
 
 // isNearContextLimit checks if history is approaching context window limits (80% threshold)
-func isNearContextLimit(ctx context.Context, history *History, llmClient LLMClient, llmType llmType, contextLimits map[llmType]int) bool {
+func isNearContextLimit(ctx context.Context, history *History, llmClient LLMClient, llmType LLMType, contextLimits map[LLMType]int) bool {
 	limit, exists := contextLimits[llmType]
 	if !exists {
 		limit = 8000 // Default limit
@@ -328,7 +328,7 @@ func isNearContextLimit(ctx context.Context, history *History, llmClient LLMClie
 }
 
 // isNearContextLimitEmergency checks if history is at emergency context window limits (95%)
-func isNearContextLimitEmergency(ctx context.Context, history *History, llmClient LLMClient, llmType llmType, contextLimits map[llmType]int) bool {
+func isNearContextLimitEmergency(ctx context.Context, history *History, llmClient LLMClient, llmType LLMType, contextLimits map[LLMType]int) bool {
 	limit, exists := contextLimits[llmType]
 	if !exists {
 		limit = 8000 // Default limit

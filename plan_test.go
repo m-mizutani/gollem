@@ -867,7 +867,7 @@ func TestPlanCompaction_DuringExecution(t *testing.T) {
 		history := session.History()
 		// Add enough messages to trigger compaction
 		for range 5 {
-			if history.LLType == gollem.LlmTypeOpenAI {
+			if history.LLType == gollem.LLMTypeOpenAI {
 				history.OpenAI = append(history.OpenAI, openai.ChatCompletionMessage{
 					Role:    "user",
 					Content: "Test message to increase history size for compaction",
@@ -936,7 +936,7 @@ func TestPlanCompaction_EmergencyScenario(t *testing.T) {
 		history := session.History()
 		// Simulate large history by adding many messages
 		for range 10 {
-			if history.LLType == gollem.LlmTypeOpenAI {
+			if history.LLType == gollem.LLMTypeOpenAI {
 				history.OpenAI = append(history.OpenAI, openai.ChatCompletionMessage{
 					Role:    "user",
 					Content: "This is a test message to increase history size for emergency compaction testing",
@@ -1130,7 +1130,7 @@ type mockLLMClientForPlan struct {
 func (m *mockLLMClientForPlan) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 	return &mockSessionForPlan{
 		client:  m,
-		history: &gollem.History{LLType: gollem.LlmTypeOpenAI},
+		history: &gollem.History{LLType: gollem.LLMTypeOpenAI},
 	}, nil
 }
 

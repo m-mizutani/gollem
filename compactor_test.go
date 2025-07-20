@@ -53,7 +53,7 @@ func TestNewHistoryCompactor_PerformCompact_ShouldCompactLogic(t *testing.T) {
 		}
 
 		history := &gollem.History{
-			LLType: gollem.LlmTypeOpenAI,
+			LLType: gollem.LLMTypeOpenAI,
 			OpenAI: messages, // 10 messages with content should exceed 50 token limit
 		}
 
@@ -64,7 +64,7 @@ func TestNewHistoryCompactor_PerformCompact_ShouldCompactLogic(t *testing.T) {
 
 	t.Run("should not compact when under limits", func(t *testing.T) {
 		history := &gollem.History{
-			LLType: gollem.LlmTypeOpenAI,
+			LLType: gollem.LLMTypeOpenAI,
 			OpenAI: make([]openaiLib.ChatCompletionMessage, 10), // 10 < default 50
 		}
 
@@ -83,7 +83,7 @@ func TestNewHistoryCompactor_PerformCompact(t *testing.T) {
 
 	t.Run("no compaction needed returns original history", func(t *testing.T) {
 		history := &gollem.History{
-			LLType: gollem.LlmTypeOpenAI,
+			LLType: gollem.LLMTypeOpenAI,
 			OpenAI: []openaiLib.ChatCompletionMessage{
 				{Role: "user", Content: "Hello"},
 			},
@@ -98,7 +98,7 @@ func TestNewHistoryCompactor_PerformCompact(t *testing.T) {
 
 	t.Run("compaction needed returns compacted history", func(t *testing.T) {
 		history := &gollem.History{
-			LLType: gollem.LlmTypeOpenAI,
+			LLType: gollem.LLMTypeOpenAI,
 			OpenAI: []openaiLib.ChatCompletionMessage{
 				{Role: "user", Content: "Message 1"},
 				{Role: "assistant", Content: "Response 1"},
@@ -137,7 +137,7 @@ func TestHistoryCompactionDefaults(t *testing.T) {
 
 	// Test with small number of messages (should not compact with default 50k token limit)
 	history := &gollem.History{
-		LLType: gollem.LlmTypeOpenAI,
+		LLType: gollem.LLMTypeOpenAI,
 		OpenAI: make([]openaiLib.ChatCompletionMessage, 10),
 	}
 	result, err := compactor(ctx, history, mockClient)
@@ -146,7 +146,7 @@ func TestHistoryCompactionDefaults(t *testing.T) {
 
 	// Test with many messages (should compact with mock token counting)
 	history = &gollem.History{
-		LLType: gollem.LlmTypeOpenAI,
+		LLType: gollem.LLMTypeOpenAI,
 		OpenAI: make([]openaiLib.ChatCompletionMessage, 6000), // 6000 * 10 = 60k tokens > 50k limit
 	}
 	result, err = compactor(ctx, history, mockClient)
@@ -157,13 +157,13 @@ func TestHistoryCompactionDefaults(t *testing.T) {
 func TestHistory_CompactionFields(t *testing.T) {
 	t.Run("should support compaction metadata", func(t *testing.T) {
 		history := &gollem.History{
-			LLType:      gollem.LlmTypeOpenAI,
+			LLType:      gollem.LLMTypeOpenAI,
 			Summary:     "Test summary",
 			Compacted:   true,
 			OriginalLen: 100,
 		}
 
-		gt.Equal(t, gollem.LlmTypeOpenAI, history.LLType)
+		gt.Equal(t, gollem.LLMTypeOpenAI, history.LLType)
 		gt.Equal(t, "Test summary", history.Summary)
 		gt.True(t, history.Compacted)
 		gt.Equal(t, 100, history.OriginalLen)
@@ -171,7 +171,7 @@ func TestHistory_CompactionFields(t *testing.T) {
 
 	t.Run("should clone compaction fields", func(t *testing.T) {
 		original := &gollem.History{
-			LLType:      gollem.LlmTypeOpenAI,
+			LLType:      gollem.LLMTypeOpenAI,
 			Summary:     "Original summary",
 			Compacted:   true,
 			OriginalLen: 50,
@@ -198,7 +198,7 @@ type mockLLMClient struct {
 func (m *mockLLMClient) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 	return &mockSession{
 		client:  m,
-		history: &gollem.History{LLType: gollem.LlmTypeOpenAI},
+		history: &gollem.History{LLType: gollem.LLMTypeOpenAI},
 	}, nil
 }
 
@@ -283,7 +283,7 @@ func TestLLMClient_CountTokens(t *testing.T) {
 
 		// Test with OpenAI history
 		history := &gollem.History{
-			LLType: gollem.LlmTypeOpenAI,
+			LLType: gollem.LLMTypeOpenAI,
 			OpenAI: []openaiLib.ChatCompletionMessage{
 				{Role: "user", Content: "Hello"},
 				{Role: "assistant", Content: "Hi there"},
@@ -320,7 +320,7 @@ Provide a brief summary.`
 
 	ctx := context.Background()
 	history := &gollem.History{
-		LLType: gollem.LlmTypeOpenAI,
+		LLType: gollem.LLMTypeOpenAI,
 		OpenAI: []openaiLib.ChatCompletionMessage{
 			{Role: "user", Content: "Message 1"},
 			{Role: "assistant", Content: "Response 1"},
@@ -367,7 +367,7 @@ func TestHistoryCompactor_TemplateRendering(t *testing.T) {
 
 	ctx := context.Background()
 	history := &gollem.History{
-		LLType: gollem.LlmTypeOpenAI,
+		LLType: gollem.LLMTypeOpenAI,
 		OpenAI: []openaiLib.ChatCompletionMessage{
 			{Role: "user", Content: "Hello"},
 			{Role: "assistant", Content: "Hi there"},
@@ -402,7 +402,7 @@ func TestHistoryCompactor_FunctionCalls(t *testing.T) {
 
 		ctx := context.Background()
 		history := &gollem.History{
-			LLType: gollem.LlmTypeOpenAI,
+			LLType: gollem.LLMTypeOpenAI,
 			OpenAI: []openaiLib.ChatCompletionMessage{
 				{Role: "user", Content: "Call the weather API for Tokyo"},
 				{
@@ -458,7 +458,7 @@ func TestHistoryCompactor_FunctionCalls(t *testing.T) {
 
 		ctx := context.Background()
 		history := &gollem.History{
-			LLType: gollem.LlmTypeOpenAI,
+			LLType: gollem.LLMTypeOpenAI,
 			OpenAI: []openaiLib.ChatCompletionMessage{
 				{Role: "user", Content: "What's 2+2?"},
 				{
@@ -878,7 +878,7 @@ func TestHistoryCompactor_SummaryInMessageHistory(t *testing.T) {
 	t.Run("OpenAI summary in system message", func(t *testing.T) {
 		// Create OpenAI history with enough messages to trigger compaction
 		history := &gollem.History{
-			LLType: gollem.LlmTypeOpenAI,
+			LLType: gollem.LLMTypeOpenAI,
 			OpenAI: []openaiLib.ChatCompletionMessage{
 				{Role: "system", Content: "You are a helpful assistant"},
 				{Role: "user", Content: "Message 1"},
@@ -905,13 +905,13 @@ func TestHistoryCompactor_SummaryInMessageHistory(t *testing.T) {
 	t.Run("Claude summary in user message", func(t *testing.T) {
 		// Create Claude history
 		history := &gollem.History{
-			LLType: gollem.LlmTypeClaude,
+			LLType: gollem.LLMTypeClaude,
 			Claude: make([]gollem.ClaudeMessage, 10), // Simplified - would normally have content
 		}
 
 		// Manually set up for testing since our mock doesn't handle Claude properly
 		recentHistory := &gollem.History{
-			LLType: gollem.LlmTypeClaude,
+			LLType: gollem.LLMTypeClaude,
 			Claude: history.Claude[5:],
 		}
 
@@ -932,13 +932,13 @@ func TestHistoryCompactor_SummaryInMessageHistory(t *testing.T) {
 	t.Run("Gemini summary in user message", func(t *testing.T) {
 		// Create Gemini history
 		history := &gollem.History{
-			LLType: gollem.LlmTypeGemini,
+			LLType: gollem.LLMTypeGemini,
 			Gemini: make([]gollem.GeminiMessage, 10), // Simplified - would normally have content
 		}
 
 		// Manually set up for testing
 		recentHistory := &gollem.History{
-			LLType: gollem.LlmTypeGemini,
+			LLType: gollem.LLMTypeGemini,
 			Gemini: history.Gemini[5:],
 		}
 

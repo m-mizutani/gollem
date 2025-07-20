@@ -10,9 +10,9 @@ var NewDefaultFacilitator = newDefaultFacilitator
 
 // Memory testing exports
 const (
-	LlmTypeOpenAI = llmTypeOpenAI
-	LlmTypeClaude = llmTypeClaude
-	LlmTypeGemini = llmTypeGemini
+	LLMTypeOpenAI = llmTypeOpenAI
+	LLMTypeClaude = llmTypeClaude
+	LLMTypeGemini = llmTypeGemini
 )
 
 // Plan internal types and methods for testing
