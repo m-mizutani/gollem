@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -434,4 +435,71 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	}()
 
 	return responseChan, nil
+}
+
+// CountTokens counts the number of tokens in the history for Gemini models.
+// Gemini has its own tokenization approach, different from both OpenAI and Claude.
+// This implementation provides an estimated count based on Gemini's characteristics.
+func (c *Client) CountTokens(ctx context.Context, history *gollem.History) (int, error) {
+	if history == nil {
+		return 0, nil
+	}
+
+	if history.LLType != "gemini" {
+		return 0, goerr.New("history is not for Gemini")
+	}
+
+	totalChars := 0
+
+	// Use internal Gemini messages for accurate counting
+	for _, msg := range history.Gemini {
+		// Count role characters
+		totalChars += len(msg.Role)
+
+		// Count parts content
+		for _, part := range msg.Parts {
+			// Count text content
+			totalChars += len(part.Text)
+
+			// Count function call content if present (when Name and Args are set)
+			if part.Name != "" && part.Args != nil {
+				totalChars += len(part.Name)
+				// Estimate args size by marshaling to JSON
+				if argsBytes, err := json.Marshal(part.Args); err == nil {
+					totalChars += len(argsBytes)
+				}
+			}
+
+			// Count function response content if present (when Response is set)
+			if part.Response != nil {
+				// Estimate response size by marshaling to JSON
+				if respBytes, err := json.Marshal(part.Response); err == nil {
+					totalChars += len(respBytes)
+				}
+			}
+		}
+	}
+
+	// Gemini-specific token estimation
+	// Gemini typically uses about 3.6-4.0 characters per token for English text
+	// Gemini has minimal message overhead
+	messageOverhead := len(history.Gemini) * 3 // Very low overhead for Gemini
+	estimatedTokens := (totalChars + messageOverhead) / 4
+
+	// Model-specific adjustments for Gemini
+	modelName := c.defaultModel
+	if modelName == "" {
+		modelName = "gemini-2.0-flash" // Default fallback
+	}
+
+	// Gemini 2.0 Flash and newer are highly efficient
+	// All older models (1.5 and below) are deprecated and not supported
+	if strings.Contains(modelName, "gemini-2.0") || strings.Contains(modelName, "gemini-2.5") {
+		estimatedTokens = int(float64(estimatedTokens) * 0.75)
+	} else {
+		// Default adjustment for newer models
+		estimatedTokens = int(float64(estimatedTokens) * 0.8)
+	}
+
+	return estimatedTokens, nil
 }

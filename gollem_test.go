@@ -942,3 +942,171 @@ func TestFacilitationHook(t *testing.T) {
 		gt.Equal(t, err, expectedError)
 	})
 }
+
+// TestIsTokenLimitError_RealLLMs tests if isTokenLimitError correctly detects token limit errors from real LLMs
+func TestIsTokenLimitError_RealLLMs(t *testing.T) {
+	// Skip if TEST_TOKEN_LIMIT_ERROR is not set
+	if os.Getenv("TEST_TOKEN_LIMIT_ERROR") == "" {
+		t.Skip("TEST_TOKEN_LIMIT_ERROR is not set")
+	}
+
+	// Helper function to generate a huge message
+	generateHugeMessage := func(targetTokens int) string {
+		// ~4 characters per token for English text
+		targetChars := targetTokens * 4
+		pattern := "This is a test message designed to exceed token limits. It contains various words and sentences to simulate real content. "
+
+		var sb strings.Builder
+		sb.Grow(targetChars)
+
+		repeats := targetChars / len(pattern)
+		if repeats < 1 {
+			repeats = 1
+		}
+
+		for i := 0; i < repeats; i++ {
+			sb.WriteString(pattern)
+			// Add variation to avoid compression
+			sb.WriteString(strings.Repeat("x", i%10))
+			sb.WriteString(" ")
+		}
+
+		return sb.String()
+	}
+
+	t.Run("OpenAI", func(t *testing.T) {
+		apiKey := os.Getenv("TEST_OPENAI_API_KEY")
+		if apiKey == "" {
+			t.Skip("TEST_OPENAI_API_KEY is not set")
+		}
+
+		ctx := context.Background()
+
+		// Create OpenAI client with a model that has smaller context window
+		client, err := openai.New(ctx, apiKey, openai.WithModel("gpt-3.5-turbo"))
+		gt.NoError(t, err)
+
+		// Create agent without compression
+		agent := gollem.New(client)
+
+		// Send a message that exceeds the token limit
+		// GPT-3.5-turbo has 16k context window
+		// Try with increasing sizes to ensure we hit the limit
+		tokenSizes := []int{20000, 50000, 100000, 200000}
+		var execErr error
+
+		for _, size := range tokenSizes {
+			hugeMessage := generateHugeMessage(size)
+			execErr = agent.Execute(ctx, hugeMessage)
+			if execErr != nil {
+				break
+			}
+			t.Logf("No error with %d tokens, trying larger...", size)
+		}
+
+		// Ensure we got an error
+		if execErr == nil {
+			t.Fatal("Expected token limit error but got none even with very large messages")
+		}
+
+		// Log the error for debugging
+		t.Logf("OpenAI error: %v", execErr)
+
+		// Verify that isTokenLimitError correctly identifies the error
+		isTokenError := gollem.IsTokenLimitError(execErr)
+		t.Logf("isTokenLimitError returned: %v", isTokenError)
+
+		// isTokenLimitError should return true for token limit errors
+		gt.True(t, isTokenError)
+	})
+
+	t.Run("Claude", func(t *testing.T) {
+		apiKey := os.Getenv("TEST_CLAUDE_API_KEY")
+		if apiKey == "" {
+			t.Skip("TEST_CLAUDE_API_KEY is not set")
+		}
+
+		ctx := context.Background()
+
+		// Create Claude client
+		client, err := claude.New(ctx, apiKey, claude.WithModel("claude-3-haiku-20240307"))
+		gt.NoError(t, err)
+
+		// Create agent without compression
+		agent := gollem.New(client)
+
+		// Send a message that exceeds the token limit
+		// Claude 3 Haiku has 200k context window
+		// Try with increasing sizes to ensure we hit the limit
+		tokenSizes := []int{250000, 500000, 1000000}
+		var execErr error
+
+		for _, size := range tokenSizes {
+			hugeMessage := generateHugeMessage(size)
+			execErr = agent.Execute(ctx, hugeMessage)
+			if execErr != nil {
+				break
+			}
+			t.Logf("No error with %d tokens, trying larger...", size)
+		}
+
+		// Ensure we got an error
+		if execErr == nil {
+			t.Fatal("Expected token limit error but got none even with very large messages")
+		}
+
+		// Log the error for debugging
+		t.Logf("Claude error: %v", execErr)
+
+		// Verify that isTokenLimitError correctly identifies the error
+		isTokenError := gollem.IsTokenLimitError(execErr)
+		t.Logf("isTokenLimitError returned: %v", isTokenError)
+
+		// isTokenLimitError should return true for token limit errors
+		gt.True(t, isTokenError)
+	})
+
+	t.Run("Gemini", func(t *testing.T) {
+		projectID := os.Getenv("TEST_GCP_PROJECT_ID")
+		location := os.Getenv("TEST_GCP_LOCATION")
+		if projectID == "" || location == "" {
+			t.Skip("TEST_GCP_PROJECT_ID or TEST_GCP_LOCATION is not set")
+		}
+
+		ctx := context.Background()
+
+		// Create Gemini client with 2.0-flash or newer
+		client, err := gemini.New(ctx, projectID, location, gemini.WithModel("gemini-2.0-flash"))
+		if err != nil {
+			t.Error("Failed to create Gemini client")
+		}
+
+		// Create agent without compression
+		agent := gollem.New(client)
+
+		// Send a message that might exceed the token limit
+		// Gemini 1.5 Flash has 1M token context window, so we start smaller
+		hugeMessage := generateHugeMessage(50000) // ~50k tokens
+
+		err = agent.Execute(ctx, hugeMessage)
+		if err == nil {
+			// If 50k didn't trigger an error, try larger
+			hugeMessage = generateHugeMessage(1500000) // 1.5M tokens
+			err = agent.Execute(ctx, hugeMessage)
+		}
+
+		if err != nil {
+			// Log the error for debugging
+			t.Logf("Gemini error: %v", err)
+
+			// Verify that isTokenLimitError correctly identifies the error
+			isTokenError := gollem.IsTokenLimitError(err)
+			t.Logf("isTokenLimitError returned: %v", isTokenError)
+
+			// isTokenLimitError should return true for token limit errors
+			gt.True(t, isTokenError)
+		} else {
+			t.Skip("Gemini did not return a token limit error with test message sizes")
+		}
+	})
+}

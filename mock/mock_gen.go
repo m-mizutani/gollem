@@ -15,6 +15,9 @@ import (
 //
 //		// make and configure a mocked gollem.LLMClient
 //		mockedLLMClient := &LLMClientMock{
+//			CountTokensFunc: func(ctx context.Context, history *gollem.History) (int, error) {
+//				panic("mock out the CountTokens method")
+//			},
 //			GenerateEmbeddingFunc: func(ctx context.Context, dimension int, input []string) ([][]float64, error) {
 //				panic("mock out the GenerateEmbedding method")
 //			},
@@ -28,6 +31,9 @@ import (
 //
 //	}
 type LLMClientMock struct {
+	// CountTokensFunc mocks the CountTokens method.
+	CountTokensFunc func(ctx context.Context, history *gollem.History) (int, error)
+
 	// GenerateEmbeddingFunc mocks the GenerateEmbedding method.
 	GenerateEmbeddingFunc func(ctx context.Context, dimension int, input []string) ([][]float64, error)
 
@@ -36,6 +42,13 @@ type LLMClientMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// CountTokens holds details about calls to the CountTokens method.
+		CountTokens []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// History is the history argument value.
+			History *gollem.History
+		}
 		// GenerateEmbedding holds details about calls to the GenerateEmbedding method.
 		GenerateEmbedding []struct {
 			// Ctx is the ctx argument value.
@@ -53,8 +66,49 @@ type LLMClientMock struct {
 			Options []gollem.SessionOption
 		}
 	}
+	lockCountTokens       sync.RWMutex
 	lockGenerateEmbedding sync.RWMutex
 	lockNewSession        sync.RWMutex
+}
+
+// CountTokens calls CountTokensFunc.
+func (mock *LLMClientMock) CountTokens(ctx context.Context, history *gollem.History) (int, error) {
+	callInfo := struct {
+		Ctx     context.Context
+		History *gollem.History
+	}{
+		Ctx:     ctx,
+		History: history,
+	}
+	mock.lockCountTokens.Lock()
+	mock.calls.CountTokens = append(mock.calls.CountTokens, callInfo)
+	mock.lockCountTokens.Unlock()
+	if mock.CountTokensFunc == nil {
+		var (
+			nOut   int
+			errOut error
+		)
+		return nOut, errOut
+	}
+	return mock.CountTokensFunc(ctx, history)
+}
+
+// CountTokensCalls gets all the calls that were made to CountTokens.
+// Check the length with:
+//
+//	len(mockedLLMClient.CountTokensCalls())
+func (mock *LLMClientMock) CountTokensCalls() []struct {
+	Ctx     context.Context
+	History *gollem.History
+} {
+	var calls []struct {
+		Ctx     context.Context
+		History *gollem.History
+	}
+	mock.lockCountTokens.RLock()
+	calls = mock.calls.CountTokens
+	mock.lockCountTokens.RUnlock()
+	return calls
 }
 
 // GenerateEmbedding calls GenerateEmbeddingFunc.

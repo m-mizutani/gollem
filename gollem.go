@@ -3,11 +3,39 @@ package gollem
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/sashabaranov/go-openai"
 )
+
+// isTokenLimitError checks if the error is a token limit exceeded error from any LLM provider
+func isTokenLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check for OpenAI API errors
+	var openaiErr *openai.APIError
+	if errors.As(err, &openaiErr) {
+		msg := strings.ToLower(openaiErr.Message)
+		return strings.Contains(msg, "maximum context length") ||
+			strings.Contains(msg, "context_length_exceeded") ||
+			(strings.Contains(msg, "token") && strings.Contains(msg, "exceed"))
+	}
+
+	// Check for generic error messages from other providers
+	errMsg := strings.ToLower(err.Error())
+	return strings.Contains(errMsg, "context length") ||
+		strings.Contains(errMsg, "token limit") ||
+		strings.Contains(errMsg, "maximum context") ||
+		strings.Contains(errMsg, "input too long") ||
+		strings.Contains(errMsg, "token size exceeded") || // Gemini specific error
+		(strings.Contains(errMsg, "token") && strings.Contains(errMsg, "exceed"))
+}
 
 // ResponseMode is the type for the response mode of the gollem agent.
 type ResponseMode int
@@ -75,6 +103,11 @@ type gollemConfig struct {
 	facilitator Facilitator
 
 	history *History
+
+	// History management related fields
+	historyCompactor HistoryCompactor
+	autoCompact      bool
+	compactionHook   CompactionHook
 }
 
 func (c *gollemConfig) Clone() *gollemConfig {
@@ -98,6 +131,11 @@ func (c *gollemConfig) Clone() *gollemConfig {
 		facilitator: c.facilitator,
 
 		history: c.history,
+
+		// History management related field cloning
+		historyCompactor: c.historyCompactor,
+		autoCompact:      c.autoCompact,
+		compactionHook:   c.compactionHook,
 	}
 }
 
@@ -119,6 +157,11 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 			responseMode:     ResponseModeBlocking,
 			logger:           slog.New(slog.DiscardHandler),
 			facilitator:      newDefaultFacilitator(llmClient),
+
+			// Default settings for history management
+			historyCompactor: nil,   // No default compactor - user must specify with LLM
+			autoCompact:      false, // Disabled by default - requires explicit LLM setup
+			compactionHook:   defaultCompactionHook,
 		},
 	}
 
@@ -290,6 +333,28 @@ func WithHistory(history *History) Option {
 	}
 }
 
+// WithHistoryCompactor sets the history compactor for the gollem agent.
+func WithHistoryCompactor(compactor HistoryCompactor) Option {
+	return func(s *gollemConfig) {
+		s.historyCompactor = compactor
+	}
+}
+
+// WithHistoryCompaction enables or disables automatic history compaction.
+// To configure compaction options, pass them when creating the compactor with DefaultHistoryCompactor.
+func WithHistoryCompaction(enabled bool) Option {
+	return func(s *gollemConfig) {
+		s.autoCompact = enabled
+	}
+}
+
+// WithCompactionHook sets a callback function for compaction events.
+func WithCompactionHook(callback func(ctx context.Context, original, compacted *History) error) Option {
+	return func(s *gollemConfig) {
+		s.compactionHook = callback
+	}
+}
+
 func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool, error) {
 	allTools := cfg.tools[:]
 
@@ -359,6 +424,14 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 	input := []Input{Text(prompt)}
 
 	for i := 0; i < cfg.loopLimit; i++ {
+		// History compaction check within loop
+		if cfg.autoCompact && i > 0 { // Skip compaction on first iteration
+			if err := g.performLoopCompaction(ctx, cfg, i, toolList); err != nil {
+				logger.Warn("loop compaction failed", "error", err, "loop", i)
+				// Continue execution even if compaction fails (log only)
+			}
+		}
+
 		if err := cfg.loopHook(ctx, i, input); err != nil {
 			return err
 		}
@@ -399,7 +472,7 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 
 		switch cfg.responseMode {
 		case ResponseModeBlocking:
-			output, err := g.currentSession.GenerateContent(ctx, input...)
+			output, err := g.generateContentWithRetry(ctx, cfg, input, toolList)
 			if err != nil {
 				return err
 			}
@@ -594,4 +667,139 @@ func buildToolMap(ctx context.Context, tools []Tool, toolSets []ToolSet) (map[st
 	}
 
 	return toolMap, nil
+}
+
+// performLoopCompaction performs history compaction within the execution loop
+func (g *Agent) performLoopCompaction(ctx context.Context, cfg *gollemConfig, loop int, toolList []Tool) error {
+	if !cfg.autoCompact || g.currentSession == nil || cfg.historyCompactor == nil {
+		return nil
+	}
+
+	history := g.currentSession.History()
+	logger := LoggerFromContext(ctx)
+
+	// Use unified compaction logic that handles both normal and emergency cases
+	compactedHistory, err := cfg.historyCompactor(ctx, history, g.llm)
+	if err != nil {
+		return goerr.Wrap(err, "failed to perform compaction")
+	}
+
+	// If compaction occurred (history changed), replace the session
+	if compactedHistory != history {
+		logger.Info("compaction triggered during loop", "loop", loop,
+			"original_count", history.ToCount(),
+			"compacted_count", compactedHistory.ToCount())
+
+		return g.replaceSessionWithCompactedHistory(ctx, cfg, compactedHistory, toolList)
+	}
+
+	return nil
+}
+
+// replaceSessionWithCompactedHistory replaces the current session with a new one using compacted history
+func (g *Agent) replaceSessionWithCompactedHistory(ctx context.Context, cfg *gollemConfig, compactedHistory *History, toolList []Tool) error {
+	if g.currentSession == nil {
+		return goerr.New("no current session to replace")
+	}
+
+	logger := LoggerFromContext(ctx)
+	originalHistory := g.currentSession.History()
+
+	// Call compaction hook
+	if err := cfg.compactionHook(ctx, originalHistory, compactedHistory); err != nil {
+		logger.Warn("compaction hook failed", "error", err)
+		// Continue processing even if hook fails
+	}
+
+	// Create new session with compacted history
+	sessionOptions := []SessionOption{
+		WithSessionHistory(compactedHistory),
+		WithSessionSystemPrompt(cfg.systemPrompt),
+	}
+
+	// Add tools if available
+	if len(toolList) > 0 {
+		sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
+	}
+
+	newSession, err := g.llm.NewSession(ctx, sessionOptions...)
+	if err != nil {
+		return goerr.Wrap(err, "failed to create new session with compacted history")
+	}
+
+	// Replace session
+	g.currentSession = newSession
+
+	return nil
+}
+
+// generateContentWithRetry handles token limit errors by compacting history and retrying once
+func (g *Agent) generateContentWithRetry(ctx context.Context, cfg *gollemConfig, input []Input, toolList []Tool) (*Response, error) {
+	logger := LoggerFromContext(ctx)
+
+	// First attempt
+	output, err := g.currentSession.GenerateContent(ctx, input...)
+	if err == nil {
+		return output, nil
+	}
+
+	// Check if it's a token limit error
+	if !isTokenLimitError(err) {
+		return nil, err
+	}
+
+	logger.Info("token limit exceeded, attempting compaction and retry")
+
+	// If no compactor is configured, return the original error
+	if cfg.historyCompactor == nil {
+		logger.Warn("token limit exceeded but no history compactor configured")
+		return nil, goerr.Wrap(ErrTokenSizeExceeded, "token limit exceeded and no compactor available")
+	}
+
+	// Get current history before compaction
+	currentHistory := g.currentSession.History()
+	if currentHistory == nil {
+		logger.Warn("cannot compact history: session has no history")
+		return nil, goerr.Wrap(ErrTokenSizeExceeded, "token limit exceeded and no history to compact")
+	}
+
+	// Compact the history (excluding the new input)
+	compactedHistory, compactionErr := cfg.historyCompactor(ctx, currentHistory, g.llm)
+	if compactionErr != nil {
+		logger.Warn("history compaction failed", "error", compactionErr)
+		return nil, goerr.Wrap(ErrTokenSizeExceeded, "token limit exceeded and compaction failed", goerr.V("compaction_error", compactionErr))
+	}
+
+	// If compaction didn't reduce the history, return the original error
+	if compactedHistory == currentHistory {
+		logger.Warn("compaction did not reduce history size")
+		return nil, goerr.Wrap(ErrTokenSizeExceeded, "token limit exceeded and compaction was not effective")
+	}
+
+	logger.Info("compaction successful, creating new session",
+		"original_count", currentHistory.ToCount(),
+		"compacted_count", compactedHistory.ToCount())
+
+	// Replace session with compacted history
+	if err := g.replaceSessionWithCompactedHistory(ctx, cfg, compactedHistory, toolList); err != nil {
+		logger.Warn("failed to replace session with compacted history", "error", err)
+		return nil, goerr.Wrap(ErrTokenSizeExceeded, "compaction succeeded but session replacement failed", goerr.V("replacement_error", err))
+	}
+
+	// Call compaction hook
+	if err := cfg.compactionHook(ctx, currentHistory, compactedHistory); err != nil {
+		logger.Warn("compaction hook failed", "error", err)
+		// Continue processing even if hook fails
+	}
+
+	// Retry with compacted session (only once)
+	logger.Debug("retrying request with compacted session")
+	output, retryErr := g.currentSession.GenerateContent(ctx, input...)
+	if retryErr != nil {
+		logger.Warn("retry with compacted session also failed", "error", retryErr)
+		return nil, goerr.Wrap(ErrTokenSizeExceeded, "token limit exceeded and retry after compaction failed", goerr.V("retry_error", retryErr))
+	}
+
+	logger.Info("retry with compacted session succeeded")
+	return output, nil
 }

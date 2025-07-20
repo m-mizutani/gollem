@@ -441,6 +441,7 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 	logger := LoggerFromContext(ctx) // Use existing context.go function
 	logger.Debug("executeSteps started", "pending_todos_count", len(p.getPendingToDos()))
 
+	stepCount := 0
 	for len(p.getPendingToDos()) > 0 {
 		currentToDo := p.getNextPendingToDo()
 		if currentToDo == nil {
@@ -449,6 +450,15 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 		}
 
 		ctx = ctxWithPlanToDo(ctx, currentToDo)
+		stepCount++
+
+		// Plan history compaction check (skip compaction on first step)
+		if p.config.autoCompact && stepCount > 1 {
+			if err := p.performPlanCompaction(ctx, stepCount); err != nil {
+				logger.Warn("plan compaction failed", "error", err, "step", stepCount)
+				// Continue execution even if compaction fails (log only)
+			}
+		}
 
 		logger.Debug("processing plan step",
 			"todo_id", currentToDo.ID,
@@ -1990,4 +2000,105 @@ func WithPlanLanguage(language string) PlanOption {
 	return func(cfg *planConfig) {
 		cfg.language = language
 	}
+}
+
+// WithPlanHistoryCompaction enables or disables automatic history compaction during plan execution.
+// To configure compaction options, pass them when creating the compactor with DefaultHistoryCompactor.
+func WithPlanHistoryCompaction(enabled bool) PlanOption {
+	return func(cfg *planConfig) {
+		cfg.autoCompact = enabled
+	}
+}
+
+// WithPlanHistoryCompactor sets the history compactor for plan execution.
+func WithPlanHistoryCompactor(compactor HistoryCompactor) PlanOption {
+	return func(cfg *planConfig) {
+		cfg.historyCompactor = compactor
+	}
+}
+
+// WithPlanCompactionHook sets a callback function for compaction events during plan execution.
+func WithPlanCompactionHook(callback func(ctx context.Context, original, compacted *History) error) PlanOption {
+	return func(cfg *planConfig) {
+		cfg.compactionHook = callback
+	}
+}
+
+// performPlanCompaction performs history compaction during plan execution
+func (p *Plan) performPlanCompaction(ctx context.Context, step int) error {
+	if !p.config.autoCompact || p.mainSession == nil || p.config.historyCompactor == nil {
+		return nil
+	}
+
+	history := p.mainSession.History()
+	logger := LoggerFromContext(ctx)
+
+	// Use unified compaction logic that handles both normal and emergency cases
+	compactedHistory, err := p.config.historyCompactor(ctx, history, p.agent.llm)
+	if err != nil {
+		return goerr.Wrap(err, "failed to perform plan compaction")
+	}
+
+	// If compaction occurred (history changed), replace the session
+	if compactedHistory != history {
+		logger.Info("compaction triggered during plan execution", "step", step,
+			"original_count", history.ToCount(),
+			"compacted_count", compactedHistory.ToCount())
+
+		return p.replaceSessionWithCompactedHistory(ctx, compactedHistory)
+	}
+
+	return nil
+}
+
+// replaceSessionWithCompactedHistory replaces the plan session with a new one using compacted history
+func (p *Plan) replaceSessionWithCompactedHistory(ctx context.Context, compactedHistory *History) error {
+	if p.mainSession == nil {
+		return goerr.New("no plan session to replace")
+	}
+
+	logger := LoggerFromContext(ctx)
+	originalHistory := p.mainSession.History()
+
+	// Call compaction hook
+	if err := p.config.compactionHook(ctx, originalHistory, compactedHistory); err != nil {
+		logger.Warn("plan compaction hook failed", "error", err)
+		// Continue processing even if hook fails
+	}
+
+	// Create new session with compacted history
+	sessionOptions := []SessionOption{
+		WithSessionHistory(compactedHistory),
+		WithSessionSystemPrompt(p.config.systemPrompt),
+	}
+
+	// Get current tools for the plan session
+	if tools := p.getCurrentPlanTools(ctx); len(tools) > 0 {
+		sessionOptions = append(sessionOptions, WithSessionTools(tools...))
+	}
+
+	newSession, err := p.agent.llm.NewSession(ctx, sessionOptions...)
+	if err != nil {
+		return goerr.Wrap(err, "failed to create new plan session with compacted history")
+	}
+
+	// Replace plan session
+	p.mainSession = newSession
+
+	return nil
+}
+
+// getCurrentPlanTools gets the list of tools from current plan configuration
+func (p *Plan) getCurrentPlanTools(_ context.Context) []Tool {
+	// Convert toolMap to slice
+	if p.toolMap == nil {
+		return []Tool{}
+	}
+
+	toolList := make([]Tool, 0, len(p.toolMap))
+	for _, tool := range p.toolMap {
+		toolList = append(toolList, tool)
+	}
+
+	return toolList
 }

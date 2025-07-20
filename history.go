@@ -15,12 +15,12 @@ import (
 // It stores messages in a format specific to each LLM type (OpenAI, Claude, or Gemini).
 //
 // For detailed documentation, see doc/history.md
-type llmType string
+type LLMType string
 
 const (
-	llmTypeOpenAI llmType = "OpenAI"
-	llmTypeGemini llmType = "gemini"
-	llmTypeClaude llmType = "claude"
+	llmTypeOpenAI LLMType = "OpenAI"
+	llmTypeGemini LLMType = "gemini"
+	llmTypeClaude LLMType = "claude"
 )
 
 const (
@@ -28,12 +28,17 @@ const (
 )
 
 type History struct {
-	LLType  llmType `json:"type"`
+	LLType  LLMType `json:"type"`
 	Version int     `json:"version"`
 
 	Claude []claudeMessage                `json:"claude,omitempty"`
 	OpenAI []openai.ChatCompletionMessage `json:"OpenAI,omitempty"`
 	Gemini []geminiMessage                `json:"gemini,omitempty"`
+
+	// Compaction related fields
+	Summary     string `json:"summary,omitempty"`      // Summary information
+	Compacted   bool   `json:"compacted,omitempty"`    // Compaction flag
+	OriginalLen int    `json:"original_len,omitempty"` // Original length
 }
 
 func (x *History) ToCount() int {

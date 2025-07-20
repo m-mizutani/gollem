@@ -8,6 +8,13 @@ import (
 
 var NewDefaultFacilitator = newDefaultFacilitator
 
+// Memory testing exports
+const (
+	LLMTypeOpenAI = llmTypeOpenAI
+	LLMTypeClaude = llmTypeClaude
+	LLMTypeGemini = llmTypeGemini
+)
+
 // Plan internal types and methods for testing
 type (
 	TestPlanToDo       = planToDo
@@ -67,3 +74,24 @@ func init() {
 }
 
 func DebugLogger() *slog.Logger { return debugLogger }
+
+// IsTokenLimitError exports isTokenLimitError for testing
+var IsTokenLimitError = isTokenLimitError
+
+// Export buildCompactedHistory for testing
+var BuildCompactedHistory = buildCompactedHistory
+
+// Export message types for testing
+type (
+	ClaudeMessage      = claudeMessage
+	GeminiMessage      = geminiMessage
+	ClaudeContentBlock = claudeContentBlock
+	ClaudeToolUse      = claudeToolUse
+	GeminiPart         = geminiPart
+)
+
+// Export conversion functions for testing
+var (
+	ClaudeToTemplateMessages = claudeToTemplateMessages
+	GeminiToTemplateMessages = geminiToTemplateMessages
+)
