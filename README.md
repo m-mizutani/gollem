@@ -14,7 +14,8 @@ GO for Large LanguagE Model (GOLLEM)
   - Tools by MCP (Model Context Protocol) server and your built-in tools
   - Automatic session management for continuous conversations
   - Portable conversational memory with history for stateless/distributed applications
-  - Diverse agent behavior control mechanisms (Hooks, Facilitators, ErrExitConversation)
+  - Intelligent memory management with automatic history compaction
+  - Diverse agent behavior control mechanisms (Hooks, Facilitators)
 
 ## Supported LLMs
 
@@ -610,51 +611,92 @@ agent := gollem.New(client,
 )
 ```
 
-### ErrExitConversation - Graceful Termination
+### Memory Management with History Compactor
 
-Tools can return `gollem.ErrExitConversation` to gracefully terminate conversations:
+gollem provides intelligent memory management through automatic history compaction, which summarizes old conversation messages to reduce token usage while preserving context.
 
 ```go
-type ExitTool struct{}
+package main
 
-func (t *ExitTool) Spec() gollem.ToolSpec {
-	return gollem.ToolSpec{
-		Name:        "exit",
-		Description: "Exit the current conversation",
-		Parameters:  map[string]*gollem.Parameter{},
-	}
-}
+import (
+	"context"
+	"fmt"
+	"os"
 
-func (t *ExitTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	// Perform cleanup operations
-	cleanup()
-	
-	// Return special error to exit conversation gracefully
-	return nil, gollem.ErrExitConversation
-}
-
-agent := gollem.New(client,
-	gollem.WithTools(&ExitTool{}),
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/llm/openai"
 )
 
-// Execute will return nil (success) when ErrExitConversation is encountered
-err := agent.Execute(ctx, "Please exit when you're done")
-if err != nil {
-	// This won't be triggered by ErrExitConversation
-	panic(err)
+func main() {
+	ctx := context.Background()
+
+	// Create LLM client
+	client, err := openai.New(ctx, os.Getenv("OPENAI_API_KEY"))
+	if err != nil {
+		panic(err)
+	}
+
+	// Create history compactor with custom options
+	compactor := gollem.NewHistoryCompactor(client,
+		gollem.WithMaxTokens(50000),           // Start compaction at 50k tokens
+		gollem.WithPreserveRecentTokens(10000), // Preserve 10k tokens of recent context
+		gollem.WithCompactionSystemPrompt("Custom summarization instructions..."),
+	)
+
+	// Create agent with automatic history compaction
+	agent := gollem.New(client,
+		gollem.WithTools(&YourTool{}),
+		gollem.WithHistoryCompactor(compactor),
+		gollem.WithHistoryCompaction(true),
+		gollem.WithCompactionHook(func(ctx context.Context, original, compacted *gollem.History) error {
+			fmt.Printf("🗜️  History compacted: %d → %d messages (%.1f%% reduction)\n", 
+				original.ToCount(), compacted.ToCount(),
+				float64(original.ToCount()-compacted.ToCount())/float64(original.ToCount())*100)
+			return nil
+		}),
+		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
+			fmt.Printf("🤖 %s\n", msg)
+			return nil
+		}),
+	)
+
+	// Long conversation that will trigger automatic compaction
+	for i := 0; i < 20; i++ {
+		prompt := fmt.Sprintf("Tell me about topic %d in detail", i)
+		if err := agent.Execute(ctx, prompt); err != nil {
+			panic(err)
+		}
+	}
 }
 ```
+
+**Key Features:**
+- **Intelligent Summarization**: Automatically summarizes old messages while preserving critical context
+- **Configurable Thresholds**: Control when compaction triggers based on token count or LLM context limits  
+- **Recent Message Preservation**: Always keeps recent messages intact for conversation continuity
+- **Context-Aware**: Preserves tool calls, responses, and important conversation state
+- **Multi-LLM Support**: Works with OpenAI, Claude, and Gemini models with appropriate token limits
+
+**Compaction Options:**
+- `WithMaxTokens(int)`: Set custom token threshold (default: 50,000)
+- `WithPreserveRecentTokens(int)`: Recent tokens to preserve (default: 10,000)
+- `WithCompactionSystemPrompt(string)`: Custom summarization instructions
+- `WithCompactionPromptTemplate(string)`: Custom prompt template for summarization
 
 ## Examples
 
 See the [examples](https://github.com/m-mizutani/gollem/tree/main/examples) directory for complete working examples:
 
+- **[Simple](examples/simple)**: Minimal example for getting started
+- **[Query](examples/query)**: Simple LLM query without conversation state
 - **[Basic](examples/basic)**: Simple agent with custom tools
 - **[Chat](examples/chat)**: Interactive chat application
 - **[MCP](examples/mcp)**: Integration with MCP servers
 - **[Tools](examples/tools)**: Custom tool development
 - **[Embedding](examples/embedding)**: Text embedding generation
 - **[Plan Mode](examples/plan_mode)**: Goal-oriented agent with intelligent task planning
+- **[Memory Compaction](examples/memory_compaction)**: Automatic history compaction for long conversations
+- **[Plan Compaction](examples/plan_compaction)**: History compaction during plan execution
 
 ## Documentation
 
