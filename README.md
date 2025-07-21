@@ -613,7 +613,7 @@ agent := gollem.New(client,
 
 ### Memory Management with History Compactor
 
-gollem provides intelligent memory management through automatic history compaction, which summarizes old conversation messages to reduce token usage while preserving context.
+gollem provides intelligent memory management through automatic history compaction, which summarizes old conversation messages to reduce token usage while preserving context. **History compaction is enabled by default** to prevent token limit issues during long conversations.
 
 ```go
 package main
@@ -636,26 +636,27 @@ func main() {
 		panic(err)
 	}
 
-	// Create history compactor with custom options
+	// Agent with default compaction (automatically enabled)
+	agent := gollem.New(client,
+		gollem.WithTools(&YourTool{}),
+		// History compaction is enabled by default with standard settings
+	)
+
+	// Or customize compaction behavior
 	compactor := gollem.NewHistoryCompactor(client,
 		gollem.WithMaxTokens(50000),           // Start compaction at 50k tokens
 		gollem.WithPreserveRecentTokens(10000), // Preserve 10k tokens of recent context
 		gollem.WithCompactionSystemPrompt("Custom summarization instructions..."),
 	)
 
-	// Create agent with automatic history compaction
-	agent := gollem.New(client,
+	// Agent with custom compaction settings
+	agentCustom := gollem.New(client,
 		gollem.WithTools(&YourTool{}),
-		gollem.WithHistoryCompactor(compactor),
-		gollem.WithHistoryCompaction(true),
+		gollem.WithHistoryCompactor(compactor), // Override default compactor
 		gollem.WithCompactionHook(func(ctx context.Context, original, compacted *gollem.History) error {
 			fmt.Printf("🗜️  History compacted: %d → %d messages (%.1f%% reduction)\n", 
 				original.ToCount(), compacted.ToCount(),
 				float64(original.ToCount()-compacted.ToCount())/float64(original.ToCount())*100)
-			return nil
-		}),
-		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-			fmt.Printf("🤖 %s\n", msg)
 			return nil
 		}),
 	)
@@ -664,6 +665,10 @@ func main() {
 	for i := 0; i < 20; i++ {
 		prompt := fmt.Sprintf("Tell me about topic %d in detail", i)
 		if err := agent.Execute(ctx, prompt); err != nil {
+			panic(err)
+		}
+		// Or use the default agent - compaction still happens automatically
+		if err := agentCustom.Execute(ctx, prompt); err != nil {
 			panic(err)
 		}
 	}
@@ -682,6 +687,7 @@ func main() {
 - `WithPreserveRecentTokens(int)`: Recent tokens to preserve (default: 10,000)
 - `WithCompactionSystemPrompt(string)`: Custom summarization instructions
 - `WithCompactionPromptTemplate(string)`: Custom prompt template for summarization
+- `WithHistoryCompaction(false)`: Disable automatic compaction if needed
 
 ## Examples
 

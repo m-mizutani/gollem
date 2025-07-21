@@ -159,8 +159,8 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 			facilitator:      newDefaultFacilitator(llmClient),
 
 			// Default settings for history management
-			historyCompactor: nil,   // No default compactor - user must specify with LLM
-			autoCompact:      false, // Disabled by default - requires explicit LLM setup
+			historyCompactor: NewHistoryCompactor(llmClient), // Default compactor with standard settings
+			autoCompact:      true,                           // Enabled by default for better memory management
 			compactionHook:   defaultCompactionHook,
 		},
 	}
