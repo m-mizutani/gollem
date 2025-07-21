@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"cloud.google.com/go/vertexai/genai"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/gemini"
 	"github.com/m-mizutani/gt"
+	"google.golang.org/genai"
 )
 
 // Tests for client.go functionality
@@ -162,12 +162,12 @@ func TestGeminiClientIssues(t *testing.T) {
 		gt.Value(t, contentParam.Type).Equal(genai.TypeString)
 
 		// Check for length constraints
-		if contentParam.MaxLength == 0 {
+		if contentParam.MaxLength == nil || *contentParam.MaxLength == 0 {
 			t.Logf("WARNING: content field has no length constraints - this might cause issues with large text")
 		}
 
 		// This tool would be problematic without proper constraints
-		if contentParam.MaxLength == 0 {
+		if contentParam.MaxLength == nil || *contentParam.MaxLength == 0 {
 			t.Log("This tool could potentially trigger FinishReasonMalformedFunctionCall")
 		}
 

@@ -44,4 +44,10 @@ var (
 
 	// ErrTokenSizeExceeded is returned when the token size exceeds the limit
 	ErrTokenSizeExceeded = errors.New("token size exceeded")
+
+	// ErrFunctionCallFormat is returned when the function call format is invalid
+	ErrFunctionCallFormat = errors.New("function call format error")
+
+	// ErrProhibitedContent is returned when the content violates policy
+	ErrProhibitedContent = errors.New("prohibited content")
 )

@@ -5,7 +5,6 @@ go 1.24.0
 toolchain go1.24.3
 
 require (
-	cloud.google.com/go/aiplatform v1.90.0
 	cloud.google.com/go/vertexai v0.13.4
 	github.com/anthropics/anthropic-sdk-go v1.5.0
 	github.com/google/uuid v1.6.0
@@ -14,7 +13,13 @@ require (
 	github.com/sashabaranov/go-openai v1.40.1
 	github.com/secmon-lab/warren v0.0.1
 	google.golang.org/api v0.236.0
-	google.golang.org/protobuf v1.36.6
+	google.golang.org/genai v1.16.0
+)
+
+require (
+	cloud.google.com/go/aiplatform v1.90.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
+	google.golang.org/protobuf v1.36.6 // indirect
 )
 
 require (

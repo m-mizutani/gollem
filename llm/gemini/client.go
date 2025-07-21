@@ -2,17 +2,16 @@ package gemini
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
 	"time"
 
-	"cloud.google.com/go/vertexai/genai"
+	oldgenai "cloud.google.com/go/vertexai/genai"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
-	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
+	"google.golang.org/genai"
 )
 
 const (
@@ -42,7 +41,7 @@ type Client struct {
 	gcpOptions []option.ClientOption
 
 	// generationConfig contains the default generation parameters
-	generationConfig genai.GenerationConfig
+	generationConfig *genai.GenerateContentConfig
 
 	// systemPrompt is the system prompt to use for chat completions.
 	systemPrompt string
@@ -51,32 +50,42 @@ type Client struct {
 	contentType gollem.ContentType
 }
 
-// Option is a function that configures a Client.
+// Option is a configuration option for the Gemini client.
 type Option func(*Client)
 
-// WithModel sets the default model to use for chat completions.
-// The model name should be a valid Gemini model identifier.
+// WithModel sets the model to use for text generation.
 // Default: "gemini-2.0-flash"
-func WithModel(modelName string) Option {
+func WithModel(model string) Option {
 	return func(c *Client) {
-		c.defaultModel = modelName
+		c.defaultModel = model
 	}
 }
 
-// WithGoogleCloudOptions sets additional options for Google Cloud Platform.
-// These options are passed to the underlying Gemini client.
-func WithGoogleCloudOptions(options ...option.ClientOption) Option {
+// WithEmbeddingModel sets the model to use for embeddings.
+// Default: "text-embedding-004"
+func WithEmbeddingModel(model string) Option {
 	return func(c *Client) {
-		c.gcpOptions = options
+		c.embeddingModel = model
+	}
+}
+
+// WithGoogleCloudOptions sets additional Google Cloud options.
+// These can include authentication credentials, endpoint overrides, etc.
+func WithGoogleCloudOptions(opts ...option.ClientOption) Option {
+	return func(c *Client) {
+		c.gcpOptions = append(c.gcpOptions, opts...)
 	}
 }
 
 // WithTemperature sets the temperature parameter for text generation.
-// Higher values make the output more random, lower values make it more focused.
-// Range: 0.0 to 1.0
-// Default: 0.7
+// Controls randomness in output generation.
+// Range: 0.0 to 2.0
+// Default: 1.0
 func WithTemperature(temp float32) Option {
 	return func(c *Client) {
+		if c.generationConfig == nil {
+			c.generationConfig = &genai.GenerateContentConfig{}
+		}
 		c.generationConfig.Temperature = &temp
 	}
 }
@@ -87,6 +96,9 @@ func WithTemperature(temp float32) Option {
 // Default: 1.0
 func WithTopP(topP float32) Option {
 	return func(c *Client) {
+		if c.generationConfig == nil {
+			c.generationConfig = &genai.GenerateContentConfig{}
+		}
 		c.generationConfig.TopP = &topP
 	}
 }
@@ -94,22 +106,32 @@ func WithTopP(topP float32) Option {
 // WithTopK sets the top_k parameter for text generation.
 // Controls diversity via top-k sampling.
 // Range: 1 to 40
-func WithTopK(topK int32) Option {
+func WithTopK(topK float32) Option {
 	return func(c *Client) {
-		c.generationConfig.TopK = &topK
+		if c.generationConfig == nil {
+			c.generationConfig = &genai.GenerateContentConfig{}
+		}
+		topKFloat32 := topK
+		c.generationConfig.TopK = &topKFloat32
 	}
 }
 
 // WithMaxTokens sets the maximum number of tokens to generate.
 func WithMaxTokens(maxTokens int32) Option {
 	return func(c *Client) {
-		c.generationConfig.MaxOutputTokens = &maxTokens
+		if c.generationConfig == nil {
+			c.generationConfig = &genai.GenerateContentConfig{}
+		}
+		c.generationConfig.MaxOutputTokens = maxTokens
 	}
 }
 
 // WithStopSequences sets the stop sequences for text generation.
 func WithStopSequences(stopSequences []string) Option {
 	return func(c *Client) {
+		if c.generationConfig == nil {
+			c.generationConfig = &genai.GenerateContentConfig{}
+		}
 		c.generationConfig.StopSequences = stopSequences
 	}
 }
@@ -129,14 +151,6 @@ func WithContentType(contentType gollem.ContentType) Option {
 	}
 }
 
-// WithEmbeddingModel sets the model to use for embeddings.
-// Default: "textembedding-gecko@latest"
-func WithEmbeddingModel(modelName string) Option {
-	return func(c *Client) {
-		c.embeddingModel = modelName
-	}
-}
-
 // New creates a new client for the Gemini API.
 // It requires a project ID and location, and can be configured with additional options.
 func New(ctx context.Context, projectID, location string, options ...Option) (*Client, error) {
@@ -148,24 +162,31 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 	}
 
 	client := &Client{
-		projectID:      projectID,
-		location:       location,
-		defaultModel:   DefaultModel,
-		embeddingModel: DefaultEmbeddingModel,
-		contentType:    gollem.ContentTypeText,
+		projectID:        projectID,
+		location:         location,
+		defaultModel:     DefaultModel,
+		embeddingModel:   DefaultEmbeddingModel,
+		contentType:      gollem.ContentTypeText,
+		generationConfig: &genai.GenerateContentConfig{},
 	}
 
 	for _, option := range options {
 		option(client)
 	}
 
-	newClient, err := genai.NewClient(ctx, projectID, location, client.gcpOptions...)
+	// Create client configuration for Vertex AI backend
+	config := &genai.ClientConfig{
+		Project:  projectID,
+		Location: location,
+		Backend:  genai.BackendVertexAI,
+	}
+
+	newClient, err := genai.NewClient(ctx, config)
 	if err != nil {
 		return nil, err
 	}
 
 	client.client = newClient
-
 	return client, nil
 }
 
@@ -174,89 +195,115 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 	cfg := gollem.NewSessionConfig(options...)
 
-	// Convert gollem.Tool to *genai.Tool
-	genaiFunctions := make([]*genai.FunctionDeclaration, len(cfg.Tools()))
-	for i, tool := range cfg.Tools() {
-		converted := convertTool(tool)
-		genaiFunctions[i] = converted
+	// Prepare generation config
+	config := &genai.GenerateContentConfig{}
+
+	// Copy generation config from client
+	if c.generationConfig != nil {
+		*config = *c.generationConfig
 	}
 
-	var messages []*genai.Content
-
-	if cfg.History() != nil {
-		history, err := cfg.History().ToGemini()
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to convert history to gemini.Content")
-		}
-		messages = append(messages, history...)
-	}
-
-	model := c.client.GenerativeModel(c.defaultModel)
-	model.GenerationConfig = c.generationConfig
-
+	// Override with session-specific content type
 	switch cfg.ContentType() {
 	case gollem.ContentTypeJSON:
-		model.GenerationConfig.ResponseMIMEType = "application/json"
+		config.ResponseMIMEType = "application/json"
 	case gollem.ContentTypeText:
-		model.GenerationConfig.ResponseMIMEType = "text/plain"
+		config.ResponseMIMEType = "text/plain"
 	}
 
-	if cfg.SystemPrompt() != "" {
-		model.SystemInstruction = &genai.Content{
-			Role:  "system",
-			Parts: []genai.Part{genai.Text(cfg.SystemPrompt())},
-		}
+	// Set system prompt
+	systemPrompt := cfg.SystemPrompt()
+	if systemPrompt == "" {
+		systemPrompt = c.systemPrompt
 	}
-
-	if len(genaiFunctions) > 0 {
-		model.Tools = []*genai.Tool{
-			{
-				FunctionDeclarations: genaiFunctions,
+	if systemPrompt != "" {
+		config.SystemInstruction = &genai.Content{
+			Role: "system",
+			Parts: []*genai.Part{
+				{Text: systemPrompt},
 			},
 		}
 	}
 
-	session := &Session{
-		session: model.StartChat(),
+	// Convert tools
+	if len(cfg.Tools()) > 0 {
+		tools := make([]*genai.Tool, 1)
+		tools[0] = &genai.Tool{
+			FunctionDeclarations: make([]*genai.FunctionDeclaration, len(cfg.Tools())),
+		}
+		for i, tool := range cfg.Tools() {
+			tools[0].FunctionDeclarations[i] = convertToolToNewSDK(tool)
+		}
+		config.Tools = tools
 	}
-	if len(messages) > 0 {
-		session.session.History = messages
+
+	// Prepare history if provided
+	var initialHistory []*genai.Content
+	if cfg.History() != nil {
+		oldHistory, err := cfg.History().ToGemini()
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert history to gemini.Content")
+		}
+		// Convert old Content format to new format
+		initialHistory = make([]*genai.Content, len(oldHistory))
+		for i, msg := range oldHistory {
+			initialHistory[i] = convertOldContentToNew(msg)
+		}
+	}
+
+	// Create chat with history
+	chat, err := c.client.Chats.Create(ctx, c.defaultModel, config, initialHistory)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create chat")
+	}
+
+	session := &Session{
+		client: c,
+		chat:   chat,
+		config: config,
 	}
 
 	return session, nil
 }
 
-func (s *Session) History() *gollem.History {
-	return gollem.NewHistoryFromGemini(s.session.History)
-}
-
 // Session is a session for the Gemini chat.
 // It maintains the conversation state and handles message generation.
 type Session struct {
-	// session is the underlying Gemini chat session.
-	session *genai.ChatSession
+	client *Client
+	chat   *genai.Chat
+	config *genai.GenerateContentConfig
+}
+
+func (s *Session) History() *gollem.History {
+	// Convert new format history to gollem.History
+	return convertNewHistoryToGollem(s.chat.History(false))
 }
 
 // convertInputs converts gollem.Input to Gemini parts
-func (s *Session) convertInputs(input ...gollem.Input) ([]genai.Part, error) {
-	parts := make([]genai.Part, len(input))
-	for i, in := range input {
+func (s *Session) convertInputs(input ...gollem.Input) ([]*genai.Part, error) {
+	parts := make([]*genai.Part, 0, len(input))
+
+	for _, in := range input {
 		switch v := in.(type) {
 		case gollem.Text:
-			parts[i] = genai.Text(string(v))
+			parts = append(parts, &genai.Part{Text: string(v)})
 		case gollem.FunctionResponse:
 			if v.Error != nil {
-				parts[i] = genai.FunctionResponse{
-					Name: v.Name,
-					Response: map[string]any{
-						"error_message": fmt.Sprintf("%+v", v.Error),
+				parts = append(parts, &genai.Part{
+					FunctionResponse: &genai.FunctionResponse{
+						Name: v.Name,
+						Response: map[string]any{
+							"error_message": fmt.Sprintf("%+v", v.Error),
+						},
 					},
-				}
+				})
 			} else {
-				parts[i] = genai.FunctionResponse{
-					Name:     v.Name,
-					Response: v.Data,
-				}
+				parts = append(parts, &genai.Part{
+					FunctionResponse: &genai.FunctionResponse{
+						Name:     v.Name,
+						Response: v.Data,
+					},
+				})
 			}
 		default:
 			return nil, goerr.Wrap(gollem.ErrInvalidParameter, "invalid input")
@@ -276,35 +323,38 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 		FunctionCalls: make([]*gollem.FunctionCall, 0),
 	}
 
-	// Add token usage information if available
+	// Extract token counts from UsageMetadata if available
 	if resp.UsageMetadata != nil {
 		response.InputToken = int(resp.UsageMetadata.PromptTokenCount)
 		response.OutputToken = int(resp.UsageMetadata.CandidatesTokenCount)
 	}
 
-	for i, candidate := range resp.Candidates {
-		// Check for malformed function call errors with improved error details
-		if candidate.FinishReason.String() == "FinishReasonMalformedFunctionCall" {
-			return nil, goerr.New("malformed function call detected",
-				goerr.V("candidate_index", i),
-				goerr.V("content_parts", len(candidate.Content.Parts)),
-				goerr.V("finish_reason", candidate.FinishReason.String()),
-				goerr.V("suggested_action", "retry with simplified parameters or check tool schema"))
+	for _, candidate := range resp.Candidates {
+		if candidate.FinishReason != "" {
+			if strings.Contains(string(candidate.FinishReason), "MALFORMED_FUNCTION_CALL") {
+				return nil, goerr.Wrap(gollem.ErrFunctionCallFormat, "malformed function call")
+			}
+			if strings.Contains(string(candidate.FinishReason), "PROHIBITED_CONTENT") {
+				return nil, goerr.Wrap(gollem.ErrProhibitedContent, "prohibited content")
+			}
 		}
 
-		if len(candidate.Content.Parts) == 0 {
+		if candidate.Content == nil {
 			continue
 		}
 
 		for _, part := range candidate.Content.Parts {
-			switch v := part.(type) {
-			case genai.Text:
-				response.Texts = append(response.Texts, string(v))
-			case genai.FunctionCall:
-				response.FunctionCalls = append(response.FunctionCalls, &gollem.FunctionCall{
-					Name:      v.Name,
-					Arguments: v.Args,
-				})
+			if part.Text != "" {
+				response.Texts = append(response.Texts, part.Text)
+			}
+
+			if part.FunctionCall != nil {
+				fc := &gollem.FunctionCall{
+					ID:        fmt.Sprintf("%s_%d", part.FunctionCall.Name, time.Now().UnixNano()),
+					Name:      part.FunctionCall.Name,
+					Arguments: part.FunctionCall.Args,
+				}
+				response.FunctionCalls = append(response.FunctionCalls, fc)
 			}
 		}
 	}
@@ -312,194 +362,371 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 	return response, nil
 }
 
-// GenerateContent processes the input and generates a response.
-// It handles both text messages and function responses.
+// GenerateContent generates content based on the input.
 func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	// Convert inputs
 	parts, err := s.convertInputs(input...)
 	if err != nil {
 		return nil, err
 	}
 
-	// Filter out history entries with empty parts before sending message
-	s.filterEmptyHistoryParts(ctx)
+	// Convert parts slice to individual arguments
+	partsArgs := make([]genai.Part, len(parts))
+	for i, p := range parts {
+		partsArgs[i] = *p
+	}
 
-	resp, err := s.session.SendMessage(ctx, parts...)
+	// Send message
+	result, err := s.chat.SendMessage(ctx, partsArgs...)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to send message")
+		return nil, goerr.Wrap(err, "failed to generate content")
 	}
 
-	return processResponse(resp)
+	return processResponse(result)
 }
 
-// GenerateContentWithRetry adds retry logic for malformed function call errors
-func (s *Session) GenerateContentWithRetry(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-	const maxRetries = 3
-	const baseDelay = 1 * time.Second
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		resp, err := s.GenerateContent(ctx, input...)
-		if err != nil {
-			if strings.Contains(err.Error(), "malformed function call") {
-				// Exponential backoff
-				delay := time.Duration(float64(baseDelay) * math.Pow(2, float64(attempt)))
-				select {
-				case <-time.After(delay):
-					continue
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
-			}
-			return nil, err
-		}
-		return resp, nil
-	}
-
-	return nil, goerr.New("max retries exceeded for malformed function call")
-}
-
-// filterEmptyHistoryParts removes history entries with empty parts
-func (s *Session) filterEmptyHistoryParts(ctx context.Context) {
-	logger := gollem.LoggerFromContext(ctx)
-	originalCount := len(s.session.History)
-
-	filteredHistory := make([]*genai.Content, 0, len(s.session.History))
-	removedCount := 0
-
-	for i, hist := range s.session.History {
-		if len(hist.Parts) == 0 {
-			logger.Warn("gemini history has empty parts, removing", "hist", hist, "index", i, "total", originalCount)
-			removedCount++
-			continue
-		}
-		filteredHistory = append(filteredHistory, hist)
-	}
-
-	s.session.History = filteredHistory
-
-	if removedCount > 0 {
-		logger.Debug("gemini filtered empty history entries", "removed", removedCount, "original", originalCount, "filtered", len(filteredHistory))
-	}
-}
-
-// GenerateStream processes the input and generates a response stream.
-// It handles both text messages and function responses, and returns a channel for streaming responses.
+// GenerateStream generates content based on the input and returns a stream of responses.
 func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+	// Convert inputs
 	parts, err := s.convertInputs(input...)
 	if err != nil {
 		return nil, err
 	}
 
-	// Filter out history entries with empty parts before sending message stream
-	s.filterEmptyHistoryParts(ctx)
-
-	iter := s.session.SendMessageStream(ctx, parts...)
-	responseChan := make(chan *gollem.Response)
+	respChan := make(chan *gollem.Response)
 
 	go func() {
-		defer close(responseChan)
-		var totalInputTokens int
-		var totalOutputTokens int
+		defer close(respChan)
 
-		for {
-			resp, err := iter.Next()
+		// Convert parts slice to individual arguments
+		partsArgs := make([]genai.Part, len(parts))
+		for i, p := range parts {
+			partsArgs[i] = *p
+		}
+
+		// Use SendMessageStream for streaming
+		for result, err := range s.chat.SendMessageStream(ctx, partsArgs...) {
 			if err != nil {
-				if err == iterator.Done {
-					return
-				}
-				responseChan <- &gollem.Response{
-					Error: goerr.Wrap(err, "failed to generate stream"),
+				// Send error response
+				respChan <- &gollem.Response{
+					Error: err,
 				}
 				return
 			}
 
-			// Accumulate token usage if available
-			if resp.UsageMetadata != nil {
-				totalInputTokens = int(resp.UsageMetadata.PromptTokenCount)
-				totalOutputTokens = int(resp.UsageMetadata.CandidatesTokenCount)
-			}
-
-			processedResp, err := processResponse(resp)
+			resp, err := processResponse(result)
 			if err != nil {
-				responseChan <- &gollem.Response{
-					Error: goerr.Wrap(err, "failed to process response"),
+				respChan <- &gollem.Response{
+					Error: err,
 				}
 				return
 			}
 
-			// Override with accumulated token counts for streaming
-			processedResp.InputToken = totalInputTokens
-			processedResp.OutputToken = totalOutputTokens
-
-			responseChan <- processedResp
+			respChan <- resp
 		}
 	}()
 
-	return responseChan, nil
+	return respChan, nil
 }
 
-// CountTokens counts the number of tokens in the history for Gemini models.
-// Gemini has its own tokenization approach, different from both OpenAI and Claude.
-// This implementation provides an estimated count based on Gemini's characteristics.
+// GenerateEmbedding generates embeddings for the given input texts.
+func (c *Client) GenerateEmbedding(ctx context.Context, dimension int, input []string) ([][]float64, error) {
+	// Create content for embedding
+	contents := make([]*genai.Content, len(input))
+	for i, text := range input {
+		contents[i] = &genai.Content{
+			Parts: []*genai.Part{
+				{Text: text},
+			},
+		}
+	}
+
+	// Create embedding config
+	config := &genai.EmbedContentConfig{}
+	if dimension > 0 && dimension <= math.MaxInt32 {
+		outputDim := int32(dimension)
+		config.OutputDimensionality = &outputDim
+	}
+
+	// Generate embeddings for the specified model
+	result, err := c.client.Models.EmbedContent(ctx, c.embeddingModel, contents, config)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to generate embeddings")
+	}
+
+	if result == nil || len(result.Embeddings) == 0 {
+		return nil, goerr.New("no embeddings returned")
+	}
+
+	embeddings := make([][]float64, len(result.Embeddings))
+	for i, emb := range result.Embeddings {
+		embeddings[i] = make([]float64, len(emb.Values))
+		for j, v := range emb.Values {
+			embeddings[i][j] = float64(v)
+		}
+	}
+
+	return embeddings, nil
+}
+
+// CountTokens counts the number of tokens in the given history.
 func (c *Client) CountTokens(ctx context.Context, history *gollem.History) (int, error) {
 	if history == nil {
 		return 0, nil
 	}
 
-	if history.LLType != "gemini" {
-		return 0, goerr.New("history is not for Gemini")
+	// Convert history to new format
+	contents, err := history.ToGemini()
+	if err != nil {
+		return 0, goerr.Wrap(err, "failed to convert history")
 	}
 
-	totalChars := 0
+	// Convert to new SDK format
+	newContents := make([]*genai.Content, len(contents))
+	for i, content := range contents {
+		newContents[i] = convertOldContentToNew(content)
+	}
 
-	// Use internal Gemini messages for accurate counting
-	for _, msg := range history.Gemini {
-		// Count role characters
-		totalChars += len(msg.Role)
+	// Count tokens using the model
+	result, err := c.client.Models.CountTokens(ctx, c.defaultModel, newContents, nil)
+	if err != nil {
+		return 0, goerr.Wrap(err, "failed to count tokens")
+	}
 
-		// Count parts content
-		for _, part := range msg.Parts {
-			// Count text content
-			totalChars += len(part.Text)
+	return int(result.TotalTokens), nil
+}
 
-			// Count function call content if present (when Name and Args are set)
-			if part.Name != "" && part.Args != nil {
-				totalChars += len(part.Name)
-				// Estimate args size by marshaling to JSON
-				if argsBytes, err := json.Marshal(part.Args); err == nil {
-					totalChars += len(argsBytes)
-				}
-			}
+// Helper functions to convert between old and new SDK formats
 
-			// Count function response content if present (when Response is set)
-			if part.Response != nil {
-				// Estimate response size by marshaling to JSON
-				if respBytes, err := json.Marshal(part.Response); err == nil {
-					totalChars += len(respBytes)
-				}
-			}
+func convertOldContentToNew(old *oldgenai.Content) *genai.Content {
+	if old == nil {
+		return nil
+	}
+
+	newParts := make([]*genai.Part, len(old.Parts))
+	for i, part := range old.Parts {
+		newParts[i] = convertOldPartToNew(part)
+	}
+
+	return &genai.Content{
+		Role:  old.Role,
+		Parts: newParts,
+	}
+}
+
+func convertOldPartToNew(old oldgenai.Part) *genai.Part {
+	switch p := old.(type) {
+	case oldgenai.Text:
+		return &genai.Part{Text: string(p)}
+	case oldgenai.Blob:
+		return &genai.Part{
+			InlineData: &genai.Blob{
+				MIMEType: p.MIMEType,
+				Data:     p.Data,
+			},
+		}
+	case oldgenai.FileData:
+		return &genai.Part{
+			FileData: &genai.FileData{
+				MIMEType: p.MIMEType,
+				FileURI:  p.FileURI,
+			},
+		}
+	case oldgenai.FunctionCall:
+		return &genai.Part{
+			FunctionCall: &genai.FunctionCall{
+				Name: p.Name,
+				Args: p.Args,
+			},
+		}
+	case oldgenai.FunctionResponse:
+		return &genai.Part{
+			FunctionResponse: &genai.FunctionResponse{
+				Name:     p.Name,
+				Response: p.Response,
+			},
+		}
+	default:
+		// Return empty text for unknown types
+		return &genai.Part{Text: ""}
+	}
+}
+
+func convertNewHistoryToGollem(history []*genai.Content) *gollem.History {
+	// Convert new format history back to gollem.History
+	if len(history) == 0 {
+		return &gollem.History{}
+	}
+
+	// Convert to old format first
+	oldContents := make([]*oldgenai.Content, len(history))
+	for i, content := range history {
+		oldContents[i] = convertNewContentToOld(content)
+	}
+
+	return gollem.NewHistoryFromGemini(oldContents)
+}
+
+func convertNewContentToOld(new *genai.Content) *oldgenai.Content {
+	if new == nil {
+		return nil
+	}
+
+	oldParts := make([]oldgenai.Part, len(new.Parts))
+	for i, part := range new.Parts {
+		oldParts[i] = convertNewPartToOld(part)
+	}
+
+	return &oldgenai.Content{
+		Role:  new.Role,
+		Parts: oldParts,
+	}
+}
+
+func convertNewPartToOld(new *genai.Part) oldgenai.Part {
+	if new.Text != "" {
+		return oldgenai.Text(new.Text)
+	}
+	if new.InlineData != nil {
+		return oldgenai.Blob{
+			MIMEType: new.InlineData.MIMEType,
+			Data:     new.InlineData.Data,
+		}
+	}
+	if new.FileData != nil {
+		return oldgenai.FileData{
+			MIMEType: new.FileData.MIMEType,
+			FileURI:  new.FileData.FileURI,
+		}
+	}
+	if new.FunctionCall != nil {
+		return oldgenai.FunctionCall{
+			Name: new.FunctionCall.Name,
+			Args: new.FunctionCall.Args,
+		}
+	}
+	if new.FunctionResponse != nil {
+		return oldgenai.FunctionResponse{
+			Name:     new.FunctionResponse.Name,
+			Response: new.FunctionResponse.Response,
+		}
+	}
+	// Return empty text for unknown types
+	return oldgenai.Text("")
+}
+
+// convertToolToNewSDK converts gollem.Tool to new SDK's FunctionDeclaration
+func convertToolToNewSDK(tool gollem.Tool) *genai.FunctionDeclaration {
+	spec := tool.Spec()
+
+	// Ensure Required is never nil - Gemini requires an empty slice, not nil
+	required := spec.Required
+	if required == nil {
+		required = []string{}
+	}
+
+	parameters := &genai.Schema{
+		Type:       genai.TypeObject,
+		Properties: make(map[string]*genai.Schema),
+		Required:   required,
+	}
+
+	for name, param := range spec.Parameters {
+		parameters.Properties[name] = convertParameterToNewSchema(param)
+	}
+
+	return &genai.FunctionDeclaration{
+		Name:        spec.Name,
+		Description: spec.Description,
+		Parameters:  parameters,
+	}
+}
+
+// convertParameterToNewSchema converts gollem.Parameter to new SDK's schema
+func convertParameterToNewSchema(param *gollem.Parameter) *genai.Schema {
+	schema := &genai.Schema{
+		Type:        getNewGeminiType(param.Type),
+		Description: param.Description,
+		Title:       param.Title,
+	}
+
+	if len(param.Enum) > 0 {
+		schema.Enum = param.Enum
+	}
+
+	if param.Properties != nil {
+		schema.Properties = make(map[string]*genai.Schema)
+		for name, prop := range param.Properties {
+			schema.Properties[name] = convertParameterToNewSchema(prop)
+		}
+		if len(param.Required) > 0 {
+			schema.Required = param.Required
+		} else {
+			schema.Required = []string{}
 		}
 	}
 
-	// Gemini-specific token estimation
-	// Gemini typically uses about 3.6-4.0 characters per token for English text
-	// Gemini has minimal message overhead
-	messageOverhead := len(history.Gemini) * 3 // Very low overhead for Gemini
-	estimatedTokens := (totalChars + messageOverhead) / 4
-
-	// Model-specific adjustments for Gemini
-	modelName := c.defaultModel
-	if modelName == "" {
-		modelName = "gemini-2.0-flash" // Default fallback
+	if param.Items != nil {
+		schema.Items = convertParameterToNewSchema(param.Items)
 	}
 
-	// Gemini 2.0 Flash and newer are highly efficient
-	// All older models (1.5 and below) are deprecated and not supported
-	if strings.Contains(modelName, "gemini-2.0") || strings.Contains(modelName, "gemini-2.5") {
-		estimatedTokens = int(float64(estimatedTokens) * 0.75)
-	} else {
-		// Default adjustment for newer models
-		estimatedTokens = int(float64(estimatedTokens) * 0.8)
+	// Add number constraints
+	if param.Type == gollem.TypeNumber || param.Type == gollem.TypeInteger {
+		if param.Minimum != nil {
+			minVal := *param.Minimum
+			schema.Minimum = &minVal
+		}
+		if param.Maximum != nil {
+			maxVal := *param.Maximum
+			schema.Maximum = &maxVal
+		}
 	}
 
-	return estimatedTokens, nil
+	// Add string constraints
+	if param.Type == gollem.TypeString {
+		if param.MinLength != nil {
+			minLen := int64(*param.MinLength)
+			schema.MinLength = &minLen
+		}
+		if param.MaxLength != nil {
+			maxLen := int64(*param.MaxLength)
+			schema.MaxLength = &maxLen
+		}
+		if param.Pattern != "" {
+			schema.Pattern = param.Pattern
+		}
+	}
+
+	// Add array constraints
+	if param.Type == gollem.TypeArray {
+		if param.MinItems != nil {
+			minItems := int64(*param.MinItems)
+			schema.MinItems = &minItems
+		}
+		if param.MaxItems != nil {
+			maxItems := int64(*param.MaxItems)
+			schema.MaxItems = &maxItems
+		}
+	}
+
+	return schema
+}
+
+func getNewGeminiType(paramType gollem.ParameterType) genai.Type {
+	switch paramType {
+	case gollem.TypeString:
+		return genai.TypeString
+	case gollem.TypeNumber:
+		return genai.TypeNumber
+	case gollem.TypeInteger:
+		return genai.TypeInteger
+	case gollem.TypeBoolean:
+		return genai.TypeBoolean
+	case gollem.TypeArray:
+		return genai.TypeArray
+	case gollem.TypeObject:
+		return genai.TypeObject
+	default:
+		return genai.TypeString
+	}
 }

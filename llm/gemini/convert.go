@@ -1,8 +1,8 @@
 package gemini
 
 import (
-	"cloud.google.com/go/vertexai/genai"
 	"github.com/m-mizutani/gollem"
+	"google.golang.org/genai"
 )
 
 // convertTool converts gollem.Tool to Gemini tool
@@ -63,20 +63,24 @@ func convertParameterToSchema(param *gollem.Parameter) *genai.Schema {
 	// Add number constraints
 	if param.Type == gollem.TypeNumber || param.Type == gollem.TypeInteger {
 		if param.Minimum != nil {
-			schema.Minimum = *param.Minimum
+			minVal := *param.Minimum
+			schema.Minimum = &minVal
 		}
 		if param.Maximum != nil {
-			schema.Maximum = *param.Maximum
+			maxVal := *param.Maximum
+			schema.Maximum = &maxVal
 		}
 	}
 
 	// Add string constraints
 	if param.Type == gollem.TypeString {
 		if param.MinLength != nil {
-			schema.MinLength = int64(*param.MinLength)
+			minLen := int64(*param.MinLength)
+			schema.MinLength = &minLen
 		}
 		if param.MaxLength != nil {
-			schema.MaxLength = int64(*param.MaxLength)
+			maxLen := int64(*param.MaxLength)
+			schema.MaxLength = &maxLen
 		}
 		if param.Pattern != "" {
 			schema.Pattern = param.Pattern
@@ -86,10 +90,12 @@ func convertParameterToSchema(param *gollem.Parameter) *genai.Schema {
 	// Add array constraints
 	if param.Type == gollem.TypeArray {
 		if param.MinItems != nil {
-			schema.MinItems = int64(*param.MinItems)
+			minItems := int64(*param.MinItems)
+			schema.MinItems = &minItems
 		}
 		if param.MaxItems != nil {
-			schema.MaxItems = int64(*param.MaxItems)
+			maxItems := int64(*param.MaxItems)
+			schema.MaxItems = &maxItems
 		}
 	}
 
