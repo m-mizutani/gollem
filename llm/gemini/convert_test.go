@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"cloud.google.com/go/vertexai/genai"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/gemini"
 	"github.com/m-mizutani/gt"
+	"google.golang.org/genai"
 )
 
 type complexTool struct{}
@@ -105,8 +105,8 @@ func TestConvertParameterToSchema(t *testing.T) {
 			Maximum: ptr(10.0),
 		}
 		schema := gemini.ConvertParameterToSchema(p)
-		gt.Value(t, schema.Minimum).Equal(1.0)
-		gt.Value(t, schema.Maximum).Equal(10.0)
+		gt.Value(t, *schema.Minimum).Equal(1.0)
+		gt.Value(t, *schema.Maximum).Equal(10.0)
 	})
 
 	t.Run("string constraints", func(t *testing.T) {
@@ -117,8 +117,8 @@ func TestConvertParameterToSchema(t *testing.T) {
 			Pattern:   "^[a-z]+$",
 		}
 		schema := gemini.ConvertParameterToSchema(p)
-		gt.Value(t, schema.MinLength).Equal(int64(1))
-		gt.Value(t, schema.MaxLength).Equal(int64(10))
+		gt.Value(t, *schema.MinLength).Equal(int64(1))
+		gt.Value(t, *schema.MaxLength).Equal(int64(10))
 		gt.Value(t, schema.Pattern).Equal("^[a-z]+$")
 	})
 
@@ -130,8 +130,8 @@ func TestConvertParameterToSchema(t *testing.T) {
 			MaxItems: ptr(10),
 		}
 		schema := gemini.ConvertParameterToSchema(p)
-		gt.Value(t, schema.MinItems).Equal(int64(1))
-		gt.Value(t, schema.MaxItems).Equal(int64(10))
+		gt.Value(t, *schema.MinItems).Equal(int64(1))
+		gt.Value(t, *schema.MaxItems).Equal(int64(10))
 		gt.Value(t, schema.Items.Type).Equal(genai.TypeString)
 	})
 }
@@ -200,23 +200,23 @@ func TestConstraintsValidation(t *testing.T) {
 	constrainedString := converted.Parameters.Properties["constrained_string"]
 	gt.Value(t, constrainedString).NotEqual(nil)
 	gt.Value(t, constrainedString.Type).Equal(genai.TypeString)
-	gt.Value(t, constrainedString.MinLength).Equal(int64(1))
-	gt.Value(t, constrainedString.MaxLength).Equal(int64(100))
+	gt.Value(t, *constrainedString.MinLength).Equal(int64(1))
+	gt.Value(t, *constrainedString.MaxLength).Equal(int64(100))
 	gt.Value(t, constrainedString.Pattern).Equal("^[a-zA-Z0-9]+$")
 
 	// Check number constraints
 	constrainedNumber := converted.Parameters.Properties["constrained_number"]
 	gt.Value(t, constrainedNumber).NotEqual(nil)
 	gt.Value(t, constrainedNumber.Type).Equal(genai.TypeNumber)
-	gt.Value(t, constrainedNumber.Minimum).Equal(0.0)
-	gt.Value(t, constrainedNumber.Maximum).Equal(100.0)
+	gt.Value(t, *constrainedNumber.Minimum).Equal(0.0)
+	gt.Value(t, *constrainedNumber.Maximum).Equal(100.0)
 
 	// Check array constraints
 	constrainedArray := converted.Parameters.Properties["constrained_array"]
 	gt.Value(t, constrainedArray).NotEqual(nil)
 	gt.Value(t, constrainedArray.Type).Equal(genai.TypeArray)
-	gt.Value(t, constrainedArray.MinItems).Equal(int64(1))
-	gt.Value(t, constrainedArray.MaxItems).Equal(int64(10))
+	gt.Value(t, *constrainedArray.MinItems).Equal(int64(1))
+	gt.Value(t, *constrainedArray.MaxItems).Equal(int64(10))
 	gt.Value(t, constrainedArray.Items.Type).Equal(genai.TypeString)
 
 	// Check enum field
@@ -485,7 +485,7 @@ func TestRespondToUserTool(t *testing.T) {
 
 	summary := converted.Parameters.Properties["summary"]
 	gt.Value(t, summary).NotEqual(nil)
-	t.Logf("Summary type: %v (String representation: %s)", summary.Type, summary.Type.String())
+	t.Logf("Summary type: %v", summary.Type)
 }
 
 func TestParameterlessTool(t *testing.T) {
