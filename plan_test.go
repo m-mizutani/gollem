@@ -1121,17 +1121,373 @@ func TestPlanCompaction_ConfigurationInheritance(t *testing.T) {
 	// gt.NotNil(t, plan.config.memoryManager) // Cannot access private fields
 }
 
+// Test plan phase system prompt provider
+func TestPlanPhaseSystemPrompt(t *testing.T) {
+	// Track how many times each phase was called
+	phasesCallCount := make(map[gollem.PlanPhaseType]int)
+	var capturedPlans []*gollem.Plan
+	var reflectingPrompts []string
+
+	mockClient := &mockLLMClientForPlan{
+		responses: []string{
+			// Goal clarification
+			"Test phase system prompts",
+			// Plan creation
+			`{"steps": [{"description": "Test step 1", "intent": "First test"}, {"description": "Test step 2", "intent": "Second test"}], "simplified_system_prompt": "Test prompt"}`,
+			// Step 1 execution
+			"Step 1 completed",
+			// Reflection after step 1
+			`{"reflection_type": "continue", "response": "Continue to next step"}`,
+			// Step 2 execution
+			"Step 2 completed",
+			// Reflection after step 2
+			`{"reflection_type": "complete", "response": "All tasks completed"}`,
+			// Summary
+			"Test completed successfully",
+		},
+	}
+
+	agent := gollem.New(mockClient)
+	ctx := context.Background()
+
+	phaseProvider := func(ctx context.Context, phase gollem.PlanPhaseType, plan *gollem.Plan) string {
+		phasesCallCount[phase]++
+		capturedPlans = append(capturedPlans, plan)
+
+		switch phase {
+		case gollem.PhaseClarifying:
+			return "Clarifying phase prompt"
+		case gollem.PhasePlanning:
+			return "Planning phase prompt"
+		case gollem.PhaseReflecting:
+			var prompt string
+			if plan != nil {
+				todos := plan.GetToDos()
+				prompt = fmt.Sprintf("Reflecting with %d todos", len(todos))
+			} else {
+				prompt = "Reflecting phase prompt"
+			}
+			reflectingPrompts = append(reflectingPrompts, prompt)
+			return prompt
+		case gollem.PhaseSummarizing:
+			return "Summarizing phase prompt"
+		default:
+			return ""
+		}
+	}
+
+	plan, err := agent.Plan(ctx, "Test phase system prompts",
+		gollem.WithPlanPhaseSystemPrompt(phaseProvider),
+	)
+	gt.NoError(t, err)
+	gt.NotNil(t, plan)
+
+	result, err := plan.Execute(ctx)
+	gt.NoError(t, err)
+	gt.NotEqual(t, "", result)
+
+	// Verify all expected phases were called
+	gt.Equal(t, 1, phasesCallCount[gollem.PhaseClarifying])
+	gt.Equal(t, 1, phasesCallCount[gollem.PhasePlanning])
+	gt.Equal(t, 2, phasesCallCount[gollem.PhaseReflecting]) // Should be called after each step
+	gt.Equal(t, 1, phasesCallCount[gollem.PhaseSummarizing])
+
+	// Verify reflecting prompts show correct todo count
+	gt.Equal(t, 2, len(reflectingPrompts))
+	gt.Equal(t, "Reflecting with 2 todos", reflectingPrompts[0]) // After step 1
+	gt.Equal(t, "Reflecting with 2 todos", reflectingPrompts[1]) // After step 2
+
+	// Verify plan parameter behavior
+	planNilCount := 0
+	for _, p := range capturedPlans {
+		if p == nil {
+			planNilCount++
+		}
+	}
+	gt.True(t, planNilCount >= 2)
+}
+
+// Test phase system prompt provider panic recovery
+func TestPlanPhaseSystemPrompt_PanicRecovery(t *testing.T) {
+	mockClient := &mockLLMClientForPlan{
+		responses: []string{
+			// Goal clarification
+			"Panic test",
+			// Plan creation
+			`{"steps": [{"description": "Test step", "intent": "Test"}], "simplified_system_prompt": "Test"}`,
+			// Step execution
+			"Step completed",
+			// Reflection
+			`{"reflection_type": "complete", "response": "Done"}`,
+		},
+	}
+
+	agent := gollem.New(mockClient)
+	ctx := context.Background()
+
+	// Provider that panics
+	panicProvider := func(ctx context.Context, phase gollem.PlanPhaseType, plan *gollem.Plan) string {
+		if phase == gollem.PhasePlanning {
+			panic("test panic in provider")
+		}
+		return "Normal prompt"
+	}
+
+	// Should not panic despite provider panicking
+	plan, err := agent.Plan(ctx, "Test panic recovery",
+		gollem.WithPlanPhaseSystemPrompt(panicProvider),
+	)
+	gt.NoError(t, err)
+	gt.NotNil(t, plan)
+
+	result, err := plan.Execute(ctx)
+	gt.NoError(t, err)
+	gt.NotEqual(t, "", result)
+}
+
+// Test phase system prompt integration with existing system prompt
+func TestPlanPhaseSystemPrompt_Integration(t *testing.T) {
+	// Track which phases were called and with what prompts
+	phasePrompts := make(map[gollem.PlanPhaseType]string)
+
+	mockClient := &mockLLMClientForPlan{
+		responses: []string{
+			// Goal clarification
+			"Integration test",
+			// Plan creation
+			`{"steps": [{"description": "Test step", "intent": "Test"}], "simplified_system_prompt": "Test"}`,
+			// Step execution
+			"Step completed",
+			// Reflection
+			`{"reflection_type": "complete", "response": "Done"}`,
+			// Summary
+			"Test summary",
+		},
+	}
+
+	agent := gollem.New(mockClient)
+	ctx := context.Background()
+
+	// Phase provider that tracks calls
+	phaseProvider := func(ctx context.Context, phase gollem.PlanPhaseType, plan *gollem.Plan) string {
+		prompt := ""
+		switch phase {
+		case gollem.PhaseClarifying:
+			prompt = "Phase-specific clarifying prompt"
+		case gollem.PhasePlanning:
+			prompt = "Phase-specific planning prompt"
+		case gollem.PhaseReflecting:
+			prompt = "Phase-specific reflecting prompt"
+		case gollem.PhaseSummarizing:
+			prompt = "Phase-specific summarizing prompt"
+		}
+		phasePrompts[phase] = prompt
+		return prompt
+	}
+
+	// Create plan with both base and phase-specific prompts
+	plan, err := agent.Plan(ctx, "Test integration",
+		gollem.WithPlanSystemPrompt("Base system prompt for execution"),
+		gollem.WithPlanPhaseSystemPrompt(phaseProvider),
+	)
+	gt.NoError(t, err)
+	gt.NotNil(t, plan)
+
+	// Execute the plan
+	result, err := plan.Execute(ctx)
+	gt.NoError(t, err)
+	gt.NotEqual(t, "", result)
+
+	// Verify that phase providers were called for all expected phases
+	gt.NotEqual(t, "", phasePrompts[gollem.PhaseClarifying])
+	gt.NotEqual(t, "", phasePrompts[gollem.PhasePlanning])
+	gt.NotEqual(t, "", phasePrompts[gollem.PhaseReflecting])
+	gt.NotEqual(t, "", phasePrompts[gollem.PhaseSummarizing])
+
+	// Verify that system prompts contain expected content
+	// For clarifying phase, it should combine base and phase-specific prompts
+	foundCombinedPrompt := false
+	for _, session := range mockClient.sessions {
+		if strings.Contains(session.systemPrompt, "Base system prompt for execution") &&
+			strings.Contains(session.systemPrompt, "Phase-specific clarifying prompt") {
+			foundCombinedPrompt = true
+			break
+		}
+	}
+	gt.True(t, foundCombinedPrompt)
+}
+
+// Test that system prompts are properly injected into sessions
+func TestPlanPhaseSystemPrompt_Injection(t *testing.T) {
+
+	mockClient := &mockLLMClientForPlan{
+		responses: []string{
+			// Goal clarification
+			"Clarified goal",
+			// Plan creation
+			`{"steps": [{"description": "Step 1", "intent": "Test"}], "simplified_system_prompt": "Test"}`,
+			// Step execution
+			"Step completed",
+			// Reflection
+			`{"reflection_type": "complete", "response": "Done"}`,
+			// Summary
+			"Summary complete",
+		},
+	}
+
+	agent := gollem.New(mockClient)
+	ctx := context.Background()
+
+	// Provider that returns distinct prompts for each phase
+	phaseProvider := func(ctx context.Context, phase gollem.PlanPhaseType, plan *gollem.Plan) string {
+		switch phase {
+		case gollem.PhaseClarifying:
+			return "CLARIFYING_PROMPT: Focus on clarity"
+		case gollem.PhasePlanning:
+			return "PLANNING_PROMPT: Create detailed plan"
+		case gollem.PhaseReflecting:
+			return "REFLECTING_PROMPT: Analyze progress"
+		case gollem.PhaseSummarizing:
+			return "SUMMARIZING_PROMPT: Create summary"
+		default:
+			return ""
+		}
+	}
+
+	// Create plan with phase system prompts
+	plan, err := agent.Plan(ctx, "Test prompt injection",
+		gollem.WithPlanPhaseSystemPrompt(phaseProvider),
+	)
+	gt.NoError(t, err)
+	gt.NotNil(t, plan)
+
+	// After plan creation, check that sessions were created
+	gt.True(t, len(mockClient.sessions) >= 2) // At least clarifying and planning sessions
+
+	// Execute plan to trigger more sessions
+	result, err := plan.Execute(ctx)
+	gt.NoError(t, err)
+	gt.NotEqual(t, "", result)
+
+	// Verify that multiple sessions were created (one for each phase)
+	// We expect at least 5 sessions: clarifying, planning, reflecting (2x), summarizing
+	gt.True(t, len(mockClient.sessions) >= 5)
+
+	// Now verify the system prompts were correctly set
+	sessionPrompts := make(map[string]bool)
+	for _, session := range mockClient.sessions {
+		if session.systemPrompt != "" {
+			sessionPrompts[session.systemPrompt] = true
+		}
+	}
+
+	// Check that our expected prompts were set
+	gt.True(t, sessionPrompts["CLARIFYING_PROMPT: Focus on clarity"])
+	gt.True(t, sessionPrompts["PLANNING_PROMPT: Create detailed plan"])
+	gt.True(t, sessionPrompts["REFLECTING_PROMPT: Analyze progress"])
+	gt.True(t, sessionPrompts["SUMMARIZING_PROMPT: Create summary"])
+}
+
+// Test WithPlanSystemPrompt and phase system prompt combination
+func TestPlanPhaseSystemPrompt_MainExecutionPrompt(t *testing.T) {
+	// Track which phases were called
+	phaseCalls := make(map[gollem.PlanPhaseType]int)
+
+	mockClient := &mockLLMClientForPlan{
+		responses: []string{
+			// Goal clarification
+			"Clarified goal",
+			// Plan creation
+			`{"steps": [{"description": "Step 1", "intent": "Test"}], "simplified_system_prompt": "Simplified prompt from planner"}`,
+			// Step execution
+			"Step completed",
+			// Reflection
+			`{"reflection_type": "complete", "response": "Done"}`,
+			// Summary
+			"Summary complete",
+		},
+	}
+
+	agent := gollem.New(mockClient)
+	ctx := context.Background()
+
+	// Provider for meta-control phases only
+	phaseProvider := func(ctx context.Context, phase gollem.PlanPhaseType, plan *gollem.Plan) string {
+		phaseCalls[phase]++
+		switch phase {
+		case gollem.PhaseClarifying:
+			return "CLARIFYING_PROMPT"
+		case gollem.PhasePlanning:
+			return "PLANNING_PROMPT"
+		default:
+			return ""
+		}
+	}
+
+	// Create plan with both WithPlanSystemPrompt and phase provider
+	// Note: WithPlanSystemPrompt is used for main execution, not affected by phase provider
+	plan, err := agent.Plan(ctx, "Test main execution prompt",
+		gollem.WithPlanSystemPrompt("Main execution system prompt"),
+		gollem.WithPlanPhaseSystemPrompt(phaseProvider),
+	)
+	gt.NoError(t, err)
+	gt.NotNil(t, plan)
+
+	// Execute the plan
+	result, err := plan.Execute(ctx)
+	gt.NoError(t, err)
+	gt.NotEqual(t, "", result)
+
+	// Verify only meta-control phases were called
+	gt.Equal(t, 1, phaseCalls[gollem.PhaseClarifying])
+	gt.Equal(t, 1, phaseCalls[gollem.PhasePlanning])
+
+	// Verify clarifying phase combines prompts
+	clarifyingSessionFound := false
+	for _, session := range mockClient.sessions {
+		// Clarifying phase should combine WithPlanSystemPrompt and phase provider prompt
+		if strings.Contains(session.systemPrompt, "Main execution system prompt") &&
+			strings.Contains(session.systemPrompt, "CLARIFYING_PROMPT") {
+			clarifyingSessionFound = true
+			break
+		}
+	}
+	gt.True(t, clarifyingSessionFound)
+
+	// Verify main execution session uses simplified system prompt from planner
+	// (not affected by phase provider)
+	mainSessionFound := false
+	for _, session := range mockClient.sessions {
+		if session.systemPrompt == "Simplified prompt from planner" {
+			mainSessionFound = true
+			break
+		}
+	}
+	gt.True(t, mainSessionFound)
+}
+
 // Mock LLM client specifically for plan tests
 type mockLLMClientForPlan struct {
 	responses []string
 	index     int
+	sessions  []*mockSessionForPlan // Track created sessions
 }
 
 func (m *mockLLMClientForPlan) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
-	return &mockSessionForPlan{
-		client:  m,
-		history: &gollem.History{LLType: gollem.LLMTypeOpenAI},
-	}, nil
+	// Apply options to extract configuration
+	cfg := gollem.NewSessionConfig(options...)
+
+	session := &mockSessionForPlan{
+		client:       m,
+		history:      &gollem.History{LLType: gollem.LLMTypeOpenAI},
+		options:      options,
+		systemPrompt: cfg.SystemPrompt(), // Extract system prompt
+	}
+
+	// Keep track of sessions created
+	m.sessions = append(m.sessions, session)
+
+	return session, nil
 }
 
 func (m *mockLLMClientForPlan) GenerateEmbedding(ctx context.Context, dimension int, input []string) ([][]float64, error) {
@@ -1149,8 +1505,10 @@ func (m *mockLLMClientForPlan) CountTokens(ctx context.Context, history *gollem.
 }
 
 type mockSessionForPlan struct {
-	client  *mockLLMClientForPlan
-	history *gollem.History
+	client       *mockLLMClientForPlan
+	history      *gollem.History
+	options      []gollem.SessionOption // Store session options for inspection
+	systemPrompt string                 // Store extracted system prompt
 }
 
 func (m *mockSessionForPlan) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {

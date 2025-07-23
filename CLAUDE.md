@@ -18,6 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Test must be included in same name test file. (e.g. test for `abc.go` must be in `abc_test.go`)
 - Use named empty structure (e.g. `type ctxHogeKey struct{}` ) as private context key
 - Do not create binary. If you need to run, use `go run` command instead
+- When a `tmp` directory is specified, search for files within the `./tmp` directory relative to the project root.
 
 ## Commands
 
