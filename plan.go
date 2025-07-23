@@ -131,6 +131,26 @@ const (
 	PlanExecutionEfficient = PlanExecutionModeEfficient
 )
 
+// PlanPhaseType represents the type of phase in plan execution
+type PlanPhaseType string
+
+const (
+	// PhasePlanning represents the planning phase where initial plan is created
+	PhasePlanning PlanPhaseType = "planning"
+
+	// PhaseReflecting represents the reflection phase where progress is analyzed
+	PhaseReflecting PlanPhaseType = "reflecting"
+
+	// PhaseSummarizing represents the summarization phase where results are compiled
+	PhaseSummarizing PlanPhaseType = "summarizing"
+
+	// PhaseClarifying represents the goal clarification phase
+	PhaseClarifying PlanPhaseType = "clarifying"
+)
+
+// PlanPhaseSystemPromptProvider is a function that provides system prompts for different plan phases
+type PlanPhaseSystemPromptProvider func(ctx context.Context, phase PlanPhaseType, plan *Plan) string
+
 // SkipDecision represents a decision to skip a specific todo with detailed reasoning
 type SkipDecision struct {
 	TodoID     string  `json:"todo_id"`
@@ -267,11 +287,12 @@ type planConfig struct {
 	internalReflectionHook    PlanReflectionHook // Keep as exported since reflection is complex
 
 	// Plan-specific settings
-	executionMode           PlanExecutionMode
-	skipConfidenceThreshold float64
-	skipConfirmationHook    PlanSkipConfirmationHook
-	maxToolRetries          int    // Maximum number of recursive tool calls
-	language                string // Language preference for plan execution
+	executionMode             PlanExecutionMode
+	skipConfidenceThreshold   float64
+	skipConfirmationHook      PlanSkipConfirmationHook
+	maxToolRetries            int                           // Maximum number of recursive tool calls
+	language                  string                        // Language preference for plan execution
+	phaseSystemPromptProvider PlanPhaseSystemPromptProvider // Dynamic system prompt provider for different phases
 }
 
 // PlanOption represents configuration options for plan creation and execution
@@ -648,6 +669,31 @@ func (p *Plan) handleStepError(step *planToDo, err error) error {
 	return goerr.Wrap(err, "plan step execution failed", goerr.V("step_id", step.ID))
 }
 
+// safeCallPhaseSystemPromptProvider wraps the provider call with panic recovery
+func safeCallPhaseSystemPromptProvider(ctx context.Context, provider PlanPhaseSystemPromptProvider, phase PlanPhaseType, plan *Plan) (prompt string) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger := LoggerFromContext(ctx)
+			logger.Error("panic in PlanPhaseSystemPromptProvider",
+				"phase", phase,
+				"panic", r)
+			prompt = "" // Use default prompt on panic
+		}
+	}()
+
+	prompt = provider(ctx, phase, plan)
+
+	// Warn if prompt is excessively long
+	if len(prompt) > 10000 {
+		logger := LoggerFromContext(ctx)
+		logger.Warn("phase system prompt is excessively long",
+			"phase", phase,
+			"length", len(prompt))
+	}
+
+	return prompt
+}
+
 // createPlanConfig creates plan configuration from options
 func (g *Agent) createPlanConfig(options ...PlanOption) *planConfig {
 	cfg := &planConfig{
@@ -744,6 +790,13 @@ func (g *Agent) createPlannerSession(ctx context.Context, cfg *planConfig, _ []T
 	}
 	if cfg.history != nil {
 		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
+	}
+
+	// Add phase-specific system prompt
+	if cfg.phaseSystemPromptProvider != nil {
+		if prompt := safeCallPhaseSystemPromptProvider(ctx, cfg.phaseSystemPromptProvider, PhasePlanning, nil); prompt != "" {
+			sessionOptions = append(sessionOptions, WithSessionSystemPrompt(prompt))
+		}
 	}
 
 	return g.llm.NewSession(ctx, sessionOptions...)
@@ -1051,10 +1104,18 @@ func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 }
 
 // createReflectorSession creates a session for reflection
-func (g *Agent) createReflectorSession(ctx context.Context, _ *planConfig) (Session, error) {
+func (g *Agent) createReflectorSession(ctx context.Context, cfg *planConfig) (Session, error) {
 	// Create clean session without history to avoid confusion with previous conversation
 	sessionOptions := []SessionOption{
 		WithSessionContentType(ContentTypeJSON),
+	}
+
+	// Add phase-specific system prompt (plan is available in reflection context)
+	if cfg.phaseSystemPromptProvider != nil {
+		plan, _ := PlanFromContext(ctx)
+		if prompt := safeCallPhaseSystemPromptProvider(ctx, cfg.phaseSystemPromptProvider, PhaseReflecting, plan); prompt != "" {
+			sessionOptions = append(sessionOptions, WithSessionSystemPrompt(prompt))
+		}
 	}
 
 	return g.llm.NewSession(ctx, sessionOptions...)
@@ -1067,8 +1128,26 @@ func (g *Agent) clarifyUserGoal(ctx context.Context, userInput string, cfg *plan
 	if cfg.history != nil {
 		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
 	}
+
+	// Combine existing system prompt with phase-specific prompt
+	var systemPrompts []string
+
+	// Existing system prompt from WithPlanSystemPrompt
 	if cfg.systemPrompt != "" {
-		sessionOptions = append(sessionOptions, WithSessionSystemPrompt(cfg.systemPrompt))
+		systemPrompts = append(systemPrompts, cfg.systemPrompt)
+	}
+
+	// Phase-specific system prompt
+	if cfg.phaseSystemPromptProvider != nil {
+		if prompt := safeCallPhaseSystemPromptProvider(ctx, cfg.phaseSystemPromptProvider, PhaseClarifying, nil); prompt != "" {
+			systemPrompts = append(systemPrompts, prompt)
+		}
+	}
+
+	// Apply combined prompts
+	if len(systemPrompts) > 0 {
+		combinedPrompt := strings.Join(systemPrompts, "\n\n")
+		sessionOptions = append(sessionOptions, WithSessionSystemPrompt(combinedPrompt))
 	}
 
 	goalSession, err := g.llm.NewSession(ctx, sessionOptions...)
@@ -1154,9 +1233,17 @@ func (p *Plan) generateExecutionSummary(ctx context.Context) (string, error) {
 }
 
 // createSummarizerSession creates a session for summary generation
-func (g *Agent) createSummarizerSession(ctx context.Context, _ *planConfig) (Session, error) {
+func (g *Agent) createSummarizerSession(ctx context.Context, cfg *planConfig) (Session, error) {
 	// Create clean session without history to avoid confusion with previous conversation
 	sessionOptions := []SessionOption{}
+
+	// Add phase-specific system prompt (plan is available in summarizer context)
+	if cfg.phaseSystemPromptProvider != nil {
+		plan, _ := PlanFromContext(ctx)
+		if prompt := safeCallPhaseSystemPromptProvider(ctx, cfg.phaseSystemPromptProvider, PhaseSummarizing, plan); prompt != "" {
+			sessionOptions = append(sessionOptions, WithSessionSystemPrompt(prompt))
+		}
+	}
 
 	return g.llm.NewSession(ctx, sessionOptions...)
 }
@@ -2021,6 +2108,81 @@ func WithPlanHistoryCompactor(compactor HistoryCompactor) PlanOption {
 func WithPlanCompactionHook(callback func(ctx context.Context, original, compacted *History) error) PlanOption {
 	return func(cfg *planConfig) {
 		cfg.compactionHook = callback
+	}
+}
+
+// WithPlanPhaseSystemPrompt sets a dynamic system prompt provider for different plan execution phases.
+//
+// Plan&Execute operates through a series of distinct phases, each handled by specialized
+// LLM sessions to achieve better task decomposition and execution:
+//
+// Phase Flow:
+//
+//  1. Clarifying: First, the user's input is analyzed and refined to create a clear,
+//     unambiguous goal. This ensures the plan addresses what the user actually wants.
+//
+//  2. Planning: Based on the clarified goal, a detailed step-by-step plan is created
+//     with specific, actionable tasks.
+//
+//  3. Executing: Each task is executed sequentially using the main agent session.
+//     This phase uses WithPlanSystemPrompt for configuration, not the phase provider.
+//
+//  4. Reflecting: After each task completion, progress is analyzed to determine if
+//     the plan needs adjustment, tasks can be skipped, or if the goal is achieved.
+//
+//  5. Summarizing: Once all tasks are complete or the goal is achieved, a final
+//     summary is generated to present the results to the user.
+//
+// Why separate phases?
+// Each phase has a distinct purpose and requires different context and decision-making
+// criteria. By separating them, we can:
+//   - Provide phase-specific system prompts for better control
+//   - Prevent context pollution between different types of decisions
+//   - Enable more focused and accurate LLM responses
+//   - Allow dynamic adjustment based on execution state
+//
+// Example:
+//
+//	WithPlanPhaseSystemPrompt(func(ctx context.Context, phase PlanPhaseType, plan *Plan) string {
+//	    logger := LoggerFromContext(ctx)
+//
+//	    switch phase {
+//	    case PhasePlanning:
+//	        return "Focus on safety and efficiency when creating the plan."
+//
+//	    case PhaseReflecting:
+//	        if plan != nil {
+//	            todos := plan.GetToDos()
+//	            completed := 0
+//	            for _, todo := range todos {
+//	                if todo.Completed {
+//	                    completed++
+//	                }
+//	            }
+//	            logger.Info("Generating reflection prompt", "progress", fmt.Sprintf("%d/%d", completed, len(todos)))
+//	            return fmt.Sprintf("Progress: %d/%d tasks completed. Reflect on efficiency.",
+//	                completed, len(todos))
+//	        }
+//	        return "Analyze the progress and determine next steps."
+//
+//	    case PhaseClarifying:
+//	        return "Extract the user's core intent and create a clear, actionable goal."
+//
+//	    default:
+//	        return ""
+//	    }
+//	})
+//
+// Important notes:
+//   - The provider function is called once per phase when creating the session
+//   - The 'plan' parameter may be nil for PhaseClarifying and PhasePlanning (called before plan exists)
+//   - Existing system prompts (e.g., from WithSystemPrompt) are preserved and combined
+//   - The Executing phase is handled by the main agent session and uses WithPlanSystemPrompt
+//   - Return empty string to use default prompts for that phase
+//   - The provider function should not perform heavy computations or I/O operations
+func WithPlanPhaseSystemPrompt(provider PlanPhaseSystemPromptProvider) PlanOption {
+	return func(cfg *planConfig) {
+		cfg.phaseSystemPromptProvider = provider
 	}
 }
 
