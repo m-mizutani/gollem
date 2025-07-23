@@ -683,14 +683,6 @@ func safeCallPhaseSystemPromptProvider(ctx context.Context, provider PlanPhaseSy
 
 	prompt = provider(ctx, phase, plan)
 
-	// Warn if prompt is excessively long
-	if len(prompt) > 10000 {
-		logger := LoggerFromContext(ctx)
-		logger.Warn("phase system prompt is excessively long",
-			"phase", phase,
-			"length", len(prompt))
-	}
-
 	return prompt
 }
 
