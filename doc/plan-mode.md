@@ -330,6 +330,7 @@ import (
     "context"
     "fmt"
     "os"
+    "strings"
     "github.com/m-mizutani/gollem"
     "github.com/m-mizutani/gollem/llm/openai"
 )
