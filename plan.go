@@ -3,7 +3,6 @@ package gollem
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -38,16 +37,17 @@ type Plan struct {
 
 // planToDo represents a single task in the plan (private to avoid API confusion)
 type planToDo struct {
-	ID              string         `json:"todo_id"`
-	Description     string         `json:"todo_description"`
-	Intent          string         `json:"todo_intent"` // High-level intention
-	Status          ToDoStatus     `json:"todo_status"`
-	Result          *toDoResult    `json:"todo_result,omitempty"`
-	Error           error          `json:"-"` // Not serialized
-	ErrorMsg        string         `json:"todo_error,omitempty"`
-	UpdatedAt       time.Time      `json:"todo_updated_at,omitempty"` // When todo was last updated
-	CreatedAt       time.Time      `json:"todo_created_at,omitempty"` // When todo was created
-	toolCallTracker map[string]int `json:"-"`                         // Track tool call frequency to prevent loops
+	ID                    string      `json:"todo_id"`
+	Description           string      `json:"todo_description"`
+	Intent                string      `json:"todo_intent"` // High-level intention
+	Status                ToDoStatus  `json:"todo_status"`
+	Result                *toDoResult `json:"todo_result,omitempty"`
+	Error                 error       `json:"-"` // Not serialized
+	ErrorMsg              string      `json:"todo_error,omitempty"`
+	UpdatedAt             time.Time   `json:"todo_updated_at,omitempty"` // When todo was last updated
+	CreatedAt             time.Time   `json:"todo_created_at,omitempty"` // When todo was created
+	executionIterations   int         `json:"-"`                         // Current iteration count for this todo
+	IterationLimitReached bool        `json:"iteration_limit_reached"`   // Whether iteration limit was reached
 }
 
 // PlanState represents the current state of plan execution (private)
@@ -293,6 +293,7 @@ type planConfig struct {
 	maxToolRetries            int                           // Maximum number of recursive tool calls
 	language                  string                        // Language preference for plan execution
 	phaseSystemPromptProvider PlanPhaseSystemPromptProvider // Dynamic system prompt provider for different phases
+	maxExecutionIterations    int                           // Maximum iterations per todo execution (default: 16)
 }
 
 // PlanOption represents configuration options for plan creation and execution
@@ -355,7 +356,7 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 	cfg.gollemConfig.facilitator = nil
 	toolMap, toolList, err := setupTools(ctx, &cfg.gollemConfig)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to setup tools for plan")
+		return nil, goerr.Wrap(err, "failed to setup tools for plan", goerr.V("plan_id", planID))
 	}
 
 	// DEBUG: Log tools available for plan
@@ -374,7 +375,7 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 		clarifiedGoal = prompt // Fallback to original prompt
 	}
 	if err := g.messageHook(ctx, clarifiedGoal); err != nil {
-		return nil, goerr.Wrap(err, "failed to call messageHook")
+		return nil, goerr.Wrap(err, "failed to call messageHook", goerr.V("plan_id", planID))
 	}
 
 	logger.Debug("user goal clarified",
@@ -384,24 +385,24 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 	// Create planner session
 	plannerSession, err := g.createPlannerSession(ctx, cfg, toolList)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create planner session")
+		return nil, goerr.Wrap(err, "failed to create planner session", goerr.V("plan_id", planID))
 	}
 
 	// Generate plan (use clarified goal for planning)
 	todos, simplifiedSystemPrompt, err := g.generatePlan(ctx, plannerSession, clarifiedGoal, toolList, cfg)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to generate plan")
+		return nil, goerr.Wrap(err, "failed to generate plan", goerr.V("plan_id", planID))
 	}
 
 	// Create plan with runtime fields
 	plan, err := g.createPlanWithRuntime(ctx, planID, prompt, clarifiedGoal, simplifiedSystemPrompt, todos, PlanStateCreated, toolMap, toolList, cfg)
 	if err != nil {
-		return nil, err
+		return nil, goerr.Wrap(err, "failed to create plan with runtime", goerr.V("plan_id", planID))
 	}
 
 	// Call PlanCreatedHook
 	if err := cfg.planCreatedHook(ctx, plan); err != nil {
-		return nil, goerr.Wrap(err, "failed to call PlanCreatedHook")
+		return nil, goerr.Wrap(err, "failed to call PlanCreatedHook", goerr.V("plan_id", planID))
 	}
 
 	logger.Info("plan created",
@@ -427,7 +428,7 @@ func (p *Plan) Execute(ctx context.Context) (string, error) {
 
 	if err := p.validateAndPrepareExecution(); err != nil {
 		logger.Debug("plan validation failed", "error", err)
-		return "", err
+		return "", goerr.Wrap(err, "plan validation failed", goerr.V("plan_id", p.id))
 	}
 
 	logger.Debug("plan validation passed, starting execution")
@@ -492,7 +493,7 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 			logger.Error("plan step processing failed",
 				"todo_id", currentToDo.ID,
 				"error", err)
-			return "", err
+			return "", goerr.Wrap(err, "plan step processing failed", goerr.V("plan_id", p.id), goerr.V("todo_id", currentToDo.ID))
 		}
 
 		if shouldComplete {
@@ -526,10 +527,11 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (string, bool, error) {
 	logger := LoggerFromContext(ctx)
 	logger.Debug("starting step processing", "step_id", currentStep.ID, "step_intent", currentStep.Intent)
+	eb := goerr.NewBuilder(goerr.V("plan_id", p.id))
 
 	// Call step start hooks
 	if err := p.callStepStartHooks(ctx, currentStep); err != nil {
-		return "", false, err
+		return "", false, eb.Wrap(err, "error returned from StepStartHooks")
 	}
 
 	logger.Debug("executing step", "step_id", currentStep.ID)
@@ -546,7 +548,7 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 
 	// Call step completed hooks
 	if err := p.callStepCompletedHooks(ctx, currentStep, result); err != nil {
-		return "", false, err
+		return "", false, goerr.Wrap(err, "failed to call step completed hooks", goerr.V("plan_id", p.id), goerr.V("todo_id", currentStep.ID))
 	}
 
 	// Reflection and re-planning
@@ -554,7 +556,7 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 	reflection, err := p.reflect(ctx)
 	if err != nil {
 		logger.Debug("plan reflection failed", "step_id", currentStep.ID, "error", err)
-		return "", false, goerr.Wrap(err, "plan reflection failed")
+		return "", false, goerr.Wrap(err, "plan reflection failed", goerr.V("plan_id", p.id), goerr.V("todo_id", currentStep.ID))
 	}
 
 	logger.Debug("plan reflection completed",
@@ -568,20 +570,20 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 
 	// Call internal reflection hook
 	if err := p.config.internalReflectionHook(ctx, p, reflection); err != nil {
-		return "", false, goerr.Wrap(err, "failed to call internal reflection hook")
+		return "", false, goerr.Wrap(err, "failed to call internal reflection hook", goerr.V("plan_id", p.id))
 	}
 
 	// Update plan
 	logger.Debug("updating plan based on reflection", "step_id", currentStep.ID)
 	if err := p.updatePlan(ctx, reflection); err != nil {
 		logger.Debug("plan update failed", "step_id", currentStep.ID, "error", err)
-		return "", false, goerr.Wrap(err, "failed to update plan")
+		return "", false, goerr.Wrap(err, "failed to update plan", goerr.V("plan_id", p.id), goerr.V("todo_id", currentStep.ID))
 	}
 
 	// Call PlanToDoUpdatedHook if there are changes
 	if len(reflection.Changes) > 0 {
 		if err := p.callToDoUpdatedHook(ctx, reflection.Changes); err != nil {
-			return "", false, err
+			return "", false, goerr.Wrap(err, "failed to call todo updated hook", goerr.V("plan_id", p.id))
 		}
 	}
 
@@ -609,7 +611,7 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 
 		// Call PlanCompletedHook
 		if err := p.config.planCompletedHook(ctx, p, summary); err != nil {
-			return "", false, goerr.Wrap(err, "failed to call PlanCompletedHook")
+			return "", false, goerr.Wrap(err, "failed to call PlanCompletedHook", goerr.V("plan_id", p.id))
 		}
 
 		return summary, true, nil
@@ -624,13 +626,13 @@ func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (st
 func (p *Plan) callStepStartHooks(ctx context.Context, currentStep *planToDo) error {
 	// Call internal step start hook
 	if err := p.config.internalStepStartHook(ctx, p, currentStep); err != nil {
-		return goerr.Wrap(err, "failed to call internal step start hook")
+		return goerr.Wrap(err, "failed to call internal step start hook", goerr.V("plan_id", p.id), goerr.V("todo_id", currentStep.ID))
 	}
 
 	// Call public ToDo start hook
 	todo := currentStep.toPlanToDo()
 	if err := p.config.planToDoStartHook(ctx, p, todo); err != nil {
-		return goerr.Wrap(err, "failed to call public ToDo start hook")
+		return goerr.Wrap(err, "failed to call public ToDo start hook", goerr.V("plan_id", p.id), goerr.V("todo_id", currentStep.ID))
 	}
 
 	return nil
@@ -640,13 +642,13 @@ func (p *Plan) callStepStartHooks(ctx context.Context, currentStep *planToDo) er
 func (p *Plan) callStepCompletedHooks(ctx context.Context, currentStep *planToDo, result *toDoResult) error {
 	// Call internal step completed hook
 	if err := p.config.internalStepCompletedHook(ctx, p, currentStep, result); err != nil {
-		return goerr.Wrap(err, "failed to call internal step completed hook")
+		return goerr.Wrap(err, "failed to call internal step completed hook", goerr.V("plan_id", p.id), goerr.V("todo_id", currentStep.ID))
 	}
 
 	// Call public ToDo completed hook
 	todo := currentStep.toPlanToDo()
 	if err := p.config.planToDoCompletedHook(ctx, p, todo); err != nil {
-		return goerr.Wrap(err, "failed to call public ToDo completed hook")
+		return goerr.Wrap(err, "failed to call public ToDo completed hook", goerr.V("plan_id", p.id), goerr.V("todo_id", currentStep.ID))
 	}
 
 	return nil
@@ -655,7 +657,7 @@ func (p *Plan) callStepCompletedHooks(ctx context.Context, currentStep *planToDo
 // callToDoUpdatedHook calls the todo updated hook
 func (p *Plan) callToDoUpdatedHook(ctx context.Context, changes []PlanToDoChange) error {
 	if err := p.config.planToDoUpdatedHook(ctx, p, changes); err != nil {
-		return goerr.Wrap(err, "failed to call PlanToDoUpdatedHook")
+		return goerr.Wrap(err, "failed to call PlanToDoUpdatedHook", goerr.V("plan_id", p.id), goerr.V("changes_count", len(changes)))
 	}
 	return nil
 }
@@ -666,7 +668,7 @@ func (p *Plan) handleStepError(step *planToDo, err error) error {
 	step.Error = err
 	step.ErrorMsg = err.Error()
 	p.state = PlanStateFailed
-	return goerr.Wrap(err, "plan step execution failed", goerr.V("step_id", step.ID))
+	return goerr.Wrap(err, "plan step execution failed", goerr.V("plan_id", p.id), goerr.V("step_id", step.ID))
 }
 
 // safeCallPhaseSystemPromptProvider wraps the provider call with panic recovery
@@ -710,6 +712,7 @@ func (g *Agent) createPlanConfig(options ...PlanOption) *planConfig {
 		skipConfidenceThreshold: 0.8,
 		maxToolRetries:          10,
 		language:                "English", // Default language
+		maxExecutionIterations:  16,        // Default iteration limit per todo
 	}
 
 	for _, opt := range options {
@@ -745,7 +748,7 @@ func (g *Agent) createPlanWithRuntime(ctx context.Context, id, input, clarifiedG
 
 	mainSession, err := g.llm.NewSession(ctx, sessionOptions...)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create main session for plan")
+		return nil, goerr.Wrap(err, "failed to create main session for plan", goerr.V("plan_id", id))
 	}
 
 	// DEBUG: Verify session was created with tools
@@ -813,16 +816,16 @@ func (g *Agent) generatePlan(ctx context.Context, session Session, prompt string
 	}
 
 	if err := plannerTmpl.Execute(&promptBuffer, templateData); err != nil {
-		return nil, "", goerr.Wrap(err, "failed to execute planner template")
+		return nil, "", goerr.Wrap(err, "failed to execute planner template", goerr.V("goal_length", len(prompt)))
 	}
 
 	response, err := session.GenerateContent(ctx, Text(promptBuffer.String()))
 	if err != nil {
-		return nil, "", err
+		return nil, "", goerr.Wrap(err, "failed to generate plan content", goerr.V("prompt_length", promptBuffer.Len()))
 	}
 
 	if len(response.Texts) == 0 {
-		return nil, "", goerr.New("no response from planner")
+		return nil, "", goerr.New("no response from planner", goerr.V("goal", prompt))
 	}
 
 	var planData struct {
@@ -858,9 +861,42 @@ func (g *Agent) generatePlan(ctx context.Context, session Session, prompt string
 	return todos, planData.SimplifiedSystemPrompt, nil
 }
 
-// executeStepWithInput handles recursive tool processing with maximum retry control
-func executeStepWithInput(ctx context.Context, session Session, config gollemConfig, toolMap map[string]Tool, todo *planToDo, inputs []Input, maxRetries int) (*toDoResult, error) {
+// executeStepWithInput handles recursive tool processing with maximum retry control and iteration limits
+func executeStepWithInput(ctx context.Context, session Session, config *planConfig, toolMap map[string]Tool, todo *planToDo, inputs []Input, maxRetries int) (*toDoResult, error) {
 	logger := LoggerFromContext(ctx)
+
+	// Check iteration limit
+	todo.executionIterations++
+	if todo.executionIterations > config.maxExecutionIterations {
+		todo.IterationLimitReached = true
+		logger.Warn("todo execution iteration limit reached",
+			"todo_id", todo.ID,
+			"iterations", todo.executionIterations,
+			"limit", config.maxExecutionIterations)
+
+		// Return current result without error - let reflection phase handle it
+		return &toDoResult{
+			Output:     fmt.Sprintf("Iteration limit reached after %d iterations. Task may be incomplete.", todo.executionIterations-1),
+			ToolCalls:  []*FunctionCall{},
+			ExecutedAt: clock.Now(ctx),
+			Data:       make(map[string]any),
+		}, nil
+	}
+
+	// Log iteration progress
+	logger.Debug("todo execution iteration",
+		"todo_id", todo.ID,
+		"current", todo.executionIterations,
+		"max", config.maxExecutionIterations,
+		"remaining", config.maxExecutionIterations-todo.executionIterations)
+
+	// Warn when approaching limit
+	if float64(todo.executionIterations) >= float64(config.maxExecutionIterations)*0.8 {
+		logger.Warn("approaching iteration limit for todo",
+			"todo_id", todo.ID,
+			"current", todo.executionIterations,
+			"max", config.maxExecutionIterations)
+	}
 
 	result := &toDoResult{
 		Output:     "",
@@ -869,17 +905,39 @@ func executeStepWithInput(ctx context.Context, session Session, config gollemCon
 		Data:       make(map[string]any),
 	}
 
-	// Track tool call frequency to prevent infinite loops
-	if todo.toolCallTracker == nil {
-		todo.toolCallTracker = make(map[string]int)
+	// Add iteration info to inputs if not the first call
+	// BUT: Only add it if we don't have function responses to send
+	// (OpenAI requires tool responses to immediately follow tool calls)
+	if todo.executionIterations > 1 {
+		// Check if we have any FunctionResponse objects
+		hasFunctionResponses := false
+		for _, input := range inputs {
+			if _, ok := input.(FunctionResponse); ok {
+				hasFunctionResponses = true
+				break
+			}
+		}
+
+		// Only add iteration info if we're not sending function responses
+		if !hasFunctionResponses {
+			iterationInfo := fmt.Sprintf("\n[Iteration %d/%d - %d remaining]",
+				todo.executionIterations,
+				config.maxExecutionIterations,
+				config.maxExecutionIterations-todo.executionIterations)
+			inputs = append([]Input{Text(iterationInfo)}, inputs...)
+		}
 	}
 
 	response, err := session.GenerateContent(ctx, inputs...)
 	if err != nil {
-		return nil, goerr.Wrap(err, "session GenerateContent failed")
+		return nil, goerr.Wrap(err, "session GenerateContent failed", goerr.V("todo_id", todo.ID), goerr.V("iteration", todo.executionIterations))
 	}
 
-	logger.Debug("executeStepWithInput: received response", "response", response)
+	logger.Debug("executeStepWithInput: received response",
+		"todo_id", todo.ID,
+		"iteration", todo.executionIterations,
+		"text_count", len(response.Texts),
+		"function_call_count", len(response.FunctionCalls))
 
 	// Process text response
 	if len(response.Texts) > 0 {
@@ -891,43 +949,13 @@ func executeStepWithInput(ctx context.Context, session Session, config gollemCon
 		}
 	}
 
-	// Filter function calls to prevent infinite loops
-	const maxSameToolCalls = 3
-	filteredCalls := []*FunctionCall{}
-	var blockedCalls []string
-
-	for _, call := range response.FunctionCalls {
-		// Create a key for tracking: tool_name:arguments_hash
-		toolKey := call.Name
-		if len(call.Arguments) > 0 {
-			// Simple hash of arguments for tracking
-			argsStr := fmt.Sprintf("%v", call.Arguments)
-			toolKey = fmt.Sprintf("%s:%x", call.Name, sha256.Sum256([]byte(argsStr)))
-		}
-
-		todo.toolCallTracker[toolKey]++
-
-		if todo.toolCallTracker[toolKey] > maxSameToolCalls {
-			logger.Warn("tool call frequency exceeded limit",
-				"tool", call.Name,
-				"count", todo.toolCallTracker[toolKey],
-				"limit", maxSameToolCalls)
-			blockedCalls = append(blockedCalls, call.Name)
-		} else {
-			filteredCalls = append(filteredCalls, call)
-		}
-	}
-
-	// Update response with filtered calls
-	response.FunctionCalls = filteredCalls
-
 	// Add function calls to result
 	result.ToolCalls = append(result.ToolCalls, response.FunctionCalls...)
 
 	// Check retry limit
 	var additionalInput []Input
 	if maxRetries <= -3 {
-		return nil, goerr.New("maximum hard-limit retries exceeded", goerr.V("todo", todo))
+		return nil, goerr.New("maximum hard-limit retries exceeded", goerr.V("todo_id", todo.ID), goerr.V("max_retries", maxRetries))
 	}
 	if maxRetries <= 0 {
 		logger.Warn("maximum retries exceeded, stopping tool processing", "max_retries", maxRetries)
@@ -939,19 +967,18 @@ func executeStepWithInput(ctx context.Context, session Session, config gollemCon
 		additionalInput = append(additionalInput, Text("IMPORTANT: maximum retries already exceeded, more tool call is not allowed"))
 	}
 
-	// Add warning about blocked calls if any
-	if len(blockedCalls) > 0 {
-		warning := fmt.Sprintf("WARNING: The following tools were blocked due to excessive repetition (%d+ calls): %v. Please try a different approach or be more specific with your requests.",
-			maxSameToolCalls, blockedCalls)
-		additionalInput = append(additionalInput, Text(warning))
-	}
-
 	// Process tool calls
-	newInput, err := handleResponse(ctx, config, response, toolMap)
+	newInput, err := handleResponse(ctx, config.gollemConfig, response, toolMap)
 	if err != nil {
 		logger.Debug("executeStepWithInput: tool processing failed", "error", err)
-		return nil, goerr.Wrap(err, "tool execution failed")
+		return nil, goerr.Wrap(err, "tool execution failed", goerr.V("todo_id", todo.ID), goerr.V("iteration", todo.executionIterations))
 	}
+
+	logger.Debug("executeStepWithInput: handleResponse completed",
+		"todo_id", todo.ID,
+		"new_input_count", len(newInput),
+		"has_function_responses", len(newInput) > 0)
+
 	newInput = append(newInput, additionalInput...)
 
 	// Store tool results in Data
@@ -963,8 +990,6 @@ func executeStepWithInput(ctx context.Context, session Session, config gollemCon
 
 	// Recursively process with tool results if any
 	if len(newInput) > 0 {
-		logger.Debug("executeStepWithInput: recursively processing tool results", "input_count", len(newInput), "retries_remaining", maxRetries-1)
-
 		recursiveResult, err := executeStepWithInput(ctx, session, config, toolMap, todo, newInput, maxRetries-1)
 		if err != nil {
 			return nil, goerr.Wrap(err, "recursive processing failed")
@@ -990,28 +1015,33 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 	logger := LoggerFromContext(ctx)
 
 	todo.Status = ToDoStatusExecuting
+	todo.executionIterations = 0 // Reset iteration count for this todo
+	todo.IterationLimitReached = false
 
 	logger.Debug("start executeStep", "todo", todo)
 
 	// Use main session for step execution to maintain history continuity
 	if p.mainSession == nil {
-		return nil, goerr.Wrap(ErrPlanNotInitialized, "plan main session is not initialized")
+		return nil, goerr.Wrap(ErrPlanNotInitialized, "plan main session is not initialized", goerr.V("plan_id", p.id), goerr.V("todo_id", todo.ID))
 	}
 
 	// Generate execution prompt (using template)
 	var promptBuffer bytes.Buffer
 	if err := executorTmpl.Execute(&promptBuffer, executorTemplateData{
-		Intent:          todo.Intent,
-		ProgressSummary: p.getProgressSummary(),
-		Language:        p.config.language,
+		Intent:              todo.Intent,
+		ProgressSummary:     p.getProgressSummary(),
+		Language:            p.config.language,
+		CurrentIteration:    todo.executionIterations + 1, // Next iteration to be executed
+		MaxIterations:       p.config.maxExecutionIterations,
+		RemainingIterations: p.config.maxExecutionIterations - todo.executionIterations,
 	}); err != nil {
-		return nil, goerr.Wrap(err, "failed to execute executor template")
+		return nil, goerr.Wrap(err, "failed to execute executor template", goerr.V("plan_id", p.id), goerr.V("todo_id", todo.ID))
 	}
 
 	// Execute with initial prompt and configured maximum retries
-	result, err := executeStepWithInput(ctx, p.mainSession, p.config.gollemConfig, p.toolMap, todo, []Input{Text(promptBuffer.String())}, p.config.maxToolRetries)
+	result, err := executeStepWithInput(ctx, p.mainSession, p.config, p.toolMap, todo, []Input{Text(promptBuffer.String())}, p.config.maxToolRetries)
 	if err != nil {
-		return nil, goerr.Wrap(err, "executeStepWithInput failed")
+		return nil, goerr.Wrap(err, "executeStepWithInput failed", goerr.V("plan_id", p.id), goerr.V("todo_id", todo.ID))
 	}
 
 	return result, nil
@@ -1026,12 +1056,23 @@ func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 	reflectorSession, err := p.agent.createReflectorSession(ctx, p.config)
 	if err != nil {
 		logger.Debug("failed to create reflector session", "error", err)
-		return nil, err
+		return nil, goerr.Wrap(err, "failed to create reflector session", goerr.V("plan_id", p.id))
 	}
 	logger.Debug("reflector session created")
 
 	// Generate reflection prompt (using template)
 	var promptBuffer bytes.Buffer
+
+	// Check if any todo hit iteration limit
+	iterationLimitInfo := ""
+	for _, todo := range p.todos {
+		if todo.IterationLimitReached {
+			iterationLimitInfo = fmt.Sprintf("IMPORTANT: Task '%s' reached its iteration limit (%d iterations). The task may be incomplete.",
+				todo.Description, p.config.maxExecutionIterations)
+			break
+		}
+	}
+
 	templateData := reflectorTemplateData{
 		Goal:                   p.input,
 		ClarifiedGoal:          p.clarifiedGoal,
@@ -1042,11 +1083,12 @@ func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 		LastStepResult:         p.getLastStepResult(),
 		SimplifiedSystemPrompt: p.simplifiedSystemPrompt,
 		Language:               p.config.language,
+		IterationLimitInfo:     iterationLimitInfo,
 	}
 
 	if err := reflectorTmpl.Execute(&promptBuffer, templateData); err != nil {
 		logger.Debug("failed to execute reflector template", "error", err)
-		return nil, goerr.Wrap(err, "failed to execute reflector template")
+		return nil, goerr.Wrap(err, "failed to execute reflector template", goerr.V("plan_id", p.id))
 	}
 	logger.Debug("reflector prompt generated", "prompt_length", promptBuffer.Len())
 
@@ -1054,13 +1096,13 @@ func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
 	response, err := reflectorSession.GenerateContent(ctx, Text(promptBuffer.String()))
 	if err != nil {
 		logger.Debug("reflection request failed", "error", err)
-		return nil, err
+		return nil, goerr.Wrap(err, "reflection request failed", goerr.V("plan_id", p.id))
 	}
 	logger.Debug("reflection response received", "response_length", len(response.Texts))
 
 	if len(response.Texts) == 0 {
 		logger.Debug("no response from reflector")
-		return nil, goerr.New("no response from reflector")
+		return nil, goerr.New("no response from reflector", goerr.V("plan_id", p.id))
 	}
 
 	logger.Debug("parsing reflection response", "response_text", response.Texts[0])
@@ -2054,6 +2096,27 @@ func WithPlanExecutionMode(mode PlanExecutionMode) PlanOption {
 func WithSkipConfidenceThreshold(threshold float64) PlanOption {
 	return func(cfg *planConfig) {
 		cfg.skipConfidenceThreshold = threshold
+	}
+}
+
+// WithPlanMaxIterations sets the maximum number of iterations allowed per todo execution.
+// This limits how many times a single todo can interact with the LLM before being considered stuck.
+// Default: 16 iterations per todo
+//
+// Example:
+//
+//	plan, err := agent.Plan(ctx, "Complex task",
+//	    gollem.WithPlanMaxIterations(30), // Allow up to 30 iterations per todo
+//	)
+//
+// Note: When a todo reaches the iteration limit, it won't throw an error. Instead,
+// the reflection phase will be informed and can decide how to proceed.
+func WithPlanMaxIterations(max int) PlanOption {
+	return func(cfg *planConfig) {
+		if max < 1 {
+			max = 1 // Ensure at least one iteration is allowed
+		}
+		cfg.maxExecutionIterations = max
 	}
 }
 

@@ -45,9 +45,12 @@ type plannerTemplateData struct {
 }
 
 type executorTemplateData struct {
-	Intent          string
-	ProgressSummary string
-	Language        string
+	Intent              string
+	ProgressSummary     string
+	Language            string
+	CurrentIteration    int
+	MaxIterations       int
+	RemainingIterations int
 }
 
 type reflectorTemplateData struct {
@@ -60,6 +63,7 @@ type reflectorTemplateData struct {
 	LastStepResult         string
 	SimplifiedSystemPrompt string
 	Language               string
+	IterationLimitInfo     string
 }
 
 type summarizerTemplateData struct {

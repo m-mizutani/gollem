@@ -509,11 +509,6 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 
 	newInput := make([]Input, 0)
 
-	// DEBUG: Log all function calls received (minimal logging for debugging)
-	if len(output.FunctionCalls) > 0 {
-		logger.Debug("handleResponse: processing response", "function_calls", output.FunctionCalls)
-	}
-
 	// Call the MessageHook for all texts
 	for _, text := range output.Texts {
 		if err := cfg.messageHook(ctx, text); err != nil {
@@ -540,9 +535,6 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 
 		tool, ok := toolMap[toolCall.Name]
 		if !ok {
-			logger.Debug("handleResponse: tool not found, creating error response",
-				"tool_name", toolCall.Name,
-				"tool_id", toolCall.ID)
 			logger.Info("gollem tool not found", "call", toolCall)
 			newInput = append(newInput, FunctionResponse{
 				Name:  toolCall.Name,
@@ -555,10 +547,6 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 		result, err := tool.Run(ctx, toolCall.Arguments)
 		logger.Debug("gollem tool result", "tool", toolCall.Name, "result", result)
 		if err != nil {
-			logger.Debug("handleResponse: tool error, creating error response",
-				"tool_name", toolCall.Name,
-				"tool_id", toolCall.ID,
-				"error", err)
 			if cbErr := cfg.toolErrorHook(ctx, err, *toolCall); cbErr != nil {
 				return nil, goerr.Wrap(cbErr, "failed to call ToolErrorHook")
 			}
@@ -592,33 +580,12 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 				result = unmarshaled
 			}
 
-			logger.Debug("handleResponse: tool success, creating data response",
-				"tool_name", toolCall.Name,
-				"tool_id", toolCall.ID,
-				"result_keys", func() []string {
-					if result == nil {
-						return nil
-					}
-					keys := make([]string, 0, len(result))
-					for k := range result {
-						keys = append(keys, k)
-					}
-					return keys
-				}())
-
 			newInput = append(newInput, FunctionResponse{
 				ID:   toolCall.ID,
 				Name: toolCall.Name,
 				Data: result,
 			})
 		}
-	}
-
-	// DEBUG: Log final function response count
-	if len(output.FunctionCalls) > 0 {
-		logger.Debug("handleResponse: completed processing",
-			"function_responses_created", len(newInput),
-			"original_function_calls", len(output.FunctionCalls))
 	}
 
 	return newInput, nil

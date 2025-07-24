@@ -31,6 +31,16 @@ Otherwise, provide a new updated plan containing only the steps that "still need
 ## Last step execution result:
 {{.LastStepResult}}
 
+{{if .IterationLimitInfo}}
+## Iteration Limit Status:
+{{.IterationLimitInfo}}
+
+When a task reaches its iteration limit, you must decide:
+1. Accept current partial results and continue with next task
+2. Mark this task as failed and skip dependent tasks
+3. Modify the plan to work around this limitation
+{{end}}
+
 # Response Format
 
 You MUST respond with valid JSON in the following format:
