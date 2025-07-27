@@ -5,6 +5,11 @@ Current task: {{.Intent}}
 Progress so far:
 {{.ProgressSummary}}
 
+{{if .MaxIterations}}
+**Iteration Status**: {{.CurrentIteration}} of {{.MaxIterations}} iterations ({{.RemainingIterations}} remaining)
+Important: Complete this task efficiently within the iteration limit.
+{{end}}
+
 **Critical Instructions**:
 1. **Prioritize task completion** - Focus solely on achieving the specific task assigned to you
 2. **Be direct and efficient** - Use the most appropriate tools immediately, avoid exploration or investigation beyond what's needed

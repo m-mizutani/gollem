@@ -774,6 +774,48 @@ plan, err := agent.Plan(ctx, "Process large dataset",
 )
 ```
 
+### Execution Iteration Limits
+
+Plan mode includes automatic iteration limiting to prevent infinite loops during task execution:
+
+```go
+// Default: 16 iterations per todo
+plan, err := agent.Plan(ctx, "Complex analysis task")
+
+// Custom iteration limit
+plan, err := agent.Plan(ctx, "Resource-intensive task",
+    gollem.WithPlanMaxIterations(10), // Lower limit for faster termination
+)
+```
+
+#### How It Works
+
+1. **Per-Todo Tracking**: Each todo tracks its own iteration count
+2. **Automatic Termination**: When limit is reached, execution stops gracefully
+3. **Prompt Awareness**: LLM is informed of current iteration and remaining attempts
+4. **Reflection Handling**: Reflection phase decides how to handle iteration-limited tasks
+
+#### Example with Iteration Information
+
+```go
+plan, err := agent.Plan(ctx, "Analyze complex dataset",
+    gollem.WithPlanMaxIterations(5),
+    gollem.WithPlanToDoCompletedHook(func(ctx context.Context, p *gollem.Plan, todo gollem.PlanToDo) error {
+        if todo.Result != nil && strings.Contains(todo.Result.Output, "Iteration limit reached") {
+            log.Printf("⚠️  Task %s hit iteration limit", todo.Description)
+        }
+        return nil
+    }),
+)
+```
+
+#### Benefits
+
+- **Prevents Runaway Execution**: Protects against infinite loops
+- **Resource Management**: Controls computational costs
+- **Graceful Degradation**: Tasks complete with partial results rather than hanging
+- **Transparency**: LLM knows iteration status and can plan accordingly
+
 ## Best Practices
 
 ### 1. Design Clear, Focused Tools
@@ -903,6 +945,7 @@ func executeWithResourceLimits(plan *gollem.Plan, maxDuration time.Duration, max
 | `WithSkipConfidenceThreshold(threshold)` | Set skip confidence threshold | 0.8 |
 | `WithPlanAutoCompact(enabled)` | Enable history compaction | false |
 | `WithPlanMaxHistorySize(size)` | Maximum history size before compaction | 100 |
+| `WithPlanMaxIterations(max)` | Maximum iterations per todo execution | 16 |
 
 ### Hook Types
 
