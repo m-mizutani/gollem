@@ -1513,6 +1513,10 @@ func (m *mockLLMClientForPlan) CountTokens(ctx context.Context, history *gollem.
 	return count * 15, nil // Slightly higher estimate for plan testing
 }
 
+func (m *mockLLMClientForPlan) IsCompatibleHistory(ctx context.Context, history *gollem.History) error {
+	return nil
+}
+
 type mockSessionForPlan struct {
 	client       *mockLLMClientForPlan
 	history      *gollem.History
@@ -1711,6 +1715,10 @@ func (m *mockLLMClientForIteration) CountTokens(ctx context.Context, history *go
 	return history.ToCount() * 10, nil
 }
 
+func (m *mockLLMClientForIteration) IsCompatibleHistory(ctx context.Context, history *gollem.History) error {
+	return nil
+}
+
 // Mock session for iteration testing
 type mockSessionForIteration struct {
 	client    *mockLLMClientForIteration
@@ -1862,6 +1870,10 @@ func (m *mockLLMClientWithPromptCapture) GenerateEmbedding(ctx context.Context, 
 
 func (m *mockLLMClientWithPromptCapture) CountTokens(ctx context.Context, history *gollem.History) (int, error) {
 	return 100, nil
+}
+
+func (m *mockLLMClientWithPromptCapture) IsCompatibleHistory(ctx context.Context, history *gollem.History) error {
+	return nil
 }
 
 // mockSessionWithPromptCapture captures prompts in the session

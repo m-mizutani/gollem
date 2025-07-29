@@ -931,7 +931,6 @@ func executeStepWithInput(ctx context.Context, session Session, config *planConf
 		}
 	}
 
-
 	// Add function calls to result
 	result.ToolCalls = append(result.ToolCalls, response.FunctionCalls...)
 
@@ -949,7 +948,6 @@ func executeStepWithInput(ctx context.Context, session Session, config *planConf
 
 		additionalInput = append(additionalInput, Text("IMPORTANT: maximum retries already exceeded, more tool call is not allowed"))
 	}
-
 
 	// Process tool calls
 	newInput, err := handleResponse(ctx, config.gollemConfig, response, toolMap)
@@ -973,7 +971,7 @@ func executeStepWithInput(ctx context.Context, session Session, config *planConf
 
 	// Recursively process with tool results if any
 	if len(newInput) > 0 {
-	
+
 		recursiveResult, err := executeStepWithInput(ctx, session, config, toolMap, todo, newInput, maxRetries-1)
 		if err != nil {
 			return nil, goerr.Wrap(err, "recursive processing failed")

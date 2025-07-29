@@ -13,6 +13,7 @@ import (
 	"github.com/m-mizutani/gollem/llm/openai"
 	"github.com/m-mizutani/gollem/mock"
 	"github.com/m-mizutani/gt"
+	openaiSDK "github.com/sashabaranov/go-openai"
 )
 
 // Sample tool implementation for testing
@@ -668,4 +669,105 @@ func TestFacilitatorHooksNotCalled(t *testing.T) {
 	})
 
 	// Verify session completed successfully (no error from Execute indicates proper completion)
+}
+
+func TestIsCompatibleHistory(t *testing.T) {
+	ctx := context.Background()
+
+	// Create test clients
+	openaiClient, err := openai.New(ctx, "test-key")
+	gt.NoError(t, err)
+
+	claudeClient, err := claude.New(ctx, "test-key")
+	gt.NoError(t, err)
+
+	geminiClient, err := gemini.New(ctx, "test-project", "test-location")
+	gt.NoError(t, err)
+
+	// Test OpenAI compatibility
+	t.Run("OpenAI history compatibility", func(t *testing.T) {
+		// Compatible history
+		openaiHistory := gollem.NewHistoryFromOpenAI([]openaiSDK.ChatCompletionMessage{
+			{Role: openaiSDK.ChatMessageRoleUser, Content: "Hello"},
+		})
+		gt.NoError(t, openaiClient.IsCompatibleHistory(ctx, openaiHistory))
+
+		// Incompatible history - wrong LLM type
+		claudeHistory := gollem.NewHistoryFromClaude(nil)
+		gt.Error(t, openaiClient.IsCompatibleHistory(ctx, claudeHistory))
+
+		// Incompatible history - wrong version
+		wrongVersionHistory := &gollem.History{
+			LLType:  "OpenAI",
+			Version: 999,
+		}
+		gt.Error(t, openaiClient.IsCompatibleHistory(ctx, wrongVersionHistory))
+
+		// Nil history should be compatible
+		gt.NoError(t, openaiClient.IsCompatibleHistory(ctx, nil))
+	})
+
+	t.Run("Claude history compatibility", func(t *testing.T) {
+		// Compatible history
+		claudeHistory := gollem.NewHistoryFromClaude(nil)
+		gt.NoError(t, claudeClient.IsCompatibleHistory(ctx, claudeHistory))
+
+		// Incompatible history - wrong LLM type
+		openaiHistory := gollem.NewHistoryFromOpenAI([]openaiSDK.ChatCompletionMessage{
+			{Role: openaiSDK.ChatMessageRoleUser, Content: "Hello"},
+		})
+		gt.Error(t, claudeClient.IsCompatibleHistory(ctx, openaiHistory))
+
+		// Incompatible history - wrong version
+		wrongVersionHistory := &gollem.History{
+			LLType:  "claude",
+			Version: 999,
+		}
+		gt.Error(t, claudeClient.IsCompatibleHistory(ctx, wrongVersionHistory))
+
+		// Nil history should be compatible
+		gt.NoError(t, claudeClient.IsCompatibleHistory(ctx, nil))
+	})
+
+	t.Run("Gemini history compatibility", func(t *testing.T) {
+		// Compatible history
+		geminiHistory := gollem.NewHistoryFromGemini(nil)
+		gt.NoError(t, geminiClient.IsCompatibleHistory(ctx, geminiHistory))
+
+		// Incompatible history - wrong LLM type
+		openaiHistory := gollem.NewHistoryFromOpenAI([]openaiSDK.ChatCompletionMessage{
+			{Role: openaiSDK.ChatMessageRoleUser, Content: "Hello"},
+		})
+		gt.Error(t, geminiClient.IsCompatibleHistory(ctx, openaiHistory))
+
+		// Incompatible history - wrong version
+		wrongVersionHistory := &gollem.History{
+			LLType:  "gemini",
+			Version: 999,
+		}
+		gt.Error(t, geminiClient.IsCompatibleHistory(ctx, wrongVersionHistory))
+
+		// Nil history should be compatible
+		gt.NoError(t, geminiClient.IsCompatibleHistory(ctx, nil))
+	})
+
+	t.Run("Cross-provider incompatibility", func(t *testing.T) {
+		openaiHistory := gollem.NewHistoryFromOpenAI([]openaiSDK.ChatCompletionMessage{
+			{Role: openaiSDK.ChatMessageRoleUser, Content: "Hello"},
+		})
+		claudeHistory := gollem.NewHistoryFromClaude(nil)
+		geminiHistory := gollem.NewHistoryFromGemini(nil)
+
+		// OpenAI client should reject Claude and Gemini histories
+		gt.Error(t, openaiClient.IsCompatibleHistory(ctx, claudeHistory))
+		gt.Error(t, openaiClient.IsCompatibleHistory(ctx, geminiHistory))
+
+		// Claude client should reject OpenAI and Gemini histories
+		gt.Error(t, claudeClient.IsCompatibleHistory(ctx, openaiHistory))
+		gt.Error(t, claudeClient.IsCompatibleHistory(ctx, geminiHistory))
+
+		// Gemini client should reject OpenAI and Claude histories
+		gt.Error(t, geminiClient.IsCompatibleHistory(ctx, openaiHistory))
+		gt.Error(t, geminiClient.IsCompatibleHistory(ctx, claudeHistory))
+	})
 }

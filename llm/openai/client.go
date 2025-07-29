@@ -511,6 +511,20 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	return responseChan, nil
 }
 
+// IsCompatibleHistory checks if the given history is compatible with the OpenAI client.
+func (c *Client) IsCompatibleHistory(ctx context.Context, history *gollem.History) error {
+	if history == nil {
+		return nil
+	}
+	if history.LLType != "OpenAI" {
+		return goerr.New("history is not compatible with OpenAI", goerr.V("expected", "OpenAI"), goerr.V("actual", history.LLType))
+	}
+	if history.Version != gollem.HistoryVersion {
+		return goerr.New("history version is not supported", goerr.V("expected", gollem.HistoryVersion), goerr.V("actual", history.Version))
+	}
+	return nil
+}
+
 // CountTokens counts the number of tokens in the history for OpenAI models.
 // This implementation uses a character-based estimation since the official
 // tiktoken library for Go is not available. For production use, consider
