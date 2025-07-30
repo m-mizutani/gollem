@@ -949,7 +949,6 @@ func executeStepWithInput(ctx context.Context, session Session, config *planConf
 
 	// Recursively process with tool results if any
 	if len(newInput) > 0 {
-
 		recursiveResult, err := executeStepWithInput(ctx, session, config, toolMap, todo, newInput, maxRetries-1)
 		if err != nil {
 			return nil, goerr.Wrap(err, "recursive processing failed")
