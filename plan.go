@@ -46,9 +46,8 @@ type planToDo struct {
 	ErrorMsg              string         `json:"todo_error,omitempty"`
 	UpdatedAt             time.Time      `json:"todo_updated_at,omitempty"` // When todo was last updated
 	CreatedAt             time.Time      `json:"todo_created_at,omitempty"` // When todo was created
-	toolCallTracker       map[string]int `json:"-"`                         // Track tool call frequency to prevent loops
-	executionIterations   int            `json:"-"`                         // Number of execution iterations
-	IterationLimitReached bool           `json:"-"`                         // Whether iteration limit was reached
+	executionIterations   int  `json:"-"` // Number of execution iterations
+	IterationLimitReached bool `json:"-"` // Whether iteration limit was reached
 }
 
 // PlanState represents the current state of plan execution (private)
@@ -684,15 +683,6 @@ func safeCallPhaseSystemPromptProvider(ctx context.Context, provider PlanPhaseSy
 	}()
 
 	prompt = provider(ctx, phase, plan)
-
-	// Warn if prompt is excessively long
-	if len(prompt) > 10000 {
-		logger := LoggerFromContext(ctx)
-		logger.Warn("phase system prompt is excessively long",
-			"phase", phase,
-			"length", len(prompt))
-	}
-
 	return prompt
 }
 
@@ -890,14 +880,6 @@ func executeStepWithInput(ctx context.Context, session Session, config *planConf
 		}, nil
 	}
 
-	// Warn when approaching limit
-	if float64(todo.executionIterations) >= float64(config.maxExecutionIterations)*0.8 {
-		logger.Warn("approaching iteration limit for todo",
-			"todo_id", todo.ID,
-			"current", todo.executionIterations,
-			"max", config.maxExecutionIterations)
-	}
-
 	result := &toDoResult{
 		Output:     "",
 		ToolCalls:  []*FunctionCall{},
@@ -905,10 +887,6 @@ func executeStepWithInput(ctx context.Context, session Session, config *planConf
 		Data:       make(map[string]any),
 	}
 
-	// Track tool call frequency to prevent infinite loops
-	if todo.toolCallTracker == nil {
-		todo.toolCallTracker = make(map[string]int)
-	}
 
 	response, err := session.GenerateContent(ctx, inputs...)
 	if err != nil {
@@ -931,7 +909,6 @@ func executeStepWithInput(ctx context.Context, session Session, config *planConf
 		}
 	}
 
-
 	// Add function calls to result
 	result.ToolCalls = append(result.ToolCalls, response.FunctionCalls...)
 
@@ -949,7 +926,6 @@ func executeStepWithInput(ctx context.Context, session Session, config *planConf
 
 		additionalInput = append(additionalInput, Text("IMPORTANT: maximum retries already exceeded, more tool call is not allowed"))
 	}
-
 
 	// Process tool calls
 	newInput, err := handleResponse(ctx, config.gollemConfig, response, toolMap)
@@ -973,7 +949,7 @@ func executeStepWithInput(ctx context.Context, session Session, config *planConf
 
 	// Recursively process with tool results if any
 	if len(newInput) > 0 {
-	
+
 		recursiveResult, err := executeStepWithInput(ctx, session, config, toolMap, todo, newInput, maxRetries-1)
 		if err != nil {
 			return nil, goerr.Wrap(err, "recursive processing failed")

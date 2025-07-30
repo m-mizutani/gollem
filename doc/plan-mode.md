@@ -188,12 +188,12 @@ sequenceDiagram
     
     loop For each ToDo
         Plan->>Hook: ▶️ WithPlanToDoStartHook
-        Plan->>Hook: 💬 WithPlanMessageHook (action)
+        Plan->>Hook: 💬 WithMessageHook (action)
         Plan->>LLM: Execute step
         LLM->>Tool: Call tool
         Tool-->>LLM: Tool result
         LLM-->>Plan: Step result
-        Plan->>Hook: 💬 WithPlanMessageHook (response)
+        Plan->>Hook: 💬 WithMessageHook (response)
         
         alt Task Completed
             Plan->>Hook: ✅ WithPlanToDoCompletedHook
@@ -213,7 +213,7 @@ sequenceDiagram
             Plan->>Hook: 📝 WithPlanToDoUpdatedHook
         end
         
-        Plan->>Hook: 💬 WithPlanMessageHook (thought)
+        Plan->>Hook: 💬 WithMessageHook (thought)
     end
     
     Plan->>LLM: Summarize results
@@ -233,7 +233,7 @@ graph LR
     subgraph "Task Execution"
         B[WithPlanToDoStartHook]
         C[WithPlanToDoCompletedHook]
-        D[WithPlanMessageHook]
+        D[WithMessageHook]
     end
     
     subgraph "Plan Adaptation"
@@ -956,7 +956,7 @@ func executeWithResourceLimits(plan *gollem.Plan, maxDuration time.Duration, max
 | `WithPlanToDoStartHook` | Task execution starts | Progress updates |
 | `WithPlanToDoCompletedHook` | Task execution ends | Error handling |
 | `WithPlanToDoUpdatedHook` | Plan modifications | Track changes |
-| `WithPlanMessageHook` | Execution messages | Detailed logging |
+| `WithMessageHook` | Agent messages (including plan) | Detailed logging |
 | `WithSkipConfirmationHook` | Skip decision made | User confirmation |
 
 ### Plan Methods
