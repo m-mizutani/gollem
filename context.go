@@ -3,21 +3,15 @@ package gollem
 import (
 	"context"
 	"log/slog"
+
+	"github.com/m-mizutani/ctxlog"
 )
 
-type ctxLoggerKey struct{}
-
-var defaultLogger = slog.New(slog.DiscardHandler)
-
-func ctxWithLogger(ctx context.Context, logger *slog.Logger) context.Context {
-	return context.WithValue(ctx, ctxLoggerKey{}, logger)
-}
-
+// LoggerFromContext extracts logger from context.
+// This function is kept for backward compatibility.
+// New code should use ctxlog.From(ctx) directly.
 func LoggerFromContext(ctx context.Context) *slog.Logger {
-	if logger, ok := ctx.Value(ctxLoggerKey{}).(*slog.Logger); ok {
-		return logger
-	}
-	return defaultLogger
+	return ctxlog.From(ctx)
 }
 
 type ctxPlanKey struct{}

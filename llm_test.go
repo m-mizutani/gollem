@@ -744,7 +744,7 @@ func TestIsCompatibleHistory(t *testing.T) {
 		if skipGemini {
 			t.Skip("TEST_GCP_PROJECT_ID is not set")
 		}
-		
+
 		// Compatible history
 		geminiHistory := gollem.NewHistoryFromGemini(nil)
 		gt.NoError(t, geminiClient.IsCompatibleHistory(ctx, geminiHistory))

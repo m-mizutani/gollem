@@ -1,6 +1,6 @@
 module github.com/m-mizutani/gollem
 
-go 1.24.0
+go 1.24.2
 
 toolchain go1.24.3
 
@@ -8,6 +8,7 @@ require (
 	cloud.google.com/go/vertexai v0.13.4
 	github.com/anthropics/anthropic-sdk-go v1.5.0
 	github.com/google/uuid v1.6.0
+	github.com/m-mizutani/ctxlog v0.2.0
 	github.com/m-mizutani/goerr/v2 v2.0.0-beta.2
 	github.com/m-mizutani/gt v0.0.16
 	github.com/sashabaranov/go-openai v1.40.1

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gt"
 	"github.com/sashabaranov/go-openai"
@@ -243,7 +244,7 @@ func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
 		// t.Parallel()
 
 		// Add debug logger to context
-		ctx := gollem.CtxWithLogger(context.Background(), gollem.DebugLogger())
+		ctx := ctxlog.With(context.Background(), gollem.DebugLogger())
 
 		client := newClient(t)
 
