@@ -681,8 +681,19 @@ func TestIsCompatibleHistory(t *testing.T) {
 	claudeClient, err := claude.New(ctx, "test-key")
 	gt.NoError(t, err)
 
-	geminiClient, err := gemini.New(ctx, "test-project", "test-location")
-	gt.NoError(t, err)
+	// Check for GCP credentials for Gemini client
+	var geminiClient gollem.LLMClient
+	var skipGemini bool
+	if projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID"); ok {
+		location := "us-central1"
+		if v, ok := os.LookupEnv("TEST_GCP_LOCATION"); ok {
+			location = v
+		}
+		geminiClient, err = gemini.New(ctx, projectID, location)
+		gt.NoError(t, err)
+	} else {
+		skipGemini = true
+	}
 
 	// Test OpenAI compatibility
 	t.Run("OpenAI history compatibility", func(t *testing.T) {
@@ -730,6 +741,10 @@ func TestIsCompatibleHistory(t *testing.T) {
 	})
 
 	t.Run("Gemini history compatibility", func(t *testing.T) {
+		if skipGemini {
+			t.Skip("TEST_GCP_PROJECT_ID is not set")
+		}
+		
 		// Compatible history
 		geminiHistory := gollem.NewHistoryFromGemini(nil)
 		gt.NoError(t, geminiClient.IsCompatibleHistory(ctx, geminiHistory))
@@ -766,8 +781,10 @@ func TestIsCompatibleHistory(t *testing.T) {
 		gt.Error(t, claudeClient.IsCompatibleHistory(ctx, openaiHistory))
 		gt.Error(t, claudeClient.IsCompatibleHistory(ctx, geminiHistory))
 
-		// Gemini client should reject OpenAI and Claude histories
-		gt.Error(t, geminiClient.IsCompatibleHistory(ctx, openaiHistory))
-		gt.Error(t, geminiClient.IsCompatibleHistory(ctx, claudeHistory))
+		// Gemini client should reject OpenAI and Claude histories (only if Gemini client is available)
+		if !skipGemini {
+			gt.Error(t, geminiClient.IsCompatibleHistory(ctx, openaiHistory))
+			gt.Error(t, geminiClient.IsCompatibleHistory(ctx, claudeHistory))
+		}
 	})
 }
