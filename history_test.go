@@ -280,7 +280,7 @@ func TestHistoryClone(t *testing.T) {
 
 	t.Run("empty history", func(t *testing.T) {
 		history := &gollem.History{
-			LLType:  "openai",
+			LLType:  gollem.LLMTypeOpenAI,
 			Version: 1,
 		}
 		cloned := history.Clone()

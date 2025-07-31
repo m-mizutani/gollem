@@ -698,7 +698,7 @@ func TestIsCompatibleHistory(t *testing.T) {
 
 		// Incompatible history - wrong version
 		wrongVersionHistory := &gollem.History{
-			LLType:  "OpenAI",
+			LLType:  gollem.LLMTypeOpenAI,
 			Version: 999,
 		}
 		gt.Error(t, openaiClient.IsCompatibleHistory(ctx, wrongVersionHistory))
