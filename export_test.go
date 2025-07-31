@@ -8,13 +8,6 @@ import (
 
 var NewDefaultFacilitator = newDefaultFacilitator
 
-// Memory testing exports
-const (
-	LLMTypeOpenAI = llmTypeOpenAI
-	LLMTypeClaude = llmTypeClaude
-	LLMTypeGemini = llmTypeGemini
-)
-
 // Plan internal types and methods for testing
 type (
 	TestPlanToDo       = planToDo

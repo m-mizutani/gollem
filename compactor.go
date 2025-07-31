@@ -174,22 +174,22 @@ func NewHistoryCompactor(summarizerLLM LLMClient, options ...HistoryCompactionOp
 
 	// Latest LLM context window sizes (as of 2024)
 	contextLimits := map[LLMType]int{
-		llmTypeOpenAI: 128000,  // GPT-4 Turbo/GPT-4o
-		llmTypeClaude: 200000,  // Claude 3.5 Sonnet / Claude 4
-		llmTypeGemini: 1000000, // Gemini 2.0 Flash and newer
+		LLMTypeOpenAI: 128000,  // GPT-4 Turbo/GPT-4o
+		LLMTypeClaude: 200000,  // Claude 3.5 Sonnet / Claude 4
+		LLMTypeGemini: 1000000, // Gemini 2.0 Flash and newer
 	}
 
 	// Per-LLM token thresholds based on context window size
 	targetTokens := map[LLMType]int{
-		llmTypeOpenAI: 100000, // ~78% of 128k
-		llmTypeClaude: 150000, // ~75% of 200k
-		llmTypeGemini: 800000, // ~80% of 1M
+		LLMTypeOpenAI: 100000, // ~78% of 128k
+		LLMTypeClaude: 150000, // ~75% of 200k
+		LLMTypeGemini: 800000, // ~80% of 1M
 	}
 
 	emergencyTokens := map[LLMType]int{
-		llmTypeOpenAI: 120000, // ~94% of 128k
-		llmTypeClaude: 190000, // ~95% of 200k
-		llmTypeGemini: 950000, // ~95% of 1M
+		LLMTypeOpenAI: 120000, // ~94% of 128k
+		LLMTypeClaude: 190000, // ~95% of 200k
+		LLMTypeGemini: 950000, // ~95% of 1M
 	}
 
 	return func(ctx context.Context, history *History, llmClient LLMClient) (*History, error) {
@@ -281,7 +281,7 @@ func fallbackEstimateTokens(history *History) int {
 	totalChars := 0
 
 	switch history.LLType {
-	case llmTypeOpenAI:
+	case LLMTypeOpenAI:
 		for _, msg := range history.OpenAI {
 			totalChars += len(msg.Role) + len(msg.Content)
 			// Include tool calls in estimation
@@ -292,7 +292,7 @@ func fallbackEstimateTokens(history *History) int {
 			}
 		}
 
-	case llmTypeClaude:
+	case LLMTypeClaude:
 		for _, msg := range history.Claude {
 			totalChars += len(string(msg.Role))
 			for _, content := range msg.Content {
@@ -302,7 +302,7 @@ func fallbackEstimateTokens(history *History) int {
 			}
 		}
 
-	case llmTypeGemini:
+	case LLMTypeGemini:
 		for _, msg := range history.Gemini {
 			totalChars += len(msg.Role)
 			for _, part := range msg.Parts {
@@ -391,7 +391,7 @@ func extractMessages(ctx context.Context, history *History, preserveRecentTokens
 	// Find the split point based on token count
 	// We'll iterate from the end and accumulate tokens until we reach preserveRecentTokens
 	switch history.LLType {
-	case llmTypeOpenAI:
+	case LLMTypeOpenAI:
 		msgs := history.OpenAI
 		if len(msgs) == 0 {
 			return nil, recentHistory
@@ -403,7 +403,7 @@ func extractMessages(ctx context.Context, history *History, preserveRecentTokens
 
 		for i := len(msgs) - 1; i >= 0; i-- {
 			// Create temporary history with just this message to estimate its tokens
-			tempHistory := &History{LLType: llmTypeOpenAI, OpenAI: []openai.ChatCompletionMessage{msgs[i]}}
+			tempHistory := &History{LLType: LLMTypeOpenAI, OpenAI: []openai.ChatCompletionMessage{msgs[i]}}
 			msgTokens := estimateTokens(ctx, tempHistory, llmClient)
 
 			if accumulatedTokens+msgTokens > preserveRecentTokens && i < len(msgs)-1 {
@@ -424,7 +424,7 @@ func extractMessages(ctx context.Context, history *History, preserveRecentTokens
 		oldHistory.OpenAI = append([]openai.ChatCompletionMessage{}, msgs[:splitIdx]...)
 		recentHistory.OpenAI = append([]openai.ChatCompletionMessage{}, msgs[splitIdx:]...)
 
-	case llmTypeClaude:
+	case LLMTypeClaude:
 		msgs := history.Claude
 		if len(msgs) == 0 {
 			return nil, recentHistory
@@ -436,7 +436,7 @@ func extractMessages(ctx context.Context, history *History, preserveRecentTokens
 
 		for i := len(msgs) - 1; i >= 0; i-- {
 			// Create temporary history with just this message to estimate its tokens
-			tempHistory := &History{LLType: llmTypeClaude, Claude: []claudeMessage{msgs[i]}}
+			tempHistory := &History{LLType: LLMTypeClaude, Claude: []claudeMessage{msgs[i]}}
 			msgTokens := estimateTokens(ctx, tempHistory, llmClient)
 
 			if accumulatedTokens+msgTokens > preserveRecentTokens && i < len(msgs)-1 {
@@ -457,7 +457,7 @@ func extractMessages(ctx context.Context, history *History, preserveRecentTokens
 		oldHistory.Claude = append([]claudeMessage{}, msgs[:splitIdx]...)
 		recentHistory.Claude = append([]claudeMessage{}, msgs[splitIdx:]...)
 
-	case llmTypeGemini:
+	case LLMTypeGemini:
 		msgs := history.Gemini
 		if len(msgs) == 0 {
 			return nil, recentHistory
@@ -469,7 +469,7 @@ func extractMessages(ctx context.Context, history *History, preserveRecentTokens
 
 		for i := len(msgs) - 1; i >= 0; i-- {
 			// Create temporary history with just this message to estimate its tokens
-			tempHistory := &History{LLType: llmTypeGemini, Gemini: []geminiMessage{msgs[i]}}
+			tempHistory := &History{LLType: LLMTypeGemini, Gemini: []geminiMessage{msgs[i]}}
 			msgTokens := estimateTokens(ctx, tempHistory, llmClient)
 
 			if accumulatedTokens+msgTokens > preserveRecentTokens && i < len(msgs)-1 {
@@ -635,11 +635,11 @@ func generateSummary(ctx context.Context, llmClient LLMClient, history *History,
 	// Convert history to template messages
 	var messages []TemplateMessage
 	switch history.LLType {
-	case llmTypeOpenAI:
+	case LLMTypeOpenAI:
 		messages = openAIToTemplateMessages(history.OpenAI)
-	case llmTypeClaude:
+	case LLMTypeClaude:
 		messages = claudeToTemplateMessages(history.Claude)
-	case llmTypeGemini:
+	case LLMTypeGemini:
 		messages = geminiToTemplateMessages(history.Gemini)
 	}
 
@@ -697,7 +697,7 @@ func buildCompactedHistory(original *History, summary string, recentHistory *His
 	}
 
 	switch original.LLType {
-	case llmTypeOpenAI:
+	case LLMTypeOpenAI:
 		// Add summary as a system message
 		msgs := []openai.ChatCompletionMessage{
 			{
@@ -717,7 +717,7 @@ func buildCompactedHistory(original *History, summary string, recentHistory *His
 		msgs = append(msgs, recentHistory.OpenAI...)
 		compacted.OpenAI = msgs
 
-	case llmTypeClaude:
+	case LLMTypeClaude:
 		// Add summary as a user message to provide context
 		summaryText := "--- Previous Conversation Summary ---\n" + summary + "\n--- End of Summary ---"
 		summaryMsg := claudeMessage{
@@ -733,7 +733,7 @@ func buildCompactedHistory(original *History, summary string, recentHistory *His
 		// Add summary message followed by recent messages
 		compacted.Claude = append([]claudeMessage{summaryMsg}, recentHistory.Claude...)
 
-	case llmTypeGemini:
+	case LLMTypeGemini:
 		// Add summary as a user message to provide context
 		summaryMsg := geminiMessage{
 			Role: "user",

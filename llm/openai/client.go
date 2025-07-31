@@ -516,8 +516,8 @@ func (c *Client) IsCompatibleHistory(ctx context.Context, history *gollem.Histor
 	if history == nil {
 		return nil
 	}
-	if history.LLType != "OpenAI" {
-		return goerr.New("history is not compatible with OpenAI", goerr.V("expected", "OpenAI"), goerr.V("actual", history.LLType))
+	if history.LLType != gollem.LLMTypeOpenAI {
+		return goerr.New("history is not compatible with OpenAI", goerr.V("expected", gollem.LLMTypeOpenAI), goerr.V("actual", history.LLType))
 	}
 	if history.Version != gollem.HistoryVersion {
 		return goerr.New("history version is not supported", goerr.V("expected", gollem.HistoryVersion), goerr.V("actual", history.Version))

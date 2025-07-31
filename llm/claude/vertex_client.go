@@ -233,8 +233,8 @@ func (c *VertexClient) IsCompatibleHistory(ctx context.Context, history *gollem.
 	if history == nil {
 		return nil
 	}
-	if history.LLType != "claude" {
-		return goerr.New("history is not compatible with Claude", goerr.V("expected", "claude"), goerr.V("actual", history.LLType))
+	if history.LLType != gollem.LLMTypeClaude {
+		return goerr.New("history is not compatible with Claude", goerr.V("expected", gollem.LLMTypeClaude), goerr.V("actual", history.LLType))
 	}
 	if history.Version != gollem.HistoryVersion {
 		return goerr.New("history version is not supported", goerr.V("expected", gollem.HistoryVersion), goerr.V("actual", history.Version))
@@ -251,7 +251,7 @@ func (c *VertexClient) CountTokens(ctx context.Context, history *gollem.History)
 	// Fallback: estimate based on character count
 	totalChars := 0
 
-	if history.LLType != "claude" {
+	if history.LLType != gollem.LLMTypeClaude {
 		return 0, nil
 	}
 
