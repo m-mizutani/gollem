@@ -228,6 +228,20 @@ func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...go
 	)
 }
 
+// IsCompatibleHistory checks if the given history is compatible with the Vertex AI Claude client.
+func (c *VertexClient) IsCompatibleHistory(ctx context.Context, history *gollem.History) error {
+	if history == nil {
+		return nil
+	}
+	if history.LLType != gollem.LLMTypeClaude {
+		return goerr.New("history is not compatible with Claude", goerr.V("expected", gollem.LLMTypeClaude), goerr.V("actual", history.LLType))
+	}
+	if history.Version != gollem.HistoryVersion {
+		return goerr.New("history version is not supported", goerr.V("expected", gollem.HistoryVersion), goerr.V("actual", history.Version))
+	}
+	return nil
+}
+
 // CountTokens estimates the number of tokens in the given history for Claude Vertex models.
 func (c *VertexClient) CountTokens(ctx context.Context, history *gollem.History) (int, error) {
 	if history == nil {
@@ -237,7 +251,7 @@ func (c *VertexClient) CountTokens(ctx context.Context, history *gollem.History)
 	// Fallback: estimate based on character count
 	totalChars := 0
 
-	if history.LLType != "claude" {
+	if history.LLType != gollem.LLMTypeClaude {
 		return 0, nil
 	}
 

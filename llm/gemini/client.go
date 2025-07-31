@@ -469,6 +469,20 @@ func (c *Client) GenerateEmbedding(ctx context.Context, dimension int, input []s
 	return embeddings, nil
 }
 
+// IsCompatibleHistory checks if the given history is compatible with the Gemini client.
+func (c *Client) IsCompatibleHistory(ctx context.Context, history *gollem.History) error {
+	if history == nil {
+		return nil
+	}
+	if history.LLType != gollem.LLMTypeGemini {
+		return goerr.New("history is not compatible with Gemini", goerr.V("expected", gollem.LLMTypeGemini), goerr.V("actual", history.LLType))
+	}
+	if history.Version != gollem.HistoryVersion {
+		return goerr.New("history version is not supported", goerr.V("expected", gollem.HistoryVersion), goerr.V("actual", history.Version))
+	}
+	return nil
+}
+
 // CountTokens counts the number of tokens in the given history.
 func (c *Client) CountTokens(ctx context.Context, history *gollem.History) (int, error) {
 	if history == nil {

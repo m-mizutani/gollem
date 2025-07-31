@@ -18,9 +18,9 @@ import (
 type LLMType string
 
 const (
-	llmTypeOpenAI LLMType = "OpenAI"
-	llmTypeGemini LLMType = "gemini"
-	llmTypeClaude LLMType = "claude"
+	LLMTypeOpenAI LLMType = "OpenAI"
+	LLMTypeGemini LLMType = "gemini"
+	LLMTypeClaude LLMType = "claude"
 )
 
 const (
@@ -81,8 +81,8 @@ func (x *History) ToGemini() ([]*genai.Content, error) {
 	if x.Version != HistoryVersion {
 		return nil, goerr.Wrap(ErrHistoryVersionMismatch, "history version is not supported", goerr.V("expected", HistoryVersion), goerr.V("actual", x.Version))
 	}
-	if x.LLType != llmTypeGemini {
-		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not gemini", goerr.V("expected", llmTypeGemini), goerr.V("actual", x.LLType))
+	if x.LLType != LLMTypeGemini {
+		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not gemini", goerr.V("expected", LLMTypeGemini), goerr.V("actual", x.LLType))
 	}
 	return toGeminiMessages(x.Gemini)
 }
@@ -91,8 +91,8 @@ func (x *History) ToClaude() ([]anthropic.MessageParam, error) {
 	if x.Version != HistoryVersion {
 		return nil, goerr.Wrap(ErrHistoryVersionMismatch, "history version is not supported", goerr.V("expected", HistoryVersion), goerr.V("actual", x.Version))
 	}
-	if x.LLType != llmTypeClaude {
-		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not claude", goerr.V("expected", llmTypeClaude), goerr.V("actual", x.LLType))
+	if x.LLType != LLMTypeClaude {
+		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not claude", goerr.V("expected", LLMTypeClaude), goerr.V("actual", x.LLType))
 	}
 	return toClaudeMessages(x.Claude)
 }
@@ -101,8 +101,8 @@ func (x *History) ToOpenAI() ([]openai.ChatCompletionMessage, error) {
 	if x.Version != HistoryVersion {
 		return nil, goerr.Wrap(ErrHistoryVersionMismatch, "history version is not supported", goerr.V("expected", HistoryVersion), goerr.V("actual", x.Version))
 	}
-	if x.LLType != llmTypeOpenAI {
-		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not OpenAI", goerr.V("expected", llmTypeOpenAI), goerr.V("actual", x.LLType))
+	if x.LLType != LLMTypeOpenAI {
+		return nil, goerr.Wrap(ErrLLMTypeMismatch, "history is not OpenAI", goerr.V("expected", LLMTypeOpenAI), goerr.V("actual", x.LLType))
 	}
 	return x.OpenAI, nil
 }
@@ -157,7 +157,7 @@ type geminiPart struct {
 
 func NewHistoryFromOpenAI(messages []openai.ChatCompletionMessage) *History {
 	return &History{
-		LLType:  llmTypeOpenAI,
+		LLType:  LLMTypeOpenAI,
 		Version: HistoryVersion,
 		OpenAI:  messages,
 	}
@@ -216,7 +216,7 @@ func NewHistoryFromClaude(messages []anthropic.MessageParam) *History {
 	}
 
 	return &History{
-		LLType:  llmTypeClaude,
+		LLType:  LLMTypeClaude,
 		Version: HistoryVersion,
 		Claude:  claudeMessages,
 	}
@@ -327,7 +327,7 @@ func NewHistoryFromGemini(messages []*genai.Content) *History {
 		}
 	}
 	return &History{
-		LLType:  llmTypeGemini,
+		LLType:  LLMTypeGemini,
 		Version: HistoryVersion,
 		Gemini:  converted,
 	}

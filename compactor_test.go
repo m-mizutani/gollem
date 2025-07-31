@@ -206,6 +206,10 @@ func (m *mockLLMClient) GenerateEmbedding(ctx context.Context, dimension int, in
 	return nil, nil
 }
 
+func (m *mockLLMClient) IsCompatibleHistory(ctx context.Context, history *gollem.History) error {
+	return nil
+}
+
 func (m *mockLLMClient) CountTokens(ctx context.Context, history *gollem.History) (int, error) {
 	if history == nil {
 		return 0, nil
