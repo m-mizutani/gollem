@@ -720,7 +720,7 @@ func TestIsCompatibleHistory(t *testing.T) {
 
 		// Incompatible history - wrong version
 		wrongVersionHistory := &gollem.History{
-			LLType:  "claude",
+			LLType:  gollem.LLMTypeClaude,
 			Version: 999,
 		}
 		gt.Error(t, claudeClient.IsCompatibleHistory(ctx, wrongVersionHistory))
@@ -742,7 +742,7 @@ func TestIsCompatibleHistory(t *testing.T) {
 
 		// Incompatible history - wrong version
 		wrongVersionHistory := &gollem.History{
-			LLType:  "gemini",
+			LLType:  gollem.LLMTypeGemini,
 			Version: 999,
 		}
 		gt.Error(t, geminiClient.IsCompatibleHistory(ctx, wrongVersionHistory))
