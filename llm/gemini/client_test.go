@@ -2,11 +2,14 @@ package gemini_test
 
 import (
 	"context"
+	"log/slog"
 	"math"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/gemini"
 	"github.com/m-mizutani/gt"
@@ -322,4 +325,38 @@ func (t *problematicFieldClientTool) Spec() gollem.ToolSpec {
 
 func (t *problematicFieldClientTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
 	return map[string]any{"result": "processed"}, nil
+}
+
+func TestGeminiContentGenerate(t *testing.T) {
+	var testProjectID, testLocation string
+	v, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+	if !ok {
+		t.Skip("TEST_GCP_PROJECT_ID is not set")
+	} else {
+		testProjectID = v
+	}
+
+	v, ok = os.LookupEnv("TEST_GCP_LOCATION")
+	if !ok {
+		t.Skip("TEST_GCP_LOCATION is not set")
+	} else {
+		testLocation = v
+	}
+
+	// Configure ctxlog to output logs during testing
+	ctx := context.Background()
+	// Create a debug logger that outputs to testing.T
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx = ctxlog.With(ctx, logger)
+
+	client, err := gemini.New(ctx, testProjectID, testLocation)
+	gt.NoError(t, err)
+
+	session, err := client.NewSession(ctx)
+	gt.NoError(t, err)
+
+	result, err := session.GenerateContent(ctx, gollem.Text("Say hello in one word"))
+	gt.NoError(t, err)
+	gt.Array(t, result.Texts).Length(1).Required()
+	gt.Value(t, len(result.Texts[0])).NotEqual(0)
 }

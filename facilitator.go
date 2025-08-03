@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 )
 
@@ -147,7 +148,7 @@ func (x *defaultFacilitator) IsCompleted() bool {
 
 // UpdateStatus for Facilitator interface
 func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (*Facilitation, error) {
-	LoggerFromContext(ctx).Debug("run Facilitate",
+	ctxlog.From(ctx).Debug("run Facilitate",
 		"isComplete", x.isCompleted,
 		"history", history,
 	)
@@ -174,12 +175,12 @@ func (x *defaultFacilitator) Facilitate(ctx context.Context, history *History) (
 	for i := 0; i < x.retryLimit; i++ {
 		resp, err := x.updateStatusWithContext(ctx, ssn)
 		if err == nil {
-			LoggerFromContext(ctx).Debug("facilitated", "facilitation", resp)
+			ctxlog.From(ctx).Debug("facilitated", "facilitation", resp)
 			return resp, nil
 		}
 
 		lastErr = err
-		LoggerFromContext(ctx).Error("failed to update status", "error", err, "attempt", i+1)
+		ctxlog.From(ctx).Error("failed to update status", "error", err, "attempt", i+1)
 	}
 
 	return nil, goerr.Wrap(lastErr, "failed to facilitate after retries")
@@ -208,7 +209,7 @@ Respond with valid JSON only.`))
 
 	// Add detailed error information for debugging
 	responseText := output.Texts[0]
-	LoggerFromContext(ctx).Debug("facilitation response", "response_text", responseText)
+	ctxlog.From(ctx).Debug("facilitation response", "response_text", responseText)
 
 	var resp Facilitation
 	if err := json.Unmarshal([]byte(responseText), &resp); err != nil {
@@ -217,7 +218,7 @@ Respond with valid JSON only.`))
 			goerr.V("response_length", len(responseText)))
 	}
 
-	LoggerFromContext(ctx).Debug("parsed facilitation", "facilitation", resp)
+	ctxlog.From(ctx).Debug("parsed facilitation", "facilitation", resp)
 
 	if err := resp.Validate(); err != nil {
 		return nil, goerr.Wrap(err, "invalid response",

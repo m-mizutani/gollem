@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"sync"
 
+	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -47,7 +48,7 @@ type Client struct {
 
 // Specs implements gollem.ToolSet interface
 func (c *Client) Specs(ctx context.Context) ([]gollem.ToolSpec, error) {
-	logger := gollem.LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 
 	tools, err := c.listTools(ctx)
 	if err != nil {
@@ -78,7 +79,7 @@ func (c *Client) Specs(ctx context.Context) ([]gollem.ToolSpec, error) {
 
 // Run implements gollem.ToolSet interface
 func (c *Client) Run(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
-	logger := gollem.LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 
 	logger.Debug("call MCP tool", "name", name, "args", args)
 
@@ -231,7 +232,7 @@ func (c *Client) init(ctx context.Context, cmd *exec.Cmd) error {
 	c.initMutex.Lock()
 	defer c.initMutex.Unlock()
 
-	logger := gollem.LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 
 	if c.session != nil {
 		return nil
@@ -260,7 +261,7 @@ func (c *Client) initStreamableHTTP(ctx context.Context) error {
 	c.initMutex.Lock()
 	defer c.initMutex.Unlock()
 
-	logger := gollem.LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 
 	if c.session != nil {
 		return nil
@@ -294,7 +295,7 @@ func (c *Client) initSSE(ctx context.Context) error {
 	c.initMutex.Lock()
 	defer c.initMutex.Unlock()
 
-	logger := gollem.LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 
 	if c.session != nil {
 		return nil

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/warren/pkg/utils/clock"
 )
@@ -37,17 +38,17 @@ type Plan struct {
 
 // planToDo represents a single task in the plan (private to avoid API confusion)
 type planToDo struct {
-	ID                    string         `json:"todo_id"`
-	Description           string         `json:"todo_description"`
-	Intent                string         `json:"todo_intent"` // High-level intention
-	Status                ToDoStatus     `json:"todo_status"`
-	Result                *toDoResult    `json:"todo_result,omitempty"`
-	Error                 error          `json:"-"` // Not serialized
-	ErrorMsg              string         `json:"todo_error,omitempty"`
-	UpdatedAt             time.Time      `json:"todo_updated_at,omitempty"` // When todo was last updated
-	CreatedAt             time.Time      `json:"todo_created_at,omitempty"` // When todo was created
-	executionIterations   int  `json:"-"` // Number of execution iterations
-	IterationLimitReached bool `json:"-"` // Whether iteration limit was reached
+	ID                    string      `json:"todo_id"`
+	Description           string      `json:"todo_description"`
+	Intent                string      `json:"todo_intent"` // High-level intention
+	Status                ToDoStatus  `json:"todo_status"`
+	Result                *toDoResult `json:"todo_result,omitempty"`
+	Error                 error       `json:"-"` // Not serialized
+	ErrorMsg              string      `json:"todo_error,omitempty"`
+	UpdatedAt             time.Time   `json:"todo_updated_at,omitempty"` // When todo was last updated
+	CreatedAt             time.Time   `json:"todo_created_at,omitempty"` // When todo was created
+	executionIterations   int         `json:"-"`                         // Number of execution iterations
+	IterationLimitReached bool        `json:"-"`                         // Whether iteration limit was reached
 }
 
 // PlanState represents the current state of plan execution (private)
@@ -349,7 +350,7 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 	// UUID import required ("github.com/google/uuid")
 	planID := uuid.New().String()
 	logger := cfg.logger.With("gollem.plan_id", planID)
-	ctx = ctxWithLogger(ctx, logger) // Use existing context.go function
+	ctx = ctxlog.With(ctx, logger) // Use existing context.go function
 
 	// Tool setup (use existing setupTools function)
 	// Facilitator is not supported in plan mode
@@ -421,7 +422,7 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 func (p *Plan) Execute(ctx context.Context) (string, error) {
 	// Embed logger into context for internal methods to use
 	logger := p.logger
-	ctx = ctxWithLogger(ctx, logger) // Add logger to context
+	ctx = ctxlog.With(ctx, logger) // Add logger to context
 	ctx = ctxWithPlan(ctx, p)
 
 	logger.Debug("plan execute started", "state", p.state)
@@ -460,7 +461,7 @@ func (p *Plan) validateAndPrepareExecution() error {
 
 // executeSteps executes all pending steps in the plan
 func (p *Plan) executeSteps(ctx context.Context) (string, error) {
-	logger := LoggerFromContext(ctx) // Use existing context.go function
+	logger := ctxlog.From(ctx) // Use existing context.go function
 	logger.Debug("executeSteps started", "pending_todos_count", len(p.getPendingToDos()))
 
 	stepCount := 0
@@ -525,7 +526,7 @@ func (p *Plan) executeSteps(ctx context.Context) (string, error) {
 
 // processSingleStep processes a single step including hooks, execution, and reflection
 func (p *Plan) processSingleStep(ctx context.Context, currentStep *planToDo) (string, bool, error) {
-	logger := LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 	logger.Debug("starting step processing", "step_id", currentStep.ID, "step_intent", currentStep.Intent)
 
 	// Call step start hooks
@@ -674,7 +675,7 @@ func (p *Plan) handleStepError(step *planToDo, err error) error {
 func safeCallPhaseSystemPromptProvider(ctx context.Context, provider PlanPhaseSystemPromptProvider, phase PlanPhaseType, plan *Plan) (prompt string) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger := LoggerFromContext(ctx)
+			logger := ctxlog.From(ctx)
 			logger.Error("panic in PlanPhaseSystemPromptProvider",
 				"phase", phase,
 				"panic", r)
@@ -722,7 +723,7 @@ func (g *Agent) createPlanConfig(options ...PlanOption) *planConfig {
 
 // createPlanWithRuntime creates a plan with all runtime fields initialized
 func (g *Agent) createPlanWithRuntime(ctx context.Context, id, input, clarifiedGoal, simplifiedSystemPrompt string, todos []planToDo, state PlanState, toolMap map[string]Tool, toolList []Tool, cfg *planConfig) (*Plan, error) {
-	logger := LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 
 	// Create independent session for this plan (not connected to Agent session)
 	sessionOptions := []SessionOption{}
@@ -861,7 +862,7 @@ func (g *Agent) generatePlan(ctx context.Context, session Session, prompt string
 
 // executeStepWithInput handles recursive tool processing with maximum retry control and iteration limits
 func executeStepWithInput(ctx context.Context, session Session, config *planConfig, toolMap map[string]Tool, todo *planToDo, inputs []Input, maxRetries int) (*toDoResult, error) {
-	logger := LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 
 	// Check iteration limit
 	todo.executionIterations++
@@ -886,7 +887,6 @@ func executeStepWithInput(ctx context.Context, session Session, config *planConf
 		ExecutedAt: clock.Now(ctx),
 		Data:       make(map[string]any),
 	}
-
 
 	response, err := session.GenerateContent(ctx, inputs...)
 	if err != nil {
@@ -971,7 +971,7 @@ func executeStepWithInput(ctx context.Context, session Session, config *planConf
 
 // executeStep executes a single plan step
 func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, error) {
-	logger := LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 
 	todo.Status = ToDoStatusExecuting
 	todo.executionIterations = 0 // Reset iteration count for this todo
@@ -1008,7 +1008,7 @@ func (p *Plan) executeStep(ctx context.Context, todo *planToDo) (*toDoResult, er
 
 // reflect analyzes execution results and determines next actions
 func (p *Plan) reflect(ctx context.Context) (*planReflection, error) {
-	logger := LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 	logger.Debug("starting reflection")
 
 	// Create reflection session
@@ -1166,7 +1166,7 @@ func (g *Agent) clarifyUserGoal(ctx context.Context, userInput string, cfg *plan
 
 // generateExecutionSummary creates a comprehensive summary of plan execution results
 func (p *Plan) generateExecutionSummary(ctx context.Context) (string, error) {
-	logger := LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 	logger.Debug("generating execution summary")
 
 	// Create summarizer session
@@ -1768,7 +1768,7 @@ func (g *Agent) NewPlanFromData(ctx context.Context, data []byte, options ...Pla
 
 	// Create plan with runtime fields using shared logic
 	logger := cfg.logger.With("gollem.plan_id", planData.ID)
-	ctx = ctxWithLogger(ctx, logger)
+	ctx = ctxlog.With(ctx, logger)
 
 	plan, err := g.createPlanWithRuntime(ctx, planData.ID, planData.Input, planData.ClarifiedGoal, planData.SimplifiedSystemPrompt, planData.ToDos, planData.State, toolMap, toolList, cfg)
 	if err != nil {
@@ -1930,7 +1930,7 @@ func toDoStatusToEmoji(status ToDoStatus) string {
 
 // logging logs the current status of all todos in a single log entry for plan consumption tracking
 func (p *Plan) logging(ctx context.Context) {
-	logger := LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 
 	// Skip logging if logger is not available in context
 	if logger == nil {
@@ -2137,7 +2137,7 @@ func WithPlanCompactionHook(callback func(ctx context.Context, original, compact
 // Example:
 //
 //	WithPlanPhaseSystemPrompt(func(ctx context.Context, phase PlanPhaseType, plan *Plan) string {
-//	    logger := LoggerFromContext(ctx)
+//	    logger := ctxlog.From(ctx)
 //
 //	    switch phase {
 //	    case PhasePlanning:
@@ -2206,7 +2206,7 @@ func (p *Plan) performPlanCompaction(ctx context.Context, step int) error {
 	}
 
 	history := p.mainSession.History()
-	logger := LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 
 	// Use unified compaction logic that handles both normal and emergency cases
 	compactedHistory, err := p.config.historyCompactor(ctx, history, p.agent.llm)
@@ -2232,7 +2232,7 @@ func (p *Plan) replaceSessionWithCompactedHistory(ctx context.Context, compacted
 		return goerr.New("no plan session to replace")
 	}
 
-	logger := LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 	originalHistory := p.mainSession.History()
 
 	// Call compaction hook

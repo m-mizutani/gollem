@@ -22,8 +22,6 @@ const (
 	TestPlanToDoChangeTypeRemoved = PlanToDoChangeTypeRemoved
 )
 
-var CtxWithLogger = ctxWithLogger
-
 // Plan internal field accessors for testing
 func (p *Plan) TestGetTodos() []planToDo {
 	return p.todos

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/sashabaranov/go-openai"
 )
@@ -373,7 +374,7 @@ func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool
 		toolList = append(toolList, tool)
 		toolNames = append(toolNames, tool.Spec().Name)
 	}
-	logger := LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 	logger.Debug("gollem tool list", "names", toolNames)
 
 	return toolMap, toolList, nil
@@ -389,7 +390,7 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 	}
 
 	logger := cfg.logger.With("gollem.request_id", uuid.New().String())
-	ctx = ctxWithLogger(ctx, logger)
+	ctx = ctxlog.With(ctx, logger)
 	logger.Info("starting gollem execution",
 		"prompt", prompt,
 		"has_existing_session", g.currentSession != nil,
@@ -505,7 +506,7 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 }
 
 func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, toolMap map[string]Tool) ([]Input, error) {
-	logger := LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 
 	newInput := make([]Input, 0)
 
@@ -643,7 +644,7 @@ func (g *Agent) performLoopCompaction(ctx context.Context, cfg *gollemConfig, lo
 	}
 
 	history := g.currentSession.History()
-	logger := LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 
 	// Use unified compaction logic that handles both normal and emergency cases
 	compactedHistory, err := cfg.historyCompactor(ctx, history, g.llm)
@@ -669,7 +670,7 @@ func (g *Agent) replaceSessionWithCompactedHistory(ctx context.Context, cfg *gol
 		return goerr.New("no current session to replace")
 	}
 
-	logger := LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 	originalHistory := g.currentSession.History()
 
 	// Call compaction hook
@@ -702,7 +703,7 @@ func (g *Agent) replaceSessionWithCompactedHistory(ctx context.Context, cfg *gol
 
 // generateContentWithRetry handles token limit errors by compacting history and retrying once
 func (g *Agent) generateContentWithRetry(ctx context.Context, cfg *gollemConfig, input []Input, toolList []Tool) (*Response, error) {
-	logger := LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 
 	// First attempt
 	output, err := g.currentSession.GenerateContent(ctx, input...)

@@ -12,6 +12,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
+	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 )
@@ -24,6 +25,9 @@ var (
 	// codeBlockRegex is a compiled regular expression for extracting JSON from markdown code blocks
 	// This is compiled once at package initialization for performance
 	codeBlockRegex = regexp.MustCompile(`(?s)` + "```" + `(?:json)?\n?(.*?)\n?` + "```" + ``)
+
+	// claudePromptScope is the logging scope for Claude prompts
+	claudePromptScope = ctxlog.NewScope("claude_prompt", ctxlog.EnabledBy("GOLLEM_LOGGING_CLAUDE_PROMPT"))
 )
 
 // generationParameters represents the parameters for text generation.
@@ -229,10 +233,28 @@ func (s *Session) convertInputs(ctx context.Context, input ...gollem.Input) ([]a
 	return convertGollemInputsToClaude(ctx, input...)
 }
 
+// contentBlockToString converts a ContentBlockParamUnion to a string representation for logging
+func contentBlockToString(content anthropic.ContentBlockParamUnion) string {
+	if content.OfText != nil {
+		return fmt.Sprintf("text: %s", content.OfText.Text)
+	} else if content.OfImage != nil {
+		mediaType := ""
+		if content.OfImage.Source.OfBase64 != nil {
+			mediaType = string(content.OfImage.Source.OfBase64.MediaType)
+		}
+		return fmt.Sprintf("image: %s", mediaType)
+	} else if content.OfToolUse != nil {
+		return fmt.Sprintf("tool_use: %s (input: %v)", content.OfToolUse.Name, content.OfToolUse.Input)
+	} else if content.OfToolResult != nil {
+		return fmt.Sprintf("tool_result: %s", content.OfToolResult.ToolUseID)
+	}
+	return "unknown"
+}
+
 // convertGollemInputsToClaude is a shared helper function that converts gollem.Input to Claude messages and tool results
 // This function is used by both the standard Claude client and the Vertex AI Claude client to avoid code duplication.
 func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
-	logger := gollem.LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 	var toolResults []anthropic.ContentBlockParamUnion
 	var messages []anthropic.MessageParam
 
@@ -329,7 +351,7 @@ func generateClaudeContent(
 	cfg gollem.SessionConfig,
 	apiName string,
 ) (*anthropic.Message, error) {
-	logger := gollem.LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 
 	// Prepare message parameters
 	msgParams := anthropic.MessageNewParams{
@@ -353,6 +375,25 @@ func generateClaudeContent(
 		"model", model,
 		"message_count", len(messages),
 		"tools_count", len(tools))
+
+	// Log prompts if GOLLEM_LOGGING_CLAUDE_PROMPT is set
+	promptLogger := ctxlog.From(ctx, claudePromptScope)
+	// Build messages for logging
+	var logMessages []map[string]any
+	for _, msg := range messages {
+		var contents []string
+		for _, content := range msg.Content {
+			contents = append(contents, contentBlockToString(content))
+		}
+		logMessages = append(logMessages, map[string]any{
+			"role":     msg.Role,
+			"contents": contents,
+		})
+	}
+	promptLogger.Info("Claude prompt",
+		"system_prompt", cfg.SystemPrompt(),
+		"messages", logMessages,
+	)
 
 	resp, err := client.Messages.New(ctx, msgParams)
 	if err != nil {
@@ -635,7 +676,7 @@ func processResponseWithContentType(resp *anthropic.Message, contentType gollem.
 // GenerateContent processes the input and generates a response.
 // It handles both text messages and function responses.
 func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-	logger := gollem.LoggerFromContext(ctx)
+	logger := ctxlog.From(ctx)
 	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
