@@ -454,7 +454,7 @@ func runWithEachProvider(t *testing.T, testFunc func(t *testing.T, client gollem
 		name   string
 		client gollem.LLMClient
 	}{}
-	
+
 	for _, provider := range providers {
 		client, available := provider.setup()
 		if available {

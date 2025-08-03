@@ -441,7 +441,7 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 
 // handleDirectResponse handles the direct_response approach where no planning is needed
 func (g *Agent) handleDirectResponse(ctx context.Context, planID, prompt string, clarification *ClarificationResponse, toolMap map[string]Tool, cfg *planConfig, logger *slog.Logger) (*Plan, error) {
-	// Direct response approach: 
+	// Direct response approach:
 	// - No tools are used or available
 	// - Response is generated immediately without planning
 	// - Plan is marked as completed with the response
