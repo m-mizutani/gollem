@@ -79,4 +79,14 @@ type goalClarifierTemplateData struct {
 	UserInput    string
 	SystemPrompt string
 	Language     string
+	ToolInfo     string
+	OldPlan      *goalClarifierOldPlanInfo
+}
+
+type goalClarifierOldPlanInfo struct {
+	Goal           string
+	Progress       string
+	CompletedCount int
+	TotalCount     int
+	Status         string
 }
