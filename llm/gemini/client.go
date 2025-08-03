@@ -8,6 +8,7 @@ import (
 	"time"
 
 	oldgenai "cloud.google.com/go/vertexai/genai"
+	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"google.golang.org/api/option"
@@ -17,6 +18,11 @@ import (
 const (
 	DefaultModel          = "gemini-2.0-flash"
 	DefaultEmbeddingModel = "text-embedding-004"
+)
+
+var (
+	// geminiPromptScope is the logging scope for Gemini prompts
+	geminiPromptScope = ctxlog.NewScope("gemini_prompt", ctxlog.EnabledBy("GOLLEM_LOGGING_GEMINI_PROMPT"))
 )
 
 // Client is a client for the Gemini API.
@@ -261,6 +267,7 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		client: c,
 		chat:   chat,
 		config: config,
+		cfg:    &cfg,
 	}
 
 	return session, nil
@@ -272,6 +279,7 @@ type Session struct {
 	client *Client
 	chat   *genai.Chat
 	config *genai.GenerateContentConfig
+	cfg    *gollem.SessionConfig
 }
 
 func (s *Session) History() *gollem.History {
@@ -369,6 +377,34 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	if err != nil {
 		return nil, err
 	}
+
+	// Log prompt if enabled
+	promptLogger := ctxlog.From(ctx, geminiPromptScope)
+	// Build messages for logging
+	var messages []map[string]any
+	for _, part := range parts {
+		if part.Text != "" {
+			messages = append(messages, map[string]any{
+				"type":    "text",
+				"content": part.Text,
+			})
+		}
+		if part.FunctionResponse != nil {
+			messages = append(messages, map[string]any{
+				"type":     "function_response",
+				"name":     part.FunctionResponse.Name,
+				"response": part.FunctionResponse.Response,
+			})
+		}
+	}
+	systemPrompt := ""
+	if cfg := s.cfg; cfg != nil {
+		systemPrompt = cfg.SystemPrompt()
+	}
+	promptLogger.Info("Gemini prompt",
+		"system_prompt", systemPrompt,
+		"messages", messages,
+	)
 
 	// Convert parts slice to individual arguments
 	partsArgs := make([]genai.Part, len(parts))

@@ -6,9 +6,15 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/sashabaranov/go-openai"
+)
+
+var (
+	// openaiPromptScope is the logging scope for OpenAI prompts
+	openaiPromptScope = ctxlog.NewScope("openai_prompt", ctxlog.EnabledBy("GOLLEM_LOGGING_OPENAI_PROMPT"))
 )
 
 // generationParameters represents the parameters for text generation.
@@ -299,6 +305,21 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	}
 
 	req := s.createRequest(false)
+
+	// Log prompts if GOLLEM_LOGGING_OPENAI_PROMPT is set
+	logger := ctxlog.From(ctx, openaiPromptScope)
+	// Build messages for logging
+	var messages []map[string]string
+	for _, msg := range s.messages {
+		messages = append(messages, map[string]string{
+			"role":    msg.Role,
+			"content": msg.Content,
+		})
+	}
+	logger.Info("OpenAI prompt", 
+		"system_prompt", s.cfg.SystemPrompt(),
+		"messages", messages,
+	)
 	resp, err := s.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create chat completion")
@@ -359,6 +380,21 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	}
 
 	req := s.createRequest(true)
+
+	// Log prompts if GOLLEM_LOGGING_OPENAI_PROMPT is set
+	logger := ctxlog.From(ctx, openaiPromptScope)
+	// Build messages for logging
+	var messages []map[string]string
+	for _, msg := range s.messages {
+		messages = append(messages, map[string]string{
+			"role":    msg.Role,
+			"content": msg.Content,
+		})
+	}
+	logger.Info("OpenAI prompt", 
+		"system_prompt", s.cfg.SystemPrompt(),
+		"messages", messages,
+	)
 	// Enable stream options to get usage data
 	req.StreamOptions = &openai.StreamOptions{
 		IncludeUsage: true,

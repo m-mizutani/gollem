@@ -788,6 +788,18 @@ gcloud auth application-default login
 - **Vertex AI MLOps** integration for monitoring and management
 - **Consistent API** - same gollem interface across all providers
 
+## Debugging
+
+### Logging LLM Prompts
+
+You can enable prompt logging for debugging purposes by setting environment variables:
+
+- `GOLLEM_LOGGING_CLAUDE_PROMPT=true` - Log all prompts sent to Claude
+- `GOLLEM_LOGGING_OPENAI_PROMPT=true` - Log all prompts sent to OpenAI
+- `GOLLEM_LOGGING_GEMINI_PROMPT=true` - Log all prompts sent to Gemini
+
+These will output the raw prompts to the standard logger before sending them to the LLM provider, which is useful for debugging conversation flow and tool usage.
+
 ## License
 
 Apache 2.0 License. See [LICENSE](LICENSE) for details.
