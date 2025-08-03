@@ -572,8 +572,11 @@ func TestSkipDecisionValidation(t *testing.T) {
 func TestPlanExecutionModeOptions(t *testing.T) {
 	mockClient := &mockLLMClient{
 		responses: []string{
+			`{"clarified_goal": "Test plan goal to verify execution mode options work correctly with multiple steps", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
 			`{"steps": [{"description": "Test step", "intent": "Test intent"}]}`,
+			`{"clarified_goal": "Test plan goal to verify execution mode options work correctly with multiple steps", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
 			`{"steps": [{"description": "Test step", "intent": "Test intent"}]}`,
+			`{"clarified_goal": "Test plan goal to verify execution mode options work correctly with multiple steps", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
 			`{"steps": [{"description": "Test step", "intent": "Test intent"}]}`,
 		},
 	}
@@ -827,7 +830,7 @@ func TestPlanCompaction_DuringExecution(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
 			// Goal clarification response
-			"Create a comprehensive test plan with multiple steps to verify compaction functionality",
+			`{"clarified_goal": "Create a comprehensive test plan with multiple steps to verify compaction functionality works correctly during execution", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
 			// Plan creation response
 			`{"steps": [{"description": "Step 1", "intent": "First step"}, {"description": "Step 2", "intent": "Second step"}], "simplified_system_prompt": "Simple system"}`,
 			// Step execution responses
@@ -1063,7 +1066,7 @@ func TestPlanCompaction_BasicConfiguration(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
 			// Goal clarification
-			"Basic configuration test plan",
+			`{"clarified_goal": "Basic configuration test plan to verify compaction settings and history management work correctly", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
 			// Plan creation
 			`{"steps": [{"description": "Basic test", "intent": "Test basic configuration"}], "simplified_system_prompt": "Basic test"}`,
 		},
@@ -1141,7 +1144,7 @@ func TestPlanPhaseSystemPrompt(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
 			// Goal clarification
-			"Test phase system prompts",
+			`{"clarified_goal": "Test phase system prompts to verify that each phase is called correctly during execution", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
 			// Plan creation
 			`{"steps": [{"description": "Test step 1", "intent": "First test"}, {"description": "Test step 2", "intent": "Second test"}], "simplified_system_prompt": "Test prompt"}`,
 			// Step 1 execution
@@ -1222,7 +1225,7 @@ func TestPlanPhaseSystemPrompt_PanicRecovery(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
 			// Goal clarification
-			"Panic test",
+			`{"clarified_goal": "Panic test to verify that panics in providers are properly handled and recovered", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
 			// Plan creation
 			`{"steps": [{"description": "Test step", "intent": "Test"}], "simplified_system_prompt": "Test"}`,
 			// Step execution
@@ -1263,7 +1266,7 @@ func TestPlanPhaseSystemPrompt_Integration(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
 			// Goal clarification
-			"Integration test",
+			`{"clarified_goal": "Integration test to verify all phases work together correctly during plan execution", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
 			// Plan creation
 			`{"steps": [{"description": "Test step", "intent": "Test"}], "simplified_system_prompt": "Test"}`,
 			// Step execution
@@ -1333,7 +1336,7 @@ func TestPlanPhaseSystemPrompt_Injection(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
 			// Goal clarification
-			"Clarified goal",
+			`{"clarified_goal": "Clarified goal to test injection protection and ensure system prompts are properly isolated", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
 			// Plan creation
 			`{"steps": [{"description": "Step 1", "intent": "Test"}], "simplified_system_prompt": "Test"}`,
 			// Step execution
@@ -1406,7 +1409,7 @@ func TestPlanPhaseSystemPrompt_MainExecutionPrompt(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
 			// Goal clarification
-			"Clarified goal",
+			`{"clarified_goal": "Clarified goal to test injection protection and ensure system prompts are properly isolated", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
 			// Plan creation
 			`{"steps": [{"description": "Step 1", "intent": "Test"}], "simplified_system_prompt": "Simplified prompt from planner"}`,
 			// Step execution
@@ -1530,6 +1533,9 @@ func (m *mockSessionForPlan) GenerateContent(ctx context.Context, input ...golle
 	if m.client.index < len(m.client.responses) {
 		response = m.client.responses[m.client.index]
 		m.client.index++
+	} else {
+		// Return a valid JSON response to avoid parse errors in tests
+		response = `{"error": "No more mock responses available"}`
 	}
 
 	// Add messages to history for testing
@@ -1975,7 +1981,7 @@ func TestExecutorPromptContainsIterationInfo(t *testing.T) {
 	mockClient := &mockLLMClientWithPromptCapture{
 		responses: []string{
 			// Goal clarification
-			`{"goal": "Test iteration tracking", "clarification": "Testing that iteration info is in prompts"}`,
+			`{"clarified_goal": "Test iteration tracking to verify that iteration information is properly included in prompts", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
 			// Plan creation
 			`{"steps": [{"description": "Test task requiring iterations", "intent": "Verify iteration tracking"}], "simplified_system_prompt": "Test system"}`,
 			// Multiple executor responses to trigger iterations
@@ -2064,7 +2070,7 @@ func TestReflectorPromptContainsIterationLimitInfo(t *testing.T) {
 	mockClient := &mockLLMClientWithPromptCapture{
 		responses: []string{
 			// Goal clarification
-			`{"goal": "Test iteration limit", "clarification": "Testing iteration limit handling"}`,
+			`{"clarified_goal": "Test iteration limit to verify that iteration limit information is properly handled in reflector prompts", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
 			// Plan creation
 			`{"steps": [{"description": "Task that will hit iteration limit", "intent": "Test iteration limit"}], "simplified_system_prompt": "Test system"}`,
 			// Executor responses - these should hit iteration limit
@@ -2157,7 +2163,7 @@ func TestIterationInfoInNormalExecution(t *testing.T) {
 	mockClient := &mockLLMClientWithPromptCapture{
 		responses: []string{
 			// Goal clarification
-			`{"goal": "Normal task execution", "clarification": "Testing normal execution with iterations"}`,
+			`{"clarified_goal": "Normal task execution to test normal execution flow with multiple iterations", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
 			// Plan creation
 			`{"steps": [{"description": "Normal task", "intent": "Complete normally"}], "simplified_system_prompt": "Test system"}`,
 			// Executor - complete in 2 iterations

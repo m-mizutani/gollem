@@ -122,12 +122,12 @@ type ClarificationResponse struct {
 	ClarifiedGoal string `json:"clarified_goal"`
 	Approach      string `json:"approach"` // "direct_response", "new_plan", "update_plan"
 	Reasoning     string `json:"reasoning"`
-	Response      string `json:"response,omitempty"` // direct_responseの場合の応答内容
+	Response      string `json:"response,omitempty"` // Response content for direct_response approach
 }
 
 // Validate validates the clarification response
 func (c *ClarificationResponse) Validate(hasOldPlan bool) error {
-	// 必須フィールドのチェック
+	// Check required fields
 	if c.ClarifiedGoal == "" {
 		return fmt.Errorf("clarified_goal is required")
 	}
@@ -135,22 +135,22 @@ func (c *ClarificationResponse) Validate(hasOldPlan bool) error {
 		return fmt.Errorf("approach is required")
 	}
 
-	// アプローチの妥当性チェック
+	// Check approach validity
 	validApproaches := map[string]bool{
 		"direct_response": true,
 		"new_plan":        true,
-		"update_plan":     hasOldPlan, // OldPlanがある場合のみ有効
+		"update_plan":     hasOldPlan, // Only valid when OldPlan exists
 	}
 	if !validApproaches[c.Approach] {
 		return fmt.Errorf("invalid approach: %s", c.Approach)
 	}
 
-	// direct_responseの場合はresponseが必須
+	// Response is required for direct_response approach
 	if c.Approach == "direct_response" && c.Response == "" {
 		return fmt.Errorf("response is required for direct_response approach")
 	}
 
-	// ゴールの長さチェック（2-3センテンス = 大体20-150ワード）
+	// Check goal length (2-3 sentences = approximately 20-150 words)
 	wordCount := len(strings.Fields(c.ClarifiedGoal))
 	if wordCount < 5 || wordCount > 150 {
 		return fmt.Errorf("clarified_goal should be 2-3 sentences (got %d words)", wordCount)
