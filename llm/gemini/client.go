@@ -267,7 +267,6 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		client: c,
 		chat:   chat,
 		config: config,
-		cfg:    &cfg,
 	}
 
 	return session, nil
@@ -279,7 +278,6 @@ type Session struct {
 	client *Client
 	chat   *genai.Chat
 	config *genai.GenerateContentConfig
-	cfg    *gollem.SessionConfig
 }
 
 func (s *Session) History() *gollem.History {
@@ -398,8 +396,10 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		}
 	}
 	systemPrompt := ""
-	if cfg := s.cfg; cfg != nil {
-		systemPrompt = cfg.SystemPrompt()
+	if s.config != nil && s.config.SystemInstruction != nil && len(s.config.SystemInstruction.Parts) > 0 {
+		if part := s.config.SystemInstruction.Parts[0]; part != nil {
+			systemPrompt = part.Text
+		}
 	}
 	promptLogger.Info("Gemini prompt",
 		"system_prompt", systemPrompt,
