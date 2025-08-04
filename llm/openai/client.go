@@ -330,7 +330,7 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	req := s.createRequest(false)
 
 	s.logPrompt(ctx)
-	
+
 	resp, err := s.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create chat completion")
@@ -393,7 +393,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	req := s.createRequest(true)
 
 	s.logPrompt(ctx)
-	
+
 	// Enable stream options to get usage data
 	req.StreamOptions = &openai.StreamOptions{
 		IncludeUsage: true,
