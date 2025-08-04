@@ -434,8 +434,7 @@ func TestSkipDecisions(t *testing.T) {
 			// Create mock agent
 			mockClient := &mockLLMClient{
 				responses: []string{
-					`{"steps": [{"description": "Test step", "intent": "Test intent"}]}`,
-					`{"steps": [{"description": "Test step", "intent": "Test intent"}]}`,
+					`{"clarified_goal": "Test plan to verify skip decision functionality works correctly", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
 					`{"steps": [{"description": "Test step", "intent": "Test intent"}]}`,
 				},
 			}
@@ -2246,7 +2245,7 @@ func TestIterationLimitScenarios(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create responses based on tool calls
 			responses := []string{
-				`{"goal": "Test", "clarification": "Test"}`,
+				`{"clarified_goal": "Test iteration limit scenarios to verify proper handling of iteration limits", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
 				`{"steps": [{"description": "Test", "intent": "Test"}], "simplified_system_prompt": "Test"}`,
 			}
 

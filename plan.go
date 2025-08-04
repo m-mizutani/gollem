@@ -150,11 +150,6 @@ func (c *ClarificationResponse) Validate(hasOldPlan bool) error {
 		return fmt.Errorf("response is required for direct_response approach")
 	}
 
-	// Check goal length (2-3 sentences = approximately 20-150 words)
-	wordCount := len(strings.Fields(c.ClarifiedGoal))
-	if wordCount < 5 || wordCount > 150 {
-		return fmt.Errorf("clarified_goal should be 2-3 sentences (got %d words)", wordCount)
-	}
 
 	return nil
 }
