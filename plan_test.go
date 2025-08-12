@@ -1780,16 +1780,9 @@ func (s *mockSessionForIteration) GenerateContent(ctx context.Context, input ...
 		}
 	}
 
-	// Debug logging
+	// Check for goal clarification prompt
 	if strings.Contains(textContent, "Task Analyzer and Goal Clarifier") {
 		// This is the goal clarification prompt
-		return &gollem.Response{
-			Texts: []string{`{"clarified_goal": "Test iteration limits", "approach": "new_plan", "reasoning": "Testing iteration limit functionality"}`},
-		}, nil
-	}
-
-	// Check for goal clarification
-	if strings.Contains(textContent, "clarify") {
 		return &gollem.Response{
 			Texts: []string{`{"clarified_goal": "Test iteration limits", "approach": "new_plan", "reasoning": "Testing iteration limit functionality"}`},
 		}, nil
