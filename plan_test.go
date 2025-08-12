@@ -237,8 +237,12 @@ func createSessionWithHistoryWithRetry(ctx context.Context, client gollem.LLMCli
 	}, "create session with history")
 }
 
-// Test plan mode with multiple tools and history - optimized for parallel execution
-func TestPlanModeWithMultipleToolsAndHistory(t *testing.T) {
+// ============================================================================
+// Integration Tests with Real LLMs
+// ============================================================================
+
+// TestPlanModeWithMultipleToolsAndHistoryWithLLM tests plan mode with multiple tools and history using real LLM providers
+func TestPlanModeWithMultipleToolsAndHistoryWithLLM(t *testing.T) {
 	testFn := func(t *testing.T, newClient func(t *testing.T) gollem.LLMClient, llmName string) {
 		// Disable parallel execution for subtests to reduce API load
 		// t.Parallel()
@@ -416,7 +420,12 @@ Do not perform multiple DNS lookups. Execute tasks one at a time.`
 	})
 }
 
-func TestSkipDecisions(t *testing.T) {
+// ============================================================================
+// Unit Tests with Mock LLMs
+// ============================================================================
+
+// TestPlanSkipDecisionHandling tests the skip decision mechanism in plan execution
+func TestPlanSkipDecisionHandling(t *testing.T) {
 	t.Parallel()
 
 	type testCase struct {
@@ -496,7 +505,7 @@ func TestSkipDecisions(t *testing.T) {
 	}))
 }
 
-func TestSkipDecisionValidation(t *testing.T) {
+func TestPlanSkipDecisionValidation(t *testing.T) {
 	type testCase struct {
 		name        string
 		decision    gollem.SkipDecision
@@ -570,7 +579,7 @@ func TestSkipDecisionValidation(t *testing.T) {
 	}))
 }
 
-func TestPlanExecutionModeOptions(t *testing.T) {
+func TestPlanExecutionModeConfiguration(t *testing.T) {
 	mockClient := &mockLLMClient{
 		responses: []string{
 			`{"clarified_goal": "Test plan goal to verify execution mode options work correctly with multiple steps", "approach": "new_plan", "reasoning": "Need to create a plan"}`,
@@ -612,7 +621,7 @@ func TestPlanExecutionModeOptions(t *testing.T) {
 }
 
 // TestPlanModeToolExecution tests LLM API tool execution with predefined plan data
-func TestPlanModeToolExecution(t *testing.T) {
+func TestPlanModeToolExecutionWithLLM(t *testing.T) {
 	t.Parallel()
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) gollem.LLMClient, llmName string) {
@@ -754,7 +763,7 @@ func TestPlanModeToolExecution(t *testing.T) {
 	})
 }
 
-func TestNewTodoIDGeneration(t *testing.T) {
+func TestPlanTodoIDGeneration(t *testing.T) {
 	type testCase struct {
 		name        string
 		newTodos    []gollem.TestPlanToDo
@@ -827,6 +836,11 @@ func TestNewTodoIDGeneration(t *testing.T) {
 }
 
 // Test plan compaction during execution
+// ============================================================================
+// Plan Compaction Tests
+// ============================================================================
+
+// TestPlanCompaction_DuringExecution tests history compaction during plan execution
 func TestPlanCompaction_DuringExecution(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
@@ -911,7 +925,7 @@ func TestPlanCompaction_EmergencyScenario(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
 			// Goal clarification
-			"Emergency compaction test plan",
+			`{"clarified_goal": "Emergency compaction test plan", "approach": "new_plan", "reasoning": "Testing emergency compaction"}`,
 			// Plan creation
 			`{"steps": [{"description": "Emergency test step", "intent": "Test emergency compaction"}], "simplified_system_prompt": "Emergency test"}`,
 			// Step execution
@@ -973,7 +987,7 @@ func TestPlanCompaction_Summarization(t *testing.T) {
 		mockClient := &mockLLMClientForPlan{
 			responses: []string{
 				// Goal clarification
-				"Strategy test plan",
+				`{"clarified_goal": "Strategy test plan", "approach": "new_plan", "reasoning": "Testing compaction strategies"}`,
 				// Plan creation
 				`{"steps": [{"description": "Strategy test step", "intent": "Test different compaction strategies"}], "simplified_system_prompt": "Strategy test"}`,
 				// Step execution
@@ -1017,7 +1031,7 @@ func TestPlanCompaction_SessionReplacement(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
 			// Goal clarification
-			"Session replacement test plan",
+			`{"clarified_goal": "Session replacement test plan", "approach": "new_plan", "reasoning": "Testing session replacement"}`,
 			// Plan creation
 			`{"steps": [{"description": "Session test step", "intent": "Test session replacement"}], "simplified_system_prompt": "Session test"}`,
 			// Step execution
@@ -1103,7 +1117,7 @@ func TestPlanCompaction_ConfigurationInheritance(t *testing.T) {
 	mockClient := &mockLLMClientForPlan{
 		responses: []string{
 			// Goal clarification
-			"Configuration inheritance test plan",
+			`{"clarified_goal": "Configuration inheritance test plan", "approach": "new_plan", "reasoning": "Testing configuration inheritance"}`,
 			// Plan creation
 			`{"steps": [{"description": "Config test", "intent": "Test configuration"}], "simplified_system_prompt": "Config test"}`,
 			"Config test completed",
@@ -1136,6 +1150,11 @@ func TestPlanCompaction_ConfigurationInheritance(t *testing.T) {
 }
 
 // Test plan phase system prompt provider
+// ============================================================================
+// Phase System Prompt Tests
+// ============================================================================
+
+// TestPlanPhaseSystemPrompt tests that phase-specific system prompts are correctly applied
 func TestPlanPhaseSystemPrompt(t *testing.T) {
 	// Track how many times each phase was called
 	phasesCallCount := make(map[gollem.PlanPhaseType]int)
@@ -1576,6 +1595,11 @@ func (m *mockSessionForPlan) History() *gollem.History {
 }
 
 // Test basic iteration limit functionality
+// ============================================================================
+// Iteration Limit Tests
+// ============================================================================
+
+// TestPlanMaxIterations tests the default iteration limit behavior
 func TestPlanMaxIterations(t *testing.T) {
 	// Mock client that will trigger iteration limit
 	mockClient := &mockLLMClientForIteration{
@@ -1757,12 +1781,17 @@ func (s *mockSessionForIteration) GenerateContent(ctx context.Context, input ...
 	}
 
 	// Debug logging
-	// fmt.Printf("Mock received call %d with content snippet: %.100s...\n", s.callCount, textContent)
+	if strings.Contains(textContent, "Task Analyzer and Goal Clarifier") {
+		// This is the goal clarification prompt
+		return &gollem.Response{
+			Texts: []string{`{"clarified_goal": "Test iteration limits", "approach": "new_plan", "reasoning": "Testing iteration limit functionality"}`},
+		}, nil
+	}
 
 	// Check for goal clarification
 	if strings.Contains(textContent, "clarify") {
 		return &gollem.Response{
-			Texts: []string{`{"goal": "Test iteration limits", "clarification": "Testing iteration limit functionality"}`},
+			Texts: []string{`{"clarified_goal": "Test iteration limits", "approach": "new_plan", "reasoning": "Testing iteration limit functionality"}`},
 		}, nil
 	}
 
@@ -1977,7 +2006,7 @@ func (t *testIterationTool) Run(ctx context.Context, args map[string]any) (map[s
 }
 
 // TestExecutorPromptContainsIterationInfo verifies iteration info is in executor prompts
-func TestExecutorPromptContainsIterationInfo(t *testing.T) {
+func TestPlanIterationInfoInExecutorPrompt(t *testing.T) {
 	// Create mock client with prompt capture
 	mockClient := &mockLLMClientWithPromptCapture{
 		responses: []string{
@@ -2065,7 +2094,7 @@ func TestExecutorPromptContainsIterationInfo(t *testing.T) {
 }
 
 // TestReflectorPromptContainsIterationLimitInfo verifies iteration limit info in reflector prompts
-func TestReflectorPromptContainsIterationLimitInfo(t *testing.T) {
+func TestPlanIterationLimitInfoInReflectorPrompt(t *testing.T) {
 	// Create a simple test that uses the mock pattern from the existing tests
 	// but focuses on capturing the reflector prompt to check for iteration limit info
 	mockClient := &mockLLMClientWithPromptCapture{
@@ -2159,7 +2188,7 @@ func TestReflectorPromptContainsIterationLimitInfo(t *testing.T) {
 }
 
 // TestIterationInfoInNormalExecution verifies iteration info during normal execution
-func TestIterationInfoInNormalExecution(t *testing.T) {
+func TestPlanIterationInfoDuringNormalExecution(t *testing.T) {
 	// Create mock client for normal execution
 	mockClient := &mockLLMClientWithPromptCapture{
 		responses: []string{
@@ -2220,7 +2249,7 @@ func TestIterationInfoInNormalExecution(t *testing.T) {
 }
 
 // TestIterationLimitScenarios tests various iteration limit scenarios
-func TestIterationLimitScenarios(t *testing.T) {
+func TestPlanIterationLimitBehaviorScenarios(t *testing.T) {
 	testCases := []struct {
 		name          string
 		maxIterations int

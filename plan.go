@@ -410,13 +410,8 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 	// Clarify user goal and determine approach
 	clarification, err := g.clarifyGoalWithRetry(ctx, prompt, cfg)
 	if err != nil {
-		logger.Warn("failed to clarify user goal, using original prompt", "error", err)
-		// Fallback to traditional approach
-		clarification = &ClarificationResponse{
-			ClarifiedGoal: prompt,
-			Approach:      "new_plan",
-			Reasoning:     "Goal clarification failed, proceeding with standard plan creation",
-		}
+		// Return error instead of using fallback
+		return nil, goerr.Wrap(err, "failed to clarify user goal")
 	}
 
 	// Handle direct response approach
@@ -1362,7 +1357,9 @@ func (g *Agent) clarifyGoalWithRetry(ctx context.Context, userInput string, cfg 
 // runGoalClarifier executes the goal clarifier and returns the raw response
 func (g *Agent) runGoalClarifier(ctx context.Context, userInput string, cfg *planConfig) (string, error) {
 	// Create goal clarification session with history to understand context
-	sessionOptions := []SessionOption{}
+	sessionOptions := []SessionOption{
+		WithSessionContentType(ContentTypeJSON),
+	}
 	if cfg.history != nil {
 		sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
 	}
@@ -1433,12 +1430,11 @@ func (g *Agent) runGoalClarifier(ctx context.Context, userInput string, cfg *pla
 		return "", goerr.Wrap(err, "failed to clarify user goal")
 	}
 
-	if len(response.Texts) == 0 {
-		return "", goerr.New("no response from goal clarification")
+	if len(response.Texts) != 1 {
+		return "", goerr.New("unexpected response from goal clarification", goerr.V("texts", response.Texts))
 	}
 
-	clarifiedGoal := strings.Join(response.Texts, "\n")
-	clarifiedGoal = strings.TrimSpace(clarifiedGoal)
+	clarifiedGoal := strings.TrimSpace(response.Texts[0])
 
 	return clarifiedGoal, nil
 }
