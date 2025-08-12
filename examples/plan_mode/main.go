@@ -206,6 +206,10 @@ func main() {
 
 	// Create agent with tools
 	agent := gollem.New(client,
+		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
+			fmt.Printf("💭 %s\n", msg)
+			return nil
+		}),
 		gollem.WithTools(&SearchTool{}, &AnalysisTool{}, &ReportTool{}),
 	)
 
