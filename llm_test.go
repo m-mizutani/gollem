@@ -931,6 +931,8 @@ func TestImageValidation(t *testing.T) {
 
 // Test image functionality with each LLM client
 func TestImageWithLLMClients(t *testing.T) {
+	t.Parallel()
+	
 	// Prepare test image
 	data, err := os.ReadFile("testdata/test_image.jpg")
 	if err != nil {
@@ -940,16 +942,16 @@ func TestImageWithLLMClients(t *testing.T) {
 	img, err := gollem.NewImage(data)
 	gt.NoError(t, err)
 
-	t.Run("Claude", func(t *testing.T) {
-		client := newClaudeClient(t)
+	testFn := func(t *testing.T, client gollem.LLMClient) {
+		ctx := t.Context()
 		
 		// First session: Ask only about color
-		session1, err := client.NewSession(context.Background())
-		gt.NoError(t, err)
+		session1, err := client.NewSession(ctx)
+		gt.NoError(t, err).Required()
 
-		resp1, err := session1.GenerateContent(context.Background(),
+		resp1, err := session1.GenerateContent(ctx,
 			gollem.Text("What color is this image?"), img)
-		gt.NoError(t, err)
+		gt.NoError(t, err).Required()
 		gt.A(t, resp1.Texts).Longer(0)
 
 		// Verify the response mentions red
@@ -960,14 +962,14 @@ func TestImageWithLLMClients(t *testing.T) {
 		history := session1.History()
 		gt.V(t, history).NotEqual(nil)
 
-		session2, err := client.NewSession(context.Background(),
+		session2, err := client.NewSession(ctx,
 			gollem.WithSessionHistory(history))
-		gt.NoError(t, err)
+		gt.NoError(t, err).Required()
 
 		// Ask only about shape, without re-sending the image
-		resp2, err := session2.GenerateContent(context.Background(),
-			gollem.Text("What shape is it?"))
-		gt.NoError(t, err)
+		resp2, err := session2.GenerateContent(ctx,
+			gollem.Text("What shape is it? Please answer with one word like: square, rectangle, circle, triangle, etc."))
+		gt.NoError(t, err).Required()
 		gt.A(t, resp2.Texts).Longer(0)
 
 		// Verify the response mentions square/rectangle
@@ -975,91 +977,24 @@ func TestImageWithLLMClients(t *testing.T) {
 		hasShape := strings.Contains(responseText2, "square") ||
 			strings.Contains(responseText2, "rectangle")
 		gt.V(t, hasShape).Equal(true)
-	})
+	}
 
 	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
 		client := newOpenAIClient(t)
-		
-		// First session: Ask only about color
-		session1, err := client.NewSession(context.Background())
-		gt.NoError(t, err)
-
-		resp1, err := session1.GenerateContent(context.Background(),
-			gollem.Text("What color is this image?"), img)
-		gt.NoError(t, err)
-		gt.A(t, resp1.Texts).Longer(0)
-
-		// Verify the response mentions red
-		responseText1 := strings.ToLower(strings.Join(resp1.Texts, " "))
-		gt.V(t, strings.Contains(responseText1, "red")).Equal(true)
-
-		// Extract history and create new session
-		history := session1.History()
-		gt.V(t, history).NotEqual(nil)
-
-		session2, err := client.NewSession(context.Background(),
-			gollem.WithSessionHistory(history))
-		gt.NoError(t, err)
-
-		// Ask only about shape, without re-sending the image
-		resp2, err := session2.GenerateContent(context.Background(),
-			gollem.Text("What shape is it?"))
-		gt.NoError(t, err)
-		gt.A(t, resp2.Texts).Longer(0)
-
-		// Verify the response mentions square/rectangle
-		responseText2 := strings.ToLower(strings.Join(resp2.Texts, " "))
-		hasShape := strings.Contains(responseText2, "square") ||
-			strings.Contains(responseText2, "rectangle")
-		gt.V(t, hasShape).Equal(true)
+		testFn(t, client)
 	})
 
-	t.Run("Gemini", func(t *testing.T) {
+	t.Run("gemini", func(t *testing.T) {
+		t.Parallel()
 		client := newGeminiClient(t)
-		
-		// First session: Ask only about color
-		session1, err := client.NewSession(context.Background())
-		gt.NoError(t, err)
+		testFn(t, client)
+	})
 
-		resp1, err := session1.GenerateContent(context.Background(),
-			gollem.Text("What color is this image?"), img)
-		gt.NoError(t, err)
-		gt.A(t, resp1.Texts).Longer(0)
-
-		// Verify the response mentions red
-		responseText1 := strings.ToLower(strings.Join(resp1.Texts, " "))
-		gt.V(t, strings.Contains(responseText1, "red")).Equal(true)
-
-		// Extract history and create new session
-		history := session1.History()
-		gt.V(t, history).NotEqual(nil)
-
-		session2, err := client.NewSession(context.Background(),
-			gollem.WithSessionHistory(history))
-		gt.NoError(t, err)
-
-		// Ask only about shape, without re-sending the image
-		resp2, err := session2.GenerateContent(context.Background(),
-			gollem.Text("What shape is it?"))
-		gt.NoError(t, err)
-		gt.A(t, resp2.Texts).Longer(0)
-
-		// Verify the response mentions shape or acknowledges the context
-		responseText2 := strings.ToLower(strings.Join(resp2.Texts, " "))
-		
-		// Gemini may have limitations with image history restoration
-		hasShape := strings.Contains(responseText2, "square") ||
-			strings.Contains(responseText2, "rectangle") ||
-			strings.Contains(responseText2, "block")
-		referencesHistory := strings.Contains(responseText2, "red") ||
-			strings.Contains(responseText2, "color") ||
-			strings.Contains(responseText2, "image")
-		
-		// Test passes if it either identifies shape or references the previous conversation
-		if !hasShape && !referencesHistory {
-			t.Logf("Gemini response: %s", responseText2)
-		}
-		gt.V(t, hasShape || referencesHistory).Equal(true)
+	t.Run("claude", func(t *testing.T) {
+		t.Parallel()
+		client := newClaudeClient(t)
+		testFn(t, client)
 	})
 }
 
