@@ -467,8 +467,8 @@ func (g *Agent) handleUpdatePlan(ctx context.Context, planID, prompt string, cla
 		input:                  prompt,                             // New input
 		clarifiedGoal:          clarification.ClarifiedGoal,        // Updated goal
 		simplifiedSystemPrompt: cfg.oldPlan.simplifiedSystemPrompt, // Keep existing prompt
-		state:                  cfg.oldPlan.state,
-		todos:                  []planToDo{}, // Will be populated by reflector
+		state:                  PlanStateCreated,                   // New plan should start in Created state
+		todos:                  []planToDo{},                       // Will be populated by reflector
 		agent:                  g,
 		toolMap:                toolMap,
 		config:                 cfg,
