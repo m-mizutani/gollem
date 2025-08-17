@@ -151,7 +151,7 @@ func TestGeminiClientIssues(t *testing.T) {
 		gt.Value(t, contentParam).NotEqual(nil)
 		gt.Value(t, contentParam.Type).Equal(genai.TypeString)
 
-		// Check for length constraints  
+		// Check for length constraints
 		_ = contentParam.MaxLength == nil || *contentParam.MaxLength == 0 // Note constraint status
 
 	})

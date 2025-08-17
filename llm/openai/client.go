@@ -232,30 +232,36 @@ func (s *Session) History() *gollem.History {
 
 // convertInputs converts gollem.Input to OpenAI messages
 func (s *Session) convertInputs(input ...gollem.Input) error {
+	// Accumulate consecutive user content (Text/Image) into a single message
+	var userContentParts []openai.ChatMessagePart
+
 	for _, in := range input {
 		switch v := in.(type) {
 		case gollem.Text:
-			s.messages = append(s.messages, openai.ChatCompletionMessage{
-				Role:    openai.ChatMessageRoleUser,
-				Content: string(v),
+			userContentParts = append(userContentParts, openai.ChatMessagePart{
+				Type: openai.ChatMessagePartTypeText,
+				Text: string(v),
 			})
 
 		case gollem.Image:
 			// Create image URL in data format for OpenAI
 			imageURL := fmt.Sprintf("data:%s;base64,%s", v.MimeType(), v.Base64())
-			s.messages = append(s.messages, openai.ChatCompletionMessage{
-				Role: openai.ChatMessageRoleUser,
-				MultiContent: []openai.ChatMessagePart{
-					{
-						Type: openai.ChatMessagePartTypeImageURL,
-						ImageURL: &openai.ChatMessageImageURL{
-							URL: imageURL,
-						},
-					},
+			userContentParts = append(userContentParts, openai.ChatMessagePart{
+				Type: openai.ChatMessagePartTypeImageURL,
+				ImageURL: &openai.ChatMessageImageURL{
+					URL: imageURL,
 				},
 			})
 
 		case gollem.FunctionResponse:
+			// If we have accumulated user content, create a message for it
+			if len(userContentParts) > 0 {
+				s.messages = append(s.messages, openai.ChatCompletionMessage{
+					Role:         openai.ChatMessageRoleUser,
+					MultiContent: userContentParts,
+				})
+				userContentParts = nil
+			}
 			data, err := json.Marshal(v.Data)
 			if err != nil {
 				return goerr.Wrap(err, "failed to marshal function response")
@@ -286,6 +292,15 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 			return goerr.Wrap(gollem.ErrInvalidParameter, "invalid input")
 		}
 	}
+
+	// Create final user message if there's any remaining user content
+	if len(userContentParts) > 0 {
+		s.messages = append(s.messages, openai.ChatCompletionMessage{
+			Role:         openai.ChatMessageRoleUser,
+			MultiContent: userContentParts,
+		})
+	}
+
 	return nil
 }
 

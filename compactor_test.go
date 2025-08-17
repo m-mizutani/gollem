@@ -844,7 +844,6 @@ func verifyRecentMessagesPreserved(t *testing.T, _, compacted *gollem.History) {
 	gt.True(t, foundTopics >= 1)
 }
 
-
 // TestHistoryCompactor_SummaryInMessageHistory verifies that summaries are properly
 // prepended to the message history for all LLM types
 func TestHistoryCompactor_SummaryInMessageHistory(t *testing.T) {
