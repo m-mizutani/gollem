@@ -182,8 +182,7 @@ type ImageOption func(*imageConfig) error
 
 // imageConfig holds configuration for Image creation
 type imageConfig struct {
-	mimeType       ImageMimeType
-	skipValidation bool
+	mimeType ImageMimeType
 }
 
 // WithMimeType explicitly sets the MIME type
@@ -218,10 +217,8 @@ func NewImage(data []byte, opts ...ImageOption) (Image, error) {
 	}
 
 	// Size validation
-	if !cfg.skipValidation {
-		if err := validateImageSize(data); err != nil {
-			return Image{}, err
-		}
+	if err := validateImageSize(data); err != nil {
+		return Image{}, err
 	}
 
 	return Image{
