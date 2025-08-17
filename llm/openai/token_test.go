@@ -32,7 +32,6 @@ func TestTokenCounts(t *testing.T) {
 		gt.N(t, resp.InputToken).Greater(0)
 		gt.N(t, resp.OutputToken).Greater(0)
 
-		t.Logf("InputToken: %d, OutputToken: %d", resp.InputToken, resp.OutputToken)
 	})
 
 	t.Run("GenerateStream should return non-negative token counts", func(t *testing.T) {
@@ -64,11 +63,7 @@ func TestTokenCounts(t *testing.T) {
 
 		// Either the final response or some response during streaming should have positive token counts
 		// Note: OpenAI streaming may not always include usage data depending on the API version
-		hasPositiveTokens := maxInputTokens > 0 && maxOutputTokens > 0
-		if !hasPositiveTokens {
-			t.Log("Warning: No positive token counts in streaming response (this may be expected for some OpenAI API versions)")
-		}
+		_ = maxInputTokens > 0 && maxOutputTokens > 0 // hasPositiveTokens
 
-		t.Logf("Max streaming tokens - InputToken: %d, OutputToken: %d", maxInputTokens, maxOutputTokens)
 	})
 }

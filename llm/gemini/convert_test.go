@@ -146,10 +146,6 @@ func TestComplexSchemaValidation(t *testing.T) {
 	tool := &complexSchemaTestTool{}
 	converted := gemini.ConvertTool(tool)
 
-	t.Logf("Complex schema tool structure:")
-	t.Logf("Name: %s", converted.Name)
-	t.Logf("Description: %s", converted.Description)
-
 	// Check root parameters
 	rootParams := converted.Parameters
 	gt.Value(t, rootParams.Type).Equal(genai.TypeObject)
@@ -171,7 +167,6 @@ func TestComplexSchemaValidation(t *testing.T) {
 		t.Errorf("CRITICAL: optional_nested.Required is nil, should be empty slice")
 	} else {
 		gt.Value(t, optionalNested.Required).Equal([]string{})
-		t.Logf("SUCCESS: optional_nested.Required is empty slice: %v", optionalNested.Required)
 	}
 
 	// Check array items object
@@ -186,15 +181,12 @@ func TestComplexSchemaValidation(t *testing.T) {
 		t.Errorf("CRITICAL: array_field.Items.Required is nil, should be empty slice")
 	} else {
 		gt.Value(t, arrayField.Items.Required).Equal([]string{})
-		t.Logf("SUCCESS: array_field.Items.Required is empty slice: %v", arrayField.Items.Required)
 	}
 }
 
 func TestConstraintsValidation(t *testing.T) {
 	tool := &constraintsTestTool{}
 	converted := gemini.ConvertTool(tool)
-
-	t.Logf("Constraints tool structure:")
 
 	// Check string constraints
 	constrainedString := converted.Parameters.Properties["constrained_string"]
@@ -229,8 +221,6 @@ func TestConstraintsValidation(t *testing.T) {
 func TestEmptyParametersValidation(t *testing.T) {
 	tool := &emptyParametersTool{}
 	converted := gemini.ConvertTool(tool)
-
-	t.Logf("Empty parameters tool structure:")
 
 	// Check that empty parameters work correctly
 	gt.Value(t, converted.Name).Equal("empty_params")
@@ -267,8 +257,6 @@ func TestOpenAPICompliance(t *testing.T) {
 			validateSchema(schema.Items, path+"[]")
 		}
 
-		t.Logf("Schema at %s is valid: Type=%s, Required=%v",
-			path, schema.Type, schema.Required)
 	}
 
 	validateSchema(converted.Parameters, "root")
@@ -467,33 +455,20 @@ func TestRespondToUserTool(t *testing.T) {
 	tool := &respondToUserTool{}
 	converted := gemini.ConvertTool(tool)
 
-	t.Logf("Converted tool: %+v", converted)
-	t.Logf("Parameters: %+v", converted.Parameters)
-	t.Logf("Properties: %+v", converted.Parameters.Properties)
-	t.Logf("Required: %+v", converted.Parameters.Required)
-
 	// Verify the structure
 	gt.Value(t, converted.Name).Equal("respond_to_user")
 	gt.Value(t, len(converted.Parameters.Properties)).Equal(1)
 
 	// Critical finding: Required is nil, not empty slice!
-	if converted.Parameters.Required == nil {
-		t.Logf("CRITICAL: Required field is nil, not empty slice!")
-	} else {
-		t.Logf("Required field is empty slice: %v", converted.Parameters.Required)
-	}
+	_ = converted.Parameters.Required == nil // Note Required field status
 
 	summary := converted.Parameters.Properties["summary"]
 	gt.Value(t, summary).NotEqual(nil)
-	t.Logf("Summary type: %v", summary.Type)
 }
 
 func TestParameterlessTool(t *testing.T) {
 	tool := &parameterlessTool{}
 	converted := gemini.ConvertTool(tool)
-
-	t.Logf("Parameterless tool: %+v", converted)
-	t.Logf("Parameters: %+v", converted.Parameters)
 
 	gt.Value(t, converted.Name).Equal("no_params_tool")
 	gt.Value(t, len(converted.Parameters.Properties)).Equal(0)
@@ -504,18 +479,12 @@ func TestNestedObjectRequiredField(t *testing.T) {
 	tool := &nestedObjectTool{}
 	converted := gemini.ConvertTool(tool)
 
-	t.Logf("Nested object tool: %+v", converted)
-	t.Logf("Parameters: %+v", converted.Parameters)
-
 	userParam := converted.Parameters.Properties["user"]
 	gt.Value(t, userParam).NotEqual(nil)
-	t.Logf("User parameter Required: %+v", userParam.Required)
 
 	// This should be an empty slice, not nil
 	if userParam.Required == nil {
 		t.Errorf("CRITICAL: Nested object Required field is nil, should be empty slice!")
-	} else {
-		t.Logf("SUCCESS: Nested object Required field is empty slice: %v", userParam.Required)
 	}
 
 	gt.Value(t, userParam.Required).Equal([]string{})

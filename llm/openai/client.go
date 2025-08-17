@@ -240,6 +240,21 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 				Content: string(v),
 			})
 
+		case gollem.Image:
+			// Create image URL in data format for OpenAI
+			imageURL := fmt.Sprintf("data:%s;base64,%s", v.MimeType(), v.Base64())
+			s.messages = append(s.messages, openai.ChatCompletionMessage{
+				Role: openai.ChatMessageRoleUser,
+				MultiContent: []openai.ChatMessagePart{
+					{
+						Type: openai.ChatMessagePartTypeImageURL,
+						ImageURL: &openai.ChatMessageImageURL{
+							URL: imageURL,
+						},
+					},
+				},
+			})
+
 		case gollem.FunctionResponse:
 			data, err := json.Marshal(v.Data)
 			if err != nil {

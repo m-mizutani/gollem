@@ -85,7 +85,6 @@ func TestVertexClient(t *testing.T) {
 	gt.NotNil(t, response)
 	gt.True(t, len(response.Texts) > 0)
 
-	t.Logf("Response: %s", response.Texts[0])
 	gt.True(t, strings.Contains(response.Texts[0], "Vertex AI working!"))
 }
 
@@ -126,7 +125,6 @@ func TestVertexClientWithTools(t *testing.T) {
 	gt.True(t, len(response.Texts) > 0 || len(response.FunctionCalls) > 0)
 
 	if len(response.FunctionCalls) > 0 {
-		t.Logf("Function call: %s with args: %v", response.FunctionCalls[0].Name, response.FunctionCalls[0].Arguments)
 
 		// Execute the function call
 		result, err := testTool.Run(ctx, response.FunctionCalls[0].Arguments)
@@ -144,7 +142,6 @@ func TestVertexClientWithTools(t *testing.T) {
 		gt.NotNil(t, finalResponse)
 		gt.True(t, len(finalResponse.Texts) > 0)
 
-		t.Logf("Final response: %s", finalResponse.Texts[0])
 		gt.True(t, strings.Contains(finalResponse.Texts[0], "42"))
 	}
 }

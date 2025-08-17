@@ -34,14 +34,6 @@ func TestMCPLocalDryRun(t *testing.T) {
 	gt.NoError(t, err)
 	gt.Array(t, specs).Longer(0)
 
-	t.Logf("Available tools: %v", func() []string {
-		names := make([]string, len(specs))
-		for i, spec := range specs {
-			names[i] = spec.Name
-		}
-		return names
-	}())
-
 	// Find a tool to test with - filesystem server typically provides read_file, write_file, list_directory
 	var testTool *gollem.ToolSpec
 	for _, spec := range specs {
@@ -94,7 +86,6 @@ func TestMCPLocalDryRun(t *testing.T) {
 	gt.NoError(t, err)
 	gt.NotNil(t, result)
 
-	t.Logf("Tool %s result: %+v", testTool.Name, result)
 }
 
 func TestMCPContentToMap(t *testing.T) {

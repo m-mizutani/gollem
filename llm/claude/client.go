@@ -265,6 +265,15 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 				anthropic.NewTextBlock(string(v)),
 			))
 
+		case gollem.Image:
+			// Create image block for Claude
+			imageBlock := anthropic.NewImageBlock(anthropic.Base64ImageSourceParam{
+				Type:      "base64",
+				MediaType: anthropic.Base64ImageSourceMediaType(v.MimeType()),
+				Data:      v.Base64(),
+			})
+			messages = append(messages, anthropic.NewUserMessage(imageBlock))
+
 		case gollem.FunctionResponse:
 			// Handle error cases first
 			isError := v.Error != nil
