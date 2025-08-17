@@ -17,9 +17,14 @@ func main() {
 			img.Set(x, y, color.RGBA{255, 0, 0, 255}) // Red
 		}
 	}
-	f, _ := os.Create("test_image.jpg")
-	jpeg.Encode(f, img, &jpeg.Options{Quality: 85})
-	f.Close()
+	f, err := os.Create("test_image.jpg")
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	if err := jpeg.Encode(f, img, &jpeg.Options{Quality: 85}); err != nil {
+		panic(err)
+	}
 
 	// Create a small test PNG (100x100 blue square)
 	for y := 0; y < 100; y++ {
@@ -27,9 +32,14 @@ func main() {
 			img.Set(x, y, color.RGBA{0, 0, 255, 255}) // Blue
 		}
 	}
-	f, _ = os.Create("test_image.png")
-	png.Encode(f, img)
-	f.Close()
+	f, err = os.Create("test_image.png")
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		panic(err)
+	}
 
 	// Create a small test GIF (50x50 green square)
 	gifImg := image.NewPaletted(image.Rect(0, 0, 50, 50), color.Palette{
@@ -41,9 +51,14 @@ func main() {
 			gifImg.SetColorIndex(x, y, 1) // Green
 		}
 	}
-	f, _ = os.Create("test_image.gif")
-	gif.Encode(f, gifImg, nil)
-	f.Close()
+	f, err = os.Create("test_image.gif")
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	if err := gif.Encode(f, gifImg, nil); err != nil {
+		panic(err)
+	}
 
 	println("Created test images")
 }
