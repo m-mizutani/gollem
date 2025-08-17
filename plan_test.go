@@ -279,7 +279,6 @@ func TestPlanModeWithMultipleToolsAndHistoryWithLLM(t *testing.T) {
 			gollem.WithHistory(history),
 			gollem.WithSystemPrompt(systemPrompt),
 			gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
-				t.Logf("[%s] Request tool: %s", llmName, tool.Name)
 				return nil
 			}),
 		)
@@ -300,12 +299,10 @@ Do not perform multiple DNS lookups. Execute tasks one at a time.`
 			simplePrompt,
 			gollem.WithToDoStartHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
 				executedTodos = append(executedTodos, todo.ID)
-				t.Logf("[%s] Started todo %s: %s", llmName, todo.ID, todo.Description)
 				return nil
 			}),
 			gollem.WithToDoCompletedHook(func(ctx context.Context, plan *gollem.Plan, todo gollem.PlanToDo) error {
 				completedTodos = append(completedTodos, todo.ID)
-				t.Logf("[%s] Completed todo %s: %s", llmName, todo.ID, todo.Description)
 				// Track tools used
 				if todo.Result != nil {
 					for _, toolCall := range todo.Result.ToolCalls {
@@ -315,10 +312,7 @@ Do not perform multiple DNS lookups. Execute tasks one at a time.`
 				return nil
 			}),
 			gollem.WithPlanToDoUpdatedHook(func(ctx context.Context, plan *gollem.Plan, changes []gollem.PlanToDoChange) error {
-				t.Logf("[%s] Plan updated", llmName)
-				for _, change := range changes {
-					t.Logf("  [%s] %s > %s", llmName, change.Type, change.Description)
-				}
+				_ = changes
 				return nil
 			}),
 		)
@@ -326,10 +320,7 @@ Do not perform multiple DNS lookups. Execute tasks one at a time.`
 		gt.NotNil(t, plan)
 
 		initialTodos := plan.GetToDos()
-		t.Logf("[%s] Plan created with %d todos:", llmName, len(initialTodos))
-		for i, todo := range initialTodos {
-			t.Logf("[%s]   %d. %s - %s", llmName, i+1, todo.Description, todo.Intent)
-		}
+		_ = initialTodos
 
 		// Execute plan with retry logic for API errors
 		result, executeErr := retryAPICall(t, func() (string, error) {
@@ -338,7 +329,6 @@ Do not perform multiple DNS lookups. Execute tasks one at a time.`
 
 		// Only fail if we couldn't execute after retries
 		if executeErr != nil {
-			t.Logf("[%s] Plan execution failed after retries: %v", llmName, executeErr)
 			// For some LLMs, we might want to continue the test to see what we can observe
 			if isTemporaryAPIError(executeErr) {
 				t.Skipf("[%s] API temporarily unavailable: %v", llmName, executeErr)
@@ -347,31 +337,19 @@ Do not perform multiple DNS lookups. Execute tasks one at a time.`
 		gt.NoError(t, executeErr)
 
 		finalTodos := plan.GetToDos()
-		t.Logf("[%s] Execution completed:", llmName)
-		t.Logf("[%s] Total todos created: %d", llmName, len(initialTodos))
-		t.Logf("[%s] Todos started: %d", llmName, len(executedTodos))
-		t.Logf("[%s] Todos completed: %d", llmName, len(completedTodos))
-		t.Logf("[%s] Tools used: %v", llmName, toolsUsed)
-		t.Logf("[%s] Final result length: %d characters", llmName, len(result))
 
 		// DEBUG: Log final result content for analysis
-		if llmName == "Gemini" {
-			t.Logf("[%s] Final result content: %s", llmName, result)
-		}
+		_ = llmName == "Gemini" // Note LLM type
 
 		// Verify that tools were available and used (reduced from 3 to 2)
 		gt.N(t, len(tools)).GreaterOrEqual(2)
-		t.Logf("[%s] Total tools available: %d", llmName, len(tools))
 
 		// Log tool usage
 		toolUsageCount := make(map[string]int)
 		for _, toolName := range toolsUsed {
 			toolUsageCount[toolName]++
 		}
-		t.Logf("[%s] Tool usage breakdown:", llmName)
-		for toolName, count := range toolUsageCount {
-			t.Logf("[%s]   %s: %d times", llmName, toolName, count)
-		}
+		_ = toolUsageCount
 
 		// Verify that the plan was executed successfully
 		gt.N(t, len(completedTodos)).Greater(0)
@@ -382,21 +360,11 @@ Do not perform multiple DNS lookups. Execute tasks one at a time.`
 		for _, toolName := range toolsUsed {
 			uniqueToolsUsed[toolName] = true
 		}
-		t.Logf("[%s] Unique tools used: %d", llmName, len(uniqueToolsUsed))
 
 		// Log the final state of all todos
-		for i, todo := range finalTodos {
-			if todo.Completed {
-				t.Logf("[%s] Todo %d (%s): %s - Status: %s", llmName, i+1, todo.ID, todo.Description, todo.Status)
-				if todo.Result != nil {
-					t.Logf("[%s]   Tool calls: %d", llmName, len(todo.Result.ToolCalls))
-				}
-			}
-		}
+		_ = finalTodos
 
 		// Summary for this LLM test
-		t.Logf("[%s] TEST SUMMARY: %d/%d todos completed, %d unique tools used",
-			llmName, len(completedTodos), len(initialTodos), len(uniqueToolsUsed))
 	}
 
 	t.Run("OpenAI", func(t *testing.T) {
@@ -677,7 +645,6 @@ func TestPlanModeToolExecutionWithLLM(t *testing.T) {
 		// Verify plan was loaded correctly
 		todos := plan.GetToDos()
 		gt.N(t, len(todos)).Equal(3)
-		t.Logf("[%s] Plan loaded with %d todos", llmName, len(todos))
 
 		// Execute the plan to trigger tool usage with retry logic
 		result, executeErr := retryAPICall(t, func() (string, error) {
@@ -685,27 +652,14 @@ func TestPlanModeToolExecutionWithLLM(t *testing.T) {
 		}, fmt.Sprintf("[%s] plan execution", llmName))
 
 		if executeErr != nil {
-			t.Logf("[%s] Plan execution failed: %v", llmName, executeErr)
 
 			// Check if this is the tool_use/tool_result error we're tracking
 			if strings.Contains(executeErr.Error(), "tool_use ids were found without tool_result blocks") {
-				t.Logf("[%s] 🎯 CAPTURED THE TOOL_USE/TOOL_RESULT ERROR: %v", llmName, executeErr)
 
 				// Log detailed plan state for debugging
 				finalTodos := plan.GetToDos()
-				t.Logf("[%s] Plan state at error:", llmName)
-				t.Logf("[%s]   Total todos: %d", llmName, len(finalTodos))
 
-				for i, todo := range finalTodos {
-					t.Logf("[%s]   Todo %d (%s): %s", llmName, i+1, todo.ID, todo.Description)
-					t.Logf("[%s]     Status: %s", llmName, todo.Status)
-					if todo.Result != nil {
-						t.Logf("[%s]     Tool calls: %d", llmName, len(todo.Result.ToolCalls))
-						for j, toolCall := range todo.Result.ToolCalls {
-							t.Logf("[%s]       Tool call %d: %s (ID: %s)", llmName, j+1, toolCall.Name, toolCall.ID)
-						}
-					}
-				}
+				_ = finalTodos
 
 				// Don't fail the test - we want to capture and analyze the error
 				return
@@ -717,7 +671,6 @@ func TestPlanModeToolExecutionWithLLM(t *testing.T) {
 			}
 
 			// For other errors, still log but don't fail
-			t.Logf("[%s] Plan execution failed with different error: %v", llmName, executeErr)
 			return
 		}
 
@@ -733,13 +686,7 @@ func TestPlanModeToolExecutionWithLLM(t *testing.T) {
 			}
 		}
 
-		t.Logf("[%s] ✅ Test completed successfully", llmName)
-		t.Logf("[%s]    Result: %s", llmName, result)
-		t.Logf("[%s]    Total tool calls executed: %d", llmName, totalToolCalls)
-
-		if totalToolCalls == 0 {
-			t.Logf("[%s] ⚠️  WARNING: No tools were used despite predefined plan requiring tool usage", llmName)
-		}
+		_ = totalToolCalls == 0 // Note tool usage status
 	}
 
 	t.Run("OpenAI", func(t *testing.T) {
@@ -1630,9 +1577,7 @@ func TestPlanMaxIterations(t *testing.T) {
 	// At least one todo should have hit the limit
 	limitReached := false
 	for _, todo := range todos {
-		t.Logf("Todo: %s, Status: %s", todo.Intent, todo.Status)
 		if todo.Result != nil {
-			t.Logf("  Result Output: %s", todo.Result.Output)
 			// Check if the output contains iteration limit information
 			if strings.Contains(todo.Result.Output, "Iteration limit reached") ||
 				strings.Contains(todo.Result.Output, "iteration limit") {
@@ -1642,7 +1587,6 @@ func TestPlanMaxIterations(t *testing.T) {
 	}
 
 	// Also check the final result
-	t.Logf("Final result: %s", result)
 
 	// The iteration limit should be reflected somewhere
 	gt.True(t, limitReached || strings.Contains(result, "iteration limit"))
@@ -2050,7 +1994,6 @@ func TestPlanIterationInfoInExecutorPrompt(t *testing.T) {
 	promptsWithIterationInfo := []int{}
 	for i, prompt := range executorPrompts {
 		// Log the full prompt for debugging
-		t.Logf("Executor prompt %d (full):\n%s\n", i+1, prompt)
 
 		// Check if this prompt contains iteration info
 		if strings.Contains(prompt, "Iteration Status") {
@@ -2060,7 +2003,6 @@ func TestPlanIterationInfoInExecutorPrompt(t *testing.T) {
 			lines := strings.Split(prompt, "\n")
 			for _, line := range lines {
 				if strings.Contains(line, "Iteration Status") {
-					t.Logf("Found iteration status: %s", strings.TrimSpace(line))
 
 					// Verify the format matches the template
 					gt.True(t, strings.Contains(line, "of"))
@@ -2070,8 +2012,6 @@ func TestPlanIterationInfoInExecutorPrompt(t *testing.T) {
 			}
 		}
 	}
-
-	t.Logf("Prompts with iteration info: %v (out of %d total)", promptsWithIterationInfo, len(executorPrompts))
 
 	// The executor should have iteration info from the first call
 	if len(promptsWithIterationInfo) == 0 {
@@ -2137,19 +2077,11 @@ func TestPlanIterationLimitInfoInReflectorPrompt(t *testing.T) {
 
 	// Check if reflector prompt contains iteration limit info
 	foundIterationLimitInfo := false
-	for i, prompt := range reflectorPrompts {
-		// Truncate prompt for display if it's too long
-		displayPrompt := prompt
-		if len(prompt) > 500 {
-			displayPrompt = prompt[:500] + "..."
-		}
-		t.Logf("Reflector prompt %d (first 500 chars):\n%s\n", i+1, displayPrompt)
-
+	for _, prompt := range reflectorPrompts {
 		if strings.Contains(prompt, "Iteration Limit Status:") ||
 			strings.Contains(prompt, "iteration limit") ||
 			strings.Contains(prompt, "reached its iteration limit") {
 			foundIterationLimitInfo = true
-			t.Logf("Found iteration limit info in reflector prompt %d", i+1)
 		}
 	}
 
@@ -2157,19 +2089,13 @@ func TestPlanIterationLimitInfoInReflectorPrompt(t *testing.T) {
 	todos := plan.GetToDos()
 	iterationLimitHit := false
 	for _, todo := range todos {
-		t.Logf("Todo: %s, Status: %s", todo.Intent, todo.Status)
 		if todo.Result != nil {
-			t.Logf("  Result Output: %s", todo.Result.Output)
 			if strings.Contains(todo.Result.Output, "Iteration limit reached") {
 				iterationLimitHit = true
-				t.Logf("Found iteration limit in todo result: %s", todo.Result.Output)
 				break
 			}
 		}
 	}
-
-	t.Logf("Iteration limit hit: %v", iterationLimitHit)
-	t.Logf("Found iteration limit info in reflector: %v", foundIterationLimitInfo)
 
 	// The main test goal: verify that when iteration limit is hit,
 	// the reflector prompt contains information about it
@@ -2222,17 +2148,14 @@ func TestPlanIterationInfoDuringNormalExecution(t *testing.T) {
 	executorPromptsWithIterationInfo := 0
 	totalExecutorPrompts := 0
 
-	for i, input := range mockClient.capturedInputs {
+	for _, input := range mockClient.capturedInputs {
 		if strings.Contains(input, "Current task:") {
 			totalExecutorPrompts++
 			if strings.Contains(input, "Iteration Status") {
 				executorPromptsWithIterationInfo++
-				t.Logf("Found iteration info in executor prompt %d", i)
 			}
 		}
 	}
-
-	t.Logf("Executor prompts with iteration info: %d/%d", executorPromptsWithIterationInfo, totalExecutorPrompts)
 
 	// When max iterations is set, we expect iteration info in all executor prompts
 	if totalExecutorPrompts > 0 && executorPromptsWithIterationInfo != totalExecutorPrompts {

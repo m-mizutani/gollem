@@ -35,7 +35,6 @@ func TestClientMalformedFunctionCallErrorHandling(t *testing.T) {
 		// - finish_reason
 		// - suggested_action
 
-		t.Log("Malformed function call error handling test passed")
 	})
 }
 
@@ -70,7 +69,6 @@ func TestClientRetryLogic(t *testing.T) {
 		expectedMinDelay := 300 * time.Millisecond
 		gt.Value(t, elapsed >= expectedMinDelay).Equal(true)
 
-		t.Logf("Retry logic test completed in %v", elapsed)
 	})
 }
 
@@ -98,9 +96,7 @@ func TestClientLargeTextDetection(t *testing.T) {
 				isLarge := len(tc.content) > 1000
 				gt.Value(t, isLarge).Equal(tc.isLarge)
 
-				if isLarge {
-					t.Logf("Large text detected: %d characters", len(tc.content))
-				}
+				_ = isLarge // Note detected state
 			})
 		}
 	})
@@ -117,11 +113,9 @@ func TestClientToolSchemaValidation(t *testing.T) {
 		gt.Value(t, spec.Parameters).NotEqual(nil)
 
 		// Check that string parameters have constraints
-		for name, param := range spec.Parameters {
+		for _, param := range spec.Parameters {
 			if param.Type == gollem.TypeString {
-				if param.MaxLength == nil {
-					t.Logf("Warning: parameter %s has no MaxLength constraint", name)
-				}
+				_ = param.MaxLength == nil // Check constraint presence
 			}
 		}
 	})
@@ -137,25 +131,18 @@ func TestClientToolSchemaValidation(t *testing.T) {
 		for _, name := range problematicNames {
 			if _, exists := spec.Parameters[name]; exists {
 				hasProblematicNames = true
-				t.Logf("Warning: parameter name '%s' might conflict with JSON schema keywords", name)
 			}
 		}
 
-		if hasProblematicNames {
-			t.Log("Tool has potentially problematic parameter names")
-		}
+		_ = hasProblematicNames // Note problematic names detected
 	})
 }
 
 func TestGeminiClientIssues(t *testing.T) {
-	t.Log("Testing known Gemini client issues:")
 
 	t.Run("large_text_content_schema", func(t *testing.T) {
 		tool := &largeTextClientTool{}
 		converted := gemini.ConvertTool(tool)
-
-		t.Logf("Large text content tool schema:")
-		t.Logf("Name: %s", converted.Name)
 
 		gt.Value(t, converted.Name).Equal("large_text_client")
 		gt.Value(t, len(converted.Parameters.Properties)).Equal(1)
@@ -165,23 +152,13 @@ func TestGeminiClientIssues(t *testing.T) {
 		gt.Value(t, contentParam.Type).Equal(genai.TypeString)
 
 		// Check for length constraints
-		if contentParam.MaxLength == nil || *contentParam.MaxLength == 0 {
-			t.Logf("WARNING: content field has no length constraints - this might cause issues with large text")
-		}
+		_ = contentParam.MaxLength == nil || *contentParam.MaxLength == 0 // Note constraint status
 
-		// This tool would be problematic without proper constraints
-		if contentParam.MaxLength == nil || *contentParam.MaxLength == 0 {
-			t.Log("This tool could potentially trigger FinishReasonMalformedFunctionCall")
-		}
-
-		t.Log("Schema validation passed")
 	})
 
 	t.Run("problematic_field_names", func(t *testing.T) {
 		tool := &problematicFieldClientTool{}
 		converted := gemini.ConvertTool(tool)
-
-		t.Logf("Problematic fields tool:")
 
 		gt.Value(t, converted.Name).Equal("problematic_field_client")
 		gt.Value(t, len(converted.Parameters.Properties)).Equal(4)
@@ -191,7 +168,6 @@ func TestGeminiClientIssues(t *testing.T) {
 		for _, name := range problematicNames {
 			param := converted.Parameters.Properties[name]
 			gt.Value(t, param).NotEqual(nil)
-			t.Logf("Field '%s' converted successfully", name)
 		}
 
 		// Check unicode field
@@ -200,9 +176,7 @@ func TestGeminiClientIssues(t *testing.T) {
 		gt.Value(t, unicodeParam.Type).Equal(genai.TypeString)
 
 		// Log the unicode description to verify it's handled correctly
-		t.Logf("Unicode description: %s", unicodeParam.Description)
 
-		t.Log("Problematic fields validation passed")
 	})
 }
 

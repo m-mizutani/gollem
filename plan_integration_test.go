@@ -153,8 +153,6 @@ func testDirectResponse(t *testing.T) {
 		// We expect "4" to be mentioned in the response
 		gt.Value(t, strings.Contains(strings.ToLower(result), "4")).Equal(true)
 
-		t.Logf("[%s] Direct response result: %s", providerName, result)
-
 		// For direct_response approach, there should be minimal or no tool usage
 		todos := plan.GetToDos()
 		toolUsageTodos := 0
@@ -166,7 +164,6 @@ func testDirectResponse(t *testing.T) {
 		}
 
 		// Direct response should minimize tool usage
-		t.Logf("[%s] Tool usage todos in direct response: %d/%d", providerName, toolUsageTodos, len(todos))
 	})
 }
 
@@ -185,8 +182,6 @@ func testNewPlan(t *testing.T) {
 		result, err := plan.Execute(context.Background())
 		gt.NoError(t, err)
 		gt.Value(t, result).NotEqual("")
-
-		t.Logf("[%s] New plan result: %s", providerName, result)
 
 		// For new_plan approach, we should see multiple todos with tool usage
 		todos := plan.GetToDos()
@@ -207,11 +202,8 @@ func testNewPlan(t *testing.T) {
 		}
 
 		// For complex calculations, we expect tool usage
-		if !toolUsageFound {
-			t.Logf("[%s] Warning: Expected tool usage but didn't find clear evidence", providerName)
-		}
+		_ = toolUsageFound // Note: LLM behavior can vary
 
-		t.Logf("[%s] Created %d todos for new plan", providerName, len(todos))
 	})
 }
 
@@ -231,8 +223,7 @@ func testUpdatePlan(t *testing.T) {
 		_, err = initialPlan.Execute(context.Background())
 		gt.NoError(t, err)
 
-		initialTodos := initialPlan.GetToDos()
-		t.Logf("[%s] Initial plan had %d todos", providerName, len(initialTodos))
+		_ = initialPlan.GetToDos() // initialTodos
 
 		// Now create an updated plan based on the previous one
 		updatedPlan, err := agent.Plan(context.Background(),
@@ -245,17 +236,13 @@ func testUpdatePlan(t *testing.T) {
 		gt.NoError(t, err)
 		gt.Value(t, result).NotEqual("")
 
-		t.Logf("[%s] Updated plan result: %s", providerName, result)
-
 		// The updated plan should have additional todos or modified todos
-		updatedTodos := updatedPlan.GetToDos()
-		t.Logf("[%s] Updated plan has %d todos", providerName, len(updatedTodos))
+		_ = updatedPlan.GetToDos() // updatedTodos
 
 		// Check that the update incorporates the old plan's context
 		// The clarified goal should reference the previous work
 		clarifiedGoal := updatedPlan.GetClarifiedGoal()
 		gt.Value(t, clarifiedGoal).NotEqual("")
-		t.Logf("[%s] Clarified goal: %s", providerName, clarifiedGoal)
 	})
 }
 
@@ -298,31 +285,9 @@ func testApproachSelection(t *testing.T) {
 				gt.Value(t, result).NotEqual("")
 
 				todos := plan.GetToDos()
-				hasToolUsage := false
-
-				for _, todo := range todos {
-					if todo.Completed && todo.Result != nil {
-						// Check if any todo used tools (has tool call results)
-						if todo.Result.Data != nil {
-							if _, hasResult := todo.Result.Data["result"]; hasResult {
-								hasToolUsage = true
-								break
-							}
-						}
-					}
-				}
-
-				t.Logf("[%s] %s: Tool usage expected=%t, found=%t, todos=%d",
-					providerName, tc.name, tc.expectTools, hasToolUsage, len(todos))
-
 				// Note: We don't make this a hard assertion because LLM behavior
 				// can vary, but we log the results for analysis
-				if tc.expectTools && !hasToolUsage {
-					t.Logf("[%s] Warning: Expected tool usage but didn't find it for: %s", providerName, tc.prompt)
-				}
-				if !tc.expectTools && hasToolUsage {
-					t.Logf("[%s] Note: Unexpected tool usage for simple prompt: %s", providerName, tc.prompt)
-				}
+				_ = todos // Check tool usage if needed
 			})
 		}
 	})
@@ -348,12 +313,7 @@ func testDirectResponseNoTools(t *testing.T) {
 		gt.NoError(t, err)
 		gt.Value(t, result).NotEqual("")
 
-		t.Logf("[%s] Direct response result: %s", providerName, result)
-
 		// The tracking tool should not have been called for a simple greeting
-		if toolCalled {
-			t.Logf("[%s] Warning: Tool was called unnecessarily for direct response", providerName)
-		}
 
 		// Check that the result contains a greeting
 		lowerResult := strings.ToLower(result)
@@ -410,7 +370,6 @@ func runWithEachProvider(t *testing.T, testFunc func(t *testing.T, client gollem
 				}
 				client, err := openai.New(ctx, apiKey)
 				if err != nil {
-					t.Logf("Failed to create OpenAI client: %v", err)
 					return nil, false
 				}
 				return client, true
@@ -425,7 +384,6 @@ func runWithEachProvider(t *testing.T, testFunc func(t *testing.T, client gollem
 				}
 				client, err := claude.New(ctx, apiKey)
 				if err != nil {
-					t.Logf("Failed to create Claude client: %v", err)
 					return nil, false
 				}
 				return client, true
@@ -441,7 +399,6 @@ func runWithEachProvider(t *testing.T, testFunc func(t *testing.T, client gollem
 				}
 				client, err := gemini.New(ctx, projectID, location)
 				if err != nil {
-					t.Logf("Failed to create Gemini client: %v", err)
 					return nil, false
 				}
 				return client, true
@@ -465,8 +422,6 @@ func runWithEachProvider(t *testing.T, testFunc func(t *testing.T, client gollem
 				name:   provider.name,
 				client: client,
 			})
-		} else {
-			t.Logf("Skipping %s: required environment variables not set", provider.name)
 		}
 	}
 

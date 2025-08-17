@@ -293,6 +293,18 @@ func (s *Session) convertInputs(input ...gollem.Input) ([]*genai.Part, error) {
 		switch v := in.(type) {
 		case gollem.Text:
 			parts = append(parts, &genai.Part{Text: string(v)})
+		case gollem.Image:
+			// Check if format is supported by Gemini (no GIF support)
+			if v.MimeType() == string(gollem.ImageMimeTypeGIF) {
+				return nil, goerr.New("GIF format is not supported by Gemini", goerr.V("mime_type", v.MimeType()))
+			}
+
+			parts = append(parts, &genai.Part{
+				InlineData: &genai.Blob{
+					MIMEType: v.MimeType(),
+					Data:     v.Data(),
+				},
+			})
 		case gollem.FunctionResponse:
 			if v.Error != nil {
 				parts = append(parts, &genai.Part{

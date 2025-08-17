@@ -32,7 +32,6 @@ func TestTokenCounts(t *testing.T) {
 		gt.N(t, resp.InputToken).Greater(0)
 		gt.N(t, resp.OutputToken).Greater(0)
 
-		t.Logf("InputToken: %d, OutputToken: %d", resp.InputToken, resp.OutputToken)
 	})
 
 	t.Run("GenerateStream should return non-negative token counts", func(t *testing.T) {
@@ -66,6 +65,5 @@ func TestTokenCounts(t *testing.T) {
 		hasPositiveTokens := maxInputTokens > 0 && maxOutputTokens > 0
 		gt.V(t, hasPositiveTokens).Equal(true)
 
-		t.Logf("Max streaming tokens - InputToken: %d, OutputToken: %d", maxInputTokens, maxOutputTokens)
 	})
 }

@@ -1001,7 +1001,6 @@ func TestIsTokenLimitError_RealLLMs(t *testing.T) {
 			if execErr != nil {
 				break
 			}
-			t.Logf("No error with %d tokens, trying larger...", size)
 		}
 
 		// Ensure we got an error
@@ -1010,11 +1009,9 @@ func TestIsTokenLimitError_RealLLMs(t *testing.T) {
 		}
 
 		// Log the error for debugging
-		t.Logf("OpenAI error: %v", execErr)
 
 		// Verify that isTokenLimitError correctly identifies the error
 		isTokenError := gollem.IsTokenLimitError(execErr)
-		t.Logf("isTokenLimitError returned: %v", isTokenError)
 
 		// isTokenLimitError should return true for token limit errors
 		gt.True(t, isTokenError)
@@ -1047,7 +1044,6 @@ func TestIsTokenLimitError_RealLLMs(t *testing.T) {
 			if execErr != nil {
 				break
 			}
-			t.Logf("No error with %d tokens, trying larger...", size)
 		}
 
 		// Ensure we got an error
@@ -1056,11 +1052,9 @@ func TestIsTokenLimitError_RealLLMs(t *testing.T) {
 		}
 
 		// Log the error for debugging
-		t.Logf("Claude error: %v", execErr)
 
 		// Verify that isTokenLimitError correctly identifies the error
 		isTokenError := gollem.IsTokenLimitError(execErr)
-		t.Logf("isTokenLimitError returned: %v", isTokenError)
 
 		// isTokenLimitError should return true for token limit errors
 		gt.True(t, isTokenError)
@@ -1097,11 +1091,9 @@ func TestIsTokenLimitError_RealLLMs(t *testing.T) {
 
 		if err != nil {
 			// Log the error for debugging
-			t.Logf("Gemini error: %v", err)
 
 			// Verify that isTokenLimitError correctly identifies the error
 			isTokenError := gollem.IsTokenLimitError(err)
-			t.Logf("isTokenLimitError returned: %v", isTokenError)
 
 			// isTokenLimitError should return true for token limit errors
 			gt.True(t, isTokenError)

@@ -554,7 +554,6 @@ func testLargeConversationCompaction(t *testing.T, llmClient gollem.LLMClient, h
 	ctx := context.Background()
 
 	originalCount := history.ToCount()
-	t.Logf("Original conversation: %d messages", originalCount)
 
 	// Create compactor with aggressive compaction settings
 	compactor := gollem.NewHistoryCompactor(llmClient,
@@ -575,9 +574,6 @@ func testLargeConversationCompaction(t *testing.T, llmClient gollem.LLMClient, h
 	gt.Equal(t, originalCount, compacted.OriginalLen)
 
 	compactedCount := compacted.ToCount()
-	t.Logf("Compacted conversation: %d messages", compactedCount)
-	t.Logf("Compaction ratio: %.1f%%", float64(compactedCount)/float64(originalCount)*100)
-	t.Logf("Summary preview: %s", truncateString(compacted.Summary, 200))
 
 	// Verify significant compaction occurred
 	gt.True(t, compactedCount < originalCount)
@@ -810,15 +806,10 @@ func verifySummaryContent(t *testing.T, summary string) {
 		}
 	}
 
-	if len(missedTopics) > 0 {
-		t.Logf("Warning: Summary might be missing some topics: %v", missedTopics)
-		// Don't fail the test, as LLMs might use synonyms or rephrase
-		// but log it for manual inspection
-	}
+	_ = missedTopics // Don't fail the test, as LLMs might use synonyms or rephrase
 
 	// Verify summary is substantial (not too short)
 	wordCount := len(strings.Fields(summary))
-	t.Logf("Summary word count: %d", wordCount)
 	gt.True(t, wordCount >= 50)
 }
 
@@ -837,11 +828,7 @@ func verifyRecentMessagesPreserved(t *testing.T, _, compacted *gollem.History) {
 	var recentContent string
 
 	// Get content from the last 5 messages
-	if compacted.ToCount() >= 5 {
-		// This is a simplified check - in reality we'd need to handle each LLM type
-		// For now, just verify the message count is preserved correctly
-		t.Logf("Compacted history has %d messages", compacted.ToCount())
-	}
+	_ = compacted.ToCount() >= 5 // This is a simplified check - verify message count is preserved
 
 	// For this test, we'll just verify that some preservation occurred
 	foundTopics := 0
@@ -854,15 +841,7 @@ func verifyRecentMessagesPreserved(t *testing.T, _, compacted *gollem.History) {
 		}
 	}
 
-	t.Logf("Found %d/%d recent topics in compacted history", foundTopics, len(recentTopics))
 	gt.True(t, foundTopics >= 1)
-}
-
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }
 
 // TestHistoryCompactor_SummaryInMessageHistory verifies that summaries are properly

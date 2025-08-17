@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -525,7 +526,7 @@ func TestFacilitator(t *testing.T) {
 
 		facilitator := gollem.NewDefaultFacilitator(client)
 		loopCount := 0
-		facilitatorCalled := false
+		_ = false // facilitatorCalled
 
 		s := gollem.New(client,
 			gollem.WithFacilitator(facilitator),
@@ -533,15 +534,12 @@ func TestFacilitator(t *testing.T) {
 			gollem.WithSystemPrompt("You are an assistant that can use tools. When asked to complete a task and end the session, you must use the respond_to_user tool to properly end the session."),
 			gollem.WithLoopHook(func(ctx context.Context, loop int, input []gollem.Input) error {
 				loopCount++
-				t.Logf("Loop called: %d", loop)
 				return nil
 			}),
 			gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-				t.Logf("[Message received]: %s", msg)
 				return nil
 			}),
 			gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
-				t.Logf("[Tool request received]: %s (%v)", tool.Name, tool.Arguments)
 				return nil
 			}),
 			gollem.WithLoopLimit(10),
@@ -550,8 +548,6 @@ func TestFacilitator(t *testing.T) {
 		ctx := t.Context()
 		err := s.Execute(ctx, "Get a random number between 1 and 10")
 		gt.NoError(t, err)
-
-		t.Logf("Test completed: facilitatorCalled=%v, loopCount=%d", facilitatorCalled, loopCount)
 
 		// Verify that the session completed without error (indicated by successful Execute completion)
 
@@ -787,4 +783,243 @@ func TestIsCompatibleHistory(t *testing.T) {
 			gt.Error(t, geminiClient.IsCompatibleHistory(ctx, claudeHistory))
 		}
 	})
+}
+
+// Image tests
+func TestNewImage(t *testing.T) {
+	t.Run("Auto-detect JPEG", func(t *testing.T) {
+		data, err := os.ReadFile("testdata/test_image.jpg")
+		gt.NoError(t, err)
+
+		img, err := gollem.NewImage(data)
+		gt.NoError(t, err)
+		gt.Equal(t, string(gollem.ImageMimeTypeJPEG), img.MimeType())
+		gt.Equal(t, data, img.Data())
+		gt.V(t, len(img.Base64()) > 0)
+	})
+
+	t.Run("Auto-detect PNG", func(t *testing.T) {
+		data, err := os.ReadFile("testdata/test_image.png")
+		gt.NoError(t, err)
+
+		img, err := gollem.NewImage(data)
+		gt.NoError(t, err)
+		gt.Equal(t, string(gollem.ImageMimeTypePNG), img.MimeType())
+		gt.Equal(t, data, img.Data())
+	})
+
+	t.Run("Auto-detect GIF", func(t *testing.T) {
+		data, err := os.ReadFile("testdata/test_image.gif")
+		gt.NoError(t, err)
+
+		img, err := gollem.NewImage(data)
+		gt.NoError(t, err)
+		gt.Equal(t, string(gollem.ImageMimeTypeGIF), img.MimeType())
+		gt.Equal(t, data, img.Data())
+	})
+
+	t.Run("Explicit MIME type", func(t *testing.T) {
+		data, err := os.ReadFile("testdata/test_image.jpg")
+		gt.NoError(t, err)
+
+		img, err := gollem.NewImage(data, gollem.WithMimeType(gollem.ImageMimeTypeJPEG))
+		gt.NoError(t, err)
+		gt.Equal(t, string(gollem.ImageMimeTypeJPEG), img.MimeType())
+	})
+
+	t.Run("Invalid format", func(t *testing.T) {
+		data := []byte("not an image")
+
+		_, err := gollem.NewImage(data)
+		gt.Error(t, err)
+		gt.V(t, strings.Contains(err.Error(), "unsupported image format"))
+	})
+
+	t.Run("Too large image", func(t *testing.T) {
+		// Create data larger than 20MB
+		largeData := make([]byte, 21*1024*1024)
+		// Add JPEG header to make it valid
+		largeData[0] = 0xFF
+		largeData[1] = 0xD8
+		largeData[2] = 0xFF
+
+		_, err := gollem.NewImage(largeData)
+		gt.Error(t, err)
+		gt.V(t, strings.Contains(err.Error(), "image size exceeds maximum limit"))
+	})
+}
+
+func TestNewImageFromReader(t *testing.T) {
+	t.Run("Auto-detect from reader", func(t *testing.T) {
+		file, err := os.Open("testdata/test_image.jpg")
+		gt.NoError(t, err)
+		defer file.Close()
+
+		img, err := gollem.NewImageFromReader(file)
+		gt.NoError(t, err)
+		gt.Equal(t, string(gollem.ImageMimeTypeJPEG), img.MimeType())
+	})
+
+	t.Run("Explicit MIME type from reader", func(t *testing.T) {
+		file, err := os.Open("testdata/test_image.png")
+		gt.NoError(t, err)
+		defer file.Close()
+
+		img, err := gollem.NewImageFromReader(file, gollem.WithMimeType(gollem.ImageMimeTypePNG))
+		gt.NoError(t, err)
+		gt.Equal(t, string(gollem.ImageMimeTypePNG), img.MimeType())
+	})
+
+	t.Run("Read error", func(t *testing.T) {
+		reader := strings.NewReader("invalid image data")
+
+		_, err := gollem.NewImageFromReader(reader)
+		gt.Error(t, err)
+		gt.V(t, strings.Contains(err.Error(), "unsupported image format"))
+	})
+}
+
+func TestImageFormatDetection(t *testing.T) {
+	testCases := []struct {
+		name     string
+		filename string
+		expected gollem.ImageMimeType
+	}{
+		{"JPEG", "testdata/test_image.jpg", gollem.ImageMimeTypeJPEG},
+		{"PNG", "testdata/test_image.png", gollem.ImageMimeTypePNG},
+		{"GIF", "testdata/test_image.gif", gollem.ImageMimeTypeGIF},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := os.ReadFile(tc.filename)
+			gt.NoError(t, err)
+
+			img, err := gollem.NewImage(data)
+			gt.NoError(t, err)
+			gt.Equal(t, string(tc.expected), img.MimeType())
+		})
+	}
+}
+
+func TestImageValidation(t *testing.T) {
+	t.Run("Valid MIME types", func(t *testing.T) {
+		validTypes := []gollem.ImageMimeType{
+			gollem.ImageMimeTypeJPEG,
+			gollem.ImageMimeTypePNG,
+			gollem.ImageMimeTypeGIF,
+			gollem.ImageMimeTypeWebP,
+			gollem.ImageMimeTypeHEIC,
+			gollem.ImageMimeTypeHEIF,
+		}
+
+		for _, mimeType := range validTypes {
+			gt.True(t, gollem.IsValidImageMimeType(mimeType))
+		}
+	})
+
+	t.Run("Invalid MIME type", func(t *testing.T) {
+		invalidType := gollem.ImageMimeType("image/invalid")
+		gt.False(t, gollem.IsValidImageMimeType(invalidType))
+
+		data := []byte{0xFF, 0xD8, 0xFF, 0xE0} // Valid JPEG header
+		_, err := gollem.NewImage(data, gollem.WithMimeType(invalidType))
+		gt.Error(t, err)
+		gt.V(t, strings.Contains(err.Error(), "unsupported image format"))
+	})
+}
+
+// Test image functionality with each LLM client
+func TestImageWithLLMClients(t *testing.T) {
+	// Prepare test image
+	data, err := os.ReadFile("testdata/test_image.jpg")
+	if err != nil {
+		t.Skipf("Test image not found: %v", err)
+	}
+
+	img, err := gollem.NewImage(data)
+	gt.NoError(t, err)
+
+	t.Run("Claude", func(t *testing.T) {
+		client := newClaudeClient(t)
+		session, err := client.NewSession(context.Background())
+		gt.NoError(t, err)
+
+		// Test that we can send an image and get meaningful response about image content
+		resp, err := session.GenerateContent(context.Background(),
+			gollem.Text("Describe what you see in this image. What color is the dominant color?"), img)
+		gt.NoError(t, err)
+		gt.A(t, resp.Texts).Longer(0)
+
+		// Verify the response mentions the image content (red square)
+		responseText := strings.ToLower(strings.Join(resp.Texts, " "))
+		hasExpectedContent := strings.Contains(responseText, "red") ||
+			strings.Contains(responseText, "square") ||
+			strings.Contains(responseText, "rectangle") ||
+			strings.Contains(responseText, "color")
+		gt.V(t, hasExpectedContent).Equal(true)
+	})
+
+	t.Run("OpenAI", func(t *testing.T) {
+		client := newOpenAIClient(t)
+		session, err := client.NewSession(context.Background())
+		gt.NoError(t, err)
+
+		// Test that we can send an image and get meaningful response about image content
+		resp, err := session.GenerateContent(context.Background(),
+			gollem.Text("Describe what you see in this image. What color is the dominant color?"), img)
+		gt.NoError(t, err)
+		gt.A(t, resp.Texts).Longer(0)
+
+		// Verify the response mentions the image content (red square)
+		responseText := strings.ToLower(strings.Join(resp.Texts, " "))
+		hasExpectedContent := strings.Contains(responseText, "red") ||
+			strings.Contains(responseText, "square") ||
+			strings.Contains(responseText, "rectangle") ||
+			strings.Contains(responseText, "color")
+		gt.V(t, hasExpectedContent).Equal(true)
+	})
+
+	t.Run("Gemini", func(t *testing.T) {
+		client := newGeminiClient(t)
+		session, err := client.NewSession(context.Background())
+		gt.NoError(t, err)
+
+		// Test that we can send an image and get meaningful response about image content
+		resp, err := session.GenerateContent(context.Background(),
+			gollem.Text("Describe what you see in this image. What color is the dominant color?"), img)
+		gt.NoError(t, err)
+		gt.A(t, resp.Texts).Longer(0)
+
+		// Verify the response mentions the image content (red square)
+		responseText := strings.ToLower(strings.Join(resp.Texts, " "))
+		hasExpectedContent := strings.Contains(responseText, "red") ||
+			strings.Contains(responseText, "square") ||
+			strings.Contains(responseText, "rectangle") ||
+			strings.Contains(responseText, "color")
+		gt.V(t, hasExpectedContent).Equal(true)
+	})
+}
+
+// Test GIF format restriction for Gemini
+func TestGeminiGIFRestriction(t *testing.T) {
+	client := newGeminiClient(t)
+	session, err := client.NewSession(context.Background())
+	gt.NoError(t, err)
+
+	// Create a GIF image
+	data, err := os.ReadFile("testdata/test_image.gif")
+	if err != nil {
+		t.Skipf("Test GIF image not found: %v", err)
+	}
+
+	gifImg, err := gollem.NewImage(data)
+	gt.NoError(t, err)
+	gt.Equal(t, string(gollem.ImageMimeTypeGIF), gifImg.MimeType())
+
+	// Gemini should reject GIF format
+	_, err = session.GenerateContent(context.Background(),
+		gollem.Text("What do you see in this image?"), gifImg)
+	gt.Error(t, err)
+	gt.V(t, strings.Contains(err.Error(), "GIF format is not supported"))
 }

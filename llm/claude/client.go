@@ -253,19 +253,36 @@ func contentBlockToString(content anthropic.ContentBlockParamUnion) string {
 
 // convertGollemInputsToClaude is a shared helper function that converts gollem.Input to Claude messages and tool results
 // This function is used by both the standard Claude client and the Vertex AI Claude client to avoid code duplication.
+// IMPORTANT: Multiple consecutive Text and Image inputs are combined into a single user message with multiple content blocks,
+// as per the Anthropic API specification for multi-modal messages.
 func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
 	logger := ctxlog.From(ctx)
 	var toolResults []anthropic.ContentBlockParamUnion
 	var messages []anthropic.MessageParam
 
+	// Accumulate consecutive user content (Text/Image) into a single message
+	var userContentBlocks []anthropic.ContentBlockParamUnion
+
 	for _, in := range input {
 		switch v := in.(type) {
 		case gollem.Text:
-			messages = append(messages, anthropic.NewUserMessage(
-				anthropic.NewTextBlock(string(v)),
-			))
+			userContentBlocks = append(userContentBlocks, anthropic.NewTextBlock(string(v)))
+
+		case gollem.Image:
+			// Create image block for Claude
+			imageBlock := anthropic.NewImageBlock(anthropic.Base64ImageSourceParam{
+				Type:      "base64",
+				MediaType: anthropic.Base64ImageSourceMediaType(v.MimeType()),
+				Data:      v.Base64(),
+			})
+			userContentBlocks = append(userContentBlocks, imageBlock)
 
 		case gollem.FunctionResponse:
+			// If we have accumulated user content, create a message for it
+			if len(userContentBlocks) > 0 {
+				messages = append(messages, anthropic.NewUserMessage(userContentBlocks...))
+				userContentBlocks = nil
+			}
 			// Handle error cases first
 			isError := v.Error != nil
 			var response string
@@ -306,6 +323,11 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 		default:
 			return nil, nil, goerr.Wrap(gollem.ErrInvalidParameter, "invalid input")
 		}
+	}
+
+	// Create final user message if there's any remaining user content
+	if len(userContentBlocks) > 0 {
+		messages = append(messages, anthropic.NewUserMessage(userContentBlocks...))
 	}
 
 	if len(toolResults) > 0 {
