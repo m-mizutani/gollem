@@ -932,7 +932,7 @@ func TestImageValidation(t *testing.T) {
 // Test image functionality with each LLM client
 func TestImageWithLLMClients(t *testing.T) {
 	t.Parallel()
-	
+
 	// Prepare test image
 	data, err := os.ReadFile("testdata/test_image.jpg")
 	if err != nil {
@@ -944,7 +944,7 @@ func TestImageWithLLMClients(t *testing.T) {
 
 	testFn := func(t *testing.T, client gollem.LLMClient) {
 		ctx := t.Context()
-		
+
 		// First session: Ask only about color
 		session1, err := client.NewSession(ctx)
 		gt.NoError(t, err).Required()

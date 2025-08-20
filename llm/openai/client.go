@@ -16,6 +16,9 @@ import (
 var (
 	// openaiPromptScope is the logging scope for OpenAI prompts
 	openaiPromptScope = ctxlog.NewScope("openai_prompt", ctxlog.EnabledBy("GOLLEM_LOGGING_OPENAI_PROMPT"))
+
+	// openaiResponseScope is the logging scope for OpenAI responses
+	openaiResponseScope = ctxlog.NewScope("openai_response", ctxlog.EnabledBy("GOLLEM_LOGGING_OPENAI_RESPONSE"))
 )
 
 // generationParameters represents the parameters for text generation.
@@ -410,6 +413,34 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		})
 	}
 
+	// Log responses if GOLLEM_LOGGING_OPENAI_RESPONSE is set
+	responseLogger := ctxlog.From(ctx, openaiResponseScope)
+	var logContent []map[string]any
+	if message.Content != "" {
+		logContent = append(logContent, map[string]any{
+			"type": "text",
+			"text": message.Content,
+		})
+	}
+	for _, toolCall := range message.ToolCalls {
+		logContent = append(logContent, map[string]any{
+			"type":      "tool_use",
+			"id":        toolCall.ID,
+			"name":      toolCall.Function.Name,
+			"arguments": toolCall.Function.Arguments,
+		})
+	}
+	responseLogger.Info("OpenAI response",
+		"model", resp.Model,
+		"finish_reason", resp.Choices[0].FinishReason,
+		"usage", map[string]any{
+			"prompt_tokens":     resp.Usage.PromptTokens,
+			"completion_tokens": resp.Usage.CompletionTokens,
+			"total_tokens":      resp.Usage.TotalTokens,
+		},
+		"content", logContent,
+	)
+
 	return response, nil
 }
 
@@ -563,6 +594,31 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				Content: textContent,
 			})
 		}
+
+		// Log streaming response if GOLLEM_LOGGING_OPENAI_RESPONSE is set
+		responseLogger := ctxlog.From(ctx, openaiResponseScope)
+		var logContent []map[string]any
+		if textContent != "" {
+			logContent = append(logContent, map[string]any{
+				"type": "text",
+				"text": textContent,
+			})
+		}
+		for _, toolCall := range toolCalls {
+			logContent = append(logContent, map[string]any{
+				"type":      "tool_use",
+				"id":        toolCall.ID,
+				"name":      toolCall.Function.Name,
+				"arguments": toolCall.Function.Arguments,
+			})
+		}
+		responseLogger.Info("OpenAI streaming response",
+			"usage", map[string]any{
+				"prompt_tokens":     totalInputTokens,
+				"completion_tokens": totalOutputTokens,
+			},
+			"content", logContent,
+		)
 
 		// Send final response with complete token usage if available
 		if totalInputTokens > 0 || totalOutputTokens > 0 {

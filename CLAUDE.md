@@ -144,3 +144,90 @@ t.Run("success case", runTest(testCase{
     expected: "BLUE",
 }))
 ```
+
+## Logging
+
+### LLM Request and Response Logging
+
+gollem provides detailed logging capabilities for LLM interactions to support debugging, monitoring, and observability.
+
+#### Prompt Logging
+
+Each LLM provider supports prompt logging through dedicated environment variables:
+
+- **Claude**: `GOLLEM_LOGGING_CLAUDE_PROMPT`
+- **OpenAI**: `GOLLEM_LOGGING_OPENAI_PROMPT`  
+- **Gemini**: `GOLLEM_LOGGING_GEMINI_PROMPT`
+
+When enabled, logs include:
+- System prompts
+- User messages
+- Tool/function responses
+- Message history context
+
+#### Response Logging
+
+Response logging captures LLM outputs for analysis and debugging:
+
+- **Claude**: `GOLLEM_LOGGING_CLAUDE_RESPONSE`
+- **OpenAI**: `GOLLEM_LOGGING_OPENAI_RESPONSE`
+- **Gemini**: `GOLLEM_LOGGING_GEMINI_RESPONSE`
+
+Response logs include:
+- Generated text content
+- Tool/function calls with IDs, names, and arguments
+- Token usage statistics (input/output tokens)
+- Model information and finish reasons
+- Both streaming and non-streaming responses
+
+#### Usage Examples
+
+```bash
+# Enable Claude prompt and response logging
+export GOLLEM_LOGGING_CLAUDE_PROMPT=true
+export GOLLEM_LOGGING_CLAUDE_RESPONSE=true
+
+# Enable OpenAI response logging only
+export GOLLEM_LOGGING_OPENAI_RESPONSE=true
+
+# Enable all Gemini logging
+export GOLLEM_LOGGING_GEMINI_PROMPT=true
+export GOLLEM_LOGGING_GEMINI_RESPONSE=true
+```
+
+#### Log Structure
+
+Logs use structured format with ctxlog scopes:
+
+```json
+{
+  "level": "info",
+  "scope": "claude_response",
+  "model": "claude-3-sonnet-20240229",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 150,
+    "output_tokens": 75
+  },
+  "content": [
+    {
+      "type": "text", 
+      "text": "Generated response text"
+    },
+    {
+      "type": "tool_use",
+      "id": "call_123",
+      "name": "search_function", 
+      "input": {"query": "example"}
+    }
+  ]
+}
+```
+
+#### Benefits
+
+- **Debugging**: Track exact prompts and responses during development
+- **Monitoring**: Observe token usage and response patterns
+- **Audit**: Log tool calls and function executions
+- **Performance**: Analyze response times and token efficiency
+- **Troubleshooting**: Capture complete interaction context for issue resolution

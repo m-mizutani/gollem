@@ -23,6 +23,9 @@ const (
 var (
 	// geminiPromptScope is the logging scope for Gemini prompts
 	geminiPromptScope = ctxlog.NewScope("gemini_prompt", ctxlog.EnabledBy("GOLLEM_LOGGING_GEMINI_PROMPT"))
+
+	// geminiResponseScope is the logging scope for Gemini responses
+	geminiResponseScope = ctxlog.NewScope("gemini_response", ctxlog.EnabledBy("GOLLEM_LOGGING_GEMINI_RESPONSE"))
 )
 
 // Client is a client for the Gemini API.
@@ -430,7 +433,42 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		return nil, goerr.Wrap(err, "failed to generate content")
 	}
 
-	return processResponse(result)
+	response, err := processResponse(result)
+	if err != nil {
+		return nil, err
+	}
+
+	// Log responses if GOLLEM_LOGGING_GEMINI_RESPONSE is set
+	responseLogger := ctxlog.From(ctx, geminiResponseScope)
+	var logContent []map[string]any
+	for _, text := range response.Texts {
+		logContent = append(logContent, map[string]any{
+			"type": "text",
+			"text": text,
+		})
+	}
+	for _, funcCall := range response.FunctionCalls {
+		logContent = append(logContent, map[string]any{
+			"type":      "function_call",
+			"id":        funcCall.ID,
+			"name":      funcCall.Name,
+			"arguments": funcCall.Arguments,
+		})
+	}
+	var finishReason string
+	if len(result.Candidates) > 0 {
+		finishReason = string(result.Candidates[0].FinishReason)
+	}
+	responseLogger.Info("Gemini response",
+		"finish_reason", finishReason,
+		"usage", map[string]any{
+			"prompt_tokens":     response.InputToken,
+			"candidates_tokens": response.OutputToken,
+		},
+		"content", logContent,
+	)
+
+	return response, nil
 }
 
 // GenerateStream generates content based on the input and returns a stream of responses.
@@ -452,6 +490,13 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 			partsArgs[i] = *p
 		}
 
+		// Accumulate streaming response for logging
+		var allTexts []string
+		var allFunctionCalls []*gollem.FunctionCall
+		var totalInputTokens int
+		var totalOutputTokens int
+		var lastFinishReason string
+
 		// Use SendMessageStream for streaming
 		for result, err := range s.chat.SendMessageStream(ctx, partsArgs...) {
 			if err != nil {
@@ -470,8 +515,47 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				return
 			}
 
+			// Accumulate for logging
+			allTexts = append(allTexts, resp.Texts...)
+			allFunctionCalls = append(allFunctionCalls, resp.FunctionCalls...)
+			if resp.InputToken > 0 {
+				totalInputTokens = resp.InputToken
+			}
+			if resp.OutputToken > 0 {
+				totalOutputTokens = resp.OutputToken
+			}
+			if len(result.Candidates) > 0 {
+				lastFinishReason = string(result.Candidates[0].FinishReason)
+			}
+
 			respChan <- resp
 		}
+
+		// Log streaming response if GOLLEM_LOGGING_GEMINI_RESPONSE is set
+		responseLogger := ctxlog.From(ctx, geminiResponseScope)
+		var logContent []map[string]any
+		for _, text := range allTexts {
+			logContent = append(logContent, map[string]any{
+				"type": "text",
+				"text": text,
+			})
+		}
+		for _, funcCall := range allFunctionCalls {
+			logContent = append(logContent, map[string]any{
+				"type":      "function_call",
+				"id":        funcCall.ID,
+				"name":      funcCall.Name,
+				"arguments": funcCall.Arguments,
+			})
+		}
+		responseLogger.Info("Gemini streaming response",
+			"finish_reason", lastFinishReason,
+			"usage", map[string]any{
+				"prompt_tokens":     totalInputTokens,
+				"candidates_tokens": totalOutputTokens,
+			},
+			"content", logContent,
+		)
 	}()
 
 	return respChan, nil
