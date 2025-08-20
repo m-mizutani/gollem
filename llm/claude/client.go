@@ -538,13 +538,15 @@ func generateClaudeStream(
 							"text": finalText,
 						})
 					}
-					for range toolCalls {
-						// toolCall is anthropic.ContentBlockParamUnion, we need to handle it properly
-						// For now, we'll represent it as a generic tool call in logs
-						logContent = append(logContent, map[string]any{
-							"type": "tool_use",
-							"data": "tool_call_param_union", // Generic representation for logging
-						})
+					for _, toolCall := range toolCalls {
+						if toolCall.OfToolUse != nil {
+							logContent = append(logContent, map[string]any{
+								"type":  "tool_use",
+								"id":    toolCall.OfToolUse.ID,
+								"name":  toolCall.OfToolUse.Name,
+								"input": toolCall.OfToolUse.Input,
+							})
+						}
 					}
 					responseLogger.Info("Claude streaming response",
 						"usage", map[string]any{
