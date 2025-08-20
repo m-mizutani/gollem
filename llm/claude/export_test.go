@@ -6,6 +6,7 @@ var (
 	ConvertParameterToSchema    = convertParameterToSchema
 	ExtractJSONFromResponse     = extractJSONFromResponse
 	ConvertGollemInputsToClaude = convertGollemInputsToClaude
+	IsValidJSONPublic           = isValidJSON
 )
 
 type JsonSchema = jsonSchema
