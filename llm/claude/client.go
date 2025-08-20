@@ -28,6 +28,9 @@ var (
 
 	// claudePromptScope is the logging scope for Claude prompts
 	claudePromptScope = ctxlog.NewScope("claude_prompt", ctxlog.EnabledBy("GOLLEM_LOGGING_CLAUDE_PROMPT"))
+
+	// claudeResponseScope is the logging scope for Claude responses
+	claudeResponseScope = ctxlog.NewScope("claude_response", ctxlog.EnabledBy("GOLLEM_LOGGING_CLAUDE_RESPONSE"))
 )
 
 // generationParameters represents the parameters for text generation.
@@ -427,6 +430,35 @@ func generateClaudeContent(
 		"content_blocks", len(resp.Content),
 		"stop_reason", resp.StopReason)
 
+	// Log responses if GOLLEM_LOGGING_CLAUDE_RESPONSE is set
+	responseLogger := ctxlog.From(ctx, claudeResponseScope)
+	var logContent []map[string]any
+	for _, content := range resp.Content {
+		switch content.Type {
+		case "text":
+			logContent = append(logContent, map[string]any{
+				"type": "text",
+				"text": content.AsText().Text,
+			})
+		case "tool_use":
+			toolUse := content.AsToolUse()
+			logContent = append(logContent, map[string]any{
+				"type":  "tool_use",
+				"name":  toolUse.Name,
+				"input": string(toolUse.Input),
+			})
+		}
+	}
+	responseLogger.Info("Claude response",
+		"model", resp.Model,
+		"stop_reason", resp.StopReason,
+		"usage", map[string]any{
+			"input_tokens":  resp.Usage.InputTokens,
+			"output_tokens": resp.Usage.OutputTokens,
+		},
+		"content", logContent,
+	)
+
 	return resp, nil
 }
 
@@ -492,6 +524,37 @@ func generateClaudeStream(
 					}
 					content = append(content, toolCalls...)
 					*messageHistory = append(*messageHistory, anthropic.NewAssistantMessage(content...))
+
+					// Log streaming response if GOLLEM_LOGGING_CLAUDE_RESPONSE is set
+					responseLogger := ctxlog.From(ctx, claudeResponseScope)
+					var logContent []map[string]any
+					if textContent.Len() > 0 {
+						finalText := textContent.String()
+						if cfg.ContentType() == gollem.ContentTypeJSON {
+							finalText = extractJSONFromResponse(finalText)
+						}
+						logContent = append(logContent, map[string]any{
+							"type": "text",
+							"text": finalText,
+						})
+					}
+					for _, toolCall := range toolCalls {
+						if toolCall.OfToolUse != nil {
+							logContent = append(logContent, map[string]any{
+								"type":  "tool_use",
+								"id":    toolCall.OfToolUse.ID,
+								"name":  toolCall.OfToolUse.Name,
+								"input": toolCall.OfToolUse.Input,
+							})
+						}
+					}
+					responseLogger.Info("Claude streaming response",
+						"usage", map[string]any{
+							"input_tokens":  totalInputTokens,
+							"output_tokens": totalOutputTokens,
+						},
+						"content", logContent,
+					)
 				}
 				return
 			}
@@ -563,94 +626,6 @@ func generateClaudeStream(
 	return responseChan, nil
 }
 
-// extractJSONFromResponse cleans the response text to extract valid JSON
-// This is necessary because Claude returns JSON wrapped in markdown code blocks
-// even when ContentTypeJSON is specified.
-//
-// This function uses heuristics to find JSON boundaries and is not a full JSON parser.
-// It handles basic cases like { and } inside string literals, but has limitations:
-// - Does not handle all JSON escape sequences perfectly
-// - May struggle with complex nested structures in unusual formatting
-// - Works well for typical LLM-generated JSON responses
-//
-// For most Claude responses, this pragmatic approach provides reliable JSON extraction.
-func extractJSONFromResponse(text string) string {
-	// Remove leading/trailing whitespace
-	text = strings.TrimSpace(text)
-
-	// Try to extract JSON from markdown code blocks using pre-compiled regex
-	matches := codeBlockRegex.FindStringSubmatch(text)
-	if len(matches) > 1 {
-		return strings.TrimSpace(matches[1])
-	}
-
-	// Try to find JSON object or array boundaries
-	firstBrace := strings.Index(text, "{")
-	firstBracket := strings.Index(text, "[")
-
-	if firstBrace == -1 && firstBracket == -1 {
-		return text // No JSON found, return original
-	}
-
-	var start int
-	if firstBracket == -1 || (firstBrace != -1 && firstBrace < firstBracket) {
-		start = firstBrace
-	} else {
-		start = firstBracket
-	}
-
-	// Find the matching closing brace/bracket with basic string literal handling
-	// Note: This is a heuristic approach that handles most common cases but
-	// is not a full JSON parser. It accounts for delimiters inside string literals.
-	braceCount := 0
-	bracketCount := 0
-	inString := false
-	escaped := false
-
-	for i := start; i < len(text); i++ {
-		char := text[i]
-
-		if escaped {
-			// Skip escaped characters
-			escaped = false
-			continue
-		}
-
-		switch char {
-		case '\\':
-			if inString {
-				escaped = true
-			}
-		case '"':
-			inString = !inString
-		case '{':
-			if !inString {
-				braceCount++
-			}
-		case '}':
-			if !inString {
-				braceCount--
-			}
-		case '[':
-			if !inString {
-				bracketCount++
-			}
-		case ']':
-			if !inString {
-				bracketCount--
-			}
-		}
-
-		if !inString && braceCount == 0 && bracketCount == 0 {
-			// The first character at start must be a brace or bracket, so the counts will be > 0.
-			// This condition is met only when all brackets and braces are balanced.
-			return text[start : i+1]
-		}
-	}
-
-	return text[start:]
-}
-
 // processResponseWithContentType converts Claude response to gollem.Response with content type handling
 func processResponseWithContentType(resp *anthropic.Message, contentType gollem.ContentType) *gollem.Response {
 	if len(resp.Content) == 0 {
@@ -678,7 +653,7 @@ func processResponseWithContentType(resp *anthropic.Message, contentType gollem.
 			response.Texts = append(response.Texts, text)
 		case "tool_use":
 			toolUseBlock := content.AsToolUse()
-			var args map[string]interface{}
+			var args map[string]any
 			if err := json.Unmarshal(toolUseBlock.Input, &args); err != nil {
 				response.Error = goerr.Wrap(err, "failed to unmarshal function arguments")
 				return response
