@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
@@ -22,10 +21,6 @@ const (
 )
 
 var (
-	// codeBlockRegex is a compiled regular expression for extracting JSON from markdown code blocks
-	// This is compiled once at package initialization for performance
-	codeBlockRegex = regexp.MustCompile(`(?s)` + "```" + `(?:json)?\n?(.*?)\n?` + "```" + ``)
-
 	// claudePromptScope is the logging scope for Claude prompts
 	claudePromptScope = ctxlog.NewScope("claude_prompt", ctxlog.EnabledBy("GOLLEM_LOGGING_CLAUDE_PROMPT"))
 

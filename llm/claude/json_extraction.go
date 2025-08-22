@@ -56,25 +56,6 @@ func extractJSONFromResponse(text string) string {
 	return text
 }
 
-// isLikelyCompleteJSON performs basic validation to check if the extracted text
-// looks like complete JSON (not a rigorous JSON parser, just basic heuristics)
-func isLikelyCompleteJSON(text string) bool {
-	text = strings.TrimSpace(text)
-	if len(text) == 0 {
-		return false
-	}
-
-	// Check if it starts and ends with matching delimiters
-	if (text[0] == '{' && text[len(text)-1] == '}') ||
-		(text[0] == '[' && text[len(text)-1] == ']') {
-		// Quick validation: try to unmarshal to see if it's valid JSON
-		var temp any
-		return json.Unmarshal([]byte(text), &temp) == nil
-	}
-
-	return false
-}
-
 // isValidJSON checks if the given text is valid JSON
 func isValidJSON(text string) bool {
 	var temp any
