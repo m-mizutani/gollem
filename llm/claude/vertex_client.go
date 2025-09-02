@@ -195,7 +195,7 @@ func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...g
 	s.messages = append(s.messages, messages...)
 	s.messages = append(s.messages, resp.ToParam())
 
-	return processResponseWithContentType(resp, s.cfg.ContentType()), nil
+	return processResponseWithContentType(ctx, resp, s.cfg.ContentType()), nil
 }
 
 // GenerateStream processes the input and generates a response stream.

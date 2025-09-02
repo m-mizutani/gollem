@@ -45,6 +45,8 @@ github.com/m-mizutani/goerr/v2 v2.0.0-beta.2 h1:3aA8RKFlWS6kX99+AJohdgIxiE5+Qwv6
 github.com/m-mizutani/goerr/v2 v2.0.0-beta.2/go.mod h1:K9+tBb0+0681yHpyHYqJmoijxn9qJf5grjRb9nMXevc=
 github.com/m-mizutani/gt v0.0.16 h1:bhJqMeqxojsgVBo9wqjPHk4s6o7mkaQLCcOus1hp1Vs=
 github.com/m-mizutani/gt v0.0.16/go.mod h1:0MPYSfGBLmYjTduzADVmIqD58ELQ5IfBFiK/f0FmB3k=
+github.com/m-mizutani/jsonex v0.0.1 h1:YhWGBjp6uVZKCCr/6PEiTzq3Zl6kt+xtkiDV4lv5A8E=
+github.com/m-mizutani/jsonex v0.0.1/go.mod h1:VEvips7aLsfk/6TCtxG3PpcWAdgLrWMromAMTUZzLw4=
 github.com/modelcontextprotocol/go-sdk v0.0.0-20250627194314-8a3f272dbbcf h1:IRZUUw76aDIZYwrwp6hTxrL9z1GrFaostAbO2Tp6hrg=
 github.com/modelcontextprotocol/go-sdk v0.0.0-20250627194314-8a3f272dbbcf/go.mod h1:DcXfbr7yl7e35oMpzHfKw2nUYRjhIGS2uou/6tdsTB0=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRIccs7FGNTlIRMkT8wgtp5eCXdBlqhYGL6U=
