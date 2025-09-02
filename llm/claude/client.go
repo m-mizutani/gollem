@@ -360,6 +360,25 @@ func createSystemPrompt(cfg gollem.SessionConfig) []anthropic.TextBlockParam {
 	return systemPrompt
 }
 
+// extractJSON extracts JSON from noisy text using jsonex library
+// It handles both JSON objects and arrays, with proper error handling and logging
+func extractJSON(ctx context.Context, text string) string {
+	var jsonResult any
+	if err := jsonex.Unmarshal([]byte(text), &jsonResult); err != nil {
+		// Not valid JSON or does not contain JSON, return original text
+		return text
+	}
+
+	jsonBytes, err := json.Marshal(jsonResult)
+	if err != nil {
+		// Log the error if marshalling fails after successful unmarshal
+		ctxlog.From(ctx).Warn("Failed to re-marshal extracted JSON, returning original text", "error", err)
+		return text
+	}
+
+	return string(jsonBytes)
+}
+
 // generateClaudeContent is a shared helper function that handles the core logic for generating content
 // This function is used by both the standard Claude client and the Vertex AI Claude client.
 func generateClaudeContent(
@@ -514,12 +533,7 @@ func generateClaudeStream(
 						finalText := textContent.String()
 						// Apply JSON extraction for Claude when ContentTypeJSON is specified
 						if cfg.ContentType() == gollem.ContentTypeJSON {
-							var jsonResult map[string]any
-							if err := jsonex.Unmarshal([]byte(finalText), &jsonResult); err == nil {
-								if jsonBytes, jsonErr := json.Marshal(jsonResult); jsonErr == nil {
-									finalText = string(jsonBytes)
-								}
-							}
+							finalText = extractJSON(ctx, finalText)
 						}
 						content = append(content, anthropic.NewTextBlock(finalText))
 					}
@@ -532,12 +546,7 @@ func generateClaudeStream(
 					if textContent.Len() > 0 {
 						finalText := textContent.String()
 						if cfg.ContentType() == gollem.ContentTypeJSON {
-							var jsonResult map[string]any
-							if err := jsonex.Unmarshal([]byte(finalText), &jsonResult); err == nil {
-								if jsonBytes, jsonErr := json.Marshal(jsonResult); jsonErr == nil {
-									finalText = string(jsonBytes)
-								}
-							}
+							finalText = extractJSON(ctx, finalText)
 						}
 						logContent = append(logContent, map[string]any{
 							"type": "text",
@@ -633,7 +642,7 @@ func generateClaudeStream(
 }
 
 // processResponseWithContentType converts Claude response to gollem.Response with content type handling
-func processResponseWithContentType(resp *anthropic.Message, contentType gollem.ContentType) *gollem.Response {
+func processResponseWithContentType(ctx context.Context, resp *anthropic.Message, contentType gollem.ContentType) *gollem.Response {
 	if len(resp.Content) == 0 {
 		return &gollem.Response{}
 	}
@@ -653,12 +662,7 @@ func processResponseWithContentType(resp *anthropic.Message, contentType gollem.
 
 			// Apply JSON extraction for Claude when ContentTypeJSON is specified
 			if contentType == gollem.ContentTypeJSON {
-				var jsonResult map[string]any
-				if err := jsonex.Unmarshal([]byte(text), &jsonResult); err == nil {
-					if jsonBytes, jsonErr := json.Marshal(jsonResult); jsonErr == nil {
-						text = string(jsonBytes)
-					}
-				}
+				text = extractJSON(ctx, text)
 			}
 
 			response.Texts = append(response.Texts, text)
@@ -730,7 +734,7 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		"content_blocks", len(resp.Content),
 		"total_messages", len(s.messages))
 
-	return processResponseWithContentType(resp, s.cfg.ContentType()), nil
+	return processResponseWithContentType(ctx, resp, s.cfg.ContentType()), nil
 }
 
 // FunctionCallAccumulator accumulates function call information from stream
