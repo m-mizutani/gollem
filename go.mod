@@ -11,6 +11,7 @@ require (
 	github.com/m-mizutani/ctxlog v0.2.0
 	github.com/m-mizutani/goerr/v2 v2.0.0-beta.2
 	github.com/m-mizutani/gt v0.0.16
+	github.com/m-mizutani/jsonex v0.0.1
 	github.com/sashabaranov/go-openai v1.40.1
 	github.com/secmon-lab/warren v0.0.1
 	google.golang.org/api v0.236.0

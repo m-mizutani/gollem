@@ -14,6 +14,7 @@ import (
 	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/jsonex"
 )
 
 const (
@@ -513,7 +514,12 @@ func generateClaudeStream(
 						finalText := textContent.String()
 						// Apply JSON extraction for Claude when ContentTypeJSON is specified
 						if cfg.ContentType() == gollem.ContentTypeJSON {
-							finalText = extractJSONFromResponse(finalText)
+							var jsonResult map[string]any
+							if err := jsonex.Unmarshal([]byte(finalText), &jsonResult); err == nil {
+								if jsonBytes, jsonErr := json.Marshal(jsonResult); jsonErr == nil {
+									finalText = string(jsonBytes)
+								}
+							}
 						}
 						content = append(content, anthropic.NewTextBlock(finalText))
 					}
@@ -526,7 +532,12 @@ func generateClaudeStream(
 					if textContent.Len() > 0 {
 						finalText := textContent.String()
 						if cfg.ContentType() == gollem.ContentTypeJSON {
-							finalText = extractJSONFromResponse(finalText)
+							var jsonResult map[string]any
+							if err := jsonex.Unmarshal([]byte(finalText), &jsonResult); err == nil {
+								if jsonBytes, jsonErr := json.Marshal(jsonResult); jsonErr == nil {
+									finalText = string(jsonBytes)
+								}
+							}
 						}
 						logContent = append(logContent, map[string]any{
 							"type": "text",
@@ -642,7 +653,12 @@ func processResponseWithContentType(resp *anthropic.Message, contentType gollem.
 
 			// Apply JSON extraction for Claude when ContentTypeJSON is specified
 			if contentType == gollem.ContentTypeJSON {
-				text = extractJSONFromResponse(text)
+				var jsonResult map[string]any
+				if err := jsonex.Unmarshal([]byte(text), &jsonResult); err == nil {
+					if jsonBytes, jsonErr := json.Marshal(jsonResult); jsonErr == nil {
+						text = string(jsonBytes)
+					}
+				}
 			}
 
 			response.Texts = append(response.Texts, text)

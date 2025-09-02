@@ -4,9 +4,7 @@ package claude
 var (
 	ConvertTool                 = convertTool
 	ConvertParameterToSchema    = convertParameterToSchema
-	ExtractJSONFromResponse     = extractJSONFromResponse
 	ConvertGollemInputsToClaude = convertGollemInputsToClaude
-	IsValidJSONPublic           = isValidJSON
 )
 
 type JsonSchema = jsonSchema
