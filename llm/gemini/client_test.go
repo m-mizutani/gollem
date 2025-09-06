@@ -334,3 +334,55 @@ func TestGeminiContentGenerate(t *testing.T) {
 	gt.Array(t, result.Texts).Length(1).Required()
 	gt.Value(t, len(result.Texts[0])).NotEqual(0)
 }
+
+func TestWithThinkingBudget(t *testing.T) {
+	projectID := os.Getenv("TEST_GCP_PROJECT_ID")
+	if projectID == "" {
+		t.Skip("TEST_GCP_PROJECT_ID is not set")
+	}
+
+	location := os.Getenv("TEST_GCP_LOCATION")
+	if location == "" {
+		t.Skip("TEST_GCP_LOCATION is not set")
+	}
+
+	ctx := context.Background()
+
+	testCases := []struct {
+		name         string
+		budget       int32
+		expectBudget int32
+	}{
+		{
+			name:         "auto thinking budget",
+			budget:       -1,
+			expectBudget: -1,
+		},
+		{
+			name:         "specific thinking budget",
+			budget:       1000,
+			expectBudget: 1000,
+		},
+		{
+			name:         "zero thinking budget",
+			budget:       0,
+			expectBudget: 0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			client, err := gemini.New(ctx, projectID, location,
+				gemini.WithThinkingBudget(tc.budget),
+			)
+			gt.NoError(t, err)
+			gt.NotNil(t, client)
+			
+			generationConfig := client.GetGenerationConfig()
+			gt.NotNil(t, generationConfig)
+			gt.NotNil(t, generationConfig.ThinkingConfig)
+			gt.NotNil(t, generationConfig.ThinkingConfig.ThinkingBudget)
+			gt.Equal(t, tc.expectBudget, *generationConfig.ThinkingConfig.ThinkingBudget)
+		})
+	}
+}

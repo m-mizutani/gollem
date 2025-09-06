@@ -711,6 +711,7 @@ For detailed documentation and advanced usage:
 - **[Getting Started Guide](doc/getting-started.md)**
 - **[Tool Development](doc/tools.md)**
 - **[MCP Integration](doc/mcp.md)**
+- **[LLM Provider Configuration](doc/llm.md)** - Detailed configuration options for each LLM provider
 - **[API Reference](https://pkg.go.dev/github.com/m-mizutani/gollem)**
 
 ## Claude via Vertex AI
@@ -773,12 +774,6 @@ gcloud auth application-default login
 
 # Option 3: Use workload identity in GKE/Cloud Run (automatic)
 ```
-
-### Available Models
-
-- `claude-sonnet-4@20250514` (default) - Latest Claude Sonnet model
-- `claude-haiku-3@20240307` - Fast, cost-effective model
-- `claude-opus-3@20240229` - Most capable model
 
 ### Benefits of Vertex AI Integration
 
