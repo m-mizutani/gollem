@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"testing"
 
-	"cloud.google.com/go/vertexai/genai"
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gt"
 	"github.com/sashabaranov/go-openai"
+	"google.golang.org/genai"
 )
 
 // newTestToolResultBlock creates a test tool result block with the given ID and content
@@ -193,40 +193,48 @@ func TestHistoryGemini(t *testing.T) {
 	messages := []*genai.Content{
 		{
 			Role: "user",
-			Parts: []genai.Part{
-				genai.Text("Hello"),
-				genai.Blob{
-					MIMEType: "image/jpeg",
-					Data:     []byte("fake image data"),
+			Parts: []*genai.Part{
+				{Text: "Hello"},
+				{
+					InlineData: &genai.Blob{
+						MIMEType: "image/jpeg",
+						Data:     []byte("fake image data"),
+					},
 				},
-				genai.FileData{
-					MIMEType: "application/pdf",
-					FileURI:  "gs://bucket/file.pdf",
-				},
-			},
-		},
-		{
-			Role: "model",
-			Parts: []genai.Part{
-				genai.Text("Hi, how can I help you?"),
-				genai.FunctionCall{
-					Name: "test_function",
-					Args: map[string]interface{}{
-						"param1": "value1",
-						"param2": float64(123),
+				{
+					FileData: &genai.FileData{
+						MIMEType: "application/pdf",
+						FileURI:  "gs://bucket/file.pdf",
 					},
 				},
 			},
 		},
 		{
 			Role: "model",
-			Parts: []genai.Part{
-				genai.Text("Function result"),
-				genai.FunctionResponse{
-					Name: "test_function",
-					Response: map[string]interface{}{
-						"status": "success",
-						"result": "operation completed",
+			Parts: []*genai.Part{
+				{Text: "Hi, how can I help you?"},
+				{
+					FunctionCall: &genai.FunctionCall{
+						Name: "test_function",
+						Args: map[string]interface{}{
+							"param1": "value1",
+							"param2": float64(123),
+						},
+					},
+				},
+			},
+		},
+		{
+			Role: "model",
+			Parts: []*genai.Part{
+				{Text: "Function result"},
+				{
+					FunctionResponse: &genai.FunctionResponse{
+						Name: "test_function",
+						Response: map[string]interface{}{
+							"status": "success",
+							"result": "operation completed",
+						},
 					},
 				},
 			},
@@ -251,24 +259,24 @@ func TestHistoryGemini(t *testing.T) {
 	// Validate specific message types
 	gt.Equal(t, "user", restoredMessages[0].Role)
 	gt.Equal(t, 3, len(restoredMessages[0].Parts))
-	gt.Equal(t, "Hello", restoredMessages[0].Parts[0].(genai.Text))
-	gt.Equal(t, "image/jpeg", restoredMessages[0].Parts[1].(genai.Blob).MIMEType)
-	gt.Equal(t, "application/pdf", restoredMessages[0].Parts[2].(genai.FileData).MIMEType)
-	gt.Equal(t, "gs://bucket/file.pdf", restoredMessages[0].Parts[2].(genai.FileData).FileURI)
+	gt.Equal(t, "Hello", restoredMessages[0].Parts[0].Text)
+	gt.Equal(t, "image/jpeg", restoredMessages[0].Parts[1].InlineData.MIMEType)
+	gt.Equal(t, "application/pdf", restoredMessages[0].Parts[2].FileData.MIMEType)
+	gt.Equal(t, "gs://bucket/file.pdf", restoredMessages[0].Parts[2].FileData.FileURI)
 
 	gt.Equal(t, "model", restoredMessages[1].Role)
 	gt.Equal(t, 2, len(restoredMessages[1].Parts))
-	gt.Equal(t, "Hi, how can I help you?", restoredMessages[1].Parts[0].(genai.Text))
-	gt.Equal(t, "test_function", restoredMessages[1].Parts[1].(genai.FunctionCall).Name)
-	gt.Equal(t, "value1", restoredMessages[1].Parts[1].(genai.FunctionCall).Args["param1"])
-	gt.Equal(t, float64(123), restoredMessages[1].Parts[1].(genai.FunctionCall).Args["param2"].(float64))
+	gt.Equal(t, "Hi, how can I help you?", restoredMessages[1].Parts[0].Text)
+	gt.Equal(t, "test_function", restoredMessages[1].Parts[1].FunctionCall.Name)
+	gt.Equal(t, "value1", restoredMessages[1].Parts[1].FunctionCall.Args["param1"])
+	gt.Equal(t, float64(123), restoredMessages[1].Parts[1].FunctionCall.Args["param2"].(float64))
 
 	gt.Equal(t, "model", restoredMessages[2].Role)
 	gt.Equal(t, 2, len(restoredMessages[2].Parts))
-	gt.Equal(t, "Function result", restoredMessages[2].Parts[0].(genai.Text))
-	gt.Equal(t, "test_function", restoredMessages[2].Parts[1].(genai.FunctionResponse).Name)
-	gt.Equal(t, "success", restoredMessages[2].Parts[1].(genai.FunctionResponse).Response["status"])
-	gt.Equal(t, "operation completed", restoredMessages[2].Parts[1].(genai.FunctionResponse).Response["result"])
+	gt.Equal(t, "Function result", restoredMessages[2].Parts[0].Text)
+	gt.Equal(t, "test_function", restoredMessages[2].Parts[1].FunctionResponse.Name)
+	gt.Equal(t, "success", restoredMessages[2].Parts[1].FunctionResponse.Response["status"])
+	gt.Equal(t, "operation completed", restoredMessages[2].Parts[1].FunctionResponse.Response["result"])
 }
 
 func TestHistoryClone(t *testing.T) {
@@ -418,29 +426,35 @@ func TestHistoryClone(t *testing.T) {
 		messages := []*genai.Content{
 			{
 				Role: "user",
-				Parts: []genai.Part{
-					genai.Text("Hello"),
-					genai.Blob{
-						MIMEType: "image/jpeg",
-						Data:     []byte("fake image data"),
+				Parts: []*genai.Part{
+					{Text: "Hello"},
+					{
+						InlineData: &genai.Blob{
+							MIMEType: "image/jpeg",
+							Data:     []byte("fake image data"),
+						},
 					},
 				},
 			},
 			{
 				Role: "model",
-				Parts: []genai.Part{
-					genai.FunctionCall{
-						Name: "test_function",
-						Args: map[string]interface{}{
-							"param1": "value1",
-							"param2": float64(123),
+				Parts: []*genai.Part{
+					{
+						FunctionCall: &genai.FunctionCall{
+							Name: "test_function",
+							Args: map[string]interface{}{
+								"param1": "value1",
+								"param2": float64(123),
+							},
 						},
 					},
-					genai.FunctionResponse{
-						Name: "test_function",
-						Response: map[string]interface{}{
-							"status": "success",
-							"data":   []interface{}{"item1", "item2"},
+					{
+						FunctionResponse: &genai.FunctionResponse{
+							Name: "test_function",
+							Response: map[string]interface{}{
+								"status": "success",
+								"data":   []interface{}{"item1", "item2"},
+							},
 						},
 					},
 				},

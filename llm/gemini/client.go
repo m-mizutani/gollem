@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	oldgenai "cloud.google.com/go/vertexai/genai"
 	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
@@ -249,14 +248,10 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 	// Prepare history if provided
 	var initialHistory []*genai.Content
 	if cfg.History() != nil {
-		oldHistory, err := cfg.History().ToGemini()
+		var err error
+		initialHistory, err = cfg.History().ToGemini()
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history to gemini.Content")
-		}
-		// Convert old Content format to new format
-		initialHistory = make([]*genai.Content, len(oldHistory))
-		for i, msg := range oldHistory {
-			initialHistory[i] = convertOldContentToNew(msg)
 		}
 	}
 
@@ -627,14 +622,8 @@ func (c *Client) CountTokens(ctx context.Context, history *gollem.History) (int,
 		return 0, goerr.Wrap(err, "failed to convert history")
 	}
 
-	// Convert to new SDK format
-	newContents := make([]*genai.Content, len(contents))
-	for i, content := range contents {
-		newContents[i] = convertOldContentToNew(content)
-	}
-
-	// Count tokens using the model
-	result, err := c.client.Models.CountTokens(ctx, c.defaultModel, newContents, nil)
+	// Count tokens using the model (contents are already in new SDK format)
+	result, err := c.client.Models.CountTokens(ctx, c.defaultModel, contents, nil)
 	if err != nil {
 		return 0, goerr.Wrap(err, "failed to count tokens")
 	}
@@ -642,123 +631,16 @@ func (c *Client) CountTokens(ctx context.Context, history *gollem.History) (int,
 	return int(result.TotalTokens), nil
 }
 
-// Helper functions to convert between old and new SDK formats
-
-func convertOldContentToNew(old *oldgenai.Content) *genai.Content {
-	if old == nil {
-		return nil
-	}
-
-	newParts := make([]*genai.Part, len(old.Parts))
-	for i, part := range old.Parts {
-		newParts[i] = convertOldPartToNew(part)
-	}
-
-	return &genai.Content{
-		Role:  old.Role,
-		Parts: newParts,
-	}
-}
-
-func convertOldPartToNew(old oldgenai.Part) *genai.Part {
-	switch p := old.(type) {
-	case oldgenai.Text:
-		return &genai.Part{Text: string(p)}
-	case oldgenai.Blob:
-		return &genai.Part{
-			InlineData: &genai.Blob{
-				MIMEType: p.MIMEType,
-				Data:     p.Data,
-			},
-		}
-	case oldgenai.FileData:
-		return &genai.Part{
-			FileData: &genai.FileData{
-				MIMEType: p.MIMEType,
-				FileURI:  p.FileURI,
-			},
-		}
-	case oldgenai.FunctionCall:
-		return &genai.Part{
-			FunctionCall: &genai.FunctionCall{
-				Name: p.Name,
-				Args: p.Args,
-			},
-		}
-	case oldgenai.FunctionResponse:
-		return &genai.Part{
-			FunctionResponse: &genai.FunctionResponse{
-				Name:     p.Name,
-				Response: p.Response,
-			},
-		}
-	default:
-		// Return empty text for unknown types
-		return &genai.Part{Text: ""}
-	}
-}
+// Helper function to convert new SDK history to gollem.History
 
 func convertNewHistoryToGollem(history []*genai.Content) *gollem.History {
-	// Convert new format history back to gollem.History
+	// Convert new format history directly to gollem.History
 	if len(history) == 0 {
 		return &gollem.History{}
 	}
 
-	// Convert to old format first
-	oldContents := make([]*oldgenai.Content, len(history))
-	for i, content := range history {
-		oldContents[i] = convertNewContentToOld(content)
-	}
-
-	return gollem.NewHistoryFromGemini(oldContents)
-}
-
-func convertNewContentToOld(new *genai.Content) *oldgenai.Content {
-	if new == nil {
-		return nil
-	}
-
-	oldParts := make([]oldgenai.Part, len(new.Parts))
-	for i, part := range new.Parts {
-		oldParts[i] = convertNewPartToOld(part)
-	}
-
-	return &oldgenai.Content{
-		Role:  new.Role,
-		Parts: oldParts,
-	}
-}
-
-func convertNewPartToOld(new *genai.Part) oldgenai.Part {
-	if new.Text != "" {
-		return oldgenai.Text(new.Text)
-	}
-	if new.InlineData != nil {
-		return oldgenai.Blob{
-			MIMEType: new.InlineData.MIMEType,
-			Data:     new.InlineData.Data,
-		}
-	}
-	if new.FileData != nil {
-		return oldgenai.FileData{
-			MIMEType: new.FileData.MIMEType,
-			FileURI:  new.FileData.FileURI,
-		}
-	}
-	if new.FunctionCall != nil {
-		return oldgenai.FunctionCall{
-			Name: new.FunctionCall.Name,
-			Args: new.FunctionCall.Args,
-		}
-	}
-	if new.FunctionResponse != nil {
-		return oldgenai.FunctionResponse{
-			Name:     new.FunctionResponse.Name,
-			Response: new.FunctionResponse.Response,
-		}
-	}
-	// Return empty text for unknown types
-	return oldgenai.Text("")
+	// Directly pass to NewHistoryFromGemini since it now accepts new genai types
+	return gollem.NewHistoryFromGemini(history)
 }
 
 // convertToolToNewSDK converts gollem.Tool to new SDK's FunctionDeclaration
