@@ -711,6 +711,7 @@ For detailed documentation and advanced usage:
 - **[Getting Started Guide](doc/getting-started.md)**
 - **[Tool Development](doc/tools.md)**
 - **[MCP Integration](doc/mcp.md)**
+- **[LLM Provider Configuration](docs/llm.md)** - Detailed configuration options for each LLM provider
 - **[API Reference](https://pkg.go.dev/github.com/m-mizutani/gollem)**
 
 ## Claude via Vertex AI

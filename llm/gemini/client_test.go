@@ -334,3 +334,34 @@ func TestGeminiContentGenerate(t *testing.T) {
 	gt.Array(t, result.Texts).Length(1).Required()
 	gt.Value(t, len(result.Texts[0])).NotEqual(0)
 }
+
+func TestWithThinkingBudget(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("auto thinking budget", func(t *testing.T) {
+		// Create client with automatic thinking budget
+		client, err := gemini.New(ctx, "test-project", "us-central1",
+			gemini.WithThinkingBudget(-1),
+		)
+		gt.NoError(t, err)
+		gt.NotNil(t, client)
+	})
+
+	t.Run("specific thinking budget", func(t *testing.T) {
+		// Create client with specific thinking budget
+		client, err := gemini.New(ctx, "test-project", "us-central1",
+			gemini.WithThinkingBudget(1000),
+		)
+		gt.NoError(t, err)
+		gt.NotNil(t, client)
+	})
+
+	t.Run("zero thinking budget", func(t *testing.T) {
+		// Create client with zero thinking budget (disable thinking)
+		client, err := gemini.New(ctx, "test-project", "us-central1",
+			gemini.WithThinkingBudget(0),
+		)
+		gt.NoError(t, err)
+		gt.NotNil(t, client)
+	})
+}

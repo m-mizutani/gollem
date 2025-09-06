@@ -144,6 +144,20 @@ func WithStopSequences(stopSequences []string) Option {
 	}
 }
 
+// WithThinkingBudget sets the thinking budget for text generation.
+// A value of -1 enables automatic thinking budget allocation.
+func WithThinkingBudget(budget int32) Option {
+	return func(c *Client) {
+		if c.generationConfig == nil {
+			c.generationConfig = &genai.GenerateContentConfig{}
+		}
+		if c.generationConfig.ThinkingConfig == nil {
+			c.generationConfig.ThinkingConfig = &genai.ThinkingConfig{}
+		}
+		c.generationConfig.ThinkingConfig.ThinkingBudget = &budget
+	}
+}
+
 // WithSystemPrompt sets the system prompt to use for chat completions.
 func WithSystemPrompt(prompt string) Option {
 	return func(c *Client) {
