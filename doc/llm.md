@@ -47,9 +47,13 @@ client, err := gemini.New(ctx, projectID, location,
 ```
 
 Available models:
-- `gemini-1.5-pro-latest` - Most capable model
-- `gemini-1.5-flash` - Fast, cost-effective model
-- `gemini-2.0-flash-thinking-exp` - Experimental model with thinking capabilities
+- `gemini-2.5-pro` - Most advanced model with state-of-the-art thinking capabilities
+- `gemini-2.5-flash` - Best price-performance model with well-rounded capabilities
+- `gemini-2.5-flash-lite` - Optimized for cost efficiency and low latency
+- `gemini-2.0-flash` - Superior speed with native tool use and 1M token context
+- `gemini-2.0-flash-thinking-exp-1219` - Experimental model with thinking capabilities
+
+Note: Gemini 1.5 models are deprecated as of April 2025 for new projects.
 
 #### Thinking Budget (Gemini 2.0)
 
@@ -120,9 +124,12 @@ client, err := claude.New(ctx, apiKey,
 ```
 
 Available models:
-- `claude-3-5-sonnet-20241022` - Latest Sonnet model (recommended)
+- `claude-opus-4-1-20250805` - Most powerful model, best for complex tasks (August 2025)
+- `claude-sonnet-4-20250514` - Balanced performance and efficiency
+- `claude-3-5-sonnet-20241022` - Previous generation, still widely available
 - `claude-3-5-haiku-20241022` - Fast, cost-effective model
-- `claude-3-opus-20240229` - Most capable model
+
+Note: Claude Opus 4.1 and Sonnet 4 are hybrid models offering both instant and extended thinking modes.
 
 #### Temperature and Max Tokens
 
@@ -163,9 +170,10 @@ client, err := claude.NewWithVertex(ctx, region, projectID,
 ```
 
 Available models on Vertex AI:
+- `claude-opus-4-1@20250805` - Most powerful model (if available in your region)
 - `claude-sonnet-4@20250514` - Latest Claude Sonnet model
-- `claude-haiku-3@20240307` - Fast, cost-effective model
-- `claude-opus-3@20240229` - Most capable model
+- `claude-3-5-sonnet@20241022` - Previous generation Sonnet
+- `claude-3-5-haiku@20241022` - Fast, cost-effective model
 
 #### System Prompt
 
@@ -218,11 +226,16 @@ client, err := openai.New(ctx, apiKey,
 ```
 
 Available models:
-- `gpt-4-turbo-preview` - Latest GPT-4 Turbo model
-- `gpt-4` - GPT-4 base model
-- `gpt-3.5-turbo` - Fast, cost-effective model
-- `o1-preview` - Advanced reasoning model
-- `o1-mini` - Smaller reasoning model
+- `o3-pro` - Most powerful reasoning model with extended thinking
+- `o3` - Advanced reasoning model for complex tasks
+- `o4-mini` - Fast, cost-efficient reasoning model
+- `gpt-4.1` - Latest GPT model with 1M token context (June 2024 cutoff)
+- `gpt-4.1-mini` - Smaller version of GPT-4.1
+- `gpt-4o` - Previous generation, still available
+- `gpt-4o-mini` - Smaller, faster GPT-4o variant
+- `gpt-3.5-turbo` - Legacy model, cost-effective
+
+Note: GPT-4.5 is in research preview. o1 models are being phased out in favor of o3/o4 series.
 
 #### Temperature and Other Parameters
 

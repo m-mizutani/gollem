@@ -775,12 +775,6 @@ gcloud auth application-default login
 # Option 3: Use workload identity in GKE/Cloud Run (automatic)
 ```
 
-### Available Models
-
-- `claude-sonnet-4@20250514` (default) - Latest Claude Sonnet model
-- `claude-haiku-3@20240307` - Fast, cost-effective model
-- `claude-opus-3@20240229` - Most capable model
-
 ### Benefits of Vertex AI Integration
 
 - **Unified Google Cloud billing** and cost management
