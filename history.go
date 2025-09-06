@@ -4,11 +4,11 @@ package gollem
 import (
 	"encoding/json"
 
-	"cloud.google.com/go/vertexai/genai"
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/sashabaranov/go-openai"
+	"google.golang.org/genai"
 )
 
 // History represents a conversation history that can be used across different LLM sessions.
@@ -289,35 +289,34 @@ func NewHistoryFromGemini(messages []*genai.Content) *History {
 	for i, msg := range messages {
 		parts := make([]geminiPart, len(msg.Parts))
 		for j, p := range msg.Parts {
-			switch v := p.(type) {
-			case genai.Text:
+			if p.Text != "" {
 				parts[j] = geminiPart{
 					Type: "text",
-					Text: string(v),
+					Text: p.Text,
 				}
-			case genai.Blob:
+			} else if p.InlineData != nil {
 				parts[j] = geminiPart{
 					Type:     "blob",
-					MIMEType: v.MIMEType,
-					Data:     v.Data,
+					MIMEType: p.InlineData.MIMEType,
+					Data:     p.InlineData.Data,
 				}
-			case genai.FileData:
+			} else if p.FileData != nil {
 				parts[j] = geminiPart{
 					Type:     "file_data",
-					MIMEType: v.MIMEType,
-					FileURI:  v.FileURI,
+					MIMEType: p.FileData.MIMEType,
+					FileURI:  p.FileData.FileURI,
 				}
-			case genai.FunctionCall:
+			} else if p.FunctionCall != nil {
 				parts[j] = geminiPart{
 					Type: "function_call",
-					Name: v.Name,
-					Args: v.Args,
+					Name: p.FunctionCall.Name,
+					Args: p.FunctionCall.Args,
 				}
-			case genai.FunctionResponse:
+			} else if p.FunctionResponse != nil {
 				parts[j] = geminiPart{
 					Type:     "function_response",
-					Name:     v.Name,
-					Response: v.Response,
+					Name:     p.FunctionResponse.Name,
+					Response: p.FunctionResponse.Response,
 				}
 			}
 		}
@@ -336,30 +335,38 @@ func NewHistoryFromGemini(messages []*genai.Content) *History {
 func toGeminiMessages(messages []geminiMessage) ([]*genai.Content, error) {
 	converted := make([]*genai.Content, len(messages))
 	for i, msg := range messages {
-		parts := make([]genai.Part, len(msg.Parts))
+		parts := make([]*genai.Part, len(msg.Parts))
 		for j, p := range msg.Parts {
 			switch p.Type {
 			case "text":
-				parts[j] = genai.Text(p.Text)
+				parts[j] = &genai.Part{Text: p.Text}
 			case "blob":
-				parts[j] = genai.Blob{
-					MIMEType: p.MIMEType,
-					Data:     p.Data,
+				parts[j] = &genai.Part{
+					InlineData: &genai.Blob{
+						MIMEType: p.MIMEType,
+						Data:     p.Data,
+					},
 				}
 			case "file_data":
-				parts[j] = genai.FileData{
-					MIMEType: p.MIMEType,
-					FileURI:  p.FileURI,
+				parts[j] = &genai.Part{
+					FileData: &genai.FileData{
+						MIMEType: p.MIMEType,
+						FileURI:  p.FileURI,
+					},
 				}
 			case "function_call":
-				parts[j] = genai.FunctionCall{
-					Name: p.Name,
-					Args: p.Args,
+				parts[j] = &genai.Part{
+					FunctionCall: &genai.FunctionCall{
+						Name: p.Name,
+						Args: p.Args,
+					},
 				}
 			case "function_response":
-				parts[j] = genai.FunctionResponse{
-					Name:     p.Name,
-					Response: p.Response,
+				parts[j] = &genai.Part{
+					FunctionResponse: &genai.FunctionResponse{
+						Name:     p.Name,
+						Response: p.Response,
+					},
 				}
 			}
 		}
