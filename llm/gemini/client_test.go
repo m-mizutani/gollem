@@ -386,3 +386,64 @@ func TestWithThinkingBudget(t *testing.T) {
 		})
 	}
 }
+
+func TestThinkingBudgetIntegration(t *testing.T) {
+	projectID := os.Getenv("TEST_GCP_PROJECT_ID")
+	if projectID == "" {
+		t.Skip("TEST_GCP_PROJECT_ID is not set")
+	}
+
+	location := os.Getenv("TEST_GCP_LOCATION")
+	if location == "" {
+		t.Skip("TEST_GCP_LOCATION is not set")
+	}
+
+	ctx := context.Background()
+
+	testCases := []struct {
+		name   string
+		model  string
+		budget int32
+	}{
+		{
+			name:   "Gemini 2.0 Flash with thinking budget disabled",
+			model:  "gemini-2.0-flash",
+			budget: 0,
+		},
+		{
+			name:   "Gemini 2.5 Flash with thinking budget disabled",
+			model:  "gemini-2.5-flash",
+			budget: 0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			client, err := gemini.New(ctx, projectID, location,
+				gemini.WithModel(tc.model),
+				gemini.WithThinkingBudget(tc.budget),
+			)
+			gt.NoError(t, err)
+			gt.NotNil(t, client)
+
+			// Verify configuration is set correctly
+			generationConfig := client.GetGenerationConfig()
+			gt.NotNil(t, generationConfig)
+			gt.NotNil(t, generationConfig.ThinkingConfig)
+			gt.NotNil(t, generationConfig.ThinkingConfig.ThinkingBudget)
+			gt.Equal(t, tc.budget, *generationConfig.ThinkingConfig.ThinkingBudget)
+
+			// Test actual API call
+			session, err := client.NewSession(ctx)
+			gt.NoError(t, err)
+			gt.NotNil(t, session)
+
+			// Simple test prompt
+			response, err := session.GenerateContent(ctx, gollem.Text("Say 'Hello' in one word"))
+			gt.NoError(t, err)
+			gt.NotNil(t, response)
+			gt.Array(t, response.Texts).Length(1).Required()
+			gt.Value(t, len(response.Texts[0])).NotEqual(0)
+		})
+	}
+}
