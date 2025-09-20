@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gt"
 	"github.com/sashabaranov/go-openai"
@@ -21,16 +20,8 @@ func newTestToolResultBlock(id, content string) anthropic.ContentBlockParamUnion
 // newTestToolResultBlockWithError creates a test tool result block with the given ID, content, and error status
 // This helper reduces the verbosity of creating anthropic.ToolResultBlock for test data that may represent errors.
 func newTestToolResultBlockWithError(id, content string, isError bool) anthropic.ContentBlockParamUnion {
-	toolResult := anthropic.NewToolResultBlock(id)
-	if content != "" {
-		toolResult.OfToolResult.Content = []anthropic.ToolResultBlockParamContentUnion{
-			{OfText: &anthropic.TextBlockParam{Text: content}},
-		}
-	}
-	if isError {
-		toolResult.OfToolResult.IsError = param.NewOpt(true)
-	}
-	return toolResult
+	// Use the new 3-argument form of NewToolResultBlock
+	return anthropic.NewToolResultBlock(id, content, isError)
 }
 
 func TestHistoryOpenAI(t *testing.T) {

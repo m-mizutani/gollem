@@ -303,7 +303,7 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 				"response_length", len(response))
 
 			// Create tool result block with new API
-			toolResult := anthropic.NewToolResultBlock(v.ID)
+			toolResult := anthropic.NewToolResultBlock(v.ID, response, isError)
 
 			// Set content
 			if response != "" {
