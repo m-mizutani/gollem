@@ -377,7 +377,7 @@ func TestWithThinkingBudget(t *testing.T) {
 			)
 			gt.NoError(t, err)
 			gt.NotNil(t, client)
-			
+
 			generationConfig := client.GetGenerationConfig()
 			gt.NotNil(t, generationConfig)
 			gt.NotNil(t, generationConfig.ThinkingConfig)

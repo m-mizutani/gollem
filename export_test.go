@@ -6,8 +6,6 @@ import (
 	"os"
 )
 
-var NewDefaultFacilitator = newDefaultFacilitator
-
 // Plan internal types and methods for testing
 type (
 	TestPlanToDo       = planToDo

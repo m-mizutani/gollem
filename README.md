@@ -573,44 +573,6 @@ func main() {
 - **Execution Modes**: Complete (no skipping), Balanced (default, smart skipping), Efficient (aggressive skipping)
 - **Transparency**: Detailed reasoning for all skip decisions with confidence scores
 
-### Facilitator - Conversation Flow Control
-
-Facilitators control the conversation flow and determine when conversations should continue or end. gollem includes a default facilitator, but you can implement custom ones:
-
-```go
-// Custom facilitator example
-type CustomFacilitator struct {
-	completed bool
-}
-
-func (f *CustomFacilitator) Spec() gollem.ToolSpec {
-	return gollem.ToolSpec{
-		Name:        "complete_task",
-		Description: "Mark the current task as completed",
-		Parameters:  map[string]*gollem.Parameter{},
-	}
-}
-
-func (f *CustomFacilitator) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	f.completed = true
-	return map[string]any{"status": "completed"}, nil
-}
-
-func (f *CustomFacilitator) IsCompleted() bool {
-	return f.completed
-}
-
-func (f *CustomFacilitator) ProceedPrompt() string {
-	return "What should we do next?"
-}
-
-// Use custom facilitator
-agent := gollem.New(client,
-	gollem.WithFacilitator(&CustomFacilitator{}),
-	gollem.WithTools(tools...),
-)
-```
-
 ### Memory Management with History Compactor
 
 gollem provides intelligent memory management through automatic history compaction, which summarizes old conversation messages to reduce token usage while preserving context. **History compaction is enabled by default** to prevent token limit issues during long conversations.

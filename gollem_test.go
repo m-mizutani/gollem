@@ -355,9 +355,15 @@ func newMockClient(generateContentFunc func(ctx context.Context, input ...gollem
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
 								if strings.Contains(string(text), "Choose your next action or complete") {
-									// Return JSON response for facilitator
+									// Return response with tool call
 									return &gollem.Response{
-										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
+										FunctionCalls: []*gollem.FunctionCall{
+											{
+												ID:        "test_call_1",
+												Name:      "test_tool",
+												Arguments: map[string]any{},
+											},
+										},
 									}, nil
 								}
 							}
@@ -516,13 +522,19 @@ func TestGollemWithOptions(t *testing.T) {
 				gt.Equal(t, cfg.SystemPrompt(), "system prompt")
 				mockSession := &mock.SessionMock{
 					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-						// Check if this is DefaultFacilitator's proceed prompt
+						// Return response based on input
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "Choose your next action or complete") {
-									// Return JSON response for facilitator
+								if strings.Contains(string(text), "test message") {
+									// Return response with tool call
 									return &gollem.Response{
-										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
+										FunctionCalls: []*gollem.FunctionCall{
+											{
+												ID:        "test_call_1",
+												Name:      "test_tool",
+												Arguments: map[string]any{},
+											},
+										},
 									}, nil
 								}
 							}
@@ -530,10 +542,11 @@ func TestGollemWithOptions(t *testing.T) {
 
 						// Handle function responses
 						if len(input) > 0 {
-							if funcResp, ok := input[0].(gollem.FunctionResponse); ok {
-								if funcResp.Name == "respond_to_user" {
-									return &gollem.Response{}, nil
-								}
+							if _, ok := input[0].(gollem.FunctionResponse); ok {
+								// Return response with no tool calls to end the loop
+								return &gollem.Response{
+									Texts: []string{"Task completed"},
+								}, nil
 							}
 						}
 
@@ -562,24 +575,29 @@ func TestGollemWithOptions(t *testing.T) {
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				cfg := gollem.NewSessionConfig(options...)
 				tools := cfg.Tools()
-				// Should have test_tool and respond_to_user (DefaultFacilitator)
-				gt.Equal(t, len(tools), 2)
+				// Should have test_tool only
+				gt.Equal(t, len(tools), 1)
 				toolNames := make(map[string]bool)
 				for _, tool := range tools {
 					toolNames[tool.Spec().Name] = true
 				}
 				gt.True(t, toolNames["test_tool"])
-				gt.True(t, toolNames["respond_to_user"])
 
 				mockSession := &mock.SessionMock{
 					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-						// Check if this is DefaultFacilitator's proceed prompt
+						// Return response based on input
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "Choose your next action or complete") {
-									// Return JSON response for facilitator
+								if strings.Contains(string(text), "test message") {
+									// Return response with tool call
 									return &gollem.Response{
-										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
+										FunctionCalls: []*gollem.FunctionCall{
+											{
+												ID:        "test_call_1",
+												Name:      "test_tool",
+												Arguments: map[string]any{},
+											},
+										},
 									}, nil
 								}
 							}
@@ -587,10 +605,11 @@ func TestGollemWithOptions(t *testing.T) {
 
 						// Handle function responses
 						if len(input) > 0 {
-							if funcResp, ok := input[0].(gollem.FunctionResponse); ok {
-								if funcResp.Name == "respond_to_user" {
-									return &gollem.Response{}, nil
-								}
+							if _, ok := input[0].(gollem.FunctionResponse); ok {
+								// Return response with no tool calls to end the loop
+								return &gollem.Response{
+									Texts: []string{"Task completed"},
+								}, nil
 							}
 						}
 
@@ -628,18 +647,24 @@ func TestGollemWithOptions(t *testing.T) {
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				cfg := gollem.NewSessionConfig(options...)
 				tools := cfg.Tools()
-				// Should have test_tool from ToolSet and respond_to_user (DefaultFacilitator)
-				gt.Equal(t, len(tools), 2)
+				// Should have test_tool from ToolSet only
+				gt.Equal(t, len(tools), 1)
 
 				mockSession := &mock.SessionMock{
 					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-						// Check if this is DefaultFacilitator's proceed prompt
+						// Return response based on input
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "Choose your next action or complete") {
-									// Return JSON response for facilitator
+								if strings.Contains(string(text), "test message") {
+									// Return response with tool call
 									return &gollem.Response{
-										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
+										FunctionCalls: []*gollem.FunctionCall{
+											{
+												ID:        "test_call_1",
+												Name:      "test_tool",
+												Arguments: map[string]any{},
+											},
+										},
 									}, nil
 								}
 							}
@@ -647,10 +672,11 @@ func TestGollemWithOptions(t *testing.T) {
 
 						// Handle function responses
 						if len(input) > 0 {
-							if funcResp, ok := input[0].(gollem.FunctionResponse); ok {
-								if funcResp.Name == "respond_to_user" {
-									return &gollem.Response{}, nil
-								}
+							if _, ok := input[0].(gollem.FunctionResponse); ok {
+								// Return response with no tool calls to end the loop
+								return &gollem.Response{
+									Texts: []string{"Task completed"},
+								}, nil
 							}
 						}
 
@@ -713,23 +739,30 @@ func TestGollemWithOptions(t *testing.T) {
 						return ch, nil
 					},
 					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-						// Check if this is DefaultFacilitator's proceed prompt
+						// Return response based on input
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "Choose your next action or complete") {
-									// Return JSON response for facilitator
+								if strings.Contains(string(text), "test message") {
+									// Return response with tool call
 									return &gollem.Response{
-										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
+										FunctionCalls: []*gollem.FunctionCall{
+											{
+												ID:        "test_call_1",
+												Name:      "test_tool",
+												Arguments: map[string]any{},
+											},
+										},
 									}, nil
 								}
 							}
 						}
 						// Handle function responses
 						if len(input) > 0 {
-							if funcResp, ok := input[0].(gollem.FunctionResponse); ok {
-								if funcResp.Name == "respond_to_user" {
-									return &gollem.Response{}, nil
-								}
+							if _, ok := input[0].(gollem.FunctionResponse); ok {
+								// Return response with no tool calls to end the loop
+								return &gollem.Response{
+									Texts: []string{"Task completed"},
+								}, nil
 							}
 						}
 						return &gollem.Response{}, nil
@@ -791,24 +824,29 @@ func TestGollemWithOptions(t *testing.T) {
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				cfg := gollem.NewSessionConfig(options...)
 				gt.Equal(t, cfg.SystemPrompt(), "system prompt")
-				// Should have test_tool and respond_to_user (DefaultFacilitator)
-				gt.Equal(t, len(cfg.Tools()), 2)
+				// Should have test_tool only
+				gt.Equal(t, len(cfg.Tools()), 1)
 				toolNames := make(map[string]bool)
 				for _, tool := range cfg.Tools() {
 					toolNames[tool.Spec().Name] = true
 				}
 				gt.True(t, toolNames["test_tool"])
-				gt.True(t, toolNames["respond_to_user"])
 
 				mockSession := &mock.SessionMock{
 					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-						// Check if this is DefaultFacilitator's proceed prompt
+						// Return response based on input
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
-								if strings.Contains(string(text), "Choose your next action or complete") {
-									// Return JSON response for facilitator
+								if strings.Contains(string(text), "test message") {
+									// Return response with tool call
 									return &gollem.Response{
-										Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
+										FunctionCalls: []*gollem.FunctionCall{
+											{
+												ID:        "test_call_1",
+												Name:      "test_tool",
+												Arguments: map[string]any{},
+											},
+										},
 									}, nil
 								}
 							}
@@ -816,10 +854,11 @@ func TestGollemWithOptions(t *testing.T) {
 
 						// Handle function responses
 						if len(input) > 0 {
-							if funcResp, ok := input[0].(gollem.FunctionResponse); ok {
-								if funcResp.Name == "respond_to_user" {
-									return &gollem.Response{}, nil
-								}
+							if _, ok := input[0].(gollem.FunctionResponse); ok {
+								// Return response with no tool calls to end the loop
+								return &gollem.Response{
+									Texts: []string{"Task completed"},
+								}, nil
 							}
 						}
 
@@ -874,73 +913,6 @@ func (t *mockToolSet) Specs(ctx context.Context) ([]gollem.ToolSpec, error) {
 
 func (t *mockToolSet) Run(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
 	return t.run(ctx, name, args)
-}
-
-func TestFacilitationHook(t *testing.T) {
-	t.Run("WithFacilitationHook", func(t *testing.T) {
-		facilitationCalls := []gollem.Facilitation{}
-
-		mockClient := newMockClient(func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-			// Check if input is DefaultFacilitator's proceed prompt and return JSON response
-			if len(input) > 0 {
-				if text, ok := input[0].(gollem.Text); ok {
-					if strings.Contains(string(text), "Choose your next action or complete") {
-						return &gollem.Response{
-							Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
-						}, nil
-					}
-				}
-			}
-			return &gollem.Response{
-				Texts: []string{"test response"},
-			}, nil
-		})
-
-		s := gollem.New(mockClient,
-			gollem.WithFacilitationHook(func(ctx context.Context, resp *gollem.Facilitation) error {
-				facilitationCalls = append(facilitationCalls, *resp)
-				return nil
-			}),
-		)
-
-		err := s.Execute(t.Context(), "test message")
-		gt.NoError(t, err)
-
-		// Verify that FacilitationHook was called
-		gt.A(t, facilitationCalls).Length(1)
-		gt.Equal(t, facilitationCalls[0].Action, gollem.ActionComplete)
-		gt.Equal(t, facilitationCalls[0].Reason, "Task completed successfully")
-		gt.Equal(t, facilitationCalls[0].Completion, "All tasks finished")
-	})
-
-	t.Run("WithFacilitationHook error handling", func(t *testing.T) {
-		mockClient := newMockClient(func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-			// Check if input is DefaultFacilitator's proceed prompt and return JSON response
-			if len(input) > 0 {
-				if text, ok := input[0].(gollem.Text); ok {
-					if strings.Contains(string(text), "Choose your next action or complete") {
-						return &gollem.Response{
-							Texts: []string{`{"action": "complete", "reason": "Task completed successfully", "completion": "All tasks finished"}`},
-						}, nil
-					}
-				}
-			}
-			return &gollem.Response{
-				Texts: []string{"test response"},
-			}, nil
-		})
-
-		expectedError := fmt.Errorf("facilitation hook error")
-		s := gollem.New(mockClient,
-			gollem.WithFacilitationHook(func(ctx context.Context, resp *gollem.Facilitation) error {
-				return expectedError
-			}),
-		)
-
-		err := s.Execute(t.Context(), "test message")
-		gt.Error(t, err)
-		gt.Equal(t, err, expectedError)
-	})
 }
 
 // TestIsTokenLimitError_RealLLMs tests if isTokenLimitError correctly detects token limit errors from real LLMs

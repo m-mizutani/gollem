@@ -391,8 +391,6 @@ func (g *Agent) Plan(ctx context.Context, prompt string, options ...PlanOption) 
 	ctx = ctxlog.With(ctx, logger) // Use existing context.go function
 
 	// Tool setup (use existing setupTools function)
-	// Facilitator is not supported in plan mode
-	cfg.gollemConfig.facilitator = nil
 	toolMap, toolList, err := setupTools(ctx, &cfg.gollemConfig)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to setup tools for plan")
