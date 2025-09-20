@@ -152,38 +152,3 @@ type (
 	CompactionHook func(ctx context.Context, original, compacted *History) error
 )
 
-// defaultLoopHook is the default implementation of LoopHook that does nothing.
-// This is used when no custom LoopHook is provided.
-func defaultLoopHook(ctx context.Context, loop int, input []Input) error {
-	return nil
-}
-
-// defaultMessageHook is the default implementation of MessageHook that does nothing.
-// This is used when no custom MessageHook is provided.
-func defaultMessageHook(ctx context.Context, msg string) error {
-	return nil
-}
-
-// defaultToolRequestHook is the default implementation of ToolRequestHook that does nothing.
-// This is used when no custom ToolRequestHook is provided.
-func defaultToolRequestHook(ctx context.Context, tool FunctionCall) error {
-	return nil
-}
-
-// defaultToolResponseHook is the default implementation of ToolResponseHook that does nothing.
-// This is used when no custom ToolResponseHook is provided.
-func defaultToolResponseHook(ctx context.Context, tool FunctionCall, response map[string]any) error {
-	return nil
-}
-
-// defaultToolErrorHook is the default implementation of ToolErrorHook that does nothing.
-// This is used when no custom ToolErrorHook is provided.
-func defaultToolErrorHook(ctx context.Context, err error, tool FunctionCall) error {
-	return nil
-}
-
-// defaultCompactionHook is the default implementation of CompactionHook that does nothing.
-// This is used when no custom CompactionHook is provided.
-func defaultCompactionHook(ctx context.Context, original, compacted *History) error {
-	return nil
-}

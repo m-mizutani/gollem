@@ -567,6 +567,7 @@ func testLargeConversationCompaction(t *testing.T, llmClient gollem.LLMClient, h
 	// Check if compaction result is nil
 	if compacted == nil {
 		t.Fatal("Compaction returned nil history")
+		return // This return is never reached but helps static analysis understand compacted is non-nil after this point
 	}
 
 	// Verify compaction occurred
