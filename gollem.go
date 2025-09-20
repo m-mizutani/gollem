@@ -68,10 +68,6 @@ type Agent struct {
 	currentSession Session
 }
 
-func (x *Agent) Facilitator() Facilitator {
-	return x.gollemConfig.facilitator
-}
-
 // Session returns the current session for the agent.
 // This is the only way to access the session and its history.
 // If no session exists, this will return nil.
@@ -96,12 +92,9 @@ type gollemConfig struct {
 	messageHook      MessageHook
 	toolRequestHook  ToolRequestHook
 	toolResponseHook ToolResponseHook
-	facilitationHook FacilitationHook
 	toolErrorHook    ToolErrorHook
 	responseMode     ResponseMode
 	logger           *slog.Logger
-
-	facilitator Facilitator
 
 	history *History
 
@@ -124,12 +117,9 @@ func (c *gollemConfig) Clone() *gollemConfig {
 		messageHook:      c.messageHook,
 		toolRequestHook:  c.toolRequestHook,
 		toolResponseHook: c.toolResponseHook,
-		facilitationHook: c.facilitationHook,
 		toolErrorHook:    c.toolErrorHook,
 		responseMode:     c.responseMode,
 		logger:           c.logger,
-
-		facilitator: c.facilitator,
 
 		history: c.history,
 
@@ -153,11 +143,9 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 			messageHook:      defaultMessageHook,
 			toolRequestHook:  defaultToolRequestHook,
 			toolResponseHook: defaultToolResponseHook,
-			facilitationHook: defaultFacilitationHook,
 			toolErrorHook:    defaultToolErrorHook,
 			responseMode:     ResponseModeBlocking,
 			logger:           slog.New(slog.DiscardHandler),
-			facilitator:      newDefaultFacilitator(llmClient),
 
 			// Default settings for history management
 			historyCompactor: NewHistoryCompactor(llmClient), // Default compactor with standard settings
@@ -182,7 +170,6 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 		"has_tool_response_hook", s.gollemConfig.toolResponseHook != nil,
 		"has_tool_error_hook", s.gollemConfig.toolErrorHook != nil,
 		"has_history", s.gollemConfig.history != nil,
-		"has_facilitator", s.gollemConfig.facilitator != nil,
 	)
 
 	return s
@@ -223,13 +210,6 @@ func WithTools(tools ...Tool) Option {
 func WithToolSets(toolSets ...ToolSet) Option {
 	return func(s *gollemConfig) {
 		s.toolSets = append(s.toolSets, toolSets...)
-	}
-}
-
-// WithFacilitator sets the facilitator for the gollem agent. The facilitator is used to control the session loop. If set nil, the session loop will be ended when the LLM generates a response with no tool call.
-func WithFacilitator(tool Facilitator) Option {
-	return func(s *gollemConfig) {
-		s.facilitator = tool
 	}
 }
 
@@ -282,19 +262,6 @@ func WithToolRequestHook(callback func(ctx context.Context, tool FunctionCall) e
 func WithToolResponseHook(callback func(ctx context.Context, tool FunctionCall, response map[string]any) error) Option {
 	return func(s *gollemConfig) {
 		s.toolResponseHook = callback
-	}
-}
-
-// WithFacilitationHook sets a callback function for facilitation responses. The callback function is called when the facilitator generates a response. If the function returns an error, the execution will be aborted immediately.
-// Usage:
-//
-//	gollem.WithFacilitationHook(func(ctx context.Context, resp *gollem.Facilitation) error {
-//		println("Facilitation action: " + string(resp.Action))
-//		return nil
-//	})
-func WithFacilitationHook(callback func(ctx context.Context, resp *Facilitation) error) Option {
-	return func(s *gollemConfig) {
-		s.facilitationHook = callback
 	}
 }
 
@@ -358,10 +325,6 @@ func WithCompactionHook(callback func(ctx context.Context, original, compacted *
 
 func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool, error) {
 	allTools := cfg.tools[:]
-
-	if cfg.facilitator != nil {
-		allTools = append(allTools, cfg.facilitator)
-	}
 
 	toolMap, err := buildToolMap(ctx, allTools, cfg.toolSets)
 	if err != nil {
@@ -438,35 +401,8 @@ func (g *Agent) Execute(ctx context.Context, prompt string, options ...Option) e
 		}
 
 		if len(input) == 0 {
-			if cfg.facilitator == nil {
-				// If no facilitator is set, the session is ended when the LLM generates a response with no tool call.
-				return nil
-			}
-
-			resp, err := cfg.facilitator.Facilitate(ctx, g.currentSession.History())
-			if err != nil {
-				return err
-			}
-
-			// Call FacilitationHook
-			if err := cfg.facilitationHook(ctx, resp); err != nil {
-				return err
-			}
-
-			switch resp.Action {
-			case ActionComplete:
-				return nil
-
-			case ActionContinue:
-				if resp.NextPrompt == "" {
-					return goerr.Wrap(ErrExitConversation, "conversation exit by no next step", goerr.V("facilitate", resp))
-				}
-
-				input = []Input{Text(resp.NextPrompt)}
-
-			default:
-				return goerr.Wrap(ErrExitConversation, "conversation exit by invalid action", goerr.V("facilitate", resp))
-			}
+			// If no input (no tool calls), end the loop
+			return nil
 		}
 
 		logger.Debug("gollem input", "input", input, "loop", i)
@@ -521,17 +457,9 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 	for _, toolCall := range output.FunctionCalls {
 		logger.Debug("gollem received tool request", "tool", toolCall.Name, "args", toolCall.Arguments)
 
-		// Check if this tool is a Facilitator by checking the tool name
-		isFacilitator := false
-		if cfg.facilitator != nil {
-			isFacilitator = toolCall.Name == cfg.facilitator.Spec().Name
-		}
-
-		// Call the ToolRequestHook only if this is not a Facilitator tool
-		if !isFacilitator {
-			if err := cfg.toolRequestHook(ctx, *toolCall); err != nil {
-				return nil, goerr.Wrap(err, "failed to call ToolRequestHook")
-			}
+		// Call the ToolRequestHook
+		if err := cfg.toolRequestHook(ctx, *toolCall); err != nil {
+			return nil, goerr.Wrap(err, "failed to call ToolRequestHook")
 		}
 
 		tool, ok := toolMap[toolCall.Name]
@@ -559,11 +487,9 @@ func handleResponse(ctx context.Context, cfg gollemConfig, output *Response, too
 				Error: goerr.Wrap(err, toolCall.Name+" failed to run", goerr.V("call", toolCall)),
 			})
 		} else {
-			// Call the ToolResponseHook only if this is not a Facilitator tool
-			if !isFacilitator {
-				if cbErr := cfg.toolResponseHook(ctx, *toolCall, result); cbErr != nil {
-					return nil, goerr.Wrap(cbErr, "failed to call ToolResponseHook")
-				}
+			// Call the ToolResponseHook
+			if cbErr := cfg.toolResponseHook(ctx, *toolCall, result); cbErr != nil {
+				return nil, goerr.Wrap(cbErr, "failed to call ToolResponseHook")
 			}
 
 			logger.Debug("gollem tool response", "call", toolCall, "result", result, "should_exit", err)

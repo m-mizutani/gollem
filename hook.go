@@ -98,30 +98,6 @@ type (
 	//   })
 	ToolResponseHook func(ctx context.Context, tool FunctionCall, response map[string]any) error
 
-	// FacilitationHook is a hook for facilitation responses. This hook is called when the facilitator
-	// generates a response during the session loop when there is no input (no tool results or user messages).
-	// The hook receives the facilitation response containing the action (continue/complete), reason,
-	// and either next_step (for continue) or completion (for complete).
-	//
-	// This hook is useful for:
-	// - Monitoring facilitator decisions and reasoning
-	// - Logging facilitation actions for debugging
-	// - Implementing custom logic based on facilitation responses
-	// - Recording session progress and completion status
-	//
-	// Note: This hook is only called for the main facilitator, not for individual tool executions.
-	// If the hook returns an error, the entire execution will be aborted immediately.
-	//
-	// Example usage:
-	//   gollem.WithFacilitationHook(func(ctx context.Context, resp *gollem.Facilitation) error {
-	//       log.Printf("Facilitator action: %s, reason: %s", resp.Action, resp.Reason)
-	//       if resp.Action == gollem.ActionComplete {
-	//           log.Printf("Session completed: %s", resp.Completion)
-	//       }
-	//       return nil
-	//   })
-	FacilitationHook func(ctx context.Context, resp *Facilitation) error
-
 	// ToolErrorHook is a hook for tool execution errors. This hook is called when a tool
 	// execution fails and returns an error.
 	//
@@ -197,12 +173,6 @@ func defaultToolRequestHook(ctx context.Context, tool FunctionCall) error {
 // defaultToolResponseHook is the default implementation of ToolResponseHook that does nothing.
 // This is used when no custom ToolResponseHook is provided.
 func defaultToolResponseHook(ctx context.Context, tool FunctionCall, response map[string]any) error {
-	return nil
-}
-
-// defaultFacilitationHook is the default implementation of FacilitationHook that does nothing.
-// This is used when no custom FacilitationHook is provided.
-func defaultFacilitationHook(ctx context.Context, resp *Facilitation) error {
 	return nil
 }
 
