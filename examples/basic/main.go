@@ -94,11 +94,6 @@ func main() {
 		gollem.WithTools(&MyTool{}),
 		// System prompt for better context
 		gollem.WithSystemPrompt("You are a helpful assistant with access to various tools."),
-		// You can customize the callback function for each message and tool call.
-		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-			fmt.Printf("🤖 %s\n", msg)
-			return nil
-		}),
 	)
 
 	fmt.Println("🚀 Gollem Agent started! Type 'quit' to exit.")
@@ -119,7 +114,7 @@ func main() {
 
 		// Execute with automatic session management
 		// No need to manually handle history - it's managed automatically!
-		if err := agent.Execute(ctx, input); err != nil {
+		if err := agent.Execute(ctx, gollem.Text(input)); err != nil {
 			fmt.Printf("❌ Error: %v\n", err)
 			continue
 		}
