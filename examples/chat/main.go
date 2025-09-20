@@ -71,14 +71,6 @@ func main() {
 		gollem.WithResponseMode(gollem.ResponseModeStreaming),
 		gollem.WithTools(&WeatherTool{}),
 		gollem.WithSystemPrompt("You are a helpful weather assistant. Use the weather tool to provide accurate weather information."),
-		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-			fmt.Printf("%s", msg)
-			return nil
-		}),
-		gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
-			fmt.Printf("\n⚡ Calling tool: %s\n", tool.Name)
-			return nil
-		}),
 	)
 
 	fmt.Println("🌤️  Weather Chat Assistant")
@@ -108,7 +100,7 @@ func main() {
 
 		// Execute with automatic session management
 		// No need to manually handle history - it's managed automatically!
-		if err := agent.Execute(ctx, input); err != nil {
+		if err := agent.Execute(ctx, gollem.Text(input)); err != nil {
 			fmt.Printf("\n❌ Error: %v\n", err)
 			continue
 		}

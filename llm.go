@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"io"
+	"log/slog"
 
 	"github.com/m-mizutani/goerr/v2"
 )
@@ -40,6 +42,8 @@ func (r *Response) HasData() bool {
 
 type Input interface {
 	isInput() restrictedValue
+	LogValue() slog.Value
+	String() string
 }
 
 type restrictedValue struct{}
@@ -51,6 +55,14 @@ type Text string
 
 func (t Text) isInput() restrictedValue {
 	return restrictedValue{}
+}
+
+func (t Text) LogValue() slog.Value {
+	return slog.StringValue(string(t))
+}
+
+func (t Text) String() string {
+	return string(t)
 }
 
 // FunctionResponse is a function response.
@@ -69,6 +81,32 @@ type FunctionResponse struct {
 
 func (f FunctionResponse) isInput() restrictedValue {
 	return restrictedValue{}
+}
+
+// String returns a string representation of the FunctionResponse
+func (f FunctionResponse) String() string {
+	if f.Error != nil {
+		return f.Name + " (error: " + f.Error.Error() + ")"
+	}
+	return f.Name + " (success)"
+}
+
+// LogValue returns a slog.Value for the FunctionResponse
+func (f FunctionResponse) LogValue() slog.Value {
+	attrs := []slog.Attr{
+		slog.String("id", f.ID),
+		slog.String("name", f.Name),
+	}
+
+	if f.Data != nil {
+		attrs = append(attrs, slog.Any("data", f.Data))
+	}
+
+	if f.Error != nil {
+		attrs = append(attrs, slog.String("error", f.Error.Error()))
+	}
+
+	return slog.GroupValue(attrs...)
 }
 
 // ImageMimeType represents supported MIME types for images
@@ -93,6 +131,14 @@ type Image struct {
 // isInput implements Input interface
 func (i Image) isInput() restrictedValue {
 	return restrictedValue{}
+}
+
+func (i Image) LogValue() slog.Value {
+	return slog.StringValue(i.String())
+}
+
+func (i Image) String() string {
+	return fmt.Sprintf("image (%d bytes, %s)", len(i.data), i.mimeType)
 }
 
 // Data returns the image data as bytes
