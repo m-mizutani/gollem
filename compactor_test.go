@@ -2,6 +2,7 @@ package gollem_test
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/m-mizutani/gollem"
@@ -255,7 +256,12 @@ func TestCompactorWithRealClients(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("OpenAI client", func(t *testing.T) {
-		client, err := openai.New(ctx, "test-key")
+		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
+		if !ok {
+			t.Skip("TEST_OPENAI_API_KEY is not set")
+		}
+		
+		client, err := openai.New(ctx, apiKey)
 		gt.NoError(t, err)
 		compactor := gollem.NewHistoryCompactor(client)
 
@@ -281,7 +287,12 @@ func TestCompactorWithRealClients(t *testing.T) {
 	})
 
 	t.Run("Claude client", func(t *testing.T) {
-		client, err := claude.New(ctx, "test-key")
+		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
+		if !ok {
+			t.Skip("TEST_CLAUDE_API_KEY is not set")
+		}
+		
+		client, err := claude.New(ctx, apiKey)
 		gt.NoError(t, err)
 		compactor := gollem.NewHistoryCompactor(client)
 
@@ -307,7 +318,16 @@ func TestCompactorWithRealClients(t *testing.T) {
 	})
 
 	t.Run("Gemini client", func(t *testing.T) {
-		client, err := gemini.New(ctx, "test-project", "us-central1")
+		projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+		if !ok {
+			t.Skip("TEST_GCP_PROJECT_ID is not set")
+		}
+		location := os.Getenv("TEST_GCP_LOCATION")
+		if location == "" {
+			location = "us-central1"
+		}
+		
+		client, err := gemini.New(ctx, projectID, location)
 		gt.NoError(t, err)
 		compactor := gollem.NewHistoryCompactor(client)
 
