@@ -106,7 +106,7 @@ func main() {
 		}
 
 		// Optional: Show conversation statistics
-		if history := agent.Session().History(); history != nil {
+		if history, err := agent.Session().History(); err == nil && history != nil {
 			fmt.Printf("\n📊 (Total messages: %d)\n", history.ToCount())
 		}
 		fmt.Println()

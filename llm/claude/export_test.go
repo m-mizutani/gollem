@@ -5,6 +5,7 @@ var (
 	ConvertTool                 = convertTool
 	ConvertParameterToSchema    = convertParameterToSchema
 	ConvertGollemInputsToClaude = convertGollemInputsToClaude
+	CreateSystemPrompt          = createSystemPrompt
 )
 
 type JsonSchema = jsonSchema

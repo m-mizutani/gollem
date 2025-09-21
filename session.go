@@ -6,7 +6,7 @@ import "context"
 type Session interface {
 	GenerateContent(ctx context.Context, input ...Input) (*Response, error)
 	GenerateStream(ctx context.Context, input ...Input) (<-chan *Response, error)
-	History() *History
+	History() (*History, error)
 }
 
 // SessionConfig is the configuration for the new session. This is required for only LLM client implementations.

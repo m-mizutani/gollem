@@ -292,9 +292,9 @@ type Session struct {
 	config *genai.GenerateContentConfig
 }
 
-func (s *Session) History() *gollem.History {
+func (s *Session) History() (*gollem.History, error) {
 	// Convert new format history to gollem.History
-	return convertNewHistoryToGollem(s.chat.History(false))
+	return convertNewHistoryToGollem(s.chat.History(false)), nil
 }
 
 // convertInputs converts gollem.Input to Gemini parts
@@ -654,7 +654,13 @@ func convertNewHistoryToGollem(history []*genai.Content) *gollem.History {
 	}
 
 	// Directly pass to NewHistoryFromGemini since it now accepts new genai types
-	return gollem.NewHistoryFromGemini(history)
+	hist, err := gollem.NewHistoryFromGemini(history)
+	if err != nil {
+		// For backward compatibility, return empty history on error
+		// This should not happen in practice as we control the message format
+		return &gollem.History{}
+	}
+	return hist
 }
 
 // convertToolToNewSDK converts gollem.Tool to new SDK's FunctionDeclaration

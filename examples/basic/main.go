@@ -120,7 +120,7 @@ func main() {
 		}
 
 		// Optional: Show conversation statistics
-		if history := agent.Session().History(); history != nil {
+		if history, err := agent.Session().History(); err == nil && history != nil {
 			fmt.Printf("📊 (Conversation has %d messages)\n", history.ToCount())
 		}
 	}
