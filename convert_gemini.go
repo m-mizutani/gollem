@@ -136,9 +136,12 @@ func convertMessageToGemini(msg Message) (*genai.Content, error) {
 		role = "model"
 	case RoleModel:
 		role = "model"
-	case RoleTool, RoleFunction:
-		// Tool/function responses are handled as function_response parts
+	case RoleTool:
+		// Tool responses go to user role in Gemini
 		role = "user"
+	case RoleFunction:
+		// Function role is preserved for function responses
+		role = "function"
 	default:
 		role = "user"
 	}

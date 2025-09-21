@@ -1,6 +1,7 @@
 package gollem_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 
@@ -21,530 +22,371 @@ func mustNewTextContent(text string) gollem.MessageContent {
 }
 
 func TestHistoryFromClaude(t *testing.T) {
-	testCases := []struct {
-		name  string
-		input []anthropic.MessageParam
-	}{
-		{
-			name: "text message conversion",
-			input: []anthropic.MessageParam{
-				anthropic.NewUserMessage(anthropic.NewTextBlock("Hello, Claude!")),
-			},
-		},
-		{
-			name: "tool use conversion",
-			input: []anthropic.MessageParam{
-				anthropic.NewAssistantMessage(anthropic.NewToolUseBlock("tool_123", map[string]any{
-					"location": "Tokyo",
-				}, "get_weather")),
-			},
-		},
-	}
+	t.Run("text message conversion", func(t *testing.T) {
+		input := []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock("Hello, Claude!")),
+		}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Create history from Claude messages
-			history, err := gollem.NewHistoryFromClaude(tc.input)
-			gt.NoError(t, err)
-			gt.NotEqual(t, history, nil)
-			gt.Equal(t, history.LLType, gollem.LLMTypeClaude)
+		history, err := gollem.NewHistoryFromClaude(input)
+		gt.NoError(t, err)
 
-			// Test round-trip conversion
-			claudeMsgs, err := history.ToClaude()
-			gt.NoError(t, err)
-			gt.Equal(t, len(claudeMsgs), len(tc.input))
-		})
-	}
-}
+		// Verify history metadata
+		gt.Equal(t, history.LLType, gollem.LLMTypeClaude)
+		gt.Equal(t, history.Version, gollem.HistoryVersion)
+		gt.Equal(t, len(history.Messages), 1)
 
-func TestHistoryFromOpenAI(t *testing.T) {
-	testCases := []struct {
-		name  string
-		input []openai.ChatCompletionMessage
-	}{
-		{
-			name: "simple text message",
-			input: []openai.ChatCompletionMessage{
-				{
-					Role:    openai.ChatMessageRoleUser,
-					Content: "Hello, OpenAI!",
-				},
-			},
-		},
-		{
-			name: "assistant with tool calls",
-			input: []openai.ChatCompletionMessage{
-				{
-					Role: openai.ChatMessageRoleAssistant,
-					ToolCalls: []openai.ToolCall{
-						{
-							ID:   "call_789",
-							Type: "function",
-							Function: openai.FunctionCall{
-								Name:      "get_time",
-								Arguments: `{"timezone":"UTC"}`,
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "tool response message",
-			input: []openai.ChatCompletionMessage{
-				{
-					Role:       openai.ChatMessageRoleTool,
-					Content:    `{"time":"2024-01-01T12:00:00Z"}`,
-					ToolCallID: "call_789",
-				},
-			},
-		},
-		{
-			name: "multi-content message with text and image",
-			input: []openai.ChatCompletionMessage{
-				{
-					Role: openai.ChatMessageRoleUser,
-					MultiContent: []openai.ChatMessagePart{
-						{
-							Type: "text",
-							Text: "What's in this image?",
-						},
-						{
-							Type: "image_url",
-							ImageURL: &openai.ChatMessageImageURL{
-								URL:    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
-								Detail: openai.ImageURLDetailAuto,
-							},
-						},
-					},
-				},
-			},
-		},
-	}
+		// Verify message details
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleUser)
+		gt.Equal(t, len(msg.Contents), 1)
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Create history from OpenAI messages
-			history, err := gollem.NewHistoryFromOpenAI(tc.input)
-			gt.NoError(t, err)
-			gt.NotEqual(t, history, nil)
-			gt.Equal(t, history.LLType, gollem.LLMTypeOpenAI)
-
-			// Test round-trip conversion
-			openAIMsgs, err := history.ToOpenAI()
-			gt.NoError(t, err)
-			// Note: tool responses may create multiple messages
-			gt.True(t, len(openAIMsgs) > 0)
-		})
-	}
-}
-
-func TestHistoryFromGemini(t *testing.T) {
-	testCases := []struct {
-		name  string
-		input []*genai.Content
-	}{
-		{
-			name: "user text message",
-			input: []*genai.Content{
-				{
-					Role: "user",
-					Parts: []*genai.Part{
-						{Text: "Hello, Gemini!"},
-					},
-				},
-			},
-		},
-		{
-			name: "model message (converted to assistant)",
-			input: []*genai.Content{
-				{
-					Role: "model",
-					Parts: []*genai.Part{
-						{Text: "Hello from model!"},
-					},
-				},
-			},
-		},
-		{
-			name: "function call",
-			input: []*genai.Content{
-				{
-					Role: "model",
-					Parts: []*genai.Part{
-						{FunctionCall: &genai.FunctionCall{
-							Name: "calculate",
-							Args: map[string]any{
-								"expression": "2+2",
-							},
-						}},
-					},
-				},
-			},
-		},
-		{
-			name: "function response",
-			input: []*genai.Content{
-				{
-					Role: "function",
-					Parts: []*genai.Part{
-						{FunctionResponse: &genai.FunctionResponse{
-							Name:     "calculate",
-							Response: map[string]any{"result": 4},
-						}},
-					},
-				},
-			},
-		},
-		{
-			name: "inline data (image)",
-			input: []*genai.Content{
-				{
-					Role: "user",
-					Parts: []*genai.Part{
-						{InlineData: &genai.Blob{
-							MIMEType: "image/jpeg",
-							Data:     []byte("imagedata"),
-						}},
-					},
-				},
-			},
-		},
-		{
-			name: "file data (video)",
-			input: []*genai.Content{
-				{
-					Role: "user",
-					Parts: []*genai.Part{
-						{FileData: &genai.FileData{
-							MIMEType: "video/mp4",
-							FileURI:  "gs://bucket/video.mp4",
-						}},
-					},
-				},
-			},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Create history from Gemini messages
-			history, err := gollem.NewHistoryFromGemini(tc.input)
-			gt.NoError(t, err)
-			gt.NotEqual(t, history, nil)
-			gt.Equal(t, history.LLType, gollem.LLMTypeGemini)
-
-			// Test round-trip conversion
-			geminiMsgs, err := history.ToGemini()
-			gt.NoError(t, err)
-			gt.Equal(t, len(geminiMsgs), len(tc.input))
-		})
-	}
-}
-
-func TestMessageContentGetters(t *testing.T) {
-	t.Run("GetTextContent", func(t *testing.T) {
-		content := mustNewTextContent("Hello")
-
+		// Verify content details
+		content := msg.Contents[0]
+		gt.Equal(t, content.Type, gollem.MessageContentTypeText)
 		textContent, err := content.GetTextContent()
 		gt.NoError(t, err)
-		gt.Equal(t, textContent.Text, "Hello")
-	})
+		gt.Equal(t, textContent.Text, "Hello, Claude!")
 
-	t.Run("GetImageContent", func(t *testing.T) {
-		// Test base64 image
-		imgContent, err := gollem.NewImageContent("image/png", []byte("test-data"), "", "")
-		gt.NoError(t, err)
-
-		imgData, err := imgContent.GetImageContent()
-		gt.NoError(t, err)
-		gt.Equal(t, imgData.MediaType, "image/png")
-		gt.Equal(t, imgData.Data, []byte("test-data"))
-		gt.Equal(t, imgData.URL, "")
-		gt.Equal(t, imgData.Detail, "")
-
-		// Test URL image with detail
-		imgContent2, err := gollem.NewImageContent("image/jpeg", nil, "https://example.com/image.jpg", "high")
-		gt.NoError(t, err)
-
-		imgData2, err := imgContent2.GetImageContent()
-		gt.NoError(t, err)
-		gt.Equal(t, imgData2.MediaType, "image/jpeg")
-		gt.Equal(t, len(imgData2.Data), 0)
-		gt.Equal(t, imgData2.URL, "https://example.com/image.jpg")
-		gt.Equal(t, imgData2.Detail, "high")
-	})
-
-	t.Run("GetToolCallContent", func(t *testing.T) {
-		args := map[string]any{"param1": "value1", "param2": float64(42)}
-		toolContent, err := gollem.NewToolCallContent("call_123", "test_tool", args)
-		gt.NoError(t, err)
-
-		toolCall, err := toolContent.GetToolCallContent()
-		gt.NoError(t, err)
-		gt.Equal(t, toolCall.ID, "call_123")
-		gt.Equal(t, toolCall.Name, "test_tool")
-		gt.Equal(t, toolCall.Arguments, args)
-	})
-
-	t.Run("GetToolResponseContent", func(t *testing.T) {
-		response := map[string]any{"result": "success", "data": []any{float64(1), float64(2), float64(3)}}
-		toolResp, err := gollem.NewToolResponseContent("call_456", "test_tool", response, false)
-		gt.NoError(t, err)
-
-		respData, err := toolResp.GetToolResponseContent()
-		gt.NoError(t, err)
-		gt.Equal(t, respData.ToolCallID, "call_456")
-		gt.Equal(t, respData.Name, "test_tool")
-		gt.Equal(t, respData.Response, response)
-		gt.Equal(t, respData.IsError, false)
-
-		// Test error response
-		toolRespErr, err := gollem.NewToolResponseContent("call_789", "error_tool", map[string]any{"error": "error message"}, true)
-		gt.NoError(t, err)
-
-		respErrData, err := toolRespErr.GetToolResponseContent()
-		gt.NoError(t, err)
-		gt.Equal(t, respErrData.ToolCallID, "call_789")
-		gt.Equal(t, respErrData.Name, "error_tool")
-		gt.Equal(t, respErrData.Response, map[string]any{"error": "error message"})
-		gt.Equal(t, respErrData.IsError, true)
-	})
-
-	t.Run("GetFunctionCallContent", func(t *testing.T) {
-		funcContent, err := gollem.NewFunctionCallContent("func_name", `{"arg1":"value1","arg2":123}`)
-		gt.NoError(t, err)
-
-		funcCall, err := funcContent.GetFunctionCallContent()
-		gt.NoError(t, err)
-		gt.Equal(t, funcCall.Name, "func_name")
-		gt.Equal(t, funcCall.Arguments, `{"arg1":"value1","arg2":123}`)
-	})
-
-	t.Run("GetFunctionResponseContent", func(t *testing.T) {
-		funcResp, err := gollem.NewFunctionResponseContent("func_name", "response content")
-		gt.NoError(t, err)
-
-		respData, err := funcResp.GetFunctionResponseContent()
-		gt.NoError(t, err)
-		gt.Equal(t, respData.Name, "func_name")
-		gt.Equal(t, respData.Content, "response content")
-	})
-}
-
-func TestRoleMapping(t *testing.T) {
-	t.Run("all roles preserved correctly", func(t *testing.T) {
-		// Test that each role is preserved or mapped correctly through conversions
-		roles := []gollem.MessageRole{
-			gollem.RoleUser,
-			gollem.RoleAssistant,
-			gollem.RoleSystem,
-			gollem.RoleTool,
-			gollem.RoleFunction,
-			gollem.RoleModel,
-		}
-
-		for _, role := range roles {
-			// Roles should be consistent
-			gt.NotEqual(t, string(role), "")
-		}
-	})
-
-	t.Run("role conversion mapping", func(t *testing.T) {
-		// Test specific role mappings for each provider
-		testCases := []struct {
-			name       string
-			inputRole  gollem.MessageRole
-			claudeRole string
-			openAIRole string
-			geminiRole string
-		}{
-			{
-				name:       "user role",
-				inputRole:  gollem.RoleUser,
-				claudeRole: "user",
-				openAIRole: "user",
-				geminiRole: "user",
-			},
-			{
-				name:       "assistant role",
-				inputRole:  gollem.RoleAssistant,
-				claudeRole: "assistant",
-				openAIRole: "assistant",
-				geminiRole: "model",
-			},
-			{
-				name:       "system role",
-				inputRole:  gollem.RoleSystem,
-				claudeRole: "user", // Claude merges system into user
-				openAIRole: "system",
-				geminiRole: "user", // Gemini merges system into user
-			},
-			{
-				name:       "tool role",
-				inputRole:  gollem.RoleTool,
-				claudeRole: "user", // Tool responses become user in Claude
-				openAIRole: "tool",
-				geminiRole: "user", // Tool responses become user in Gemini
-			},
-			{
-				name:       "function role",
-				inputRole:  gollem.RoleFunction,
-				claudeRole: "user",     // Function responses become user in Claude
-				openAIRole: "function", // Function role preserved in OpenAI (but may be converted to tool in some cases)
-				geminiRole: "user",     // Function becomes user in Gemini (but may be preserved as function in some cases)
-			},
-			{
-				name:       "model role",
-				inputRole:  gollem.RoleModel,
-				claudeRole: "assistant", // Model becomes assistant in Claude
-				openAIRole: "assistant", // Model becomes assistant in OpenAI
-				geminiRole: "model",
-			},
-		}
-
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				// Create a simple message with the role
-				message := gollem.Message{
-					Role: tc.inputRole,
-					Contents: []gollem.MessageContent{
-						mustNewTextContent("test content"),
-					},
-				}
-
-				history := &gollem.History{
-					Version:  gollem.HistoryVersion,
-					LLType:   gollem.LLMTypeGemini, // Use Gemini as base
-					Messages: []gollem.Message{message},
-				}
-
-				// Test Claude conversion
-				claudeMsgs, err := history.ToClaude()
-				gt.NoError(t, err)
-				if len(claudeMsgs) > 0 {
-					gt.Equal(t, string(claudeMsgs[0].Role), tc.claudeRole)
-				}
-
-				// Test OpenAI conversion
-				openAIMsgs, err := history.ToOpenAI()
-				gt.NoError(t, err)
-				if len(openAIMsgs) > 0 {
-					// For function role, accept either "function" or "tool"
-					if tc.inputRole == gollem.RoleFunction {
-						actualRole := string(openAIMsgs[0].Role)
-						gt.True(t, actualRole == "function" || actualRole == "tool")
-					} else {
-						gt.Equal(t, string(openAIMsgs[0].Role), tc.openAIRole)
-					}
-				}
-
-				// Test Gemini conversion
-				geminiMsgs, err := history.ToGemini()
-				gt.NoError(t, err)
-				if len(geminiMsgs) > 0 {
-					// For function role, accept either "function" or "user"
-					if tc.inputRole == gollem.RoleFunction {
-						actualRole := geminiMsgs[0].Role
-						gt.True(t, actualRole == "function" || actualRole == "user")
-					} else {
-						gt.Equal(t, geminiMsgs[0].Role, tc.geminiRole)
-					}
-				}
-			})
-		}
-	})
-}
-
-func TestComplexMessageConversion(t *testing.T) {
-	t.Run("OpenAI message with multiple tool calls - detailed verification", func(t *testing.T) {
-		msg := []openai.ChatCompletionMessage{
-			{
-				Role: openai.ChatMessageRoleAssistant,
-				ToolCalls: []openai.ToolCall{
-					{
-						ID:   "call_1",
-						Type: "function",
-						Function: openai.FunctionCall{
-							Name:      "search",
-							Arguments: `{"query":"weather"}`,
-						},
-					},
-					{
-						ID:   "call_2",
-						Type: "function",
-						Function: openai.FunctionCall{
-							Name:      "calculate",
-							Arguments: `{"expression":"2+2"}`,
-						},
-					},
-				},
-			},
-		}
-
-		history, err := gollem.NewHistoryFromOpenAI(msg)
-		gt.NoError(t, err)
-		gt.Equal(t, len(history.Messages), 1)
-		gt.Equal(t, len(history.Messages[0].Contents), 2)
-
-		// Verify each tool call content
-		for i, content := range history.Messages[0].Contents {
-			gt.Equal(t, content.Type, gollem.MessageContentTypeToolCall)
-			toolCall, err := content.GetToolCallContent()
-			gt.NoError(t, err)
-			gt.NotEqual(t, toolCall, nil)
-
-			if i == 0 {
-				gt.Equal(t, toolCall.ID, "call_1")
-				gt.Equal(t, toolCall.Name, "search")
-				expectedArgs := map[string]any{"query": "weather"}
-				gt.Equal(t, toolCall.Arguments, expectedArgs)
-			} else if i == 1 {
-				gt.Equal(t, toolCall.ID, "call_2")
-				gt.Equal(t, toolCall.Name, "calculate")
-				expectedArgs := map[string]any{"expression": "2+2"}
-				gt.Equal(t, toolCall.Arguments, expectedArgs)
-			}
-		}
-
-		// Convert to Claude and verify details
+		// Test round-trip conversion
 		claudeMsgs, err := history.ToClaude()
 		gt.NoError(t, err)
 		gt.Equal(t, len(claudeMsgs), 1)
-		gt.Equal(t, string(claudeMsgs[0].Role), "assistant")
-
-		// Verify Claude tool use blocks
-		toolUseCount := 0
-		for _, block := range claudeMsgs[0].Content {
-			if block.OfToolUse != nil {
-				toolUseCount++
-				gt.NotEqual(t, block.OfToolUse.ID, "")
-				gt.NotEqual(t, block.OfToolUse.Name, "")
-				gt.NotEqual(t, block.OfToolUse.Input, nil)
-			}
-		}
-		gt.Equal(t, toolUseCount, 2)
-
-		// Convert back and verify round-trip
-		history2, err := gollem.NewHistoryFromClaude(claudeMsgs)
-		gt.NoError(t, err)
-		gt.Equal(t, len(history2.Messages), 1)
-		gt.Equal(t, len(history2.Messages[0].Contents), 2)
-
-		// Verify tool calls are preserved in round-trip
-		for _, content := range history2.Messages[0].Contents {
-			gt.Equal(t, content.Type, gollem.MessageContentTypeToolCall)
-			toolCall, err := content.GetToolCallContent()
-			gt.NoError(t, err)
-			gt.NotEqual(t, toolCall.ID, "")
-			gt.NotEqual(t, toolCall.Name, "")
-			gt.NotEqual(t, toolCall.Arguments, nil)
-		}
+		gt.Equal(t, claudeMsgs[0].Role, anthropic.MessageParamRoleUser)
+		gt.Equal(t, len(claudeMsgs[0].Content), 1)
+		gt.Equal(t, claudeMsgs[0].Content[0].OfText.Text, "Hello, Claude!")
 	})
 
-	t.Run("Mixed content types - detailed verification", func(t *testing.T) {
-		// Create a message with mixed text and image content
-		msg := []openai.ChatCompletionMessage{
+	t.Run("tool use conversion", func(t *testing.T) {
+		args := map[string]any{
+			"location": "Tokyo",
+			"units":    "celsius",
+		}
+		input := []anthropic.MessageParam{
+			anthropic.NewAssistantMessage(
+				anthropic.NewToolUseBlock("tool_123", args, "get_weather"),
+			),
+		}
+
+		history, err := gollem.NewHistoryFromClaude(input)
+		gt.NoError(t, err)
+
+		// Verify structure
+		gt.Equal(t, len(history.Messages), 1)
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleAssistant)
+		gt.Equal(t, len(msg.Contents), 1)
+
+		// Verify tool call content
+		content := msg.Contents[0]
+		gt.Equal(t, content.Type, gollem.MessageContentTypeToolCall)
+		toolCall, err := content.GetToolCallContent()
+		gt.NoError(t, err)
+		gt.Equal(t, toolCall.ID, "tool_123")
+		gt.Equal(t, toolCall.Name, "get_weather")
+		gt.Equal(t, toolCall.Arguments["location"], "Tokyo")
+		gt.Equal(t, toolCall.Arguments["units"], "celsius")
+
+		// Round-trip verification
+		claudeMsgs, err := history.ToClaude()
+		gt.NoError(t, err)
+		gt.Equal(t, len(claudeMsgs), 1)
+		gt.Equal(t, claudeMsgs[0].Content[0].OfToolUse.ID, "tool_123")
+		gt.Equal(t, claudeMsgs[0].Content[0].OfToolUse.Name, "get_weather")
+	})
+
+	t.Run("tool result conversion", func(t *testing.T) {
+		input := []anthropic.MessageParam{
+			anthropic.NewUserMessage(
+				anthropic.NewToolResultBlock("tool_456", `{"temperature": 25, "condition": "sunny"}`, false),
+			),
+		}
+
+		history, err := gollem.NewHistoryFromClaude(input)
+		gt.NoError(t, err)
+
+		// Verify message structure
+		gt.Equal(t, len(history.Messages), 1)
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleUser)
+		gt.Equal(t, len(msg.Contents), 1)
+
+		// Verify tool response content
+		content := msg.Contents[0]
+		gt.Equal(t, content.Type, gollem.MessageContentTypeToolResponse)
+		toolResp, err := content.GetToolResponseContent()
+		gt.NoError(t, err)
+		gt.Equal(t, toolResp.ToolCallID, "tool_456")
+		gt.Equal(t, toolResp.Name, "") // Claude doesn't include tool name in response
+		gt.Equal(t, toolResp.Response["content"], `{"temperature": 25, "condition": "sunny"}`)
+		gt.Equal(t, toolResp.IsError, false)
+	})
+
+	t.Run("image message conversion", func(t *testing.T) {
+		// Create valid Base64 data
+		imageData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+
+		input := []anthropic.MessageParam{
+			anthropic.NewUserMessage(
+				anthropic.NewTextBlock("Look at this image:"),
+				anthropic.NewImageBlockBase64("image/png", imageData),
+			),
+		}
+
+		history, err := gollem.NewHistoryFromClaude(input)
+		gt.NoError(t, err)
+
+		// Verify message structure
+		gt.Equal(t, len(history.Messages), 1)
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleUser)
+		gt.Equal(t, len(msg.Contents), 2)
+
+		// Verify text content
+		textContent, err := msg.Contents[0].GetTextContent()
+		gt.NoError(t, err)
+		gt.Equal(t, textContent.Text, "Look at this image:")
+
+		// Verify image content (should be decoded)
+		imgContent, err := msg.Contents[1].GetImageContent()
+		gt.NoError(t, err)
+		gt.Equal(t, imgContent.MediaType, "image/png")
+
+		// Decode the original Base64 to compare
+		expectedBytes, _ := base64.StdEncoding.DecodeString(imageData)
+		gt.Equal(t, imgContent.Data, expectedBytes)
+
+		// Round-trip should re-encode to Base64
+		claudeMsgs, err := history.ToClaude()
+		gt.NoError(t, err)
+		gt.Equal(t, len(claudeMsgs[0].Content), 2)
+		gt.Equal(t, claudeMsgs[0].Content[1].OfImage.Source.OfBase64.Data, imageData)
+	})
+
+	t.Run("mixed content message", func(t *testing.T) {
+		input := []anthropic.MessageParam{
+			anthropic.NewAssistantMessage(
+				anthropic.NewTextBlock("I'll search for that."),
+				anthropic.NewToolUseBlock("call_001", map[string]any{"query": "weather tokyo"}, "web_search"),
+				anthropic.NewTextBlock("And calculate this."),
+				anthropic.NewToolUseBlock("call_002", map[string]any{"expr": "2+2"}, "calculator"),
+			),
+		}
+
+		history, err := gollem.NewHistoryFromClaude(input)
+		gt.NoError(t, err)
+
+		// Verify message structure
+		gt.Equal(t, len(history.Messages), 1)
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleAssistant)
+		gt.Equal(t, len(msg.Contents), 4)
+
+		// Verify each content in order
+		text1, err := msg.Contents[0].GetTextContent()
+		gt.NoError(t, err)
+		gt.Equal(t, text1.Text, "I'll search for that.")
+
+		tool1, err := msg.Contents[1].GetToolCallContent()
+		gt.NoError(t, err)
+		gt.Equal(t, tool1.ID, "call_001")
+		gt.Equal(t, tool1.Name, "web_search")
+		gt.Equal(t, tool1.Arguments["query"], "weather tokyo")
+
+		text2, err := msg.Contents[2].GetTextContent()
+		gt.NoError(t, err)
+		gt.Equal(t, text2.Text, "And calculate this.")
+
+		tool2, err := msg.Contents[3].GetToolCallContent()
+		gt.NoError(t, err)
+		gt.Equal(t, tool2.ID, "call_002")
+		gt.Equal(t, tool2.Name, "calculator")
+		gt.Equal(t, tool2.Arguments["expr"], "2+2")
+	})
+}
+
+func TestHistoryFromOpenAI(t *testing.T) {
+	t.Run("simple text message", func(t *testing.T) {
+		input := []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: "Hello, OpenAI!",
+			},
+		}
+
+		history, err := gollem.NewHistoryFromOpenAI(input)
+		gt.NoError(t, err)
+
+		// Verify history metadata
+		gt.Equal(t, history.LLType, gollem.LLMTypeOpenAI)
+		gt.Equal(t, history.Version, gollem.HistoryVersion)
+		gt.Equal(t, len(history.Messages), 1)
+
+		// Verify message details
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleUser)
+		gt.Equal(t, len(msg.Contents), 1)
+
+		// Verify content
+		textContent, err := msg.Contents[0].GetTextContent()
+		gt.NoError(t, err)
+		gt.Equal(t, textContent.Text, "Hello, OpenAI!")
+
+		// Round-trip verification
+		openAIMsgs, err := history.ToOpenAI()
+		gt.NoError(t, err)
+		gt.Equal(t, len(openAIMsgs), 1)
+		gt.Equal(t, openAIMsgs[0].Role, openai.ChatMessageRoleUser)
+		gt.Equal(t, openAIMsgs[0].Content, "Hello, OpenAI!")
+	})
+
+	t.Run("system message", func(t *testing.T) {
+		input := []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: "You are a helpful assistant.",
+			},
+		}
+
+		history, err := gollem.NewHistoryFromOpenAI(input)
+		gt.NoError(t, err)
+
+		// Verify system role is preserved
+		gt.Equal(t, len(history.Messages), 1)
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleSystem)
+
+		textContent, err := msg.Contents[0].GetTextContent()
+		gt.NoError(t, err)
+		gt.Equal(t, textContent.Text, "You are a helpful assistant.")
+	})
+
+	t.Run("assistant with tool calls", func(t *testing.T) {
+		input := []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleAssistant,
+				Content: "Let me help you with that.",
+				ToolCalls: []openai.ToolCall{
+					{
+						ID:   "call_789",
+						Type: "function",
+						Function: openai.FunctionCall{
+							Name:      "get_time",
+							Arguments: `{"timezone":"UTC"}`,
+						},
+					},
+					{
+						ID:   "call_790",
+						Type: "function",
+						Function: openai.FunctionCall{
+							Name:      "get_weather",
+							Arguments: `{"city":"London"}`,
+						},
+					},
+				},
+			},
+		}
+
+		history, err := gollem.NewHistoryFromOpenAI(input)
+		gt.NoError(t, err)
+
+		// Verify message structure
+		gt.Equal(t, len(history.Messages), 1)
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleAssistant)
+		gt.Equal(t, len(msg.Contents), 3) // 1 text + 2 tool calls
+
+		// Verify text content
+		textContent, err := msg.Contents[0].GetTextContent()
+		gt.NoError(t, err)
+		gt.Equal(t, textContent.Text, "Let me help you with that.")
+
+		// Verify first tool call
+		tool1, err := msg.Contents[1].GetToolCallContent()
+		gt.NoError(t, err)
+		gt.Equal(t, tool1.ID, "call_789")
+		gt.Equal(t, tool1.Name, "get_time")
+		gt.Equal(t, tool1.Arguments["timezone"], "UTC")
+
+		// Verify second tool call
+		tool2, err := msg.Contents[2].GetToolCallContent()
+		gt.NoError(t, err)
+		gt.Equal(t, tool2.ID, "call_790")
+		gt.Equal(t, tool2.Name, "get_weather")
+		gt.Equal(t, tool2.Arguments["city"], "London")
+
+		// Round-trip verification
+		openAIMsgs, err := history.ToOpenAI()
+		gt.NoError(t, err)
+		gt.Equal(t, len(openAIMsgs), 1)
+		gt.Equal(t, openAIMsgs[0].Content, "Let me help you with that.")
+		gt.Equal(t, len(openAIMsgs[0].ToolCalls), 2)
+		gt.Equal(t, openAIMsgs[0].ToolCalls[0].ID, "call_789")
+		gt.Equal(t, openAIMsgs[0].ToolCalls[1].ID, "call_790")
+	})
+
+	t.Run("tool response message", func(t *testing.T) {
+		input := []openai.ChatCompletionMessage{
+			{
+				Role:       openai.ChatMessageRoleTool,
+				Content:    `{"time":"2024-01-01T12:00:00Z","timezone":"UTC"}`,
+				ToolCallID: "call_789",
+				Name:       "get_time",
+			},
+		}
+
+		history, err := gollem.NewHistoryFromOpenAI(input)
+		gt.NoError(t, err)
+
+		// Verify structure
+		gt.Equal(t, len(history.Messages), 1)
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleTool)
+
+		// Tool responses with ToolCallID create both text and tool response content
+		gt.Equal(t, len(msg.Contents), 2)
+
+		// First should be text content
+		textContent, err := msg.Contents[0].GetTextContent()
+		gt.NoError(t, err)
+		gt.Equal(t, textContent.Text, `{"time":"2024-01-01T12:00:00Z","timezone":"UTC"}`)
+
+		// Second should be tool response content
+		toolResp, err := msg.Contents[1].GetToolResponseContent()
+		gt.NoError(t, err)
+		gt.Equal(t, toolResp.ToolCallID, "call_789")
+		gt.Equal(t, toolResp.Name, "get_time")
+
+		// Round-trip verification - might create multiple messages
+		openAIMsgs, err := history.ToOpenAI()
+		gt.NoError(t, err)
+		gt.True(t, len(openAIMsgs) >= 1)
+
+		// Find the tool messages (may be split into text and tool response)
+		foundToolContent := false
+		foundToolResponse := false
+		for _, msg := range openAIMsgs {
+			if msg.Role == openai.ChatMessageRoleTool {
+				if msg.ToolCallID == "call_789" {
+					foundToolResponse = true
+					// Tool response should have the response data
+					var respData map[string]interface{}
+					if err := json.Unmarshal([]byte(msg.Content), &respData); err == nil {
+						// May have content key or the direct data
+						gt.True(t, respData != nil && len(respData) > 0)
+					}
+				} else if msg.Content == `{"time":"2024-01-01T12:00:00Z","timezone":"UTC"}` {
+					foundToolContent = true
+				}
+			}
+		}
+		// Should have at least one tool message
+		gt.True(t, foundToolContent || foundToolResponse)
+	})
+
+	t.Run("multi-content message with text and image", func(t *testing.T) {
+		validBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+
+		input := []openai.ChatCompletionMessage{
 			{
 				Role: openai.ChatMessageRoleUser,
 				MultiContent: []openai.ChatMessagePart{
@@ -554,12 +396,12 @@ func TestComplexMessageConversion(t *testing.T) {
 					},
 					{
 						Type: "text",
-						Text: "Please describe it in detail.",
+						Text: "Please describe in detail.",
 					},
 					{
 						Type: "image_url",
 						ImageURL: &openai.ChatMessageImageURL{
-							URL:    "https://example.com/image.jpg",
+							URL:    "data:image/png;base64," + validBase64,
 							Detail: openai.ImageURLDetailHigh,
 						},
 					},
@@ -567,62 +409,683 @@ func TestComplexMessageConversion(t *testing.T) {
 			},
 		}
 
-		history, err := gollem.NewHistoryFromOpenAI(msg)
+		history, err := gollem.NewHistoryFromOpenAI(input)
 		gt.NoError(t, err)
+
+		// Verify structure
 		gt.Equal(t, len(history.Messages), 1)
-		gt.Equal(t, len(history.Messages[0].Contents), 3)
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleUser)
+		gt.Equal(t, len(msg.Contents), 3)
 
-		// Verify each content type
-		gt.Equal(t, history.Messages[0].Contents[0].Type, gollem.MessageContentTypeText)
-		gt.Equal(t, history.Messages[0].Contents[1].Type, gollem.MessageContentTypeText)
-		gt.Equal(t, history.Messages[0].Contents[2].Type, gollem.MessageContentTypeImage)
-
-		// Verify text contents
-		text1, err := history.Messages[0].Contents[0].GetTextContent()
+		// Verify first text
+		text1, err := msg.Contents[0].GetTextContent()
 		gt.NoError(t, err)
 		gt.Equal(t, text1.Text, "What's in this image?")
 
-		text2, err := history.Messages[0].Contents[1].GetTextContent()
+		// Verify second text
+		text2, err := msg.Contents[1].GetTextContent()
 		gt.NoError(t, err)
-		gt.Equal(t, text2.Text, "Please describe it in detail.")
+		gt.Equal(t, text2.Text, "Please describe in detail.")
 
-		// Verify image content
-		img, err := history.Messages[0].Contents[2].GetImageContent()
+		// Verify image (should be decoded from Base64)
+		imgContent, err := msg.Contents[2].GetImageContent()
 		gt.NoError(t, err)
-		gt.Equal(t, img.URL, "https://example.com/image.jpg")
-		gt.Equal(t, img.Detail, "high")
-		gt.Equal(t, len(img.Data), 0) // URL image has no data
+		gt.Equal(t, imgContent.MediaType, "image/png")
+		gt.Equal(t, imgContent.Detail, "high")
+
+		// Data should be decoded
+		expectedData, _ := base64.StdEncoding.DecodeString(validBase64)
+		gt.Equal(t, imgContent.Data, expectedData)
+
+		// Round-trip should re-encode
+		openAIMsgs, err := history.ToOpenAI()
+		gt.NoError(t, err)
+		gt.Equal(t, len(openAIMsgs[0].MultiContent), 3)
+		gt.Equal(t, openAIMsgs[0].MultiContent[2].ImageURL.URL, "data:image/png;base64,"+validBase64)
 	})
 
-	t.Run("Tool response with error handling", func(t *testing.T) {
-		msg := []openai.ChatCompletionMessage{
+	t.Run("function message (legacy format)", func(t *testing.T) {
+		input := []openai.ChatCompletionMessage{
 			{
-				Role:       openai.ChatMessageRoleTool,
-				Content:    `{"error":"Not found","code":404}`,
-				ToolCallID: "call_error_123",
+				Role:    openai.ChatMessageRoleFunction,
+				Content: "Function result data",
+				Name:    "my_function",
 			},
 		}
 
-		history, err := gollem.NewHistoryFromOpenAI(msg)
+		history, err := gollem.NewHistoryFromOpenAI(input)
 		gt.NoError(t, err)
+
+		// Verify function role is preserved
 		gt.Equal(t, len(history.Messages), 1)
-		gt.Equal(t, history.Messages[0].Role, gollem.RoleTool)
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleFunction)
 
-		// Verify content is properly converted
-		gt.True(t, len(history.Messages[0].Contents) > 0)
+		// Content should be text
+		textContent, err := msg.Contents[0].GetTextContent()
+		gt.NoError(t, err)
+		gt.Equal(t, textContent.Text, "Function result data")
+	})
+}
 
-		// The content might be either text or tool_response depending on implementation
-		content := history.Messages[0].Contents[0]
-		if content.Type == gollem.MessageContentTypeToolResponse {
-			toolResp, err := content.GetToolResponseContent()
-			gt.NoError(t, err)
-			gt.Equal(t, toolResp.ToolCallID, "call_error_123")
-			gt.NotEqual(t, toolResp.Response, nil)
-		} else if content.Type == gollem.MessageContentTypeText {
-			textContent, err := content.GetTextContent()
-			gt.NoError(t, err)
-			gt.Equal(t, textContent.Text, `{"error":"Not found","code":404}`)
+func TestHistoryFromGemini(t *testing.T) {
+	t.Run("user text message", func(t *testing.T) {
+		input := []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{Text: "Hello, Gemini!"},
+				},
+			},
 		}
+
+		history, err := gollem.NewHistoryFromGemini(input)
+		gt.NoError(t, err)
+
+		// Verify history metadata
+		gt.Equal(t, history.LLType, gollem.LLMTypeGemini)
+		gt.Equal(t, history.Version, gollem.HistoryVersion)
+		gt.Equal(t, len(history.Messages), 1)
+
+		// Verify message
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleUser)
+		gt.Equal(t, len(msg.Contents), 1)
+
+		// Verify content
+		textContent, err := msg.Contents[0].GetTextContent()
+		gt.NoError(t, err)
+		gt.Equal(t, textContent.Text, "Hello, Gemini!")
+
+		// Round-trip verification
+		geminiMsgs, err := history.ToGemini()
+		gt.NoError(t, err)
+		gt.Equal(t, len(geminiMsgs), 1)
+		gt.Equal(t, geminiMsgs[0].Role, "user")
+		gt.Equal(t, geminiMsgs[0].Parts[0].Text, "Hello, Gemini!")
+	})
+
+	t.Run("model message", func(t *testing.T) {
+		input := []*genai.Content{
+			{
+				Role: "model",
+				Parts: []*genai.Part{
+					{Text: "Hello from model!"},
+				},
+			},
+		}
+
+		history, err := gollem.NewHistoryFromGemini(input)
+		gt.NoError(t, err)
+
+		// Model role should be preserved
+		gt.Equal(t, len(history.Messages), 1)
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleModel)
+
+		textContent, err := msg.Contents[0].GetTextContent()
+		gt.NoError(t, err)
+		gt.Equal(t, textContent.Text, "Hello from model!")
+
+		// Round-trip should preserve model role
+		geminiMsgs, err := history.ToGemini()
+		gt.NoError(t, err)
+		gt.Equal(t, geminiMsgs[0].Role, "model")
+	})
+
+	t.Run("function call", func(t *testing.T) {
+		input := []*genai.Content{
+			{
+				Role: "model",
+				Parts: []*genai.Part{
+					{Text: "I'll calculate that for you."},
+					{FunctionCall: &genai.FunctionCall{
+						Name: "calculate",
+						Args: map[string]any{
+							"expression": "2+2",
+							"precision":  float64(2),
+						},
+					}},
+				},
+			},
+		}
+
+		history, err := gollem.NewHistoryFromGemini(input)
+		gt.NoError(t, err)
+
+		// Verify structure
+		gt.Equal(t, len(history.Messages), 1)
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleModel)
+		gt.Equal(t, len(msg.Contents), 2)
+
+		// Verify text
+		text, err := msg.Contents[0].GetTextContent()
+		gt.NoError(t, err)
+		gt.Equal(t, text.Text, "I'll calculate that for you.")
+
+		// Verify tool call (Gemini function calls become tool calls)
+		toolCall, err := msg.Contents[1].GetToolCallContent()
+		gt.NoError(t, err)
+		gt.Equal(t, toolCall.Name, "calculate")
+
+		// Verify arguments (already as map for tool calls)
+		gt.Equal(t, toolCall.Arguments["expression"], "2+2")
+		gt.Equal(t, toolCall.Arguments["precision"], 2.0)
+
+		// Round-trip verification
+		geminiMsgs, err := history.ToGemini()
+		gt.NoError(t, err)
+		gt.Equal(t, len(geminiMsgs[0].Parts), 2)
+		gt.Equal(t, geminiMsgs[0].Parts[1].FunctionCall.Name, "calculate")
+		gt.Equal(t, geminiMsgs[0].Parts[1].FunctionCall.Args["expression"], "2+2")
+	})
+
+	t.Run("function response", func(t *testing.T) {
+		input := []*genai.Content{
+			{
+				Role: "function",
+				Parts: []*genai.Part{
+					{FunctionResponse: &genai.FunctionResponse{
+						Name: "calculate",
+						Response: map[string]any{
+							"result": float64(4),
+							"steps":  []any{"2+2", "=4"},
+						},
+					}},
+				},
+			},
+		}
+
+		history, err := gollem.NewHistoryFromGemini(input)
+		gt.NoError(t, err)
+
+		// Function role should be preserved
+		gt.Equal(t, len(history.Messages), 1)
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleFunction)
+		gt.Equal(t, len(msg.Contents), 1)
+
+		// Verify tool response content (Gemini function responses become tool responses)
+		toolResp, err := msg.Contents[0].GetToolResponseContent()
+		gt.NoError(t, err)
+		gt.Equal(t, toolResp.Name, "calculate")
+
+		// Response is already a map
+		gt.Equal(t, toolResp.Response["result"], 4.0)
+		steps := toolResp.Response["steps"].([]interface{})
+		gt.Equal(t, steps[0], "2+2")
+		gt.Equal(t, steps[1], "=4")
+
+		// Round-trip verification
+		geminiMsgs, err := history.ToGemini()
+		gt.NoError(t, err)
+		gt.Equal(t, geminiMsgs[0].Role, "function")
+		gt.Equal(t, geminiMsgs[0].Parts[0].FunctionResponse.Name, "calculate")
+	})
+
+	t.Run("inline data (image)", func(t *testing.T) {
+		imageBytes := []byte("test image data")
+
+		input := []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{Text: "Look at this:"},
+					{InlineData: &genai.Blob{
+						MIMEType: "image/jpeg",
+						Data:     imageBytes,
+					}},
+				},
+			},
+		}
+
+		history, err := gollem.NewHistoryFromGemini(input)
+		gt.NoError(t, err)
+
+		// Verify structure
+		gt.Equal(t, len(history.Messages), 1)
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleUser)
+		gt.Equal(t, len(msg.Contents), 2)
+
+		// Verify text
+		text, err := msg.Contents[0].GetTextContent()
+		gt.NoError(t, err)
+		gt.Equal(t, text.Text, "Look at this:")
+
+		// Verify image
+		img, err := msg.Contents[1].GetImageContent()
+		gt.NoError(t, err)
+		gt.Equal(t, img.MediaType, "image/jpeg")
+		gt.Equal(t, img.Data, imageBytes)
+		gt.Equal(t, img.URL, "")
+
+		// Round-trip verification
+		geminiMsgs, err := history.ToGemini()
+		gt.NoError(t, err)
+		gt.Equal(t, len(geminiMsgs[0].Parts), 2)
+		gt.Equal(t, geminiMsgs[0].Parts[1].InlineData.MIMEType, "image/jpeg")
+		gt.Equal(t, geminiMsgs[0].Parts[1].InlineData.Data, imageBytes)
+	})
+
+	t.Run("file data (video)", func(t *testing.T) {
+		input := []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{FileData: &genai.FileData{
+						MIMEType: "video/mp4",
+						FileURI:  "gs://bucket/video.mp4",
+					}},
+				},
+			},
+		}
+
+		history, err := gollem.NewHistoryFromGemini(input)
+		gt.NoError(t, err)
+
+		// Verify structure
+		gt.Equal(t, len(history.Messages), 1)
+		msg := history.Messages[0]
+		gt.Equal(t, msg.Role, gollem.RoleUser)
+		gt.Equal(t, len(msg.Contents), 1)
+
+		// File data becomes image content with URL
+		img, err := msg.Contents[0].GetImageContent()
+		gt.NoError(t, err)
+		gt.Equal(t, img.MediaType, "video/mp4")
+		gt.Equal(t, img.URL, "gs://bucket/video.mp4")
+		gt.Equal(t, len(img.Data), 0)
+
+		// Round-trip verification
+		geminiMsgs, err := history.ToGemini()
+		gt.NoError(t, err)
+		gt.Equal(t, geminiMsgs[0].Parts[0].FileData.MIMEType, "video/mp4")
+		gt.Equal(t, geminiMsgs[0].Parts[0].FileData.FileURI, "gs://bucket/video.mp4")
+	})
+}
+
+func TestCrossProviderConversion(t *testing.T) {
+	t.Run("OpenAI to Claude conversion", func(t *testing.T) {
+		openAIMsgs := []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: "You are helpful.",
+			},
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: "Hello",
+			},
+			{
+				Role:    openai.ChatMessageRoleAssistant,
+				Content: "Hi there!",
+				ToolCalls: []openai.ToolCall{
+					{
+						ID:   "call_123",
+						Type: "function",
+						Function: openai.FunctionCall{
+							Name:      "search",
+							Arguments: `{"q":"weather"}`,
+						},
+					},
+				},
+			},
+			{
+				Role:       openai.ChatMessageRoleTool,
+				Content:    `{"result":"sunny"}`,
+				ToolCallID: "call_123",
+			},
+		}
+
+		history, err := gollem.NewHistoryFromOpenAI(openAIMsgs)
+		gt.NoError(t, err)
+
+		// Convert to Claude
+		claudeMsgs, err := history.ToClaude()
+		gt.NoError(t, err)
+
+		// System message should be merged into first user message
+		gt.Equal(t, len(claudeMsgs), 3) // user, assistant, user (tool result)
+
+		// First message should be user with system content merged
+		gt.Equal(t, claudeMsgs[0].Role, anthropic.MessageParamRoleUser)
+		gt.Equal(t, len(claudeMsgs[0].Content), 2)
+		gt.Equal(t, claudeMsgs[0].Content[0].OfText.Text, "You are helpful.\n\n")
+		gt.Equal(t, claudeMsgs[0].Content[1].OfText.Text, "Hello")
+
+		// Second message should be assistant with text and tool use
+		gt.Equal(t, claudeMsgs[1].Role, anthropic.MessageParamRoleAssistant)
+		gt.Equal(t, len(claudeMsgs[1].Content), 2)
+		gt.Equal(t, claudeMsgs[1].Content[0].OfText.Text, "Hi there!")
+		gt.Equal(t, claudeMsgs[1].Content[1].OfToolUse.ID, "call_123")
+		gt.Equal(t, claudeMsgs[1].Content[1].OfToolUse.Name, "search")
+
+		// Third message should be user with tool result
+		gt.Equal(t, claudeMsgs[2].Role, anthropic.MessageParamRoleUser)
+		// Tool responses may have multiple content blocks
+		gt.True(t, len(claudeMsgs[2].Content) >= 1)
+		// Find the tool result block
+		foundToolResult := false
+		for _, block := range claudeMsgs[2].Content {
+			if block.OfToolResult != nil && block.OfToolResult.ToolUseID == "call_123" {
+				foundToolResult = true
+				break
+			}
+		}
+		gt.True(t, foundToolResult)
+	})
+
+	t.Run("Claude to Gemini conversion", func(t *testing.T) {
+		claudeMsgs := []anthropic.MessageParam{
+			anthropic.NewUserMessage(
+				anthropic.NewTextBlock("Question?"),
+			),
+			anthropic.NewAssistantMessage(
+				anthropic.NewTextBlock("Let me search."),
+				anthropic.NewToolUseBlock("tool_1", map[string]any{"q": "answer"}, "search"),
+			),
+			anthropic.NewUserMessage(
+				anthropic.NewToolResultBlock("tool_1", `{"found": true}`, false),
+			),
+		}
+
+		history, err := gollem.NewHistoryFromClaude(claudeMsgs)
+		gt.NoError(t, err)
+
+		// Convert to Gemini
+		geminiMsgs, err := history.ToGemini()
+		gt.NoError(t, err)
+
+		gt.Equal(t, len(geminiMsgs), 3)
+
+		// First message - user
+		gt.Equal(t, geminiMsgs[0].Role, "user")
+		gt.Equal(t, geminiMsgs[0].Parts[0].Text, "Question?")
+
+		// Second message - model with text and function call
+		gt.Equal(t, geminiMsgs[1].Role, "model")
+		gt.Equal(t, len(geminiMsgs[1].Parts), 2)
+		gt.Equal(t, geminiMsgs[1].Parts[0].Text, "Let me search.")
+		gt.Equal(t, geminiMsgs[1].Parts[1].FunctionCall.Name, "search")
+		gt.Equal(t, geminiMsgs[1].Parts[1].FunctionCall.Args["q"], "answer")
+
+		// Third message - user with function response (tool results go to user in Gemini)
+		gt.Equal(t, geminiMsgs[2].Role, "user")
+		gt.Equal(t, len(geminiMsgs[2].Parts), 1)
+		gt.NotNil(t, geminiMsgs[2].Parts[0].FunctionResponse)
+	})
+
+	t.Run("Gemini to OpenAI conversion", func(t *testing.T) {
+		geminiMsgs := []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{Text: "Question"},
+				},
+			},
+			{
+				Role: "model",
+				Parts: []*genai.Part{
+					{Text: "Answer"},
+					{FunctionCall: &genai.FunctionCall{
+						Name: "tool",
+						Args: map[string]any{"x": float64(1)},
+					}},
+				},
+			},
+			{
+				Role: "function",
+				Parts: []*genai.Part{
+					{FunctionResponse: &genai.FunctionResponse{
+						Name:     "tool",
+						Response: map[string]any{"y": float64(2)},
+					}},
+				},
+			},
+		}
+
+		history, err := gollem.NewHistoryFromGemini(geminiMsgs)
+		gt.NoError(t, err)
+
+		// Convert to OpenAI
+		openAIMsgs, err := history.ToOpenAI()
+		gt.NoError(t, err)
+
+		gt.Equal(t, len(openAIMsgs), 3)
+
+		// First message - user
+		gt.Equal(t, openAIMsgs[0].Role, openai.ChatMessageRoleUser)
+		gt.Equal(t, openAIMsgs[0].Content, "Question")
+
+		// Second message - assistant with text and tool call
+		gt.Equal(t, openAIMsgs[1].Role, openai.ChatMessageRoleAssistant)
+		gt.Equal(t, openAIMsgs[1].Content, "Answer")
+		gt.Equal(t, len(openAIMsgs[1].ToolCalls), 1)
+		gt.Equal(t, openAIMsgs[1].ToolCalls[0].Function.Name, "tool")
+		gt.Equal(t, openAIMsgs[1].ToolCalls[0].Function.Arguments, `{"x":1}`)
+
+		// Third message - function or tool
+		gt.True(t, openAIMsgs[2].Role == openai.ChatMessageRoleFunction || openAIMsgs[2].Role == openai.ChatMessageRoleTool)
+		gt.Equal(t, openAIMsgs[2].Content, `{"y":2}`)
+		if openAIMsgs[2].Role == openai.ChatMessageRoleFunction {
+			gt.Equal(t, openAIMsgs[2].Name, "tool")
+		}
+	})
+}
+
+func TestRoundTripConversions(t *testing.T) {
+	t.Run("OpenAI round-trip with all content types", func(t *testing.T) {
+		validBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+		original := []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: "System prompt",
+			},
+			{
+				Role: openai.ChatMessageRoleUser,
+				MultiContent: []openai.ChatMessagePart{
+					{Type: "text", Text: "User text"},
+					{Type: "image_url", ImageURL: &openai.ChatMessageImageURL{
+						URL:    "data:image/png;base64," + validBase64,
+						Detail: openai.ImageURLDetailLow,
+					}},
+				},
+			},
+			{
+				Role:    openai.ChatMessageRoleAssistant,
+				Content: "Assistant response",
+				ToolCalls: []openai.ToolCall{
+					{
+						ID:   "tc_1",
+						Type: "function",
+						Function: openai.FunctionCall{
+							Name:      "func1",
+							Arguments: `{"arg":"val"}`,
+						},
+					},
+				},
+			},
+			{
+				Role:       openai.ChatMessageRoleTool,
+				Content:    `{"result":"ok"}`,
+				ToolCallID: "tc_1",
+				Name:       "func1",
+			},
+		}
+
+		// Convert to history
+		history, err := gollem.NewHistoryFromOpenAI(original)
+		gt.NoError(t, err)
+
+		// Convert back to OpenAI
+		converted, err := history.ToOpenAI()
+		gt.NoError(t, err)
+
+		// Verify essential structure is preserved
+		gt.True(t, len(converted) >= 3) // At least user, assistant, tool
+
+		// Find and verify user message with image
+		foundUserWithImage := false
+		for _, msg := range converted {
+			if msg.Role == openai.ChatMessageRoleUser && len(msg.MultiContent) > 0 {
+				for _, part := range msg.MultiContent {
+					if part.Type == "image_url" && part.ImageURL != nil {
+						foundUserWithImage = true
+						gt.Equal(t, part.ImageURL.URL, "data:image/png;base64,"+validBase64)
+						gt.Equal(t, part.ImageURL.Detail, openai.ImageURLDetailLow)
+					}
+				}
+			}
+		}
+		gt.True(t, foundUserWithImage)
+
+		// Find and verify assistant with tool call
+		foundAssistantWithTool := false
+		for _, msg := range converted {
+			if msg.Role == openai.ChatMessageRoleAssistant && len(msg.ToolCalls) > 0 {
+				foundAssistantWithTool = true
+				gt.Equal(t, msg.ToolCalls[0].ID, "tc_1")
+				gt.Equal(t, msg.ToolCalls[0].Function.Name, "func1")
+				gt.Equal(t, msg.ToolCalls[0].Function.Arguments, `{"arg":"val"}`)
+			}
+		}
+		gt.True(t, foundAssistantWithTool)
+
+		// Find and verify tool response
+		foundToolResponse := false
+		for _, msg := range converted {
+			if msg.Role == openai.ChatMessageRoleTool {
+				foundToolResponse = true
+				// Tool response may have been transformed
+				if msg.ToolCallID == "tc_1" {
+					// Check that content contains the result
+					var content map[string]interface{}
+					if err := json.Unmarshal([]byte(msg.Content), &content); err == nil {
+						// Content may be wrapped or direct
+						gt.True(t, content["result"] == "ok" || content["content"] == `{"result":"ok"}`)
+					}
+				} else {
+					// Or it might be the original content
+					gt.Equal(t, msg.Content, `{"result":"ok"}`)
+				}
+			}
+		}
+		gt.True(t, foundToolResponse)
+	})
+
+	t.Run("Claude round-trip preserves content", func(t *testing.T) {
+		imageBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+		original := []anthropic.MessageParam{
+			anthropic.NewUserMessage(
+				anthropic.NewTextBlock("User message"),
+				anthropic.NewImageBlockBase64("image/png", imageBase64),
+			),
+			anthropic.NewAssistantMessage(
+				anthropic.NewTextBlock("Response"),
+				anthropic.NewToolUseBlock("use_1", map[string]any{"key": "value"}, "tool_name"),
+			),
+			anthropic.NewUserMessage(
+				anthropic.NewToolResultBlock("use_1", `{"status":"complete"}`, false),
+			),
+		}
+
+		// Convert to history
+		history, err := gollem.NewHistoryFromClaude(original)
+		gt.NoError(t, err)
+
+		// Convert back to Claude
+		converted, err := history.ToClaude()
+		gt.NoError(t, err)
+
+		// Verify structure
+		gt.Equal(t, len(converted), 3)
+
+		// First message - user with text and image
+		gt.Equal(t, converted[0].Role, anthropic.MessageParamRoleUser)
+		gt.Equal(t, len(converted[0].Content), 2)
+		gt.Equal(t, converted[0].Content[0].OfText.Text, "User message")
+		gt.Equal(t, string(converted[0].Content[1].OfImage.Source.OfBase64.MediaType), "image/png")
+		gt.Equal(t, converted[0].Content[1].OfImage.Source.OfBase64.Data, imageBase64)
+
+		// Second message - assistant with text and tool use
+		gt.Equal(t, converted[1].Role, anthropic.MessageParamRoleAssistant)
+		gt.Equal(t, len(converted[1].Content), 2)
+		gt.Equal(t, converted[1].Content[0].OfText.Text, "Response")
+		gt.Equal(t, converted[1].Content[1].OfToolUse.ID, "use_1")
+		gt.Equal(t, converted[1].Content[1].OfToolUse.Name, "tool_name")
+
+		// Third message - user with tool result
+		gt.Equal(t, converted[2].Role, anthropic.MessageParamRoleUser)
+		gt.Equal(t, len(converted[2].Content), 1)
+		gt.Equal(t, converted[2].Content[0].OfToolResult.ToolUseID, "use_1")
+	})
+
+	t.Run("Gemini round-trip with all part types", func(t *testing.T) {
+		imageData := []byte("image bytes")
+		original := []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{Text: "User text"},
+					{InlineData: &genai.Blob{
+						MIMEType: "image/jpeg",
+						Data:     imageData,
+					}},
+				},
+			},
+			{
+				Role: "model",
+				Parts: []*genai.Part{
+					{Text: "Model response"},
+					{FunctionCall: &genai.FunctionCall{
+						Name: "my_func",
+						Args: map[string]any{"param": "value"},
+					}},
+				},
+			},
+			{
+				Role: "function",
+				Parts: []*genai.Part{
+					{FunctionResponse: &genai.FunctionResponse{
+						Name:     "my_func",
+						Response: map[string]any{"result": "success"},
+					}},
+				},
+			},
+		}
+
+		// Convert to history
+		history, err := gollem.NewHistoryFromGemini(original)
+		gt.NoError(t, err)
+
+		// Convert back to Gemini
+		converted, err := history.ToGemini()
+		gt.NoError(t, err)
+
+		// Verify structure
+		gt.Equal(t, len(converted), 3)
+
+		// First message - user with text and image
+		gt.Equal(t, converted[0].Role, "user")
+		gt.Equal(t, len(converted[0].Parts), 2)
+		gt.Equal(t, converted[0].Parts[0].Text, "User text")
+		gt.Equal(t, converted[0].Parts[1].InlineData.MIMEType, "image/jpeg")
+		gt.Equal(t, converted[0].Parts[1].InlineData.Data, imageData)
+
+		// Second message - model with text and function call
+		gt.Equal(t, converted[1].Role, "model")
+		gt.Equal(t, len(converted[1].Parts), 2)
+		gt.Equal(t, converted[1].Parts[0].Text, "Model response")
+		gt.Equal(t, converted[1].Parts[1].FunctionCall.Name, "my_func")
+		gt.Equal(t, converted[1].Parts[1].FunctionCall.Args["param"], "value")
+
+		// Third message - function response
+		gt.Equal(t, converted[2].Role, "function")
+		gt.Equal(t, len(converted[2].Parts), 1)
+		gt.Equal(t, converted[2].Parts[0].FunctionResponse.Name, "my_func")
+		gt.Equal(t, converted[2].Parts[0].FunctionResponse.Response["result"], "success")
 	})
 }
 
@@ -651,7 +1114,6 @@ func TestErrorHandling(t *testing.T) {
 	})
 
 	t.Run("invalid JSON in tool arguments", func(t *testing.T) {
-		// OpenAI message with invalid JSON in tool arguments
 		msg := []openai.ChatCompletionMessage{
 			{
 				Role: openai.ChatMessageRoleAssistant,
@@ -673,19 +1135,18 @@ func TestErrorHandling(t *testing.T) {
 		gt.Equal(t, len(history.Messages), 1)
 		gt.Equal(t, len(history.Messages[0].Contents), 1)
 
-		// Verify the malformed JSON is still stored
+		// Tool call should still be created
 		content := history.Messages[0].Contents[0]
 		gt.Equal(t, content.Type, gollem.MessageContentTypeToolCall)
 		toolCall, err := content.GetToolCallContent()
 		gt.NoError(t, err)
 		gt.Equal(t, toolCall.ID, "call_bad")
 		gt.Equal(t, toolCall.Name, "bad_tool")
-		// Arguments should be stored as-is even if invalid JSON
-		gt.NotEqual(t, toolCall.Arguments, nil)
+		// Arguments should be empty map or contain raw string
+		gt.NotNil(t, toolCall.Arguments)
 	})
 
-	t.Run("nil and empty content handling", func(t *testing.T) {
-		// Test OpenAI message with empty content
+	t.Run("empty content handling", func(t *testing.T) {
 		msg := []openai.ChatCompletionMessage{
 			{
 				Role:    openai.ChatMessageRoleUser,
@@ -697,14 +1158,17 @@ func TestErrorHandling(t *testing.T) {
 		gt.NoError(t, err)
 		gt.Equal(t, len(history.Messages), 1)
 
-		// Empty content should still create a text message
+		// Empty content should create empty text
 		if len(history.Messages[0].Contents) > 0 {
-			gt.Equal(t, history.Messages[0].Contents[0].Type, gollem.MessageContentTypeText)
+			content := history.Messages[0].Contents[0]
+			gt.Equal(t, content.Type, gollem.MessageContentTypeText)
+			text, err := content.GetTextContent()
+			gt.NoError(t, err)
+			gt.Equal(t, text.Text, "")
 		}
 	})
 
 	t.Run("missing tool call ID", func(t *testing.T) {
-		// OpenAI tool response without ToolCallID
 		msg := []openai.ChatCompletionMessage{
 			{
 				Role:    openai.ChatMessageRoleTool,
@@ -714,13 +1178,20 @@ func TestErrorHandling(t *testing.T) {
 		}
 
 		history, err := gollem.NewHistoryFromOpenAI(msg)
-		gt.NoError(t, err) // Should handle gracefully
+		gt.NoError(t, err)
 		gt.Equal(t, len(history.Messages), 1)
 		gt.Equal(t, history.Messages[0].Role, gollem.RoleTool)
+
+		// Content should still be created
+		gt.True(t, len(history.Messages[0].Contents) > 0)
+		content := history.Messages[0].Contents[0]
+		gt.Equal(t, content.Type, gollem.MessageContentTypeText)
+		text, err := content.GetTextContent()
+		gt.NoError(t, err)
+		gt.Equal(t, text.Text, `{"result":"success"}`)
 	})
 
-	t.Run("invalid image data", func(t *testing.T) {
-		// Test with invalid base64 image
+	t.Run("invalid image data URL", func(t *testing.T) {
 		msg := []openai.ChatCompletionMessage{
 			{
 				Role: openai.ChatMessageRoleUser,
@@ -728,7 +1199,7 @@ func TestErrorHandling(t *testing.T) {
 					{
 						Type: "image_url",
 						ImageURL: &openai.ChatMessageImageURL{
-							URL: "data:image/png;base64,invalid_base64!!!",
+							URL: "data:image/png;base64,invalid!!!",
 						},
 					},
 				},
@@ -738,29 +1209,45 @@ func TestErrorHandling(t *testing.T) {
 		history, err := gollem.NewHistoryFromOpenAI(msg)
 		gt.NoError(t, err) // Should handle gracefully
 		gt.Equal(t, len(history.Messages), 1)
+		gt.Equal(t, len(history.Messages[0].Contents), 1)
 
-		// Should still create image content even with invalid base64
-		if len(history.Messages[0].Contents) > 0 {
-			gt.Equal(t, history.Messages[0].Contents[0].Type, gollem.MessageContentTypeImage)
-		}
+		// Should create image content with URL preserved
+		content := history.Messages[0].Contents[0]
+		gt.Equal(t, content.Type, gollem.MessageContentTypeImage)
+		img, err := content.GetImageContent()
+		gt.NoError(t, err)
+		// Invalid Base64 should preserve URL
+		gt.Equal(t, img.URL, "data:image/png;base64,invalid!!!")
+		gt.Equal(t, img.MediaType, "image/png")
 	})
 
 	t.Run("content type mismatch errors", func(t *testing.T) {
-		// Create text content and try to get it as image
 		textContent := mustNewTextContent("Hello")
 
 		_, err := textContent.GetImageContent()
-		gt.Error(t, err) // Should return error for wrong type
+		gt.Error(t, err)
 
 		_, err = textContent.GetToolCallContent()
-		gt.Error(t, err) // Should return error for wrong type
+		gt.Error(t, err)
 
 		_, err = textContent.GetToolResponseContent()
-		gt.Error(t, err) // Should return error for wrong type
+		gt.Error(t, err)
+
+		_, err = textContent.GetFunctionCallContent()
+		gt.Error(t, err)
+
+		_, err = textContent.GetFunctionResponseContent()
+		gt.Error(t, err)
+
+		// Verify correct getter works
+		text, err := textContent.GetTextContent()
+		gt.NoError(t, err)
+		gt.Equal(t, text.Text, "Hello")
 	})
 
-	t.Run("conversion with unsupported content", func(t *testing.T) {
-		// Test conversion of messages with complex nested structures
+	t.Run("Unicode and special characters", func(t *testing.T) {
+		specialText := "Unicode: 🚀 ñáéíóú 中文 العربية\nNewlines\tTabs\"Quotes\""
+
 		history := &gollem.History{
 			Version: gollem.HistoryVersion,
 			LLType:  gollem.LLMTypeOpenAI,
@@ -768,316 +1255,136 @@ func TestErrorHandling(t *testing.T) {
 				{
 					Role: gollem.RoleUser,
 					Contents: []gollem.MessageContent{
-						mustNewTextContent("Test message with unicode: 🚀 ñáéíóú 中文 العربية"),
+						mustNewTextContent(specialText),
 					},
 				},
 			},
 		}
 
-		// Test conversion to all providers
+		// Test conversion to all providers handles special characters
 		claudeMsgs, err := history.ToClaude()
 		gt.NoError(t, err)
-		gt.True(t, len(claudeMsgs) > 0)
+		gt.Equal(t, len(claudeMsgs), 1)
+		gt.Equal(t, claudeMsgs[0].Content[0].OfText.Text, specialText)
 
 		openAIMsgs, err := history.ToOpenAI()
 		gt.NoError(t, err)
-		gt.True(t, len(openAIMsgs) > 0)
+		gt.Equal(t, len(openAIMsgs), 1)
+		gt.Equal(t, openAIMsgs[0].Content, specialText)
 
 		geminiMsgs, err := history.ToGemini()
 		gt.NoError(t, err)
-		gt.True(t, len(geminiMsgs) > 0)
+		gt.Equal(t, len(geminiMsgs), 1)
+		gt.Equal(t, geminiMsgs[0].Parts[0].Text, specialText)
 	})
 }
 
 func TestHistorySerialization(t *testing.T) {
-	t.Run("serialize and deserialize simple history", func(t *testing.T) {
-		// Create a history with various message types
-		openAIMsg := []openai.ChatCompletionMessage{
-			{
-				Role:    openai.ChatMessageRoleUser,
-				Content: "Test message",
-			},
-		}
-
-		history, err := gollem.NewHistoryFromOpenAI(openAIMsg)
-		gt.NoError(t, err)
-
-		// Serialize to JSON
-		data, err := json.Marshal(history)
-		gt.NoError(t, err)
-
-		// Deserialize
-		var restored gollem.History
-		err = json.Unmarshal(data, &restored)
-		gt.NoError(t, err)
-
-		// Verify the restored history
-		gt.Equal(t, restored.Version, gollem.HistoryVersion)
-		gt.Equal(t, restored.LLType, gollem.LLMTypeOpenAI)
-		gt.Equal(t, len(restored.Messages), 1)
-		gt.Equal(t, restored.Messages[0].Role, gollem.RoleUser)
-		gt.Equal(t, len(restored.Messages[0].Contents), 1)
-		gt.Equal(t, restored.Messages[0].Contents[0].Type, gollem.MessageContentTypeText)
-	})
-
-	t.Run("serialize complex history with all content types", func(t *testing.T) {
-		// Create a more complex history with different content types
-		textContent, _ := gollem.NewTextContent("Hello world")
-		imageContent, _ := gollem.NewImageContent("image/png", []byte("test-data"), "", "high")
-		toolCallContent, _ := gollem.NewToolCallContent("call_123", "search", map[string]any{"query": "test"})
-		toolRespContent, _ := gollem.NewToolResponseContent("call_123", "search", map[string]any{"result": "found"}, false)
+	t.Run("complete history serialization", func(t *testing.T) {
+		// Create complex history
+		textContent, _ := gollem.NewTextContent("Test message")
+		imageContent, _ := gollem.NewImageContent("image/png", []byte{0x89, 0x50, 0x4E, 0x47}, "", "high")
+		toolCallContent, _ := gollem.NewToolCallContent("call_123", "search", map[string]any{
+			"query": "test query",
+			"limit": float64(10),
+		})
+		toolRespContent, _ := gollem.NewToolResponseContent("call_123", "search", map[string]any{
+			"results": []any{"result1", "result2"},
+			"count":   float64(2),
+		}, false)
+		funcCallContent, _ := gollem.NewFunctionCallContent("calculator", `{"operation":"add","values":[1,2]}`)
+		funcRespContent, _ := gollem.NewFunctionResponseContent("calculator", "3")
 
 		history := &gollem.History{
 			Version: gollem.HistoryVersion,
 			LLType:  gollem.LLMTypeOpenAI,
 			Messages: []gollem.Message{
 				{
+					Role:     gollem.RoleSystem,
+					Contents: []gollem.MessageContent{textContent},
+				},
+				{
 					Role:     gollem.RoleUser,
 					Contents: []gollem.MessageContent{textContent, imageContent},
 				},
 				{
 					Role:     gollem.RoleAssistant,
-					Contents: []gollem.MessageContent{toolCallContent},
+					Contents: []gollem.MessageContent{textContent, toolCallContent},
 				},
 				{
 					Role:     gollem.RoleTool,
 					Contents: []gollem.MessageContent{toolRespContent},
 				},
+				{
+					Role:     gollem.RoleModel,
+					Contents: []gollem.MessageContent{funcCallContent},
+				},
+				{
+					Role:     gollem.RoleFunction,
+					Contents: []gollem.MessageContent{funcRespContent},
+				},
 			},
 		}
 
-		// Serialize to JSON
+		// Serialize
 		data, err := json.Marshal(history)
 		gt.NoError(t, err)
-		gt.True(t, len(data) > 0)
 
 		// Deserialize
 		var restored gollem.History
 		err = json.Unmarshal(data, &restored)
 		gt.NoError(t, err)
 
-		// Verify all details are preserved
+		// Verify complete structure
 		gt.Equal(t, restored.Version, gollem.HistoryVersion)
 		gt.Equal(t, restored.LLType, gollem.LLMTypeOpenAI)
-		gt.Equal(t, len(restored.Messages), 3)
+		gt.Equal(t, len(restored.Messages), 6)
 
-		// Verify first message (user with text and image)
-		gt.Equal(t, restored.Messages[0].Role, gollem.RoleUser)
-		gt.Equal(t, len(restored.Messages[0].Contents), 2)
-		gt.Equal(t, restored.Messages[0].Contents[0].Type, gollem.MessageContentTypeText)
-		gt.Equal(t, restored.Messages[0].Contents[1].Type, gollem.MessageContentTypeImage)
+		// Verify each message role
+		gt.Equal(t, restored.Messages[0].Role, gollem.RoleSystem)
+		gt.Equal(t, restored.Messages[1].Role, gollem.RoleUser)
+		gt.Equal(t, restored.Messages[2].Role, gollem.RoleAssistant)
+		gt.Equal(t, restored.Messages[3].Role, gollem.RoleTool)
+		gt.Equal(t, restored.Messages[4].Role, gollem.RoleModel)
+		gt.Equal(t, restored.Messages[5].Role, gollem.RoleFunction)
 
-		// Verify text content
-		text, err := restored.Messages[0].Contents[0].GetTextContent()
-		gt.NoError(t, err)
-		gt.Equal(t, text.Text, "Hello world")
+		// Verify content types are preserved
+		gt.Equal(t, restored.Messages[1].Contents[0].Type, gollem.MessageContentTypeText)
+		gt.Equal(t, restored.Messages[1].Contents[1].Type, gollem.MessageContentTypeImage)
+		gt.Equal(t, restored.Messages[2].Contents[1].Type, gollem.MessageContentTypeToolCall)
+		gt.Equal(t, restored.Messages[3].Contents[0].Type, gollem.MessageContentTypeToolResponse)
+		gt.Equal(t, restored.Messages[4].Contents[0].Type, gollem.MessageContentTypeFunctionCall)
+		gt.Equal(t, restored.Messages[5].Contents[0].Type, gollem.MessageContentTypeFunctionResponse)
 
-		// Verify image content
-		img, err := restored.Messages[0].Contents[1].GetImageContent()
-		gt.NoError(t, err)
+		// Verify actual content data
+		text, _ := restored.Messages[0].Contents[0].GetTextContent()
+		gt.Equal(t, text.Text, "Test message")
+
+		img, _ := restored.Messages[1].Contents[1].GetImageContent()
 		gt.Equal(t, img.MediaType, "image/png")
-		gt.Equal(t, img.Data, []byte("test-data"))
+		gt.Equal(t, img.Data, []byte{0x89, 0x50, 0x4E, 0x47})
 		gt.Equal(t, img.Detail, "high")
 
-		// Verify second message (assistant with tool call)
-		gt.Equal(t, restored.Messages[1].Role, gollem.RoleAssistant)
-		gt.Equal(t, len(restored.Messages[1].Contents), 1)
-		gt.Equal(t, restored.Messages[1].Contents[0].Type, gollem.MessageContentTypeToolCall)
-
-		toolCall, err := restored.Messages[1].Contents[0].GetToolCallContent()
-		gt.NoError(t, err)
+		toolCall, _ := restored.Messages[2].Contents[1].GetToolCallContent()
 		gt.Equal(t, toolCall.ID, "call_123")
 		gt.Equal(t, toolCall.Name, "search")
-		gt.Equal(t, toolCall.Arguments, map[string]any{"query": "test"})
+		gt.Equal(t, toolCall.Arguments["query"], "test query")
+		gt.Equal(t, toolCall.Arguments["limit"], 10.0)
 
-		// Verify third message (tool response)
-		gt.Equal(t, restored.Messages[2].Role, gollem.RoleTool)
-		gt.Equal(t, len(restored.Messages[2].Contents), 1)
-		gt.Equal(t, restored.Messages[2].Contents[0].Type, gollem.MessageContentTypeToolResponse)
-
-		toolResp, err := restored.Messages[2].Contents[0].GetToolResponseContent()
-		gt.NoError(t, err)
+		toolResp, _ := restored.Messages[3].Contents[0].GetToolResponseContent()
 		gt.Equal(t, toolResp.ToolCallID, "call_123")
 		gt.Equal(t, toolResp.Name, "search")
-		gt.Equal(t, toolResp.Response, map[string]any{"result": "found"})
-		gt.Equal(t, toolResp.IsError, false)
-	})
+		results := toolResp.Response["results"].([]interface{})
+		gt.Equal(t, results[0], "result1")
+		gt.Equal(t, results[1], "result2")
+		gt.Equal(t, toolResp.Response["count"], 2.0)
 
-	t.Run("round-trip serialization preserves data", func(t *testing.T) {
-		// Create complex OpenAI message, convert to history, serialize/deserialize, convert back
-		originalMsg := []openai.ChatCompletionMessage{
-			{
-				Role:    openai.ChatMessageRoleSystem,
-				Content: "You are a helpful assistant.",
-			},
-			{
-				Role: openai.ChatMessageRoleUser,
-				MultiContent: []openai.ChatMessagePart{
-					{Type: "text", Text: "Analyze this image"},
-					{Type: "image_url", ImageURL: &openai.ChatMessageImageURL{
-						URL:    "https://example.com/test.jpg",
-						Detail: openai.ImageURLDetailLow,
-					}},
-				},
-			},
-			{
-				Role:    openai.ChatMessageRoleAssistant,
-				Content: "I'll analyze that for you.",
-				ToolCalls: []openai.ToolCall{
-					{
-						ID:   "call_analyze",
-						Type: "function",
-						Function: openai.FunctionCall{
-							Name:      "image_analyzer",
-							Arguments: `{"mode":"detailed"}`,
-						},
-					},
-				},
-			},
-		}
+		funcCall, _ := restored.Messages[4].Contents[0].GetFunctionCallContent()
+		gt.Equal(t, funcCall.Name, "calculator")
+		gt.Equal(t, funcCall.Arguments, `{"operation":"add","values":[1,2]}`)
 
-		// Convert to history
-		history, err := gollem.NewHistoryFromOpenAI(originalMsg)
-		gt.NoError(t, err)
-
-		// Serialize and deserialize
-		data, err := json.Marshal(history)
-		gt.NoError(t, err)
-
-		var restored gollem.History
-		err = json.Unmarshal(data, &restored)
-		gt.NoError(t, err)
-
-		// Convert back to OpenAI
-		convertedMsg, err := restored.ToOpenAI()
-		gt.NoError(t, err)
-
-		// Verify key information is preserved
-		gt.True(t, len(convertedMsg) >= 2) // At least user and assistant messages
-
-		// Find the user message with image
-		hasUserWithImage := false
-		hasAssistantWithTool := false
-
-		for _, msg := range convertedMsg {
-			if msg.Role == openai.ChatMessageRoleUser && len(msg.MultiContent) > 0 {
-				for _, part := range msg.MultiContent {
-					if part.Type == "image_url" && part.ImageURL != nil {
-						hasUserWithImage = true
-						break
-					}
-				}
-			}
-			if msg.Role == openai.ChatMessageRoleAssistant && len(msg.ToolCalls) > 0 {
-				hasAssistantWithTool = true
-				for _, tc := range msg.ToolCalls {
-					gt.NotEqual(t, tc.ID, "")
-					gt.NotEqual(t, tc.Function.Name, "")
-				}
-			}
-		}
-
-		gt.True(t, hasUserWithImage)
-		gt.True(t, hasAssistantWithTool)
-	})
-}
-
-// Additional comprehensive test for all message content types and edge cases
-func TestComprehensiveContentValidation(t *testing.T) {
-	t.Run("validate all content type getters", func(t *testing.T) {
-		testCases := []struct {
-			name         string
-			content      gollem.MessageContent
-			expectedType gollem.MessageContentType
-			shouldError  []string // Methods that should return errors
-		}{
-			{
-				name:         "text content",
-				content:      mustNewTextContent("test"),
-				expectedType: gollem.MessageContentTypeText,
-				shouldError:  []string{"GetImageContent", "GetToolCallContent", "GetToolResponseContent", "GetFunctionCallContent", "GetFunctionResponseContent"},
-			},
-		}
-
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				gt.Equal(t, tc.content.Type, tc.expectedType)
-
-				// Test that GetTextContent works for text content
-				if tc.expectedType == gollem.MessageContentTypeText {
-					_, err := tc.content.GetTextContent()
-					gt.NoError(t, err)
-				}
-
-				// Test that other getters return errors
-				for _, method := range tc.shouldError {
-					switch method {
-					case "GetImageContent":
-						_, err := tc.content.GetImageContent()
-						gt.Error(t, err)
-					case "GetToolCallContent":
-						_, err := tc.content.GetToolCallContent()
-						gt.Error(t, err)
-					case "GetToolResponseContent":
-						_, err := tc.content.GetToolResponseContent()
-						gt.Error(t, err)
-					case "GetFunctionCallContent":
-						_, err := tc.content.GetFunctionCallContent()
-						gt.Error(t, err)
-					case "GetFunctionResponseContent":
-						_, err := tc.content.GetFunctionResponseContent()
-						gt.Error(t, err)
-					}
-				}
-			})
-		}
-	})
-
-	t.Run("validate message role constants", func(t *testing.T) {
-		roles := []gollem.MessageRole{
-			gollem.RoleUser,
-			gollem.RoleAssistant,
-			gollem.RoleSystem,
-			gollem.RoleTool,
-			gollem.RoleFunction,
-			gollem.RoleModel,
-		}
-
-		for _, role := range roles {
-			gt.NotEqual(t, string(role), "")
-			gt.True(t, len(string(role)) > 0)
-		}
-
-		// Verify role uniqueness
-		roleSet := make(map[string]bool)
-		for _, role := range roles {
-			roleStr := string(role)
-			gt.False(t, roleSet[roleStr])
-			roleSet[roleStr] = true
-		}
-	})
-
-	t.Run("validate content type constants", func(t *testing.T) {
-		contentTypes := []gollem.MessageContentType{
-			gollem.MessageContentTypeText,
-			gollem.MessageContentTypeImage,
-			gollem.MessageContentTypeToolCall,
-			gollem.MessageContentTypeToolResponse,
-			gollem.MessageContentTypeFunctionCall,
-			gollem.MessageContentTypeFunctionResponse,
-		}
-
-		for _, contentType := range contentTypes {
-			gt.NotEqual(t, string(contentType), "")
-			gt.True(t, len(string(contentType)) > 0)
-		}
-
-		// Verify content type uniqueness
-		typeSet := make(map[string]bool)
-		for _, contentType := range contentTypes {
-			typeStr := string(contentType)
-			gt.False(t, typeSet[typeStr])
-			typeSet[typeStr] = true
-		}
+		funcResp, _ := restored.Messages[5].Contents[0].GetFunctionResponseContent()
+		gt.Equal(t, funcResp.Name, "calculator")
+		gt.Equal(t, funcResp.Content, "3")
 	})
 }
