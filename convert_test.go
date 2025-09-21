@@ -372,7 +372,7 @@ func TestHistoryFromOpenAI(t *testing.T) {
 					var respData map[string]interface{}
 					if err := json.Unmarshal([]byte(msg.Content), &respData); err == nil {
 						// May have content key or the direct data
-						gt.True(t, respData != nil && len(respData) > 0)
+						gt.True(t, len(respData) > 0)
 					}
 				} else if msg.Content == `{"time":"2024-01-01T12:00:00Z","timezone":"UTC"}` {
 					foundToolContent = true
