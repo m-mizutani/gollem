@@ -299,7 +299,7 @@ func TestGeminiConversion(t *testing.T) {
 				// Message 2: User with image (base64 encoded)
 				anthropicSDK.NewUserMessage(
 					anthropicSDK.NewTextBlock("What's in this image?"),
-					anthropicSDK.NewImageBlockBase64("image/jpeg", "fake image data for testing"),
+					anthropicSDK.NewImageBlockBase64("image/jpeg", "ZmFrZSBpbWFnZSBkYXRhIGZvciB0ZXN0aW5n"),
 				),
 				// Message 3: Assistant with tool uses
 				anthropicSDK.NewAssistantMessage(
@@ -365,7 +365,7 @@ func TestGeminiConversion(t *testing.T) {
 					MultiContent: []openai.ChatMessagePart{
 						{Type: "text", Text: "What's in this image?"},
 						{Type: "image_url", ImageURL: &openai.ChatMessageImageURL{
-							URL: "data:image/jpeg;base64,fake image data for testing", // Raw bytes stored directly
+							URL: "data:image/jpeg;base64,ZmFrZSBpbWFnZSBkYXRhIGZvciB0ZXN0aW5n", // Base64 encoded
 						}},
 					},
 				},

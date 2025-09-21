@@ -1,6 +1,7 @@
 package gollem_test
 
 import (
+	"encoding/base64"
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -208,8 +209,9 @@ func TestClaudeConversion(t *testing.T) {
 			gt.NoError(t, err)
 
 			// Create expected Gemini messages structure
-			// Base64 decode the image data
-			imageData := []byte("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+			// Decode the Base64 image data to raw bytes
+			imageData, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+			gt.NoError(t, err)
 			expected := []*genai.Content{
 				// Message 0: User
 				{

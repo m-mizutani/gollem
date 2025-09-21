@@ -112,7 +112,7 @@ func TestHistoryFromOpenAI(t *testing.T) {
 						{
 							Type: "image_url",
 							ImageURL: &openai.ChatMessageImageURL{
-								URL:    "data:image/png;base64,abc123",
+								URL:    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
 								Detail: openai.ImageURLDetailAuto,
 							},
 						},

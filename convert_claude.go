@@ -1,6 +1,7 @@
 package gollem
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 
@@ -46,9 +47,16 @@ func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion) (MessageC
 	// Handle image blocks
 	if block.OfImage != nil {
 		if block.OfImage.Source.OfBase64 != nil {
+			// Decode the Base64 string to raw bytes
+			decodedData, err := base64.StdEncoding.DecodeString(block.OfImage.Source.OfBase64.Data)
+			if err != nil {
+				// If decoding fails, treat it as raw data
+				// This allows handling of both valid Base64 and raw strings
+				decodedData = []byte(block.OfImage.Source.OfBase64.Data)
+			}
 			return NewImageContent(
 				string(block.OfImage.Source.OfBase64.MediaType),
-				[]byte(block.OfImage.Source.OfBase64.Data),
+				decodedData,
 				"",
 				"",
 			)
@@ -195,7 +203,7 @@ func convertContentToClaude(content MessageContent, messageRole MessageRole) (an
 		}
 		// Convert to base64 if we have raw data
 		if len(imgContent.Data) > 0 {
-			return anthropic.NewImageBlockBase64(imgContent.MediaType, string(imgContent.Data)), nil
+			return anthropic.NewImageBlockBase64(imgContent.MediaType, base64.StdEncoding.EncodeToString(imgContent.Data)), nil
 		}
 		// For URL images, create a text block with the URL reference
 		// This maintains the information even though Claude can't directly display the image

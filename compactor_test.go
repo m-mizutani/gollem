@@ -260,7 +260,7 @@ func TestCompactorWithRealClients(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_OPENAI_API_KEY is not set")
 		}
-		
+
 		client, err := openai.New(ctx, apiKey)
 		gt.NoError(t, err)
 		compactor := gollem.NewHistoryCompactor(client)
@@ -291,7 +291,7 @@ func TestCompactorWithRealClients(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_CLAUDE_API_KEY is not set")
 		}
-		
+
 		client, err := claude.New(ctx, apiKey)
 		gt.NoError(t, err)
 		compactor := gollem.NewHistoryCompactor(client)
@@ -326,7 +326,7 @@ func TestCompactorWithRealClients(t *testing.T) {
 		if location == "" {
 			location = "us-central1"
 		}
-		
+
 		client, err := gemini.New(ctx, projectID, location)
 		gt.NoError(t, err)
 		compactor := gollem.NewHistoryCompactor(client)

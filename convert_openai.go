@@ -1,7 +1,9 @@
 package gollem
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/sashabaranov/go-openai"
@@ -52,11 +54,30 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (Message, error) {
 			} else if part.Type == "image_url" && part.ImageURL != nil {
 				// Extract image data from URL if it's a data URL
 				var imageData []byte
+				var mediaType string
 				url := part.ImageURL.URL
 				detail := string(part.ImageURL.Detail)
 
-				// TODO: Handle data URLs and extract base64 data
-				content, err := NewImageContent("", imageData, url, detail)
+				// Parse data URLs to extract base64 data
+				if len(url) > 5 && url[:5] == "data:" {
+					// Format: data:image/png;base64,<data>
+					if idx := strings.Index(url, ";base64,"); idx != -1 {
+						mediaType = url[5:idx]
+						base64Data := url[idx+8:]
+						var err error
+						imageData, err = base64.StdEncoding.DecodeString(base64Data)
+						if err != nil {
+							// If Base64 decoding fails, keep the URL as-is
+							// This allows graceful handling of invalid data
+							imageData = nil
+						} else {
+							// Clear URL since we have the data
+							url = ""
+						}
+					}
+				}
+
+				content, err := NewImageContent(mediaType, imageData, url, detail)
 				if err != nil {
 					return Message{}, err
 				}
@@ -200,8 +221,8 @@ func convertMessageToOpenAI(msg Message) ([]openai.ChatCompletionMessage, error)
 			}
 			imageURL := imgContent.URL
 			if len(imgContent.Data) > 0 {
-				// Convert to data URL
-				imageURL = "data:" + imgContent.MediaType + ";base64," + string(imgContent.Data)
+				// Convert to data URL with Base64 encoding
+				imageURL = "data:" + imgContent.MediaType + ";base64," + base64.StdEncoding.EncodeToString(imgContent.Data)
 			}
 			textParts = append(textParts, openai.ChatMessagePart{
 				Type: "image_url",
