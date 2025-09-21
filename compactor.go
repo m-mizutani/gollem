@@ -341,7 +341,10 @@ func summarizeCompact(ctx context.Context, history *History, llmClient LLMClient
 	}
 
 	// Build new history with summary + recent messages
-	compacted := buildCompactedHistory(history, summary, recentHistory)
+	compacted, err := buildCompactedHistory(history, summary, recentHistory)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to build compacted history")
+	}
 	compacted.Compacted = true
 	compacted.OriginalLen = history.ToCount()
 
@@ -424,12 +427,19 @@ func messagesToTemplateMessages(msgs []Message) []TemplateMessage {
 			switch c.Type {
 			case MessageContentTypeText:
 				var textContent TextContent
-				if err := json.Unmarshal(c.Data, &textContent); err == nil {
+				if err := json.Unmarshal(c.Data, &textContent); err != nil {
+					content.WriteString("[ERROR: failed to unmarshal text content]")
+				} else {
 					content.WriteString(textContent.Text)
 				}
 			case MessageContentTypeToolCall:
 				var tcContent ToolCallContent
-				if err := json.Unmarshal(c.Data, &tcContent); err == nil {
+				if err := json.Unmarshal(c.Data, &tcContent); err != nil {
+					toolCalls = append(toolCalls, TemplateToolCall{
+						Name:      "[ERROR: failed to unmarshal tool call]",
+						Arguments: `{"error": "failed to unmarshal tool call content"}`,
+					})
+				} else {
 					argsJSON, err := json.Marshal(tcContent.Arguments)
 					if err != nil {
 						argsJSON = []byte(`{"error": "failed to marshal arguments"}`)
@@ -441,9 +451,17 @@ func messagesToTemplateMessages(msgs []Message) []TemplateMessage {
 				}
 			case MessageContentTypeToolResponse:
 				var trContent ToolResponseContent
-				if err := json.Unmarshal(c.Data, &trContent); err == nil {
+				if err := json.Unmarshal(c.Data, &trContent); err != nil {
+					toolResponses = append(toolResponses, TemplateToolResponse{
+						Name:    "[ERROR: failed to unmarshal tool response]",
+						Content: `{"error": "failed to unmarshal tool response content"}`,
+					})
+				} else {
 					// Convert Response map to JSON string
-					respJSON, _ := json.Marshal(trContent.Response)
+					respJSON, err := json.Marshal(trContent.Response)
+					if err != nil {
+						respJSON = []byte(`{"error": "failed to marshal response"}`)
+					}
 					toolResponses = append(toolResponses, TemplateToolResponse{
 						Name:    trContent.Name,
 						Content: string(respJSON),
@@ -451,7 +469,12 @@ func messagesToTemplateMessages(msgs []Message) []TemplateMessage {
 				}
 			case MessageContentTypeFunctionCall:
 				var fcContent FunctionCallContent
-				if err := json.Unmarshal(c.Data, &fcContent); err == nil {
+				if err := json.Unmarshal(c.Data, &fcContent); err != nil {
+					toolCalls = append(toolCalls, TemplateToolCall{
+						Name:      "[ERROR: failed to unmarshal function call]",
+						Arguments: `{"error": "failed to unmarshal function call content"}`,
+					})
+				} else {
 					argsJSON, err := json.Marshal(fcContent.Arguments)
 					if err != nil {
 						argsJSON = []byte(`{"error": "failed to marshal arguments"}`)
@@ -463,7 +486,12 @@ func messagesToTemplateMessages(msgs []Message) []TemplateMessage {
 				}
 			case MessageContentTypeFunctionResponse:
 				var frContent FunctionResponseContent
-				if err := json.Unmarshal(c.Data, &frContent); err == nil {
+				if err := json.Unmarshal(c.Data, &frContent); err != nil {
+					toolResponses = append(toolResponses, TemplateToolResponse{
+						Name:    "[ERROR: failed to unmarshal function response]",
+						Content: `{"error": "failed to unmarshal function response content"}`,
+					})
+				} else {
 					// Convert FunctionResponseContent to TemplateToolResponse
 					toolResponses = append(toolResponses, TemplateToolResponse(frContent))
 				}
@@ -531,7 +559,7 @@ func generateSummary(ctx context.Context, llmClient LLMClient, history *History,
 }
 
 // buildCompactedHistory builds compacted history from summary and recent messages
-func buildCompactedHistory(original *History, summary string, recentHistory *History) *History {
+func buildCompactedHistory(original *History, summary string, recentHistory *History) (*History, error) {
 	compacted := &History{
 		LLType:   original.LLType,
 		Version:  original.Version,
@@ -541,13 +569,16 @@ func buildCompactedHistory(original *History, summary string, recentHistory *His
 	}
 
 	if recentHistory == nil {
-		return compacted
+		return compacted, nil
 	}
 
 	// Add summary as a system message
 	summaryText := "Conversation history summary: " + summary
 	textContent := TextContent{Text: summaryText}
-	textData, _ := json.Marshal(textContent)
+	textData, err := json.Marshal(textContent)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to marshal summary text content")
+	}
 	summaryMsg := Message{
 		Role: RoleSystem,
 		Contents: []MessageContent{
@@ -575,5 +606,5 @@ func buildCompactedHistory(original *History, summary string, recentHistory *His
 		compacted.Messages = append(compacted.Messages, recentHistory.Messages...)
 	}
 
-	return compacted
+	return compacted, nil
 }

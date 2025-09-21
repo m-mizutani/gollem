@@ -379,8 +379,9 @@ func TestBuildCompactedHistory(t *testing.T) {
 
 		// Build compacted history
 		summary := "This is a summary of the conversation"
-		compacted := gollem.BuildCompactedHistory(original, summary, recent)
+		compacted, err := gollem.BuildCompactedHistory(original, summary, recent)
 
+		gt.NoError(t, err)
 		gt.NotNil(t, compacted)
 		gt.Equal(t, summary, compacted.Summary)
 		gt.Equal(t, gollem.LLMTypeOpenAI, compacted.LLType)
@@ -398,8 +399,9 @@ func TestBuildCompactedHistory(t *testing.T) {
 		}
 
 		summary := "Summary"
-		compacted := gollem.BuildCompactedHistory(original, summary, nil)
+		compacted, err := gollem.BuildCompactedHistory(original, summary, nil)
 
+		gt.NoError(t, err)
 		gt.NotNil(t, compacted)
 		gt.Equal(t, summary, compacted.Summary)
 	})
