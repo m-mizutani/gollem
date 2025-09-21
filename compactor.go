@@ -464,11 +464,8 @@ func messagesToTemplateMessages(msgs []Message) []TemplateMessage {
 			case MessageContentTypeFunctionResponse:
 				var frContent FunctionResponseContent
 				if err := json.Unmarshal(c.Data, &frContent); err == nil {
-					// FunctionResponseContent has the same fields as TemplateToolResponse
-					toolResponses = append(toolResponses, TemplateToolResponse{
-						Name:    frContent.Name,
-						Content: frContent.Content,
-					})
+					// Convert FunctionResponseContent to TemplateToolResponse
+					toolResponses = append(toolResponses, TemplateToolResponse(frContent))
 				}
 			}
 		}
