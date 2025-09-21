@@ -3,6 +3,7 @@ package gollem
 import (
 	"encoding/json"
 	"errors"
+	"strconv"
 
 	"github.com/m-mizutani/goerr/v2"
 )
@@ -124,5 +125,5 @@ func mergeSystemIntoFirstUser(messages []Message) []Message {
 
 // generateToolCallID generates a unique ID for tool calls if not present
 func generateToolCallID(name string, index int) string {
-	return "call_" + name + "_" + string(rune('0'+index))
+	return "call_" + name + "_" + strconv.Itoa(index)
 }
