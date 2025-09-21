@@ -22,17 +22,7 @@ func DebugLogger() *slog.Logger { return debugLogger }
 // Export buildCompactedHistory for testing
 var BuildCompactedHistory = buildCompactedHistory
 
-// Export message types for testing
-type (
-	ClaudeMessage      = claudeMessage
-	GeminiMessage      = geminiMessage
-	ClaudeContentBlock = claudeContentBlock
-	ClaudeToolUse      = claudeToolUse
-	GeminiPart         = geminiPart
-)
-
 // Export conversion functions for testing
 var (
-	ClaudeToTemplateMessages = claudeToTemplateMessages
-	GeminiToTemplateMessages = geminiToTemplateMessages
+	MessagesToTemplateMessages = messagesToTemplateMessages
 )

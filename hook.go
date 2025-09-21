@@ -151,4 +151,3 @@ type (
 	//   })
 	CompactionHook func(ctx context.Context, original, compacted *History) error
 )
-

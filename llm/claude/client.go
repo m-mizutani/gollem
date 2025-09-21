@@ -223,7 +223,7 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 	return session, nil
 }
 
-func (s *Session) History() *gollem.History {
+func (s *Session) History() (*gollem.History, error) {
 	return gollem.NewHistoryFromClaude(s.messages)
 }
 
@@ -338,6 +338,8 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 
 // createSystemPrompt creates system prompt with content type handling
 // This is a shared helper function used by both standard Claude client and Vertex AI Claude client.
+// Returns []anthropic.TextBlockParam as per anthropic-sdk-go v1.5.0 specification.
+// This implementation follows the official SDK format: []anthropic.TextBlockParam{{Text: "..."}}
 func createSystemPrompt(cfg gollem.SessionConfig) []anthropic.TextBlockParam {
 	var systemPrompt []anthropic.TextBlockParam
 	if cfg.SystemPrompt() != "" {
@@ -819,37 +821,22 @@ func (c *Client) CountTokens(ctx context.Context, history *gollem.History) (int,
 
 	totalChars := 0
 
-	// Use internal Claude messages for accurate counting
-	for _, msg := range history.Claude {
+	// Use unified Messages field for accurate counting
+	for _, msg := range history.Messages {
 		// Count role characters
 		totalChars += len(string(msg.Role))
 
 		// Count content characters
-		for _, content := range msg.Content {
-			if content.Text != nil {
-				totalChars += len(*content.Text)
-			}
-			// Count tool use content if present
-			if content.ToolUse != nil {
-				totalChars += len(content.ToolUse.Name)
-				// Estimate input size by marshaling to JSON
-				if inputBytes, err := json.Marshal(content.ToolUse.Input); err == nil {
-					totalChars += len(inputBytes)
-				}
-			}
-			// Count tool result content if present
-			if content.ToolResult != nil {
-				if content.ToolResult.Content != "" {
-					totalChars += len(content.ToolResult.Content)
-				}
-			}
+		for _, content := range msg.Contents {
+			// Estimate based on Data field size
+			totalChars += len(content.Data)
 		}
 	}
 
 	// Claude-specific token estimation
 	// Claude typically uses about 3.8-4.2 characters per token for English text
 	// Claude has less message overhead compared to OpenAI
-	messageOverhead := len(history.Claude) * 5 // Lower overhead for Claude
+	messageOverhead := len(history.Messages) * 5 // Lower overhead for Claude
 	estimatedTokens := (totalChars + messageOverhead) / 4
 
 	// Model-specific adjustments for Claude

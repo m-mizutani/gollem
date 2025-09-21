@@ -2,7 +2,6 @@ package claude
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -148,7 +147,7 @@ func (c *VertexClient) NewSession(ctx context.Context, options ...gollem.Session
 }
 
 // History returns the conversation history
-func (s *VertexAnthropicSession) History() *gollem.History {
+func (s *VertexAnthropicSession) History() (*gollem.History, error) {
 	return gollem.NewHistoryFromClaude(s.messages)
 }
 
@@ -255,24 +254,11 @@ func (c *VertexClient) CountTokens(ctx context.Context, history *gollem.History)
 		return 0, nil
 	}
 
-	for _, msg := range history.Claude {
+	for _, msg := range history.Messages {
 		totalChars += len(string(msg.Role))
-		for _, content := range msg.Content {
-			if content.Text != nil {
-				totalChars += len(*content.Text)
-			}
-			if content.ToolUse != nil {
-				totalChars += len(content.ToolUse.Name)
-				if content.ToolUse.Input != nil {
-					if inputBytes, err := json.Marshal(content.ToolUse.Input); err == nil {
-						totalChars += len(inputBytes)
-					}
-				}
-			}
-			if content.ToolResult != nil {
-				totalChars += len(content.ToolResult.ToolUseID)
-				totalChars += len(content.ToolResult.Content)
-			}
+		for _, content := range msg.Contents {
+			// Estimate based on Data field size
+			totalChars += len(content.Data)
 		}
 	}
 

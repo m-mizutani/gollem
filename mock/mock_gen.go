@@ -260,7 +260,7 @@ func (mock *LLMClientMock) NewSessionCalls() []struct {
 //			GenerateStreamFunc: func(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
 //				panic("mock out the GenerateStream method")
 //			},
-//			HistoryFunc: func() *gollem.History {
+//			HistoryFunc: func() (*gollem.History, error) {
 //				panic("mock out the History method")
 //			},
 //		}
@@ -277,7 +277,7 @@ type SessionMock struct {
 	GenerateStreamFunc func(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error)
 
 	// HistoryFunc mocks the History method.
-	HistoryFunc func() *gollem.History
+	HistoryFunc func() (*gollem.History, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -385,7 +385,7 @@ func (mock *SessionMock) GenerateStreamCalls() []struct {
 }
 
 // History calls HistoryFunc.
-func (mock *SessionMock) History() *gollem.History {
+func (mock *SessionMock) History() (*gollem.History, error) {
 	callInfo := struct {
 	}{}
 	mock.lockHistory.Lock()
@@ -394,8 +394,9 @@ func (mock *SessionMock) History() *gollem.History {
 	if mock.HistoryFunc == nil {
 		var (
 			historyOut *gollem.History
+			errOut     error
 		)
-		return historyOut
+		return historyOut, errOut
 	}
 	return mock.HistoryFunc()
 }

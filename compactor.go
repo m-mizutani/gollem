@@ -7,9 +7,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/sashabaranov/go-openai"
 )
 
 // HistoryCompactor is a function type that handles compaction of conversation history
@@ -280,34 +278,12 @@ func fallbackEstimateTokens(history *History) int {
 
 	totalChars := 0
 
-	switch history.LLType {
-	case LLMTypeOpenAI:
-		for _, msg := range history.OpenAI {
-			totalChars += len(msg.Role) + len(msg.Content)
-			// Include tool calls in estimation
-			if msg.ToolCalls != nil {
-				for _, call := range msg.ToolCalls {
-					totalChars += len(call.Function.Name) + len(call.Function.Arguments)
-				}
-			}
-		}
-
-	case LLMTypeClaude:
-		for _, msg := range history.Claude {
-			totalChars += len(string(msg.Role))
-			for _, content := range msg.Content {
-				if content.Text != nil {
-					totalChars += len(*content.Text)
-				}
-			}
-		}
-
-	case LLMTypeGemini:
-		for _, msg := range history.Gemini {
-			totalChars += len(msg.Role)
-			for _, part := range msg.Parts {
-				totalChars += len(part.Text)
-			}
+	// Use unified Messages field for V2 format
+	for _, msg := range history.Messages {
+		totalChars += len(string(msg.Role))
+		for _, content := range msg.Contents {
+			// Estimate based on Data field size
+			totalChars += len(content.Data)
 		}
 	}
 
@@ -365,7 +341,10 @@ func summarizeCompact(ctx context.Context, history *History, llmClient LLMClient
 	}
 
 	// Build new history with summary + recent messages
-	compacted := buildCompactedHistory(history, summary, recentHistory)
+	compacted, err := buildCompactedHistory(history, summary, recentHistory)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to build compacted history")
+	}
 	compacted.Compacted = true
 	compacted.OriginalLen = history.ToCount()
 
@@ -374,250 +353,153 @@ func summarizeCompact(ctx context.Context, history *History, llmClient LLMClient
 
 // extractMessages separates old messages from recent messages based on token count
 func extractMessages(ctx context.Context, history *History, preserveRecentTokens int, llmClient LLMClient) (old, recent *History) {
-	if history == nil {
-		return nil, nil
+	if history == nil || len(history.Messages) == 0 {
+		return nil, history
 	}
 
 	// Create base History objects
 	oldHistory := &History{
-		LLType:  history.LLType,
-		Version: history.Version,
+		LLType:   history.LLType,
+		Version:  history.Version,
+		Metadata: history.Metadata,
+		Messages: []Message{},
 	}
 	recentHistory := &History{
-		LLType:  history.LLType,
-		Version: history.Version,
+		LLType:   history.LLType,
+		Version:  history.Version,
+		Metadata: history.Metadata,
+		Messages: []Message{},
 	}
 
-	// Find the split point based on token count
-	// We'll iterate from the end and accumulate tokens until we reach preserveRecentTokens
-	switch history.LLType {
-	case LLMTypeOpenAI:
-		msgs := history.OpenAI
-		if len(msgs) == 0 {
-			return nil, recentHistory
-		}
-
-		// Find split point by counting tokens from the end
-		splitIdx := len(msgs)
-		accumulatedTokens := 0
-
-		for i := len(msgs) - 1; i >= 0; i-- {
-			// Create temporary history with just this message to estimate its tokens
-			tempHistory := &History{LLType: LLMTypeOpenAI, OpenAI: []openai.ChatCompletionMessage{msgs[i]}}
-			msgTokens := estimateTokens(ctx, tempHistory, llmClient)
-
-			if accumulatedTokens+msgTokens > preserveRecentTokens && i < len(msgs)-1 {
-				// We've exceeded the limit, use previous index as split
-				splitIdx = i + 1
-				break
-			}
-			accumulatedTokens += msgTokens
-			splitIdx = i
-		}
-
-		if splitIdx == 0 {
-			// All messages fit in recent history
-			recentHistory.OpenAI = append([]openai.ChatCompletionMessage{}, msgs...)
-			return nil, recentHistory
-		}
-
-		oldHistory.OpenAI = append([]openai.ChatCompletionMessage{}, msgs[:splitIdx]...)
-		recentHistory.OpenAI = append([]openai.ChatCompletionMessage{}, msgs[splitIdx:]...)
-
-	case LLMTypeClaude:
-		msgs := history.Claude
-		if len(msgs) == 0 {
-			return nil, recentHistory
-		}
-
-		// Find split point by counting tokens from the end
-		splitIdx := len(msgs)
-		accumulatedTokens := 0
-
-		for i := len(msgs) - 1; i >= 0; i-- {
-			// Create temporary history with just this message to estimate its tokens
-			tempHistory := &History{LLType: LLMTypeClaude, Claude: []claudeMessage{msgs[i]}}
-			msgTokens := estimateTokens(ctx, tempHistory, llmClient)
-
-			if accumulatedTokens+msgTokens > preserveRecentTokens && i < len(msgs)-1 {
-				// We've exceeded the limit, use previous index as split
-				splitIdx = i + 1
-				break
-			}
-			accumulatedTokens += msgTokens
-			splitIdx = i
-		}
-
-		if splitIdx == 0 {
-			// All messages fit in recent history
-			recentHistory.Claude = append([]claudeMessage{}, msgs...)
-			return nil, recentHistory
-		}
-
-		oldHistory.Claude = append([]claudeMessage{}, msgs[:splitIdx]...)
-		recentHistory.Claude = append([]claudeMessage{}, msgs[splitIdx:]...)
-
-	case LLMTypeGemini:
-		msgs := history.Gemini
-		if len(msgs) == 0 {
-			return nil, recentHistory
-		}
-
-		// Find split point by counting tokens from the end
-		splitIdx := len(msgs)
-		accumulatedTokens := 0
-
-		for i := len(msgs) - 1; i >= 0; i-- {
-			// Create temporary history with just this message to estimate its tokens
-			tempHistory := &History{LLType: LLMTypeGemini, Gemini: []geminiMessage{msgs[i]}}
-			msgTokens := estimateTokens(ctx, tempHistory, llmClient)
-
-			if accumulatedTokens+msgTokens > preserveRecentTokens && i < len(msgs)-1 {
-				// We've exceeded the limit, use previous index as split
-				splitIdx = i + 1
-				break
-			}
-			accumulatedTokens += msgTokens
-			splitIdx = i
-		}
-
-		if splitIdx == 0 {
-			// All messages fit in recent history
-			recentHistory.Gemini = append([]geminiMessage{}, msgs...)
-			return nil, recentHistory
-		}
-
-		oldHistory.Gemini = append([]geminiMessage{}, msgs[:splitIdx]...)
-		recentHistory.Gemini = append([]geminiMessage{}, msgs[splitIdx:]...)
+	// Use unified Messages field for V2 format
+	msgs := history.Messages
+	if len(msgs) == 0 {
+		return nil, recentHistory
 	}
+
+	// Find split point by counting tokens from the end
+	splitIdx := len(msgs)
+	accumulatedTokens := 0
+
+	for i := len(msgs) - 1; i >= 0; i-- {
+		// Create temporary history with just this message to estimate its tokens
+		tempHistory := &History{
+			LLType:   history.LLType,
+			Version:  history.Version,
+			Messages: []Message{msgs[i]},
+		}
+		msgTokens := estimateTokens(ctx, tempHistory, llmClient)
+
+		if accumulatedTokens+msgTokens > preserveRecentTokens && i < len(msgs)-1 {
+			// We've exceeded the limit, use previous index as split
+			splitIdx = i + 1
+			break
+		}
+		accumulatedTokens += msgTokens
+		splitIdx = i
+	}
+
+	if splitIdx == 0 {
+		// All messages fit in recent history
+		recentHistory.Messages = append([]Message{}, msgs...)
+		return nil, recentHistory
+	}
+
+	oldHistory.Messages = append([]Message{}, msgs[:splitIdx]...)
+	recentHistory.Messages = append([]Message{}, msgs[splitIdx:]...)
 
 	return oldHistory, recentHistory
 }
 
-// openAIToTemplateMessages converts OpenAI messages to TemplateMessage array
-func openAIToTemplateMessages(msgs []openai.ChatCompletionMessage) []TemplateMessage {
+// messagesToTemplateMessages converts common Messages to TemplateMessage array
+func messagesToTemplateMessages(msgs []Message) []TemplateMessage {
 	var result []TemplateMessage
 	for _, msg := range msgs {
-		if msg.Role != "system" { // Exclude system messages from summarization
-			tmplMsg := TemplateMessage{
-				Role:    msg.Role,
-				Content: msg.Content,
-			}
-
-			// Handle tool calls from assistant
-			if len(msg.ToolCalls) > 0 {
-				for _, toolCall := range msg.ToolCalls {
-					tmplMsg.ToolCalls = append(tmplMsg.ToolCalls, TemplateToolCall{
-						Name:      toolCall.Function.Name,
-						Arguments: toolCall.Function.Arguments,
-					})
-				}
-			}
-
-			// Handle tool responses (tool role)
-			if msg.Role == "tool" && msg.ToolCallID != "" {
-				// For tool responses, we'll add them as ToolResponses
-				// Note: We might need to match this with the previous assistant message
-				tmplMsg.ToolResponses = append(tmplMsg.ToolResponses, TemplateToolResponse{
-					Name:    msg.Name,
-					Content: msg.Content,
-				})
-			}
-
-			result = append(result, tmplMsg)
+		if msg.Role == RoleSystem {
+			continue // Skip system messages
 		}
-	}
-	return result
-}
 
-// claudeToTemplateMessages converts Claude messages to TemplateMessage array
-func claudeToTemplateMessages(msgs []claudeMessage) []TemplateMessage {
-	var result []TemplateMessage
-	for _, msg := range msgs {
 		var content strings.Builder
 		var toolCalls []TemplateToolCall
 		var toolResponses []TemplateToolResponse
 
-		for _, c := range msg.Content {
-			if c.Text != nil {
-				content.WriteString(*c.Text)
-			}
-
-			// Handle tool use (Claude's way of making tool calls)
-			if c.ToolUse != nil {
-				// Convert Input (interface{}) to JSON string
-				argsJSON, err := json.Marshal(c.ToolUse.Input)
-				if err != nil {
-					// Use error placeholder if marshaling fails
-					argsJSON = []byte(`{"error": "failed to marshal arguments"}`)
+		for _, c := range msg.Contents {
+			switch c.Type {
+			case MessageContentTypeText:
+				var textContent TextContent
+				if err := json.Unmarshal(c.Data, &textContent); err != nil {
+					content.WriteString("[ERROR: failed to unmarshal text content]")
+				} else {
+					content.WriteString(textContent.Text)
 				}
-				toolCalls = append(toolCalls, TemplateToolCall{
-					Name:      c.ToolUse.Name,
-					Arguments: string(argsJSON),
-				})
-			}
-
-			// Handle tool results
-			if c.ToolResult != nil {
-				toolResponses = append(toolResponses, TemplateToolResponse{
-					Name:    c.ToolResult.ToolUseID, // Using ID as name proxy
-					Content: c.ToolResult.Content,
-				})
+			case MessageContentTypeToolCall:
+				var tcContent ToolCallContent
+				if err := json.Unmarshal(c.Data, &tcContent); err != nil {
+					toolCalls = append(toolCalls, TemplateToolCall{
+						Name:      "[ERROR: failed to unmarshal tool call]",
+						Arguments: `{"error": "failed to unmarshal tool call content"}`,
+					})
+				} else {
+					argsJSON, err := json.Marshal(tcContent.Arguments)
+					if err != nil {
+						argsJSON = []byte(`{"error": "failed to marshal arguments"}`)
+					}
+					toolCalls = append(toolCalls, TemplateToolCall{
+						Name:      tcContent.Name,
+						Arguments: string(argsJSON),
+					})
+				}
+			case MessageContentTypeToolResponse:
+				var trContent ToolResponseContent
+				if err := json.Unmarshal(c.Data, &trContent); err != nil {
+					toolResponses = append(toolResponses, TemplateToolResponse{
+						Name:    "[ERROR: failed to unmarshal tool response]",
+						Content: `{"error": "failed to unmarshal tool response content"}`,
+					})
+				} else {
+					// Convert Response map to JSON string
+					respJSON, err := json.Marshal(trContent.Response)
+					if err != nil {
+						respJSON = []byte(`{"error": "failed to marshal response"}`)
+					}
+					toolResponses = append(toolResponses, TemplateToolResponse{
+						Name:    trContent.Name,
+						Content: string(respJSON),
+					})
+				}
+			case MessageContentTypeFunctionCall:
+				var fcContent FunctionCallContent
+				if err := json.Unmarshal(c.Data, &fcContent); err != nil {
+					toolCalls = append(toolCalls, TemplateToolCall{
+						Name:      "[ERROR: failed to unmarshal function call]",
+						Arguments: `{"error": "failed to unmarshal function call content"}`,
+					})
+				} else {
+					argsJSON, err := json.Marshal(fcContent.Arguments)
+					if err != nil {
+						argsJSON = []byte(`{"error": "failed to marshal arguments"}`)
+					}
+					toolCalls = append(toolCalls, TemplateToolCall{
+						Name:      fcContent.Name,
+						Arguments: string(argsJSON),
+					})
+				}
+			case MessageContentTypeFunctionResponse:
+				var frContent FunctionResponseContent
+				if err := json.Unmarshal(c.Data, &frContent); err != nil {
+					toolResponses = append(toolResponses, TemplateToolResponse{
+						Name:    "[ERROR: failed to unmarshal function response]",
+						Content: `{"error": "failed to unmarshal function response content"}`,
+					})
+				} else {
+					// Convert FunctionResponseContent to TemplateToolResponse
+					toolResponses = append(toolResponses, TemplateToolResponse(frContent))
+				}
 			}
 		}
 
 		result = append(result, TemplateMessage{
 			Role:          string(msg.Role),
-			Content:       content.String(),
-			ToolCalls:     toolCalls,
-			ToolResponses: toolResponses,
-		})
-	}
-	return result
-}
-
-// geminiToTemplateMessages converts Gemini messages to TemplateMessage array
-func geminiToTemplateMessages(msgs []geminiMessage) []TemplateMessage {
-	var result []TemplateMessage
-	for _, msg := range msgs {
-		var content strings.Builder
-		var toolCalls []TemplateToolCall
-		var toolResponses []TemplateToolResponse
-
-		for _, part := range msg.Parts {
-			if part.Text != "" {
-				content.WriteString(part.Text)
-			}
-
-			// Handle function calls (when Type is "function_call")
-			if part.Type == "function_call" && part.Name != "" {
-				argsJSON, err := json.Marshal(part.Args)
-				if err != nil {
-					// Use error placeholder if marshaling fails
-					argsJSON = []byte(`{"error": "failed to marshal arguments"}`)
-				}
-				toolCalls = append(toolCalls, TemplateToolCall{
-					Name:      part.Name,
-					Arguments: string(argsJSON),
-				})
-			}
-
-			// Handle function responses (when Type is "function_response")
-			if part.Type == "function_response" && part.Name != "" {
-				respJSON, err := json.Marshal(part.Response)
-				if err != nil {
-					// Use error placeholder if marshaling fails
-					respJSON = []byte(`{"error": "failed to marshal response"}`)
-				}
-				toolResponses = append(toolResponses, TemplateToolResponse{
-					Name:    part.Name,
-					Content: string(respJSON),
-				})
-			}
-		}
-
-		result = append(result, TemplateMessage{
-			Role:          msg.Role,
 			Content:       content.String(),
 			ToolCalls:     toolCalls,
 			ToolResponses: toolResponses,
@@ -633,15 +515,7 @@ func generateSummary(ctx context.Context, llmClient LLMClient, history *History,
 	}
 
 	// Convert history to template messages
-	var messages []TemplateMessage
-	switch history.LLType {
-	case LLMTypeOpenAI:
-		messages = openAIToTemplateMessages(history.OpenAI)
-	case LLMTypeClaude:
-		messages = claudeToTemplateMessages(history.Claude)
-	case LLMTypeGemini:
-		messages = geminiToTemplateMessages(history.Gemini)
-	}
+	messages := messagesToTemplateMessages(history.Messages)
 
 	if len(messages) == 0 {
 		return "", nil
@@ -685,69 +559,52 @@ func generateSummary(ctx context.Context, llmClient LLMClient, history *History,
 }
 
 // buildCompactedHistory builds compacted history from summary and recent messages
-func buildCompactedHistory(original *History, summary string, recentHistory *History) *History {
+func buildCompactedHistory(original *History, summary string, recentHistory *History) (*History, error) {
 	compacted := &History{
-		LLType:  original.LLType,
-		Version: original.Version,
-		Summary: summary,
+		LLType:   original.LLType,
+		Version:  original.Version,
+		Metadata: original.Metadata,
+		Summary:  summary,
+		Messages: []Message{},
 	}
 
 	if recentHistory == nil {
-		return compacted
+		return compacted, nil
 	}
 
-	switch original.LLType {
-	case LLMTypeOpenAI:
-		// Add summary as a system message
-		msgs := []openai.ChatCompletionMessage{
+	// Add summary as a system message
+	summaryText := "Conversation history summary: " + summary
+	textContent := TextContent{Text: summaryText}
+	textData, err := json.Marshal(textContent)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to marshal summary text content")
+	}
+	summaryMsg := Message{
+		Role: RoleSystem,
+		Contents: []MessageContent{
 			{
-				Role:    "system",
-				Content: "Conversation history summary: " + summary,
+				Type: MessageContentTypeText,
+				Data: textData,
 			},
-		}
-
-		// Preserve original system messages
-		for _, msg := range original.OpenAI {
-			if msg.Role == "system" {
-				msgs = append(msgs, msg)
-			}
-		}
-
-		// Add recent messages directly (no string conversion needed)
-		msgs = append(msgs, recentHistory.OpenAI...)
-		compacted.OpenAI = msgs
-
-	case LLMTypeClaude:
-		// Add summary as a user message to provide context
-		summaryText := "--- Previous Conversation Summary ---\n" + summary + "\n--- End of Summary ---"
-		summaryMsg := claudeMessage{
-			Role: anthropic.MessageParamRoleUser,
-			Content: []claudeContentBlock{
-				{
-					Type: "text",
-					Text: &summaryText,
-				},
-			},
-		}
-
-		// Add summary message followed by recent messages
-		compacted.Claude = append([]claudeMessage{summaryMsg}, recentHistory.Claude...)
-
-	case LLMTypeGemini:
-		// Add summary as a user message to provide context
-		summaryMsg := geminiMessage{
-			Role: "user",
-			Parts: []geminiPart{
-				{
-					Type: "text",
-					Text: "--- Previous Conversation Summary ---\n" + summary + "\n--- End of Summary ---",
-				},
-			},
-		}
-
-		// Add summary message followed by recent messages
-		compacted.Gemini = append([]geminiMessage{summaryMsg}, recentHistory.Gemini...)
+		},
 	}
 
-	return compacted
+	// Preserve original system messages
+	for _, msg := range original.Messages {
+		if msg.Role == RoleSystem {
+			compacted.Messages = append(compacted.Messages, msg)
+		}
+	}
+
+	// Add summary message if not already has system message
+	if len(compacted.Messages) == 0 {
+		compacted.Messages = append(compacted.Messages, summaryMsg)
+	}
+
+	// Add recent messages
+	if len(recentHistory.Messages) > 0 {
+		compacted.Messages = append(compacted.Messages, recentHistory.Messages...)
+	}
+
+	return compacted, nil
 }

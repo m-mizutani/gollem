@@ -229,7 +229,7 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 	return session, nil
 }
 
-func (s *Session) History() *gollem.History {
+func (s *Session) History() (*gollem.History, error) {
 	return gollem.NewHistoryFromOpenAI(s.messages)
 }
 
