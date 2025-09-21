@@ -294,7 +294,7 @@ type Session struct {
 
 func (s *Session) History() (*gollem.History, error) {
 	// Convert new format history to gollem.History
-	return convertNewHistoryToGollem(s.chat.History(false)), nil
+	return convertNewHistoryToGollem(s.chat.History(false))
 }
 
 // convertInputs converts gollem.Input to Gemini parts
@@ -647,20 +647,18 @@ func (c *Client) CountTokens(ctx context.Context, history *gollem.History) (int,
 
 // Helper function to convert new SDK history to gollem.History
 
-func convertNewHistoryToGollem(history []*genai.Content) *gollem.History {
+func convertNewHistoryToGollem(history []*genai.Content) (*gollem.History, error) {
 	// Convert new format history directly to gollem.History
 	if len(history) == 0 {
-		return &gollem.History{}
+		return &gollem.History{}, nil
 	}
 
 	// Directly pass to NewHistoryFromGemini since it now accepts new genai types
 	hist, err := gollem.NewHistoryFromGemini(history)
 	if err != nil {
-		// For backward compatibility, return empty history on error
-		// This should not happen in practice as we control the message format
-		return &gollem.History{}
+		return nil, goerr.Wrap(err, "failed to convert Gemini history to gollem format")
 	}
-	return hist
+	return hist, nil
 }
 
 // convertToolToNewSDK converts gollem.Tool to new SDK's FunctionDeclaration
