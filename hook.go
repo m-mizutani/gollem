@@ -64,7 +64,7 @@ type (
 	// - Debugging tool call issues
 	//
 	// Note: This hook is called even for unknown/missing tools, allowing you to handle
-	// or log such cases. Facilitator tool calls do not trigger this hook.
+	// or log such cases.
 	// If the hook returns an error, the execution will be aborted immediately.
 	//
 	// Example usage:
@@ -88,7 +88,7 @@ type (
 	// - Recording tool performance metrics
 	//
 	// Note: This hook is only called for successful tool executions. Failed executions
-	// trigger ToolErrorHook instead. Facilitator tool responses do not trigger this hook.
+	// trigger ToolErrorHook instead.
 	// If the hook returns an error, the execution will be aborted immediately.
 	//
 	// Example usage:

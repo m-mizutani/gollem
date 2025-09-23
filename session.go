@@ -15,6 +15,10 @@ type SessionConfig struct {
 	contentType  ContentType
 	systemPrompt string
 	tools        []Tool
+
+	// Middleware fields (ToolMiddleware excluded - managed at Agent layer)
+	contentBlockMiddlewares  []ContentBlockMiddleware
+	contentStreamMiddlewares []ContentStreamMiddleware
 }
 
 // History returns the history of the session.
@@ -35,6 +39,16 @@ func (c *SessionConfig) ContentType() ContentType {
 // Tools returns the tools of the session.
 func (c *SessionConfig) Tools() []Tool {
 	return c.tools
+}
+
+// ContentBlockMiddlewares returns the content block middlewares of the session.
+func (c *SessionConfig) ContentBlockMiddlewares() []ContentBlockMiddleware {
+	return c.contentBlockMiddlewares
+}
+
+// ContentStreamMiddlewares returns the content stream middlewares of the session.
+func (c *SessionConfig) ContentStreamMiddlewares() []ContentStreamMiddleware {
+	return c.contentStreamMiddlewares
 }
 
 // NewSessionConfig creates a new session configuration. This is required for only LLM client implementations.
@@ -82,6 +96,24 @@ func WithSessionTools(tools ...Tool) SessionOption {
 func WithSessionSystemPrompt(systemPrompt string) SessionOption {
 	return func(cfg *SessionConfig) {
 		cfg.systemPrompt = systemPrompt
+	}
+}
+
+// WithSessionContentBlockMiddleware sets the content block middlewares for the session.
+// Usage:
+// session, err := llmClient.NewSession(ctx, gollem.WithSessionContentBlockMiddleware(middleware1, middleware2))
+func WithSessionContentBlockMiddleware(middlewares ...ContentBlockMiddleware) SessionOption {
+	return func(cfg *SessionConfig) {
+		cfg.contentBlockMiddlewares = append(cfg.contentBlockMiddlewares, middlewares...)
+	}
+}
+
+// WithSessionContentStreamMiddleware sets the content stream middlewares for the session.
+// Usage:
+// session, err := llmClient.NewSession(ctx, gollem.WithSessionContentStreamMiddleware(middleware1, middleware2))
+func WithSessionContentStreamMiddleware(middlewares ...ContentStreamMiddleware) SessionOption {
+	return func(cfg *SessionConfig) {
+		cfg.contentStreamMiddlewares = append(cfg.contentStreamMiddlewares, middlewares...)
 	}
 }
 

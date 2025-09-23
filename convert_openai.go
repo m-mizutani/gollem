@@ -292,37 +292,49 @@ func convertMessageToOpenAI(msg Message) ([]openai.ChatCompletionMessage, error)
 	// Build the result messages
 	var result []openai.ChatCompletionMessage
 
-	// Add main message if it has content or tool calls
-	if len(textParts) > 0 || len(toolCalls) > 0 || functionCall != nil {
-		mainMsg := openai.ChatCompletionMessage{
-			Role: role,
-			Name: msg.Name,
+	// Special handling for tool role - merge text content with tool response
+	if role == "tool" && len(toolResponses) > 0 {
+		// For tool messages, use the tool response as the main message and merge text content
+		for _, toolResp := range toolResponses {
+			if len(textParts) == 1 && textParts[0].Type == "text" {
+				// Replace content with the text content if we have it
+				toolResp.Content = textParts[0].Text
+			}
+			result = append(result, toolResp)
+		}
+	} else {
+		// Add main message if it has content or tool calls
+		if len(textParts) > 0 || len(toolCalls) > 0 || functionCall != nil {
+			mainMsg := openai.ChatCompletionMessage{
+				Role: role,
+				Name: msg.Name,
+			}
+
+			// Set content based on what we have
+			if len(textParts) == 1 && textParts[0].Type == "text" {
+				// Simple text content
+				mainMsg.Content = textParts[0].Text
+			} else if len(textParts) > 0 {
+				// Multi-part content
+				mainMsg.MultiContent = textParts
+			}
+
+			// Add tool calls
+			if len(toolCalls) > 0 {
+				mainMsg.ToolCalls = toolCalls
+			}
+
+			// Add function call
+			if functionCall != nil {
+				mainMsg.FunctionCall = functionCall
+			}
+
+			result = append(result, mainMsg)
 		}
 
-		// Set content based on what we have
-		if len(textParts) == 1 && textParts[0].Type == "text" {
-			// Simple text content
-			mainMsg.Content = textParts[0].Text
-		} else if len(textParts) > 0 {
-			// Multi-part content
-			mainMsg.MultiContent = textParts
-		}
-
-		// Add tool calls
-		if len(toolCalls) > 0 {
-			mainMsg.ToolCalls = toolCalls
-		}
-
-		// Add function call
-		if functionCall != nil {
-			mainMsg.FunctionCall = functionCall
-		}
-
-		result = append(result, mainMsg)
+		// Add tool response messages (they must be separate messages for non-tool roles)
+		result = append(result, toolResponses...)
 	}
-
-	// Add tool response messages (they must be separate messages)
-	result = append(result, toolResponses...)
 
 	// If we have no messages, create an empty text message
 	if len(result) == 0 {

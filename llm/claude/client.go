@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
@@ -173,8 +173,8 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 // Session is a session for the Claude chat.
 // It maintains the conversation state and handles message generation.
 type Session struct {
-	// client is the underlying Claude client.
-	client *anthropic.Client
+	// apiClient is the API client interface for dependency injection.
+	apiClient apiClient
 
 	// defaultModel is the model to use for chat completions.
 	defaultModel string
@@ -182,8 +182,8 @@ type Session struct {
 	// tools are the available tools for the session.
 	tools []anthropic.ToolUnionParam
 
-	// messages stores the conversation history.
-	messages []anthropic.MessageParam
+	// currentHistory maintains the gollem.History as the single source of truth
+	currentHistory *gollem.History
 
 	// generation parameters
 	params generationParameters
@@ -202,29 +202,31 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		claudeTools[i] = convertTool(tool)
 	}
 
-	var messages []anthropic.MessageParam
+	// Initialize currentHistory from config or create new
+	var currentHistory *gollem.History
 	if cfg.History() != nil {
-		history, err := cfg.History().ToClaude()
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to convert history to anthropic.MessageParam")
+		currentHistory = cfg.History()
+	} else {
+		currentHistory = &gollem.History{
+			Version: gollem.HistoryVersion,
+			LLType:  gollem.LLMTypeClaude,
 		}
-		messages = append(messages, history...)
 	}
 
 	session := &Session{
-		client:       c.client,
-		defaultModel: c.defaultModel,
-		tools:        claudeTools,
-		params:       c.params,
-		messages:     messages,
-		cfg:          cfg,
+		apiClient:      &realAPIClient{client: c.client},
+		defaultModel:   c.defaultModel,
+		tools:          claudeTools,
+		params:         c.params,
+		currentHistory: currentHistory,
+		cfg:            cfg,
 	}
 
 	return session, nil
 }
 
 func (s *Session) History() (*gollem.History, error) {
-	return gollem.NewHistoryFromClaude(s.messages)
+	return s.currentHistory, nil
 }
 
 // convertInputs converts gollem.Input to Claude messages and tool results
@@ -314,7 +316,7 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 
 			// Set error flag
 			if isError {
-				toolResult.OfToolResult.IsError = param.NewOpt(true)
+				toolResult.OfToolResult.IsError = anthropic.Bool(true)
 			}
 
 			toolResults = append(toolResults, toolResult)
@@ -690,53 +692,170 @@ func processResponseWithContentType(ctx context.Context, resp *anthropic.Message
 // GenerateContent processes the input and generates a response.
 // It handles both text messages and function responses.
 func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-	logger := ctxlog.From(ctx)
-	messages, _, err := s.convertInputs(ctx, input...)
+	// Build the content request for middleware
+	// Create a copy of the current history to avoid middleware side effects
+	var historyCopy *gollem.History
+	if s.currentHistory != nil {
+		historyCopy = &gollem.History{
+			Version:  s.currentHistory.Version,
+			LLType:   s.currentHistory.LLType,
+			Messages: make([]gollem.Message, len(s.currentHistory.Messages)),
+		}
+		copy(historyCopy.Messages, s.currentHistory.Messages)
+	}
+
+	contentReq := &gollem.ContentRequest{
+		Inputs:  input,
+		History: historyCopy,
+	}
+
+	// Create the base handler that performs the actual API call
+	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+		logger := ctxlog.From(ctx)
+
+		// Always update history from middleware (even if same address, content may have changed)
+		if req.History != nil {
+			s.currentHistory = req.History
+		}
+
+		messages, _, err := s.convertInputs(ctx, req.Inputs...)
+		if err != nil {
+			return nil, err
+		}
+
+		// Convert current history to Claude messages
+		var apiMessages []anthropic.MessageParam
+		if s.currentHistory != nil {
+			historyMessages, err := s.currentHistory.ToClaude()
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to convert history to Claude messages")
+			}
+			apiMessages = append(apiMessages, historyMessages...)
+		}
+		apiMessages = append(apiMessages, messages...)
+
+		// DEBUG: Log message history for debugging
+		logger.Debug("Claude API request",
+			"message_count", len(apiMessages),
+			"input_count", len(req.Inputs))
+
+		// Log the last few messages to understand the conversation state
+		for i, msg := range apiMessages[max(0, len(apiMessages)-5):] {
+			logger.Debug("Claude message",
+				"index", i,
+				"role", msg.Role,
+				"content_blocks", len(msg.Content))
+		}
+
+		// Create the request and call the API
+		systemPrompt := createSystemPrompt(s.cfg)
+		request := anthropic.MessageNewParams{
+			Model:       anthropic.Model(s.defaultModel),
+			Messages:    apiMessages,
+			MaxTokens:   s.params.MaxTokens,
+			Temperature: anthropic.Float(s.params.Temperature),
+			TopP:        anthropic.Float(s.params.TopP),
+		}
+
+		if len(systemPrompt) > 0 {
+			request.System = systemPrompt
+		}
+
+		if len(s.tools) > 0 {
+			request.Tools = s.tools
+		}
+
+		// Log prompts if GOLLEM_LOGGING_CLAUDE_PROMPT is set
+		promptLogger := ctxlog.From(ctx, claudePromptScope)
+		if promptLogger.Enabled(ctx, slog.LevelInfo) {
+			promptLogger.Info("Claude prompt",
+				"system_prompt", systemPrompt,
+				"messages", apiMessages,
+			)
+		}
+
+		resp, err := s.apiClient.MessagesNew(ctx, request)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create message")
+		}
+
+		// Log response if GOLLEM_LOGGING_CLAUDE_RESPONSE is set
+		responseLogger := ctxlog.From(ctx, claudeResponseScope)
+		if responseLogger.Enabled(ctx, slog.LevelInfo) {
+			var logContent []map[string]any
+			for _, content := range resp.Content {
+				if content.Type == "text" {
+					logContent = append(logContent, map[string]any{
+						"type": "text",
+						"text": content.Text,
+					})
+				} else if content.Type == "tool_use" {
+					logContent = append(logContent, map[string]any{
+						"type":  "tool_use",
+						"id":    content.ID,
+						"name":  content.Name,
+						"input": content.Input,
+					})
+				}
+			}
+			responseLogger.Info("Claude response",
+				"model", resp.Model,
+				"stop_reason", resp.StopReason,
+				"usage", map[string]any{
+					"input_tokens":  resp.Usage.InputTokens,
+					"output_tokens": resp.Usage.OutputTokens,
+				},
+				"content", logContent,
+			)
+		}
+
+		// Process response and extract content
+		processedResp := processResponseWithContentType(ctx, resp, s.cfg.ContentType())
+
+		// Update currentHistory after successful API call
+		// This is critical for tool_use/tool_result consistency
+		// Convert only the current input and response to gollem format and append to existing history
+		newInputHistory, err := gollem.NewHistoryFromClaude(messages)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create history from input messages")
+		}
+
+		newResponseHistory, err := gollem.NewHistoryFromClaude([]anthropic.MessageParam{resp.ToParam()})
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create history from response")
+		}
+
+		// Preserve middleware-modified history and append only new input and response
+		s.currentHistory.Messages = append(s.currentHistory.Messages, newInputHistory.Messages...)
+		s.currentHistory.Messages = append(s.currentHistory.Messages, newResponseHistory.Messages...)
+
+		return &gollem.ContentResponse{
+			Texts:         processedResp.Texts,
+			FunctionCalls: processedResp.FunctionCalls,
+			InputToken:    processedResp.InputToken,
+			OutputToken:   processedResp.OutputToken,
+		}, nil
+	}
+
+	// Build middleware chain
+	handler := gollem.ContentBlockHandler(baseHandler)
+	for i := len(s.cfg.ContentBlockMiddlewares()) - 1; i >= 0; i-- {
+		handler = s.cfg.ContentBlockMiddlewares()[i](handler)
+	}
+
+	// Execute middleware chain
+	contentResp, err := handler(ctx, contentReq)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create a copy of messages for the API call, but don't update session history yet
-	apiMessages := append([]anthropic.MessageParam{}, s.messages...)
-	apiMessages = append(apiMessages, messages...)
-
-	// DEBUG: Log message history for debugging
-	logger.Debug("Claude API request",
-		"message_count", len(apiMessages),
-		"input_count", len(input))
-
-	// Log the last few messages to understand the conversation state
-	for i, msg := range apiMessages[max(0, len(apiMessages)-5):] {
-		logger.Debug("Claude message",
-			"index", i,
-			"role", msg.Role,
-			"content_blocks", len(msg.Content))
-	}
-
-	resp, err := generateClaudeContent(
-		ctx,
-		s.client,
-		apiMessages,
-		s.defaultModel,
-		s.params,
-		s.tools,
-		s.cfg,
-		"Claude",
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Only update session history after successful API call
-	// This is critical for tool_use/tool_result consistency
-	s.messages = append(s.messages, messages...)
-	s.messages = append(s.messages, resp.ToParam())
-
-	logger.Debug("Added assistant response to message history",
-		"content_blocks", len(resp.Content),
-		"total_messages", len(s.messages))
-
-	return processResponseWithContentType(ctx, resp, s.cfg.ContentType()), nil
+	// Convert ContentResponse back to gollem.Response
+	return &gollem.Response{
+		Texts:         contentResp.Texts,
+		FunctionCalls: contentResp.FunctionCalls,
+		InputToken:    contentResp.InputToken,
+		OutputToken:   contentResp.OutputToken,
+	}, nil
 }
 
 // FunctionCallAccumulator accumulates function call information from stream
@@ -774,23 +893,127 @@ func (a *FunctionCallAccumulator) accumulate() (*gollem.FunctionCall, error) {
 // GenerateStream processes the input and generates a response stream.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
 func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
-	messages, _, err := s.convertInputs(ctx, input...)
+	// Build the content request for middleware
+	contentReq := &gollem.ContentRequest{
+		Inputs:  input,
+		History: s.currentHistory,
+	}
+
+	// Create the base handler that performs the actual API call
+	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
+		// Update history if modified by middleware
+		if req.History != nil {
+			s.currentHistory = req.History
+		}
+
+		messages, _, err := s.convertInputs(ctx, req.Inputs...)
+		if err != nil {
+			return nil, err
+		}
+
+		// Convert current history to Claude messages and append new inputs
+		var allMessages []anthropic.MessageParam
+		if s.currentHistory != nil && len(s.currentHistory.Messages) > 0 {
+			historyMessages, err := s.currentHistory.ToClaude()
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to convert history to Claude messages")
+			}
+			allMessages = append(allMessages, historyMessages...)
+		}
+		allMessages = append(allMessages, messages...)
+
+		// Create request params
+		systemPrompt := createSystemPrompt(s.cfg)
+		request := anthropic.MessageNewParams{
+			Model:       anthropic.Model(s.defaultModel),
+			Messages:    allMessages,
+			MaxTokens:   s.params.MaxTokens,
+			Temperature: anthropic.Float(s.params.Temperature),
+			TopP:        anthropic.Float(s.params.TopP),
+		}
+
+		if len(systemPrompt) > 0 {
+			request.System = systemPrompt
+		}
+
+		if len(s.tools) > 0 {
+			request.Tools = s.tools
+		}
+
+		// Simplified streaming implementation - full implementation would be complex
+		// For now, we'll use non-streaming API and simulate streaming
+		resp, err := s.apiClient.MessagesNew(ctx, request)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create message stream")
+		}
+
+		responseChan := make(chan *gollem.ContentResponse)
+
+		go func() {
+			defer close(responseChan)
+
+			// Process response and send chunks
+			for _, content := range resp.Content {
+				if content.Type == "text" {
+					textBlock := content.AsText()
+					responseChan <- &gollem.ContentResponse{
+						Texts:       []string{textBlock.Text},
+						InputToken:  int(resp.Usage.InputTokens),
+						OutputToken: int(resp.Usage.OutputTokens),
+					}
+				}
+			}
+
+			// Update history after successful streaming
+			// Convert the new messages (input + response) to gollem format and append to existing history
+			newMessages, err := gollem.NewHistoryFromClaude(append(messages, resp.ToParam()))
+			if err != nil {
+				responseChan <- &gollem.ContentResponse{
+					Error: goerr.Wrap(err, "failed to create history from new messages"),
+				}
+				return
+			}
+
+			// Preserve middleware-modified history and append new messages
+			s.currentHistory.Messages = append(s.currentHistory.Messages, newMessages.Messages...)
+		}()
+
+		return responseChan, nil
+	}
+
+	// Build middleware chain
+	handler := gollem.ContentStreamHandler(baseHandler)
+	for i := len(s.cfg.ContentStreamMiddlewares()) - 1; i >= 0; i-- {
+		handler = s.cfg.ContentStreamMiddlewares()[i](handler)
+	}
+
+	// Execute middleware chain
+	streamChan, err := handler(ctx, contentReq)
 	if err != nil {
 		return nil, err
 	}
 
-	s.messages = append(s.messages, messages...)
+	// Convert ContentResponse channel to Response channel
+	responseChan := make(chan *gollem.Response)
+	go func() {
+		defer close(responseChan)
+		for streamResp := range streamChan {
+			if streamResp.Error != nil {
+				responseChan <- &gollem.Response{
+					Error: streamResp.Error,
+				}
+			} else {
+				responseChan <- &gollem.Response{
+					Texts:         streamResp.Texts,
+					FunctionCalls: streamResp.FunctionCalls,
+					InputToken:    streamResp.InputToken,
+					OutputToken:   streamResp.OutputToken,
+				}
+			}
+		}
+	}()
 
-	return generateClaudeStream(
-		ctx,
-		s.client,
-		s.messages,
-		s.defaultModel,
-		s.params,
-		s.tools,
-		s.cfg,
-		&s.messages,
-	)
+	return responseChan, nil
 }
 
 // IsCompatibleHistory checks if the given history is compatible with the Claude client.

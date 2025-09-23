@@ -173,8 +173,8 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 // Session is a session for the OpenAI chat.
 // It maintains the conversation state and handles message generation.
 type Session struct {
-	// client is the underlying OpenAI client.
-	client *openai.Client
+	// apiClient is the API client interface for dependency injection.
+	apiClient apiClient
 
 	// defaultModel is the model to use for chat completions.
 	defaultModel string
@@ -182,8 +182,8 @@ type Session struct {
 	// tools are the available tools for the session.
 	tools []openai.Tool
 
-	// messages stores the conversation history.
-	messages []openai.ChatCompletionMessage
+	// currentHistory maintains the gollem.History for middleware access.
+	currentHistory *gollem.History
 
 	// generation parameters
 	params generationParameters
@@ -202,39 +202,71 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		openaiTools[i] = convertTool(tool)
 	}
 
-	var messages []openai.ChatCompletionMessage
-	if c.systemPrompt != "" {
-		messages = append(messages, openai.ChatCompletionMessage{
-			Role:    openai.ChatMessageRoleSystem,
-			Content: cfg.SystemPrompt(),
-		})
-	}
+	// Initialize currentHistory from config or create new
+	var currentHistory *gollem.History
 	if cfg.History() != nil {
-		history, err := cfg.History().ToOpenAI()
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to convert history to openai.ChatCompletionMessage")
+		currentHistory = cfg.History()
+	} else {
+		currentHistory = &gollem.History{
+			LLType:  gollem.LLMTypeOpenAI,
+			Version: gollem.HistoryVersion,
 		}
-		messages = append(messages, history...)
 	}
 
 	session := &Session{
-		client:       c.client,
-		defaultModel: c.defaultModel,
-		tools:        openaiTools,
-		params:       c.params,
-		messages:     messages,
-		cfg:          cfg,
+		apiClient:      &realAPIClient{client: c.client},
+		defaultModel:   c.defaultModel,
+		tools:          openaiTools,
+		params:         c.params,
+		currentHistory: currentHistory,
+		cfg:            cfg,
 	}
 
 	return session, nil
 }
 
 func (s *Session) History() (*gollem.History, error) {
-	return gollem.NewHistoryFromOpenAI(s.messages)
+	return s.currentHistory, nil
 }
 
-// convertInputs converts gollem.Input to OpenAI messages
+// getMessages converts currentHistory to OpenAI messages for API calls
+func (s *Session) getMessages() ([]openai.ChatCompletionMessage, error) {
+	if s.currentHistory == nil || len(s.currentHistory.Messages) == 0 {
+		return []openai.ChatCompletionMessage{}, nil
+	}
+	messages, err := s.currentHistory.ToOpenAI()
+	if err != nil {
+		return nil, err
+	}
+
+	return messages, nil
+}
+
+// updateHistoryWithResponse updates the current history with an assistant response
+func (s *Session) updateHistoryWithResponse(assistantMessage openai.ChatCompletionMessage) error {
+	// Get current messages and append the assistant response
+	currentMessages, err := s.getMessages()
+	if err != nil {
+		return goerr.Wrap(err, "failed to get current messages")
+	}
+	allMessages := append(currentMessages, assistantMessage)
+
+	// DEBUG: Debug logging can be enabled here for troubleshooting tool_call_id issues
+
+	// Create new history from all messages
+	updatedHistory, err := gollem.NewHistoryFromOpenAI(allMessages)
+	if err != nil {
+		return goerr.Wrap(err, "failed to create history from messages")
+	}
+	s.currentHistory = updatedHistory
+	return nil
+}
+
+// convertInputs converts gollem.Input to OpenAI messages and updates currentHistory
 func (s *Session) convertInputs(input ...gollem.Input) error {
+	// Work with a local messages array that we'll integrate into history at the end
+	var newMessages []openai.ChatCompletionMessage
+
 	// Accumulate consecutive user content (Text/Image) into a single message
 	var userContentParts []openai.ChatMessagePart
 
@@ -259,7 +291,7 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 		case gollem.FunctionResponse:
 			// If we have accumulated user content, create a message for it
 			if len(userContentParts) > 0 {
-				s.messages = append(s.messages, openai.ChatCompletionMessage{
+				newMessages = append(newMessages, openai.ChatCompletionMessage{
 					Role:         openai.ChatMessageRoleUser,
 					MultiContent: userContentParts,
 				})
@@ -275,18 +307,9 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 			}
 
 			// DEBUG: Log tool result creation for OpenAI
-			// Note: This log is commented out by default to avoid spamming logs
-			// Uncomment for debugging tool_call_id issues
-			/*
-				logger := slog.Default()
-				logger.Debug("creating tool response for OpenAI",
-					"tool_call_id", v.ID,
-					"tool_name", v.Name,
-					"has_error", v.Error != nil,
-					"response_length", len(response))
-			*/
+			// Note: Debug logging can be enabled here for troubleshooting tool_call_id issues
 
-			s.messages = append(s.messages, openai.ChatCompletionMessage{
+			newMessages = append(newMessages, openai.ChatCompletionMessage{
 				Role:       openai.ChatMessageRoleTool,
 				Content:    response,
 				ToolCallID: v.ID,
@@ -298,20 +321,42 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 
 	// Create final user message if there's any remaining user content
 	if len(userContentParts) > 0 {
-		s.messages = append(s.messages, openai.ChatCompletionMessage{
+		newMessages = append(newMessages, openai.ChatCompletionMessage{
 			Role:         openai.ChatMessageRoleUser,
 			MultiContent: userContentParts,
 		})
+	}
+
+	// Update currentHistory with new messages
+	if len(newMessages) > 0 {
+		// Get current messages and append new ones
+		currentMessages, err := s.getMessages()
+		if err != nil {
+			return goerr.Wrap(err, "failed to get current messages")
+		}
+		allMessages := append(currentMessages, newMessages...)
+
+		// Create new history from all messages
+		updatedHistory, err := gollem.NewHistoryFromOpenAI(allMessages)
+		if err != nil {
+			return goerr.Wrap(err, "failed to create history from messages")
+		}
+		s.currentHistory = updatedHistory
 	}
 
 	return nil
 }
 
 // createRequest creates a chat completion request with the current session state
-func (s *Session) createRequest(stream bool) openai.ChatCompletionRequest {
+func (s *Session) createRequest(stream bool) (openai.ChatCompletionRequest, error) {
+	messages, err := s.getMessages()
+	if err != nil {
+		return openai.ChatCompletionRequest{}, goerr.Wrap(err, "failed to get messages for API call")
+	}
+
 	req := openai.ChatCompletionRequest{
 		Model:            s.defaultModel,
-		Messages:         s.messages,
+		Messages:         messages,
 		Tools:            s.tools,
 		Temperature:      s.params.Temperature,
 		TopP:             s.params.TopP,
@@ -328,7 +373,7 @@ func (s *Session) createRequest(stream bool) openai.ChatCompletionRequest {
 		}
 	}
 
-	return req
+	return req, nil
 }
 
 // logPrompt logs the prompt if GOLLEM_LOGGING_OPENAI_PROMPT is enabled
@@ -340,8 +385,14 @@ func (s *Session) logPrompt(ctx context.Context) {
 	}
 
 	// Build messages for logging
+	currentMessages, err := s.getMessages()
+	if err != nil {
+		logger.Error("Failed to get messages for logging", "error", err)
+		return
+	}
+
 	var messages []map[string]string
-	for _, msg := range s.messages {
+	for _, msg := range currentMessages {
 		messages = append(messages, map[string]string{
 			"role":    msg.Role,
 			"content": msg.Content,
@@ -356,275 +407,415 @@ func (s *Session) logPrompt(ctx context.Context) {
 // GenerateContent processes the input and generates a response.
 // It handles both text messages and function responses.
 func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-	if err := s.convertInputs(input...); err != nil {
+	// Build the content request for middleware
+	// Create a copy of the current history to avoid middleware side effects
+	var historyCopy *gollem.History
+	if s.currentHistory != nil {
+		historyCopy = &gollem.History{
+			Version:  s.currentHistory.Version,
+			LLType:   s.currentHistory.LLType,
+			Messages: make([]gollem.Message, len(s.currentHistory.Messages)),
+		}
+		copy(historyCopy.Messages, s.currentHistory.Messages)
+	}
+
+	contentReq := &gollem.ContentRequest{
+		Inputs:  input,
+		History: historyCopy,
+	}
+
+	// Create the base handler that performs the actual API call
+	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+		// Always update history from middleware (even if same address, content may have changed)
+		if req.History != nil {
+			s.currentHistory = req.History
+		}
+
+		// Convert inputs and perform the actual API call
+		if err := s.convertInputs(req.Inputs...); err != nil {
+			return nil, err
+		}
+
+		openaiReq, err := s.createRequest(false)
+		if err != nil {
+			return nil, err
+		}
+		s.logPrompt(ctx)
+
+		resp, err := s.apiClient.CreateChatCompletion(ctx, openaiReq)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create chat completion")
+		}
+
+		if len(resp.Choices) == 0 {
+			return &gollem.ContentResponse{
+				Texts:         []string{},
+				FunctionCalls: []*gollem.FunctionCall{},
+				InputToken:    0,
+				OutputToken:   0,
+			}, nil
+		}
+
+		response := &gollem.Response{
+			Texts:         make([]string, 0),
+			FunctionCalls: make([]*gollem.FunctionCall, 0),
+			InputToken:    resp.Usage.PromptTokens,
+			OutputToken:   resp.Usage.CompletionTokens,
+		}
+
+		message := resp.Choices[0].Message
+		if message.Content != "" {
+			response.Texts = append(response.Texts, message.Content)
+		}
+
+		if message.ToolCalls != nil {
+			for _, toolCall := range message.ToolCalls {
+				var args map[string]any
+				if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+					return nil, goerr.Wrap(err, "failed to unmarshal tool arguments")
+				}
+
+				response.FunctionCalls = append(response.FunctionCalls, &gollem.FunctionCall{
+					ID:        toolCall.ID,
+					Name:      toolCall.Function.Name,
+					Arguments: args,
+				})
+			}
+
+			// Create assistant message with all tool calls
+			assistantMessage := openai.ChatCompletionMessage{
+				Role:      openai.ChatMessageRoleAssistant,
+				Content:   message.Content,
+				ToolCalls: message.ToolCalls,
+			}
+
+			// Update history with assistant response
+			if err := s.updateHistoryWithResponse(assistantMessage); err != nil {
+				return nil, goerr.Wrap(err, "failed to update history with assistant response")
+			}
+		} else if message.Content != "" {
+			// Create assistant message without tool calls
+			assistantMessage := openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleAssistant,
+				Content: message.Content,
+			}
+
+			// Update history with assistant response
+			if err := s.updateHistoryWithResponse(assistantMessage); err != nil {
+				return nil, goerr.Wrap(err, "failed to update history with assistant response")
+			}
+		}
+
+		// Log responses if GOLLEM_LOGGING_OPENAI_RESPONSE is set
+		responseLogger := ctxlog.From(ctx, openaiResponseScope)
+		if responseLogger.Enabled(ctx, slog.LevelInfo) {
+			var logContent []map[string]any
+			if message.Content != "" {
+				logContent = append(logContent, map[string]any{
+					"type": "text",
+					"text": message.Content,
+				})
+			}
+			for _, toolCall := range message.ToolCalls {
+				logContent = append(logContent, map[string]any{
+					"type":      "tool_use",
+					"id":        toolCall.ID,
+					"name":      toolCall.Function.Name,
+					"arguments": toolCall.Function.Arguments,
+				})
+			}
+			responseLogger.Info("OpenAI response",
+				"model", resp.Model,
+				"finish_reason", resp.Choices[0].FinishReason,
+				"usage", map[string]any{
+					"prompt_tokens":     resp.Usage.PromptTokens,
+					"completion_tokens": resp.Usage.CompletionTokens,
+					"total_tokens":      resp.Usage.TotalTokens,
+				},
+				"content", logContent,
+			)
+		}
+
+		// History is already updated by updateHistoryWithResponse above
+
+		return &gollem.ContentResponse{
+			Texts:         response.Texts,
+			FunctionCalls: response.FunctionCalls,
+			InputToken:    response.InputToken,
+			OutputToken:   response.OutputToken,
+		}, nil
+	}
+
+	// Build middleware chain
+	handler := gollem.ContentBlockHandler(baseHandler)
+	for i := len(s.cfg.ContentBlockMiddlewares()) - 1; i >= 0; i-- {
+		handler = s.cfg.ContentBlockMiddlewares()[i](handler)
+	}
+
+	// Execute middleware chain
+	contentResp, err := handler(ctx, contentReq)
+	if err != nil {
 		return nil, err
 	}
 
-	req := s.createRequest(false)
-
-	s.logPrompt(ctx)
-
-	resp, err := s.client.CreateChatCompletion(ctx, req)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create chat completion")
-	}
-
-	if len(resp.Choices) == 0 {
-		return &gollem.Response{}, nil
-	}
-
-	response := &gollem.Response{
-		Texts:         make([]string, 0),
-		FunctionCalls: make([]*gollem.FunctionCall, 0),
-		InputToken:    resp.Usage.PromptTokens,
-		OutputToken:   resp.Usage.CompletionTokens,
-	}
-
-	message := resp.Choices[0].Message
-	if message.Content != "" {
-		response.Texts = append(response.Texts, message.Content)
-	}
-
-	if message.ToolCalls != nil {
-		for _, toolCall := range message.ToolCalls {
-			var args map[string]interface{}
-			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-				return nil, goerr.Wrap(err, "failed to unmarshal tool arguments")
-			}
-
-			response.FunctionCalls = append(response.FunctionCalls, &gollem.FunctionCall{
-				ID:        toolCall.ID,
-				Name:      toolCall.Function.Name,
-				Arguments: args,
-			})
-		}
-
-		// Add a single assistant message with all tool calls
-		s.messages = append(s.messages, openai.ChatCompletionMessage{
-			Role:      openai.ChatMessageRoleAssistant,
-			Content:   message.Content,
-			ToolCalls: message.ToolCalls,
-		})
-	} else if message.Content != "" {
-		// Add assistant message only if there are no tool calls
-		s.messages = append(s.messages, openai.ChatCompletionMessage{
-			Role:    openai.ChatMessageRoleAssistant,
-			Content: message.Content,
-		})
-	}
-
-	// Log responses if GOLLEM_LOGGING_OPENAI_RESPONSE is set
-	responseLogger := ctxlog.From(ctx, openaiResponseScope)
-	var logContent []map[string]any
-	if message.Content != "" {
-		logContent = append(logContent, map[string]any{
-			"type": "text",
-			"text": message.Content,
-		})
-	}
-	for _, toolCall := range message.ToolCalls {
-		logContent = append(logContent, map[string]any{
-			"type":      "tool_use",
-			"id":        toolCall.ID,
-			"name":      toolCall.Function.Name,
-			"arguments": toolCall.Function.Arguments,
-		})
-	}
-	responseLogger.Info("OpenAI response",
-		"model", resp.Model,
-		"finish_reason", resp.Choices[0].FinishReason,
-		"usage", map[string]any{
-			"prompt_tokens":     resp.Usage.PromptTokens,
-			"completion_tokens": resp.Usage.CompletionTokens,
-			"total_tokens":      resp.Usage.TotalTokens,
-		},
-		"content", logContent,
-	)
-
-	return response, nil
+	// Update history after middleware execution (history was already updated in baseHandler)
+	// Convert ContentResponse back to gollem.Response
+	return &gollem.Response{
+		Texts:         contentResp.Texts,
+		FunctionCalls: contentResp.FunctionCalls,
+		InputToken:    contentResp.InputToken,
+		OutputToken:   contentResp.OutputToken,
+	}, nil
 }
 
 // GenerateStream processes the input and generates a response stream.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
 func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
-	if err := s.convertInputs(input...); err != nil {
-		return nil, err
+	// Build the content request for middleware
+	contentReq := &gollem.ContentRequest{
+		Inputs:  input,
+		History: s.currentHistory,
 	}
 
-	req := s.createRequest(true)
+	// Create the base handler that performs the actual API call
+	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
+		// Always update history from middleware (even if same address, content may have changed)
+		if req.History != nil {
+			s.currentHistory = req.History
+		}
 
-	s.logPrompt(ctx)
+		// Convert inputs and perform the actual API call
+		if err := s.convertInputs(req.Inputs...); err != nil {
+			return nil, err
+		}
 
-	// Enable stream options to get usage data
-	req.StreamOptions = &openai.StreamOptions{
-		IncludeUsage: true,
-	}
-	stream, err := s.client.CreateChatCompletionStream(ctx, req)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create chat completion stream")
-	}
+		openaiReq, err := s.createRequest(true)
+		if err != nil {
+			return nil, err
+		}
+		s.logPrompt(ctx)
 
-	responseChan := make(chan *gollem.Response)
+		// Enable stream options to get usage data
+		openaiReq.StreamOptions = &openai.StreamOptions{
+			IncludeUsage: true,
+		}
+		stream, err := s.apiClient.CreateChatCompletionStream(ctx, openaiReq)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create chat completion stream")
+		}
 
-	go func() {
-		defer close(responseChan)
-		defer stream.Close()
+		responseChan := make(chan *gollem.ContentResponse)
 
-		var textContent string
-		var toolCalls []openai.ToolCall
-		var totalInputTokens int
-		var totalOutputTokens int
+		go func() {
+			defer close(responseChan)
+			defer stream.Close()
 
-		// Process streaming chunks
-		for {
-			resp, err := stream.Recv()
-			if err != nil {
-				if err == io.EOF {
+			var textContent string
+			var toolCalls []openai.ToolCall
+			var totalInputTokens int
+			var totalOutputTokens int
+
+			// Process streaming chunks
+			for {
+				resp, err := stream.Recv()
+				if err != nil {
+					if err == io.EOF {
+						break
+					}
+					responseChan <- &gollem.ContentResponse{
+						Error: goerr.Wrap(err, "failed to receive chat completion stream"),
+					}
+					return
+				}
+
+				// Handle token usage if available (comes in final chunk)
+				if resp.Usage != nil {
+					totalInputTokens = resp.Usage.PromptTokens
+					totalOutputTokens = resp.Usage.CompletionTokens
+				}
+
+				if len(resp.Choices) == 0 {
+					continue
+				}
+
+				choice := resp.Choices[0]
+				delta := choice.Delta
+
+				// Handle text content
+				if delta.Content != "" {
+					textContent += delta.Content
+					responseChan <- &gollem.ContentResponse{
+						Texts:       []string{delta.Content},
+						InputToken:  totalInputTokens,
+						OutputToken: totalOutputTokens,
+					}
+				}
+
+				// Handle tool calls - accumulate them
+				if delta.ToolCalls != nil {
+					for _, toolCall := range delta.ToolCalls {
+						// Get the index, defaulting to 0 if nil
+						index := 0
+						if toolCall.Index != nil {
+							index = *toolCall.Index
+						}
+
+						// Ensure we have enough space in the slice
+						for len(toolCalls) <= index {
+							toolCalls = append(toolCalls, openai.ToolCall{
+								Function: openai.FunctionCall{},
+							})
+						}
+
+						tc := &toolCalls[index]
+
+						if toolCall.ID != "" {
+							tc.ID = toolCall.ID
+						}
+						if toolCall.Type != "" {
+							tc.Type = toolCall.Type
+						}
+						if toolCall.Function.Name != "" {
+							tc.Function.Name = toolCall.Function.Name
+						}
+						if toolCall.Function.Arguments != "" {
+							tc.Function.Arguments += toolCall.Function.Arguments
+						}
+					}
+				}
+
+				// Check if we're done
+				if choice.FinishReason == openai.FinishReasonToolCalls {
 					break
 				}
-				responseChan <- &gollem.Response{
-					Error: goerr.Wrap(err, "failed to receive chat completion stream"),
+				if choice.FinishReason == openai.FinishReasonStop {
+					break
 				}
-				return
 			}
 
-			// Handle token usage if available (comes in final chunk)
-			if resp.Usage != nil {
-				totalInputTokens = resp.Usage.PromptTokens
-				totalOutputTokens = resp.Usage.CompletionTokens
+			// Process accumulated tool calls
+			if len(toolCalls) > 0 {
+				var functionCalls []*gollem.FunctionCall
+				for _, toolCall := range toolCalls {
+					if toolCall.ID != "" && toolCall.Function.Name != "" && toolCall.Function.Arguments != "" {
+						var args map[string]any
+						if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+							responseChan <- &gollem.ContentResponse{
+								Error: goerr.Wrap(err, "failed to unmarshal function call arguments"),
+							}
+							return
+						}
+
+						functionCalls = append(functionCalls, &gollem.FunctionCall{
+							ID:        toolCall.ID,
+							Name:      toolCall.Function.Name,
+							Arguments: args,
+						})
+					}
+				}
+
+				if len(functionCalls) > 0 {
+					responseChan <- &gollem.ContentResponse{
+						FunctionCalls: functionCalls,
+						InputToken:    totalInputTokens,
+						OutputToken:   totalOutputTokens,
+					}
+				}
+
+				// Create assistant message with tool calls
+				assistantMessage := openai.ChatCompletionMessage{
+					Role:      openai.ChatMessageRoleAssistant,
+					ToolCalls: toolCalls,
+				}
+				// Update history with assistant response
+				if err := s.updateHistoryWithResponse(assistantMessage); err != nil {
+					responseChan <- &gollem.ContentResponse{
+						Error: goerr.Wrap(err, "failed to update history with assistant response"),
+					}
+					return
+				}
+			} else if textContent != "" {
+				// Create assistant message with text content
+				assistantMessage := openai.ChatCompletionMessage{
+					Role:    openai.ChatMessageRoleAssistant,
+					Content: textContent,
+				}
+				// Update history with assistant response
+				if err := s.updateHistoryWithResponse(assistantMessage); err != nil {
+					responseChan <- &gollem.ContentResponse{
+						Error: goerr.Wrap(err, "failed to update history with assistant response"),
+					}
+					return
+				}
 			}
 
-			if len(resp.Choices) == 0 {
-				continue
+			// Log streaming response if GOLLEM_LOGGING_OPENAI_RESPONSE is set
+			responseLogger := ctxlog.From(ctx, openaiResponseScope)
+			var logContent []map[string]any
+			if textContent != "" {
+				logContent = append(logContent, map[string]any{
+					"type": "text",
+					"text": textContent,
+				})
 			}
+			for _, toolCall := range toolCalls {
+				logContent = append(logContent, map[string]any{
+					"type":      "tool_use",
+					"id":        toolCall.ID,
+					"name":      toolCall.Function.Name,
+					"arguments": toolCall.Function.Arguments,
+				})
+			}
+			responseLogger.Info("OpenAI streaming response",
+				"usage", map[string]any{
+					"prompt_tokens":     totalInputTokens,
+					"completion_tokens": totalOutputTokens,
+				},
+				"content", logContent,
+			)
 
-			choice := resp.Choices[0]
-			delta := choice.Delta
-
-			// Handle text content
-			if delta.Content != "" {
-				textContent += delta.Content
-				responseChan <- &gollem.Response{
-					Texts:       []string{delta.Content},
+			// Send final response with complete token usage if available
+			if totalInputTokens > 0 || totalOutputTokens > 0 {
+				responseChan <- &gollem.ContentResponse{
 					InputToken:  totalInputTokens,
 					OutputToken: totalOutputTokens,
 				}
 			}
 
-			// Handle tool calls - accumulate them
-			if delta.ToolCalls != nil {
-				for _, toolCall := range delta.ToolCalls {
-					// Get the index, defaulting to 0 if nil
-					index := 0
-					if toolCall.Index != nil {
-						index = *toolCall.Index
-					}
+			// History is already updated by updateHistoryWithResponse above
+		}()
 
-					// Ensure we have enough space in the slice
-					for len(toolCalls) <= index {
-						toolCalls = append(toolCalls, openai.ToolCall{
-							Function: openai.FunctionCall{},
-						})
-					}
+		return responseChan, nil
+	}
 
-					tc := &toolCalls[index]
+	// Build middleware chain
+	handler := gollem.ContentStreamHandler(baseHandler)
+	for i := len(s.cfg.ContentStreamMiddlewares()) - 1; i >= 0; i-- {
+		handler = s.cfg.ContentStreamMiddlewares()[i](handler)
+	}
 
-					if toolCall.ID != "" {
-						tc.ID = toolCall.ID
-					}
-					if toolCall.Type != "" {
-						tc.Type = toolCall.Type
-					}
-					if toolCall.Function.Name != "" {
-						tc.Function.Name = toolCall.Function.Name
-					}
-					if toolCall.Function.Arguments != "" {
-						tc.Function.Arguments += toolCall.Function.Arguments
-					}
-				}
-			}
+	// Execute middleware chain
+	streamChan, err := handler(ctx, contentReq)
+	if err != nil {
+		return nil, err
+	}
 
-			// Check if we're done
-			if choice.FinishReason == openai.FinishReasonToolCalls {
-				break
-			}
-			if choice.FinishReason == openai.FinishReasonStop {
-				break
-			}
-		}
-
-		// Process accumulated tool calls
-		if len(toolCalls) > 0 {
-			var functionCalls []*gollem.FunctionCall
-			for _, toolCall := range toolCalls {
-				if toolCall.ID != "" && toolCall.Function.Name != "" && toolCall.Function.Arguments != "" {
-					var args map[string]any
-					if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-						responseChan <- &gollem.Response{
-							Error: goerr.Wrap(err, "failed to unmarshal function call arguments"),
-						}
-						return
-					}
-
-					functionCalls = append(functionCalls, &gollem.FunctionCall{
-						ID:        toolCall.ID,
-						Name:      toolCall.Function.Name,
-						Arguments: args,
-					})
-				}
-			}
-
-			if len(functionCalls) > 0 {
+	// Convert ContentStreamResponse channel to Response channel
+	responseChan := make(chan *gollem.Response)
+	go func() {
+		defer close(responseChan)
+		for streamResp := range streamChan {
+			if streamResp.Error != nil {
 				responseChan <- &gollem.Response{
-					FunctionCalls: functionCalls,
-					InputToken:    totalInputTokens,
-					OutputToken:   totalOutputTokens,
+					Error: streamResp.Error,
 				}
-			}
-
-			// Add tool calls to message history
-			s.messages = append(s.messages, openai.ChatCompletionMessage{
-				Role:      openai.ChatMessageRoleAssistant,
-				ToolCalls: toolCalls,
-			})
-		} else if textContent != "" {
-			// Add text content to message history
-			s.messages = append(s.messages, openai.ChatCompletionMessage{
-				Role:    openai.ChatMessageRoleAssistant,
-				Content: textContent,
-			})
-		}
-
-		// Log streaming response if GOLLEM_LOGGING_OPENAI_RESPONSE is set
-		responseLogger := ctxlog.From(ctx, openaiResponseScope)
-		var logContent []map[string]any
-		if textContent != "" {
-			logContent = append(logContent, map[string]any{
-				"type": "text",
-				"text": textContent,
-			})
-		}
-		for _, toolCall := range toolCalls {
-			logContent = append(logContent, map[string]any{
-				"type":      "tool_use",
-				"id":        toolCall.ID,
-				"name":      toolCall.Function.Name,
-				"arguments": toolCall.Function.Arguments,
-			})
-		}
-		responseLogger.Info("OpenAI streaming response",
-			"usage", map[string]any{
-				"prompt_tokens":     totalInputTokens,
-				"completion_tokens": totalOutputTokens,
-			},
-			"content", logContent,
-		)
-
-		// Send final response with complete token usage if available
-		if totalInputTokens > 0 || totalOutputTokens > 0 {
-			responseChan <- &gollem.Response{
-				InputToken:  totalInputTokens,
-				OutputToken: totalOutputTokens,
+			} else {
+				responseChan <- &gollem.Response{
+					Texts:         streamResp.Texts,
+					FunctionCalls: streamResp.FunctionCalls,
+					InputToken:    streamResp.InputToken,
+					OutputToken:   streamResp.OutputToken,
+				}
 			}
 		}
 	}()

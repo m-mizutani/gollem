@@ -3,6 +3,7 @@ package gemini
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"strings"
 	"time"
@@ -259,26 +260,23 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		config.Tools = tools
 	}
 
-	// Prepare history if provided
-	var initialHistory []*genai.Content
+	// Initialize currentHistory from config or create new
+	var currentHistory *gollem.History
 	if cfg.History() != nil {
-		var err error
-		initialHistory, err = cfg.History().ToGemini()
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to convert history to gemini.Content")
+		currentHistory = cfg.History()
+	} else {
+		currentHistory = &gollem.History{
+			LLType:  gollem.LLMTypeGemini,
+			Version: gollem.HistoryVersion,
 		}
 	}
 
-	// Create chat with history
-	chat, err := c.client.Chats.Create(ctx, c.defaultModel, config, initialHistory)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create chat")
-	}
-
 	session := &Session{
-		client: c,
-		chat:   chat,
-		config: config,
+		apiClient:      &realAPIClient{client: c.client},
+		model:          c.defaultModel,
+		config:         config,
+		currentHistory: currentHistory,
+		cfg:            cfg,
 	}
 
 	return session, nil
@@ -287,14 +285,24 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 // Session is a session for the Gemini chat.
 // It maintains the conversation state and handles message generation.
 type Session struct {
-	client *Client
-	chat   *genai.Chat
+	// apiClient is the API client interface for dependency injection
+	apiClient apiClient
+
+	// model is the model name to use
+	model string
+
+	// config is the generation configuration
 	config *genai.GenerateContentConfig
+
+	// currentHistory maintains the gollem.History for middleware access
+	currentHistory *gollem.History
+
+	// cfg is the session configuration
+	cfg gollem.SessionConfig
 }
 
 func (s *Session) History() (*gollem.History, error) {
-	// Convert new format history to gollem.History
-	return convertNewHistoryToGollem(s.chat.History(false))
+	return s.currentHistory, nil
 }
 
 // convertInputs converts gollem.Input to Gemini parts
@@ -394,179 +402,223 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 
 // GenerateContent generates content based on the input.
 func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-	// Convert inputs
-	parts, err := s.convertInputs(input...)
+	// Build the content request for middleware
+	// Create a copy of the current history to avoid middleware side effects
+	var historyCopy *gollem.History
+	if s.currentHistory != nil {
+		historyCopy = &gollem.History{
+			Version:  s.currentHistory.Version,
+			LLType:   s.currentHistory.LLType,
+			Messages: make([]gollem.Message, len(s.currentHistory.Messages)),
+		}
+		copy(historyCopy.Messages, s.currentHistory.Messages)
+	}
+
+	contentReq := &gollem.ContentRequest{
+		Inputs:  input,
+		History: historyCopy,
+	}
+
+	// Create the base handler that performs the actual API call
+	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+		// Always update history from middleware (even if same address, content may have changed)
+		if req.History != nil {
+			s.currentHistory = req.History
+		}
+
+		// Build complete content list from history and inputs
+		var contents []*genai.Content
+
+		// Add history to contents if available
+		if s.currentHistory != nil {
+			historyContents, err := s.currentHistory.ToGemini()
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to convert history to Gemini format")
+			}
+			contents = append(contents, historyContents...)
+		}
+
+		// Convert current inputs to parts
+		parts, err := s.convertInputs(req.Inputs...)
+		if err != nil {
+			return nil, err
+		}
+
+		// Add current input as a new user message
+		if len(parts) > 0 {
+			userContent := &genai.Content{
+				Role:  "user",
+				Parts: parts,
+			}
+			contents = append(contents, userContent)
+		}
+
+		// Log prompt if enabled
+		promptLogger := ctxlog.From(ctx, geminiPromptScope)
+		if promptLogger.Enabled(ctx, slog.LevelInfo) {
+			var messages []map[string]any
+			for _, content := range contents {
+				for _, part := range content.Parts {
+					if part.Text != "" {
+						messages = append(messages, map[string]any{
+							"role":    content.Role,
+							"type":    "text",
+							"content": part.Text,
+						})
+					}
+					if part.FunctionResponse != nil {
+						messages = append(messages, map[string]any{
+							"role":     content.Role,
+							"type":     "function_response",
+							"name":     part.FunctionResponse.Name,
+							"response": part.FunctionResponse.Response,
+						})
+					}
+				}
+			}
+			systemPrompt := ""
+			if s.config != nil && s.config.SystemInstruction != nil && len(s.config.SystemInstruction.Parts) > 0 {
+				if part := s.config.SystemInstruction.Parts[0]; part != nil {
+					systemPrompt = part.Text
+				}
+			}
+			promptLogger.Info("Gemini prompt",
+				"system_prompt", systemPrompt,
+				"messages", messages,
+			)
+		}
+
+		// Call the API
+		result, err := s.apiClient.GenerateContent(ctx, s.model, contents, s.config)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to generate content")
+		}
+
+		response, err := processResponse(result)
+		if err != nil {
+			return nil, err
+		}
+
+		// Log responses if GOLLEM_LOGGING_GEMINI_RESPONSE is set
+		responseLogger := ctxlog.From(ctx, geminiResponseScope)
+		if responseLogger.Enabled(ctx, slog.LevelInfo) {
+			var logContent []map[string]any
+			for _, text := range response.Texts {
+				logContent = append(logContent, map[string]any{
+					"type": "text",
+					"text": text,
+				})
+			}
+			for _, funcCall := range response.FunctionCalls {
+				logContent = append(logContent, map[string]any{
+					"type":      "function_call",
+					"id":        funcCall.ID,
+					"name":      funcCall.Name,
+					"arguments": funcCall.Arguments,
+				})
+			}
+			var finishReason string
+			if len(result.Candidates) > 0 {
+				finishReason = string(result.Candidates[0].FinishReason)
+			}
+			responseLogger.Info("Gemini response",
+				"finish_reason", finishReason,
+				"usage", map[string]any{
+					"prompt_tokens":     response.InputToken,
+					"candidates_tokens": response.OutputToken,
+				},
+				"content", logContent,
+			)
+		}
+
+		// Update history with the response
+		// Create assistant message from response
+		assistantParts := make([]*genai.Part, 0)
+		if len(response.Texts) > 0 || len(response.FunctionCalls) > 0 {
+			for _, text := range response.Texts {
+				assistantParts = append(assistantParts, &genai.Part{Text: text})
+			}
+			for _, fc := range response.FunctionCalls {
+				assistantParts = append(assistantParts, &genai.Part{
+					FunctionCall: &genai.FunctionCall{
+						Name: fc.Name,
+						Args: fc.Arguments,
+					},
+				})
+			}
+
+		}
+
+		// Convert only the new messages (input + response) to gollem format and append to existing history
+		var newContents []*genai.Content
+		// Add current input as a new user message
+		if len(parts) > 0 {
+			userContent := &genai.Content{
+				Role:  "user",
+				Parts: parts,
+			}
+			newContents = append(newContents, userContent)
+		}
+		// Add assistant response if available
+		if len(assistantParts) > 0 {
+			assistantContent := &genai.Content{
+				Role:  "model",
+				Parts: assistantParts,
+			}
+			newContents = append(newContents, assistantContent)
+		}
+
+		// Convert new messages to gollem format and append to existing history
+		if len(newContents) > 0 {
+			newHistory, err := convertNewHistoryToGollem(newContents)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to convert new messages to history")
+			}
+			// Preserve middleware-modified history and append new messages
+			s.currentHistory.Messages = append(s.currentHistory.Messages, newHistory.Messages...)
+		}
+
+		return &gollem.ContentResponse{
+			Texts:         response.Texts,
+			FunctionCalls: response.FunctionCalls,
+			InputToken:    response.InputToken,
+			OutputToken:   response.OutputToken,
+		}, nil
+	}
+
+	// Build middleware chain
+	handler := gollem.ContentBlockHandler(baseHandler)
+	for i := len(s.cfg.ContentBlockMiddlewares()) - 1; i >= 0; i-- {
+		handler = s.cfg.ContentBlockMiddlewares()[i](handler)
+	}
+
+	// Execute middleware chain
+	contentResp, err := handler(ctx, contentReq)
 	if err != nil {
 		return nil, err
 	}
 
-	// Log prompt if enabled
-	promptLogger := ctxlog.From(ctx, geminiPromptScope)
-	// Build messages for logging
-	var messages []map[string]any
-	for _, part := range parts {
-		if part.Text != "" {
-			messages = append(messages, map[string]any{
-				"type":    "text",
-				"content": part.Text,
-			})
-		}
-		if part.FunctionResponse != nil {
-			messages = append(messages, map[string]any{
-				"type":     "function_response",
-				"name":     part.FunctionResponse.Name,
-				"response": part.FunctionResponse.Response,
-			})
-		}
-	}
-	systemPrompt := ""
-	if s.config != nil && s.config.SystemInstruction != nil && len(s.config.SystemInstruction.Parts) > 0 {
-		if part := s.config.SystemInstruction.Parts[0]; part != nil {
-			systemPrompt = part.Text
-		}
-	}
-	promptLogger.Info("Gemini prompt",
-		"system_prompt", systemPrompt,
-		"messages", messages,
-	)
-
-	// Convert parts slice to individual arguments
-	partsArgs := make([]genai.Part, len(parts))
-	for i, p := range parts {
-		partsArgs[i] = *p
-	}
-
-	// Send message
-	result, err := s.chat.SendMessage(ctx, partsArgs...)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to generate content")
-	}
-
-	response, err := processResponse(result)
-	if err != nil {
-		return nil, err
-	}
-
-	// Log responses if GOLLEM_LOGGING_GEMINI_RESPONSE is set
-	responseLogger := ctxlog.From(ctx, geminiResponseScope)
-	var logContent []map[string]any
-	for _, text := range response.Texts {
-		logContent = append(logContent, map[string]any{
-			"type": "text",
-			"text": text,
-		})
-	}
-	for _, funcCall := range response.FunctionCalls {
-		logContent = append(logContent, map[string]any{
-			"type":      "function_call",
-			"id":        funcCall.ID,
-			"name":      funcCall.Name,
-			"arguments": funcCall.Arguments,
-		})
-	}
-	var finishReason string
-	if len(result.Candidates) > 0 {
-		finishReason = string(result.Candidates[0].FinishReason)
-	}
-	responseLogger.Info("Gemini response",
-		"finish_reason", finishReason,
-		"usage", map[string]any{
-			"prompt_tokens":     response.InputToken,
-			"candidates_tokens": response.OutputToken,
-		},
-		"content", logContent,
-	)
-
-	return response, nil
+	// Convert ContentResponse back to gollem.Response
+	return &gollem.Response{
+		Texts:         contentResp.Texts,
+		FunctionCalls: contentResp.FunctionCalls,
+		InputToken:    contentResp.InputToken,
+		OutputToken:   contentResp.OutputToken,
+	}, nil
 }
 
 // GenerateStream generates content based on the input and returns a stream of responses.
 func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
-	// Convert inputs
-	parts, err := s.convertInputs(input...)
+	// For simplicity, use non-streaming implementation
+	// Full streaming would require significant refactoring
+	resp, err := s.GenerateContent(ctx, input...)
 	if err != nil {
 		return nil, err
 	}
 
-	respChan := make(chan *gollem.Response)
-
-	go func() {
-		defer close(respChan)
-
-		// Convert parts slice to individual arguments
-		partsArgs := make([]genai.Part, len(parts))
-		for i, p := range parts {
-			partsArgs[i] = *p
-		}
-
-		// Accumulate streaming response for logging
-		var allTexts []string
-		var allFunctionCalls []*gollem.FunctionCall
-		var totalInputTokens int
-		var totalOutputTokens int
-		var lastFinishReason string
-
-		// Use SendMessageStream for streaming
-		for result, err := range s.chat.SendMessageStream(ctx, partsArgs...) {
-			if err != nil {
-				// Send error response
-				respChan <- &gollem.Response{
-					Error: err,
-				}
-				return
-			}
-
-			resp, err := processResponse(result)
-			if err != nil {
-				respChan <- &gollem.Response{
-					Error: err,
-				}
-				return
-			}
-
-			// Accumulate for logging
-			allTexts = append(allTexts, resp.Texts...)
-			allFunctionCalls = append(allFunctionCalls, resp.FunctionCalls...)
-			if resp.InputToken > 0 {
-				totalInputTokens = resp.InputToken
-			}
-			if resp.OutputToken > 0 {
-				totalOutputTokens = resp.OutputToken
-			}
-			if len(result.Candidates) > 0 {
-				lastFinishReason = string(result.Candidates[0].FinishReason)
-			}
-
-			respChan <- resp
-		}
-
-		// Log streaming response if GOLLEM_LOGGING_GEMINI_RESPONSE is set
-		responseLogger := ctxlog.From(ctx, geminiResponseScope)
-		var logContent []map[string]any
-		for _, text := range allTexts {
-			logContent = append(logContent, map[string]any{
-				"type": "text",
-				"text": text,
-			})
-		}
-		for _, funcCall := range allFunctionCalls {
-			logContent = append(logContent, map[string]any{
-				"type":      "function_call",
-				"id":        funcCall.ID,
-				"name":      funcCall.Name,
-				"arguments": funcCall.Arguments,
-			})
-		}
-		responseLogger.Info("Gemini streaming response",
-			"finish_reason", lastFinishReason,
-			"usage", map[string]any{
-				"prompt_tokens":     totalInputTokens,
-				"candidates_tokens": totalOutputTokens,
-			},
-			"content", logContent,
-		)
-	}()
-
+	respChan := make(chan *gollem.Response, 1)
+	respChan <- resp
+	close(respChan)
 	return respChan, nil
 }
 

@@ -15,3 +15,24 @@ tasks:
         -rm -skip-ensure -stub
         .
         LLMClient Session Tool
+      # OpenAI package apiClient mock generation
+      - go run github.com/matryer/moq@v0.5.3
+        -out ./llm/openai/mock_gen_test.go
+        -pkg openai_test
+        -rm -skip-ensure
+        ./llm/openai
+        apiClient
+      # Claude package apiClient mock generation
+      - go run github.com/matryer/moq@v0.5.3
+        -out ./llm/claude/mock_gen_test.go
+        -pkg claude_test
+        -rm -skip-ensure
+        ./llm/claude
+        apiClient
+      # Gemini package apiClient mock generation
+      - go run github.com/matryer/moq@v0.5.3
+        -out ./llm/gemini/mock_gen_test.go
+        -pkg gemini_test
+        -rm -skip-ensure
+        ./llm/gemini
+        apiClient
