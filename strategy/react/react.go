@@ -61,12 +61,12 @@ type reactImpl struct {
 	conversationLog []string // Store conversation history for context
 }
 
-func (x *reactImpl) Handle(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, error) {
+func (x *reactImpl) Handle(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
 	// First iteration: Add thought prompt
 	if state.Iteration == 0 {
 		x.recordInitialInput(state.InitInput)
 		thought := gollem.Text(x.thoughtPrompt)
-		return append([]gollem.Input{thought}, state.InitInput...), nil
+		return append([]gollem.Input{thought}, state.InitInput...), nil, nil
 	}
 
 	// Update conversation log with latest response and tool results
@@ -74,7 +74,7 @@ func (x *reactImpl) Handle(ctx context.Context, state *gollem.StrategyState) ([]
 
 	// Process tool results with reflection
 	if toolInput := x.processToolResults(state.NextInput); toolInput != nil {
-		return toolInput, nil
+		return toolInput, nil, nil
 	}
 
 	// ReAct core: Always evaluate next step when no tools are pending
@@ -84,7 +84,7 @@ func (x *reactImpl) Handle(ctx context.Context, state *gollem.StrategyState) ([]
 	}
 
 	// Continue with pending input
-	return state.NextInput, nil
+	return state.NextInput, nil, nil
 }
 
 func (x *reactImpl) recordInitialInput(inputs []gollem.Input) {
@@ -144,18 +144,18 @@ func (x *reactImpl) processToolResults(inputs []gollem.Input) []gollem.Input {
 	return append([]gollem.Input{reflection}, inputs...)
 }
 
-func (x *reactImpl) evaluateNextStep(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, error) {
+func (x *reactImpl) evaluateNextStep(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
 	session, err := x.llm.NewSession(ctx,
 		gollem.WithSessionSystemPrompt("You are a task completion analyzer. Analyze if a task is complete based on the conversation history and respond in JSON format."),
 		gollem.WithSessionContentType(gollem.ContentTypeJSON))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	contextPrompt := x.buildCompletionPrompt()
 	response, err := session.GenerateContent(ctx, gollem.Text(contextPrompt))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	return x.parseCompletionResponse(response)
@@ -183,10 +183,10 @@ func (x *reactImpl) buildCompletionPrompt() string {
 	return prompt.String()
 }
 
-func (x *reactImpl) parseCompletionResponse(response *gollem.Response) ([]gollem.Input, error) {
+func (x *reactImpl) parseCompletionResponse(response *gollem.Response) ([]gollem.Input, *gollem.ExecuteResponse, error) {
 	if len(response.Texts) == 0 {
 		// No response, continue by default
-		return []gollem.Input{gollem.Text("Continuing...")}, nil
+		return []gollem.Input{gollem.Text("Continuing...")}, nil, nil
 	}
 
 	type CompletionCheck struct {
@@ -200,22 +200,54 @@ func (x *reactImpl) parseCompletionResponse(response *gollem.Response) ([]gollem
 		// Fallback to simple string matching if JSON parsing fails
 		decision := strings.ToUpper(response.Texts[0])
 		if strings.Contains(decision, "COMPLETE") || strings.Contains(decision, "TRUE") {
-			return nil, nil
+			// Task complete, generate conclusion from conversation log
+			conclusionText := x.generateConclusion()
+			executeResponse := &gollem.ExecuteResponse{
+				Texts: []string{conclusionText},
+			}
+			return nil, executeResponse, nil
 		}
-		return []gollem.Input{gollem.Text("Continuing with task...")}, nil
+		return []gollem.Input{gollem.Text("Continuing with task...")}, nil, nil
 	}
 
 	if result.IsComplete {
 		x.conversationLog = append(x.conversationLog, "COMPLETION: "+result.Reason)
-		return nil, nil
+		// Generate conclusion based on reason and conversation
+		conclusionText := fmt.Sprintf("Task completed: %s", result.Reason)
+		executeResponse := &gollem.ExecuteResponse{
+			Texts: []string{conclusionText},
+		}
+		return nil, executeResponse, nil
 	}
 
 	if result.NextAction != "" {
 		x.conversationLog = append(x.conversationLog, "GUIDANCE: "+result.NextAction)
-		return []gollem.Input{gollem.Text("Next: " + result.NextAction)}, nil
+		return []gollem.Input{gollem.Text("Next: " + result.NextAction)}, nil, nil
 	}
 
-	return []gollem.Input{gollem.Text("Continuing...")}, nil
+	return []gollem.Input{gollem.Text("Continuing...")}, nil, nil
+}
+
+func (x *reactImpl) generateConclusion() string {
+	if len(x.conversationLog) == 0 {
+		return "Task analysis completed"
+	}
+
+	// Extract key points from conversation log
+	var conclusions []string
+	for _, entry := range x.conversationLog {
+		if strings.HasPrefix(entry, "COMPLETION:") || strings.HasPrefix(entry, "ASSISTANT:") {
+			conclusions = append(conclusions, strings.TrimPrefix(entry, "COMPLETION:"))
+			conclusions = append(conclusions, strings.TrimPrefix(entry, "ASSISTANT:"))
+		}
+	}
+
+	if len(conclusions) > 0 {
+		// Return the last meaningful conclusion
+		return strings.TrimSpace(conclusions[len(conclusions)-1])
+	}
+
+	return "ReAct strategy task completed"
 }
 
 // Option is an option for configuring the ReAct strategy

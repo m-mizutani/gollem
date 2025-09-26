@@ -35,7 +35,7 @@ func TestReactStrategy(t *testing.T) {
 			Iteration: 0,
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 
 		// Should have thought prompt + initial input
@@ -73,7 +73,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 
 		// Should have reflection prompt + tool response
@@ -127,7 +127,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 
 		// Should return nil when task is complete
@@ -174,7 +174,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 
 		// Should return next action
@@ -206,7 +206,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 
 		// Should have reflection prompt + error response
@@ -254,7 +254,7 @@ func TestReactStrategy(t *testing.T) {
 			Iteration: 0,
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 		gt.Equal(t, customThought, result[0].String())
 
@@ -271,7 +271,7 @@ func TestReactStrategy(t *testing.T) {
 			Iteration: 1,
 		}
 
-		result, err = handler(ctx, state)
+		result, _, err = handler(ctx, state)
 		gt.NoError(t, err)
 		if !containsString(result[0].String(), "Custom reflection:") {
 			t.Errorf("Expected result to contain 'Custom reflection:', got: %s", result[0].String())
@@ -285,7 +285,7 @@ func TestReactStrategy(t *testing.T) {
 			LastResponse: &gollem.Response{Texts: []string{"text"}},
 		}
 
-		result, err = handler(ctx, state)
+		result, _, err = handler(ctx, state)
 		gt.NoError(t, err)
 		// Should return nil when complete
 		gt.V(t, result).Nil()
@@ -321,7 +321,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 
 		// Should have reflection prompt + both tool responses
@@ -369,7 +369,7 @@ func TestReactStrategy(t *testing.T) {
 			LastResponse: &gollem.Response{Texts: []string{"text"}},
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 
 		// Should return nil when response contains "COMPLETE"

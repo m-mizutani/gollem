@@ -28,7 +28,7 @@ func TestToolExecution(t *testing.T) {
 			gollem.WithLoopLimit(5),
 		)
 
-		err = s.Execute(t.Context(), gollem.Text("Generate a random number between 1 and 100."))
+		_, err = s.Execute(t.Context(), gollem.Text("Generate a random number between 1 and 100."))
 		gt.NoError(t, err)
 	}
 
