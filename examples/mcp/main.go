@@ -75,8 +75,14 @@ func main() {
 	task := "Hello, I want to use MCP tools. Please show me what tools are available and help me with file operations."
 	fmt.Printf("📝 Task: %s\n\n", task)
 
-	if err := agent.Execute(ctx, gollem.Text(task)); err != nil {
+	result, err := agent.Execute(ctx, gollem.Text(task))
+	if err != nil {
 		log.Fatalf("❌ Error executing task: %v", err)
+	}
+
+	// Display conclusion if available
+	if result != nil && !result.IsEmpty() {
+		fmt.Printf("💭 Task completion: %s\n", result.String())
 	}
 
 	fmt.Println("\n✅ MCP integration example completed!")

@@ -226,8 +226,9 @@ func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool
 
 // Execute performs the agent task with the given prompt. This method manages the session state internally,
 // allowing for continuous conversation without manual history management.
+// Returns (*ExecuteResponse, error) where ExecuteResponse contains the final conclusion.
 // Use this method instead of Prompt for better agent-like behavior.
-func (g *Agent) Execute(ctx context.Context, input ...Input) error {
+func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, error) {
 	cfg := g.gollemConfig.Clone()
 	logger := cfg.logger.With("gollem.exec_id", uuid.New().String())
 	ctx = ctxlog.With(ctx, logger)
@@ -241,7 +242,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) error {
 	// Setup tools for the current execution
 	toolMap, toolList, err := setupTools(ctx, cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// If no current session exists, create a new one
@@ -267,7 +268,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) error {
 
 		ssn, err := g.llm.NewSession(ctx, sessionOptions...)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		g.currentSession = ssn
 	}
@@ -284,34 +285,50 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) error {
 			NextInput:    nextInput,
 			Iteration:    i,
 		}
-		strategyInput, err := strategy(ctx, state)
+		strategyInputs, executeResponse, err := strategy(ctx, state)
 		if err != nil {
-			return err
-		}
-		if len(strategyInput) == 0 {
-			return nil
+			return nil, err
 		}
 
-		logger.Debug("gollem input", "input", strategyInput, "loop", i)
+		// ExecuteResponse priority processing
+		if executeResponse != nil {
+			// Input also specified? Log warning
+			if len(strategyInputs) > 0 {
+				logger.Warn("Strategy returned both ExecuteResponse and Input - Input will be ignored",
+					"inputs_count", len(strategyInputs),
+					"texts_count", len(executeResponse.Texts))
+			}
+
+			// Return strategy's response immediately
+			return executeResponse, nil
+		}
+
+		// Input processing
+		if len(strategyInputs) == 0 {
+			// Both nil: session terminated
+			return nil, nil
+		}
+
+		logger.Debug("gollem input", "input", strategyInputs, "loop", i)
 
 		switch cfg.responseMode {
 		case ResponseModeBlocking:
-			output, err := g.currentSession.GenerateContent(ctx, strategyInput...)
+			output, err := g.currentSession.GenerateContent(ctx, strategyInputs...)
 			if err != nil {
-				return err
+				return nil, err
 			}
 
 			newInput, err := handleResponse(ctx, output, toolMap, cfg.toolMiddlewares)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			lastResponse = output
 			nextInput = newInput
 
 		case ResponseModeStreaming:
-			stream, err := g.currentSession.GenerateStream(ctx, strategyInput...)
+			stream, err := g.currentSession.GenerateStream(ctx, strategyInputs...)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			nextInput = []Input{}
 
@@ -321,7 +338,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) error {
 				logger.Debug("recv response", "output", output)
 				newInput, err := handleResponse(ctx, output, toolMap, cfg.toolMiddlewares)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				nextInput = append(nextInput, newInput...)
 
@@ -338,7 +355,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) error {
 		}
 	}
 
-	return goerr.Wrap(ErrLoopLimitExceeded, "session stopped", goerr.V("loop_limit", cfg.loopLimit))
+	return nil, goerr.Wrap(ErrLoopLimitExceeded, "session stopped", goerr.V("loop_limit", cfg.loopLimit))
 }
 
 func handleResponse(ctx context.Context, output *Response, toolMap map[string]Tool, toolMiddlewares []ToolMiddleware) ([]Input, error) {

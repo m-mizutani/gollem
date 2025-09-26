@@ -35,7 +35,7 @@ func TestReactStrategy(t *testing.T) {
 			Iteration: 0,
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 
 		// Should have thought prompt + initial input
@@ -73,7 +73,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 
 		// Should have reflection prompt + tool response
@@ -127,11 +127,15 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, err := handler(ctx, state)
+		result, resp, err := handler(ctx, state)
 		gt.NoError(t, err)
 
 		// Should return nil when task is complete
 		gt.V(t, result).Nil()
+
+		// Should return ExecuteResponse with completion message
+		gt.NotNil(t, resp)
+		gt.Equal(t, "Task completed: Task has been completed successfully", resp.String())
 
 		// Verify session was created with correct options
 		gt.Equal(t, 1, len(mockClient.NewSessionCalls()))
@@ -174,7 +178,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 
 		// Should return next action
@@ -206,7 +210,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 
 		// Should have reflection prompt + error response
@@ -254,7 +258,7 @@ func TestReactStrategy(t *testing.T) {
 			Iteration: 0,
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 		gt.Equal(t, customThought, result[0].String())
 
@@ -271,7 +275,7 @@ func TestReactStrategy(t *testing.T) {
 			Iteration: 1,
 		}
 
-		result, err = handler(ctx, state)
+		result, _, err = handler(ctx, state)
 		gt.NoError(t, err)
 		if !containsString(result[0].String(), "Custom reflection:") {
 			t.Errorf("Expected result to contain 'Custom reflection:', got: %s", result[0].String())
@@ -285,10 +289,10 @@ func TestReactStrategy(t *testing.T) {
 			LastResponse: &gollem.Response{Texts: []string{"text"}},
 		}
 
-		result, err = handler(ctx, state)
+		result, _, err = handler(ctx, state)
 		gt.NoError(t, err)
-		// Should return nil when complete
-		gt.V(t, result).Nil()
+		// Should continue with task when no explicit completion
+		gt.NotNil(t, result)
 	})
 
 	t.Run("handles multiple tool results", func(t *testing.T) {
@@ -321,7 +325,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 
 		// Should have reflection prompt + both tool responses
@@ -369,10 +373,10 @@ func TestReactStrategy(t *testing.T) {
 			LastResponse: &gollem.Response{Texts: []string{"text"}},
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 
-		// Should return nil when response contains "COMPLETE"
-		gt.V(t, result).Nil()
+		// Should continue when JSON parsing fails (no assumptions)
+		gt.NotNil(t, result)
 	})
 }

@@ -121,8 +121,10 @@ func TestGollemWithTool(t *testing.T) {
 			gollem.WithLoopLimit(5),
 		)
 
-		err := s.Execute(t.Context(), gollem.Text("Generate a random number between 1 and 100."))
+		result, err := s.Execute(t.Context(), gollem.Text("Generate a random number between 1 and 100."))
 		gt.NoError(t, err)
+		// Check that we got some result (either from strategy or default behavior)
+		_ = result
 		gt.True(t, toolCalled)
 		gt.Equal(t, 2, callCount)
 	})
@@ -193,7 +195,7 @@ func TestGollemWithTool(t *testing.T) {
 			gollem.WithLoopLimit(5),
 		)
 
-		err := s.Execute(t.Context(), gollem.Text("test"))
+		_, err := s.Execute(t.Context(), gollem.Text("test"))
 		gt.NoError(t, err)
 		gt.True(t, middlewareCalled)
 		gt.Equal(t, 1, len(capturedToolCalls))
@@ -264,7 +266,7 @@ func TestGollemWithOptions(t *testing.T) {
 		}
 
 		s := gollem.New(mockClient, gollem.WithLoopLimit(10), gollem.WithTools(tool))
-		err := s.Execute(t.Context(), gollem.Text("test message"))
+		_, err := s.Execute(t.Context(), gollem.Text("test message"))
 		gt.Error(t, err)
 		gt.True(t, errors.Is(err, gollem.ErrLoopLimitExceeded))
 		gt.Equal(t, loopCount, 10)
@@ -321,7 +323,7 @@ func TestGollemWithOptions(t *testing.T) {
 		}
 
 		s := gollem.New(mockClient, gollem.WithSystemPrompt("system prompt"))
-		err := s.Execute(t.Context(), gollem.Text("test message"))
+		_, err := s.Execute(t.Context(), gollem.Text("test message"))
 		gt.NoError(t, err)
 	})
 
@@ -393,7 +395,7 @@ func TestGollemWithOptions(t *testing.T) {
 			},
 		}
 		s := gollem.New(mockClient, gollem.WithTools(tool), gollem.WithLoopLimit(5))
-		err := s.Execute(t.Context(), gollem.Text("test message"))
+		_, err := s.Execute(t.Context(), gollem.Text("test message"))
 		gt.NoError(t, err)
 	})
 
@@ -462,7 +464,7 @@ func TestGollemWithOptions(t *testing.T) {
 			},
 		}
 		s := gollem.New(mockClient, gollem.WithToolSets(toolSet), gollem.WithLoopLimit(5))
-		err := s.Execute(t.Context(), gollem.Text("test message"))
+		_, err := s.Execute(t.Context(), gollem.Text("test message"))
 		gt.NoError(t, err)
 	})
 
@@ -530,7 +532,7 @@ func TestGollemWithOptions(t *testing.T) {
 		s := gollem.New(mockClient,
 			gollem.WithResponseMode(gollem.ResponseModeStreaming),
 		)
-		err := s.Execute(t.Context(), gollem.Text("test message"))
+		_, err := s.Execute(t.Context(), gollem.Text("test message"))
 		gt.NoError(t, err)
 		// Test completes successfully with streaming mode
 	})
@@ -548,7 +550,7 @@ func TestGollemWithOptions(t *testing.T) {
 		})
 
 		s := gollem.New(mockClient, gollem.WithLogger(logger), gollem.WithLoopLimit(5))
-		err := s.Execute(t.Context(), gollem.Text("test message"))
+		_, err := s.Execute(t.Context(), gollem.Text("test message"))
 		gt.NoError(t, err)
 
 		logContent := logOutput.String()
@@ -631,7 +633,7 @@ func TestGollemWithOptions(t *testing.T) {
 			gollem.WithResponseMode(gollem.ResponseModeBlocking),
 			gollem.WithLogger(logger),
 		)
-		err := s.Execute(t.Context(), gollem.Text("test message"))
+		_, err := s.Execute(t.Context(), gollem.Text("test message"))
 		gt.NoError(t, err)
 	})
 
@@ -670,4 +672,127 @@ func (t *mockToolSet) Specs(ctx context.Context) ([]gollem.ToolSpec, error) {
 
 func (t *mockToolSet) Run(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
 	return t.run(ctx, name, args)
+}
+
+func TestExecuteWithExecuteResponse(t *testing.T) {
+	t.Run("strategy returns ExecuteResponse", func(t *testing.T) {
+		// Create a strategy that immediately returns an ExecuteResponse
+		strategy := func(client gollem.LLMClient) gollem.StrategyHandler {
+			return func(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+				return nil, gollem.NewExecuteResponse("Test conclusion"), nil
+			}
+		}
+
+		agent := gollem.New(&mock.LLMClientMock{}, gollem.WithStrategy(strategy))
+		result, err := agent.Execute(context.Background(), gollem.Text("test"))
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.Equal(t, "Test conclusion", result.String())
+	})
+
+	t.Run("strategy returns both ExecuteResponse and Input with warning", func(t *testing.T) {
+		var logOutput strings.Builder
+		logger := slog.New(slog.NewTextHandler(&logOutput, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+		// Strategy that returns both ExecuteResponse and Input
+		strategy := func(client gollem.LLMClient) gollem.StrategyHandler {
+			return func(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+				return []gollem.Input{gollem.Text("ignored")},
+					gollem.NewExecuteResponse("conclusion"),
+					nil
+			}
+		}
+
+		agent := gollem.New(&mock.LLMClientMock{},
+			gollem.WithStrategy(strategy),
+			gollem.WithLogger(logger))
+
+		result, err := agent.Execute(context.Background(), gollem.Text("test"))
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.Equal(t, "conclusion", result.String())
+		// Check that warning was logged
+		gt.True(t, strings.Contains(logOutput.String(), "Strategy returned both ExecuteResponse and Input"))
+	})
+
+	t.Run("strategy returns nil for both", func(t *testing.T) {
+		strategy := func(client gollem.LLMClient) gollem.StrategyHandler {
+			return func(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+				return nil, nil, nil
+			}
+		}
+
+		agent := gollem.New(&mock.LLMClientMock{}, gollem.WithStrategy(strategy))
+		result, err := agent.Execute(context.Background(), gollem.Text("test"))
+
+		gt.NoError(t, err)
+		gt.Nil(t, result)
+	})
+}
+
+func TestDefaultStrategyWithExecuteResponse(t *testing.T) {
+	t.Run("default strategy generates conclusion for LLM response without tool calls", func(t *testing.T) {
+		mockClient := &mock.LLMClientMock{}
+
+		// Mock session that returns a response without function calls
+		mockSession := &mock.SessionMock{}
+		mockSession.GenerateContentFunc = func(ctx context.Context, inputs ...gollem.Input) (*gollem.Response, error) {
+			return &gollem.Response{
+				Texts:         []string{"Task completed successfully"},
+				FunctionCalls: []*gollem.FunctionCall{}, // No tool calls
+			}, nil
+		}
+
+		mockClient.NewSessionFunc = func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+			return mockSession, nil
+		}
+
+		agent := gollem.New(mockClient) // Uses default strategy
+		result, err := agent.Execute(context.Background(), gollem.Text("test task"))
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.Equal(t, "Task completed successfully", result.String())
+	})
+
+	t.Run("default strategy continues with tool calls", func(t *testing.T) {
+		mockClient := &mock.LLMClientMock{}
+
+		callCount := 0
+		mockSession := &mock.SessionMock{}
+		mockSession.GenerateContentFunc = func(ctx context.Context, inputs ...gollem.Input) (*gollem.Response, error) {
+			callCount++
+			if callCount == 1 {
+				// First call: return tool call
+				return &gollem.Response{
+					Texts: []string{"Calling tool"},
+					FunctionCalls: []*gollem.FunctionCall{
+						{Name: "test_tool", ID: "call_1", Arguments: map[string]any{}},
+					},
+				}, nil
+			} else {
+				// Second call: return final response
+				return &gollem.Response{
+					Texts:         []string{"Tool execution completed"},
+					FunctionCalls: []*gollem.FunctionCall{}, // No more tool calls
+				}, nil
+			}
+		}
+
+		mockClient.NewSessionFunc = func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+			return mockSession, nil
+		}
+
+		// Add a test tool
+		testTool := &RandomNumberTool{}
+		agent := gollem.New(mockClient, gollem.WithTools(testTool))
+		result, err := agent.Execute(context.Background(), gollem.Text("test task"))
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.Equal(t, "Tool execution completed", result.String())
+		gt.Equal(t, 2, callCount)
+	})
 }

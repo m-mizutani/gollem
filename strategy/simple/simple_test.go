@@ -27,7 +27,7 @@ func TestSimpleStrategy(t *testing.T) {
 			Iteration: 0,
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 		gt.Equal(t, len(initInput), len(result))
 		gt.Equal(t, initInput[0].String(), result[0].String())
@@ -45,7 +45,7 @@ func TestSimpleStrategy(t *testing.T) {
 			Iteration: 1,
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 		gt.Equal(t, len(nextInput), len(result))
 		gt.Equal(t, nextInput[0].String(), result[0].String())
@@ -58,7 +58,7 @@ func TestSimpleStrategy(t *testing.T) {
 			Iteration: 2,
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 		gt.Equal(t, 0, len(result))
 	})
@@ -76,7 +76,7 @@ func TestSimpleStrategy(t *testing.T) {
 			Iteration: 3,
 		}
 
-		result, err := handler(ctx, state)
+		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 		gt.Equal(t, 1, len(result))
 

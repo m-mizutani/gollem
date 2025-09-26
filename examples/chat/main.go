@@ -100,9 +100,15 @@ func main() {
 
 		// Execute with automatic session management
 		// No need to manually handle history - it's managed automatically!
-		if err := agent.Execute(ctx, gollem.Text(input)); err != nil {
+		result, err := agent.Execute(ctx, gollem.Text(input))
+		if err != nil {
 			fmt.Printf("\n❌ Error: %v\n", err)
 			continue
+		}
+
+		// Display conclusion if available
+		if result != nil && !result.IsEmpty() {
+			fmt.Printf("\n💭 %s", result.String())
 		}
 
 		// Optional: Show conversation statistics

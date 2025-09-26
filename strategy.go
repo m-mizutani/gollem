@@ -8,8 +8,11 @@ import (
 type Strategy func(client LLMClient) StrategyHandler
 
 // StrategyHandler is a function that determines the next input for the LLM based on the current state.
-// Returning nil indicates that the task is complete.
-type StrategyHandler func(ctx context.Context, state *StrategyState) ([]Input, error)
+// Returns ([]Input, *ExecuteResponse, error) where:
+// - []Input: next input for LLM (nil means no LLM call)
+// - *ExecuteResponse: strategy's conclusion (nil means let LLM decide)
+// - error: execution error
+type StrategyHandler func(ctx context.Context, state *StrategyState) ([]Input, *ExecuteResponse, error)
 
 // StrategyState contains the current state of the execution
 type StrategyState struct {
@@ -23,19 +26,25 @@ type StrategyState struct {
 // defaultStrategy returns the default simple loop strategy
 func defaultStrategy() Strategy {
 	return func(client LLMClient) StrategyHandler {
-		return func(ctx context.Context, state *StrategyState) ([]Input, error) {
+		return func(ctx context.Context, state *StrategyState) ([]Input, *ExecuteResponse, error) {
+			// Initial iteration: send user input to LLM
 			if state.Iteration == 0 {
-				return state.InitInput, nil
+				return state.InitInput, nil, nil
 			}
 
-			// If the last response has no function calls, end the session
-			// (facilitator replacement logic)
-			if state.LastResponse != nil &&
-				len(state.LastResponse.FunctionCalls) == 0 {
-				return nil, nil // End the session
+			// Check LLM's last response
+			if state.LastResponse != nil {
+				if len(state.LastResponse.FunctionCalls) == 0 {
+					// No tool calls = final response, use as conclusion
+					executeResponse := &ExecuteResponse{
+						Texts: state.LastResponse.Texts,
+					}
+					return nil, executeResponse, nil
+				}
 			}
 
-			return state.NextInput, nil
+			// Tool calls exist, continue with next input
+			return state.NextInput, nil, nil
 		}
 	}
 }
