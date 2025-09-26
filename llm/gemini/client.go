@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -609,16 +610,228 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 
 // GenerateStream generates content based on the input and returns a stream of responses.
 func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
-	// For simplicity, use non-streaming implementation
-	// Full streaming would require significant refactoring
-	resp, err := s.GenerateContent(ctx, input...)
+	// Build the content request for middleware
+	// Create a copy of the current history to avoid middleware side effects
+	var historyCopy *gollem.History
+	if s.currentHistory != nil {
+		historyCopy = &gollem.History{
+			Version:  s.currentHistory.Version,
+			LLType:   s.currentHistory.LLType,
+			Messages: make([]gollem.Message, len(s.currentHistory.Messages)),
+		}
+		copy(historyCopy.Messages, s.currentHistory.Messages)
+	}
+
+	contentReq := &gollem.ContentRequest{
+		Inputs:  input,
+		History: historyCopy,
+	}
+
+	// Create the base handler that performs the actual API call
+	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
+		// Always update history from middleware (even if same address, content may have changed)
+		if req.History != nil {
+			s.currentHistory = req.History
+		}
+
+		// Build complete content list from history and inputs
+		var contents []*genai.Content
+
+		// Add history to contents if available
+		if s.currentHistory != nil {
+			historyContents, err := s.currentHistory.ToGemini()
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to convert history to Gemini format")
+			}
+			contents = append(contents, historyContents...)
+		}
+
+		// Convert current inputs to parts
+		parts, err := s.convertInputs(req.Inputs...)
+		if err != nil {
+			return nil, err
+		}
+
+		// Add current input as a new user message
+		if len(parts) > 0 {
+			userContent := &genai.Content{
+				Role:  "user",
+				Parts: parts,
+			}
+			contents = append(contents, userContent)
+		}
+
+		// Log prompt if enabled
+		promptLogger := ctxlog.From(ctx, geminiPromptScope)
+		if promptLogger.Enabled(ctx, slog.LevelInfo) {
+			var messages []map[string]any
+			for _, content := range contents {
+				for _, part := range content.Parts {
+					if part.Text != "" {
+						messages = append(messages, map[string]any{
+							"role":    content.Role,
+							"type":    "text",
+							"content": part.Text,
+						})
+					}
+					if part.FunctionResponse != nil {
+						messages = append(messages, map[string]any{
+							"role":     content.Role,
+							"type":     "function_response",
+							"name":     part.FunctionResponse.Name,
+							"response": part.FunctionResponse.Response,
+						})
+					}
+				}
+			}
+			systemPrompt := ""
+			if s.config != nil && s.config.SystemInstruction != nil && len(s.config.SystemInstruction.Parts) > 0 {
+				if part := s.config.SystemInstruction.Parts[0]; part != nil {
+					systemPrompt = part.Text
+				}
+			}
+			promptLogger.Info("Gemini streaming prompt",
+				"system_prompt", systemPrompt,
+				"messages", messages,
+			)
+		}
+
+		// Create streaming channel for middleware
+		streamChan := make(chan *gollem.ContentResponse)
+
+		// Start streaming in goroutine
+		go func() {
+			defer close(streamChan)
+
+			// Get the streaming response from API
+			apiStreamChan := s.apiClient.GenerateContentStream(ctx, s.model, contents, s.config)
+
+			// Accumulate response data for history
+			var accumulatedTexts []string
+			var accumulatedFunctionCalls []*gollem.FunctionCall
+			var totalInputTokens, totalOutputTokens int
+
+			for streamResp := range apiStreamChan {
+				if streamResp.Err != nil {
+					streamChan <- &gollem.ContentResponse{
+						Error: streamResp.Err,
+					}
+					return
+				}
+
+				// Process the response
+				response, err := processResponse(streamResp.Resp)
+				if err != nil {
+					streamChan <- &gollem.ContentResponse{
+						Error: err,
+					}
+					return
+				}
+
+				// Accumulate data
+				accumulatedTexts = append(accumulatedTexts, response.Texts...)
+				accumulatedFunctionCalls = append(accumulatedFunctionCalls, response.FunctionCalls...)
+				totalInputTokens += response.InputToken
+				totalOutputTokens += response.OutputToken
+
+				// Send streaming response with delta
+				streamChan <- &gollem.ContentResponse{
+					Texts:         response.Texts,
+					FunctionCalls: response.FunctionCalls,
+					InputToken:    totalInputTokens,
+					OutputToken:   totalOutputTokens,
+				}
+			}
+
+			// Update history with accumulated response
+			if len(accumulatedTexts) > 0 || len(accumulatedFunctionCalls) > 0 {
+				// Convert inputs and response to history format
+				inputMessage := gollem.Message{
+					Role:     gollem.RoleUser,
+					Contents: []gollem.MessageContent{},
+				}
+				for _, input := range req.Inputs {
+					if text, ok := input.(gollem.Text); ok {
+						textData, _ := json.Marshal(map[string]string{"text": string(text)})
+						inputMessage.Contents = append(inputMessage.Contents, gollem.MessageContent{
+							Type: gollem.MessageContentTypeText,
+							Data: textData,
+						})
+					} else if funcResp, ok := input.(gollem.FunctionResponse); ok {
+						funcData, _ := json.Marshal(funcResp)
+						inputMessage.Contents = append(inputMessage.Contents, gollem.MessageContent{
+							Type: gollem.MessageContentTypeFunctionResponse,
+							Data: funcData,
+						})
+					}
+				}
+
+				assistantMessage := gollem.Message{
+					Role:     gollem.RoleAssistant,
+					Contents: []gollem.MessageContent{},
+				}
+				for _, text := range accumulatedTexts {
+					textData, _ := json.Marshal(map[string]string{"text": text})
+					assistantMessage.Contents = append(assistantMessage.Contents, gollem.MessageContent{
+						Type: gollem.MessageContentTypeText,
+						Data: textData,
+					})
+				}
+				for _, fc := range accumulatedFunctionCalls {
+					funcData, _ := json.Marshal(fc)
+					assistantMessage.Contents = append(assistantMessage.Contents, gollem.MessageContent{
+						Type: gollem.MessageContentTypeFunctionCall,
+						Data: funcData,
+					})
+				}
+
+				if len(inputMessage.Contents) > 0 {
+					s.currentHistory.Messages = append(s.currentHistory.Messages, inputMessage)
+				}
+				if len(assistantMessage.Contents) > 0 {
+					s.currentHistory.Messages = append(s.currentHistory.Messages, assistantMessage)
+				}
+			}
+		}()
+
+		return streamChan, nil
+	}
+
+	// Build middleware chain for streaming
+	handler := gollem.ContentStreamHandler(baseHandler)
+	for i := len(s.cfg.ContentStreamMiddlewares()) - 1; i >= 0; i-- {
+		handler = s.cfg.ContentStreamMiddlewares()[i](handler)
+	}
+
+	// Execute middleware chain
+	streamChan, err := handler(ctx, contentReq)
 	if err != nil {
 		return nil, err
 	}
 
-	respChan := make(chan *gollem.Response, 1)
-	respChan <- resp
-	close(respChan)
+	// Convert ContentResponse stream to Response stream
+	respChan := make(chan *gollem.Response)
+	go func() {
+		defer close(respChan)
+
+		for contentResp := range streamChan {
+			if contentResp.Error != nil {
+				// Log error and continue (don't break the stream)
+				continue
+			}
+
+			// Convert ContentResponse to Response
+			resp := &gollem.Response{
+				Texts:         contentResp.Texts,
+				FunctionCalls: contentResp.FunctionCalls,
+				InputToken:    contentResp.InputToken,
+				OutputToken:   contentResp.OutputToken,
+			}
+
+			respChan <- resp
+		}
+	}()
+
 	return respChan, nil
 }
 

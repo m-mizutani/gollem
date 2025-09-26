@@ -208,10 +208,115 @@ func TestContentMiddleware(t *testing.T) {
 
 			var firstContent map[string]string
 			if len(firstUserMsg.Contents) > 0 {
-				json.Unmarshal(firstUserMsg.Contents[0].Data, &firstContent)
+				err := json.Unmarshal(firstUserMsg.Contents[0].Data, &firstContent)
+				gt.NoError(t, err)
 				gt.True(t, strings.Contains(firstContent["text"], userName))
 				gt.True(t, strings.Contains(firstContent["text"], userAge))
 			}
+		}
+	}
+
+	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
+		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
+		if !ok {
+			t.Skip("TEST_OPENAI_API_KEY is not set")
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return openai.New(context.Background(), apiKey)
+		})
+	})
+
+	t.Run("Claude", func(t *testing.T) {
+		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
+		if !ok {
+			t.Skip("TEST_CLAUDE_API_KEY is not set")
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return claude.New(context.Background(), apiKey)
+		})
+	})
+
+	t.Run("Gemini", func(t *testing.T) {
+		t.Parallel()
+		projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+		if !ok {
+			t.Skip("TEST_GCP_PROJECT_ID is not set")
+		}
+		location, ok := os.LookupEnv("TEST_GCP_LOCATION")
+		if !ok {
+			t.Skip("TEST_GCP_LOCATION is not set")
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return gemini.New(context.Background(), projectID, location)
+		})
+	})
+}
+
+// TestStreamMiddleware tests streaming middleware functionality with real LLM clients
+func TestStreamMiddleware(t *testing.T) {
+	t.Parallel()
+
+	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		modifiedPrompt := "Modified: Please respond with exactly: MIDDLEWARE_WORKS"
+
+		// Streaming middleware that modifies the input prompt
+		streamMiddleware := func(next gollem.ContentStreamHandler) gollem.ContentStreamHandler {
+			return func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
+				// Modify the input - replace user's prompt
+				for i, input := range req.Inputs {
+					if _, ok := input.(gollem.Text); ok {
+						req.Inputs[i] = gollem.Text(modifiedPrompt)
+					}
+				}
+
+				// Call the next handler with modified request
+				return next(ctx, req)
+			}
+		}
+
+		client, err := newClient(t)
+		gt.NoError(t, err)
+
+		session, err := client.NewSession(context.Background(),
+			gollem.WithSessionContentStreamMiddleware(streamMiddleware),
+		)
+		gt.NoError(t, err)
+
+		// Generate stream with original prompt (will be modified by middleware)
+		streamChan, err := session.GenerateStream(t.Context(), gollem.Text("Say ORIGINAL_PROMPT"))
+		gt.NoError(t, err)
+
+		// Collect all streaming responses
+		var collectedTexts []string
+		for resp := range streamChan {
+			if resp.Error != nil {
+				t.Fatalf("Stream error: %v", resp.Error)
+			}
+			collectedTexts = append(collectedTexts, resp.Texts...)
+		}
+
+		// Verify the response contains MIDDLEWARE_WORKS (from modified prompt)
+		fullResponse := strings.Join(collectedTexts, "")
+		if !strings.Contains(fullResponse, "MIDDLEWARE_WORKS") {
+			t.Logf("Response should contain MIDDLEWARE_WORKS from modified prompt, got: %s", fullResponse)
+		}
+		gt.True(t, strings.Contains(fullResponse, "MIDDLEWARE_WORKS"))
+
+		// Verify history contains the modified input
+		history, err := session.History()
+		gt.NoError(t, err)
+		gt.True(t, len(history.Messages) >= 2) // User + Assistant
+
+		// Check the first message (user) contains modified prompt
+		if len(history.Messages) > 0 && len(history.Messages[0].Contents) > 0 {
+			var content map[string]string
+			err := json.Unmarshal(history.Messages[0].Contents[0].Data, &content)
+			gt.NoError(t, err)
+			if !strings.Contains(content["text"], "Modified:") {
+				t.Logf("First message should contain modified prompt, got: %s", content["text"])
+			}
+			gt.True(t, strings.Contains(content["text"], "Modified:"))
 		}
 	}
 
