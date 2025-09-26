@@ -127,11 +127,15 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, _, err := handler(ctx, state)
+		result, resp, err := handler(ctx, state)
 		gt.NoError(t, err)
 
 		// Should return nil when task is complete
 		gt.V(t, result).Nil()
+
+		// Should return ExecuteResponse with completion message
+		gt.NotNil(t, resp)
+		gt.Equal(t, "Task completed: Task has been completed successfully", resp.String())
 
 		// Verify session was created with correct options
 		gt.Equal(t, 1, len(mockClient.NewSessionCalls()))
