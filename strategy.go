@@ -27,6 +27,14 @@ func defaultStrategy() Strategy {
 			if state.Iteration == 0 {
 				return state.InitInput, nil
 			}
+
+			// If the last response has no function calls, end the session
+			// (facilitator replacement logic)
+			if state.LastResponse != nil &&
+				len(state.LastResponse.FunctionCalls) == 0 {
+				return nil, nil // End the session
+			}
+
 			return state.NextInput, nil
 		}
 	}

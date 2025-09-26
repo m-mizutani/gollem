@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/m-mizutani/ctxlog"
@@ -47,13 +48,11 @@ func (x *Agent) Session() Session {
 }
 
 const (
-	DefaultLoopLimit  = 128
-	DefaultRetryLimit = 4
+	DefaultLoopLimit = 128
 )
 
 type gollemConfig struct {
 	loopLimit    int
-	retryLimit   int
 	systemPrompt string
 
 	tools    []Tool
@@ -63,12 +62,18 @@ type gollemConfig struct {
 	logger       *slog.Logger
 	history      *History
 	strategy     Strategy
+
+	// Middleware for content generation
+	contentBlockMiddlewares  []ContentBlockMiddleware
+	contentStreamMiddlewares []ContentStreamMiddleware
+
+	// Middleware for tool execution
+	toolMiddlewares []ToolMiddleware
 }
 
 func (c *gollemConfig) Clone() *gollemConfig {
 	return &gollemConfig{
 		loopLimit:    c.loopLimit,
-		retryLimit:   c.retryLimit,
 		systemPrompt: c.systemPrompt,
 
 		tools:    c.tools[:],
@@ -77,7 +82,12 @@ func (c *gollemConfig) Clone() *gollemConfig {
 		responseMode: c.responseMode,
 		logger:       c.logger,
 
-		history: c.history,
+		history:  c.history,
+		strategy: c.strategy,
+
+		contentBlockMiddlewares:  c.contentBlockMiddlewares[:],
+		contentStreamMiddlewares: c.contentStreamMiddlewares[:],
+		toolMiddlewares:          c.toolMiddlewares[:],
 	}
 }
 
@@ -87,7 +97,6 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 		llm: llmClient,
 		gollemConfig: gollemConfig{
 			loopLimit:    DefaultLoopLimit,
-			retryLimit:   DefaultRetryLimit,
 			systemPrompt: "",
 
 			responseMode: ResponseModeBlocking,
@@ -102,7 +111,6 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 
 	s.logger.Info("gollem agent created",
 		"loop_limit", s.gollemConfig.loopLimit,
-		"retry_limit", s.gollemConfig.retryLimit,
 		"system_prompt", s.gollemConfig.systemPrompt,
 		"tools_count", len(s.gollemConfig.tools),
 		"tool_sets_count", len(s.gollemConfig.toolSets),
@@ -120,13 +128,6 @@ type Option func(*gollemConfig)
 func WithLoopLimit(loopLimit int) Option {
 	return func(s *gollemConfig) {
 		s.loopLimit = loopLimit
-	}
-}
-
-// WithRetryLimit sets the maximum number of retries for the gollem session. This is counted for error response from Tool. When reaching the limit, the session is finished immediately.
-func WithRetryLimit(retryLimit int) Option {
-	return func(s *gollemConfig) {
-		s.retryLimit = retryLimit
 	}
 }
 
@@ -169,6 +170,30 @@ func WithLogger(logger *slog.Logger) Option {
 func WithHistory(history *History) Option {
 	return func(s *gollemConfig) {
 		s.history = history
+	}
+}
+
+// WithContentBlockMiddleware adds a content block middleware to the agent.
+// The middleware will be applied to all sessions created by this agent.
+func WithContentBlockMiddleware(middleware ContentBlockMiddleware) Option {
+	return func(s *gollemConfig) {
+		s.contentBlockMiddlewares = append(s.contentBlockMiddlewares, middleware)
+	}
+}
+
+// WithContentStreamMiddleware adds a content stream middleware to the agent.
+// The middleware will be applied to all streaming sessions created by this agent.
+func WithContentStreamMiddleware(middleware ContentStreamMiddleware) Option {
+	return func(s *gollemConfig) {
+		s.contentStreamMiddlewares = append(s.contentStreamMiddlewares, middleware)
+	}
+}
+
+// WithToolMiddleware adds a tool middleware to the agent.
+// The middleware will be applied to all tool executions by this agent.
+func WithToolMiddleware(middleware ToolMiddleware) Option {
+	return func(s *gollemConfig) {
+		s.toolMiddlewares = append(s.toolMiddlewares, middleware)
 	}
 }
 
@@ -232,6 +257,14 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) error {
 			sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
 		}
 
+		// Add middleware from agent configuration
+		for _, mw := range cfg.contentBlockMiddlewares {
+			sessionOptions = append(sessionOptions, WithSessionContentBlockMiddleware(mw))
+		}
+		for _, mw := range cfg.contentStreamMiddlewares {
+			sessionOptions = append(sessionOptions, WithSessionContentStreamMiddleware(mw))
+		}
+
 		ssn, err := g.llm.NewSession(ctx, sessionOptions...)
 		if err != nil {
 			return err
@@ -268,7 +301,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) error {
 				return err
 			}
 
-			newInput, err := handleResponse(ctx, output, toolMap)
+			newInput, err := handleResponse(ctx, output, toolMap, cfg.toolMiddlewares)
 			if err != nil {
 				return err
 			}
@@ -286,7 +319,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) error {
 			var streamedResponse Response
 			for output := range stream {
 				logger.Debug("recv response", "output", output)
-				newInput, err := handleResponse(ctx, output, toolMap)
+				newInput, err := handleResponse(ctx, output, toolMap, cfg.toolMiddlewares)
 				if err != nil {
 					return err
 				}
@@ -308,7 +341,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) error {
 	return goerr.Wrap(ErrLoopLimitExceeded, "session stopped", goerr.V("loop_limit", cfg.loopLimit))
 }
 
-func handleResponse(ctx context.Context, output *Response, toolMap map[string]Tool) ([]Input, error) {
+func handleResponse(ctx context.Context, output *Response, toolMap map[string]Tool, toolMiddlewares []ToolMiddleware) ([]Input, error) {
 	logger := ctxlog.From(ctx)
 
 	newInput := make([]Input, 0)
@@ -331,10 +364,32 @@ func handleResponse(ctx context.Context, output *Response, toolMap map[string]To
 			continue
 		}
 
-		result, err := tool.Run(ctx, toolCall.Arguments)
-		logger.Debug("gollem tool result", "tool", toolCall.Name, "result", result)
+		// Create base tool handler
+		baseHandler := func(ctx context.Context, req *ToolExecRequest) (*ToolExecResponse, error) {
+			start := time.Now()
+			result, err := tool.Run(ctx, req.Tool.Arguments)
+			duration := time.Since(start).Milliseconds()
+
+			return &ToolExecResponse{
+				Result:   result,
+				Error:    err,
+				Duration: duration,
+			}, nil
+		}
+
+		// Build middleware chain
+		handler := buildToolChain(toolMiddlewares, baseHandler)
+
+		// Execute tool with middleware
+		toolSpec := tool.Spec()
+		req := &ToolExecRequest{
+			Tool:     toolCall,
+			ToolSpec: &toolSpec,
+		}
+
+		resp, err := handler(ctx, req)
 		if err != nil {
-			logger.Info("gollem tool error", "error", err)
+			logger.Info("gollem tool handler error", "error", err)
 			newInput = append(newInput, FunctionResponse{
 				ID:    toolCall.ID,
 				Name:  toolCall.Name,
@@ -342,6 +397,19 @@ func handleResponse(ctx context.Context, output *Response, toolMap map[string]To
 			})
 			continue
 		}
+
+		result := resp.Result
+		if resp.Error != nil {
+			logger.Info("gollem tool error", "error", resp.Error)
+			newInput = append(newInput, FunctionResponse{
+				ID:    toolCall.ID,
+				Name:  toolCall.Name,
+				Error: goerr.With(resp.Error, goerr.V("call", toolCall)),
+			})
+			continue
+		}
+
+		logger.Debug("gollem tool result", "tool", toolCall.Name, "result", result, "duration_ms", resp.Duration)
 
 		logger.Debug("gollem tool response", "call", toolCall, "result", result, "should_exit", err)
 
