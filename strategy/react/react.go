@@ -14,11 +14,11 @@ import (
 func New(options ...Option) gollem.Strategy {
 	return func(client gollem.LLMClient) gollem.StrategyHandler {
 		impl := &reactImpl{
-			llm:              client,
-			thoughtPrompt:    defaultThoughtPrompt,
-			reflectionPrompt: defaultReflectionPrompt,
-			finishPrompt:     defaultFinishCheckPrompt,
-			conversationLog:  []string{}, // Initialize conversation log
+			llm:                 client,
+			thoughtPrompt:       defaultThoughtPrompt,
+			reflectionPrompt:    defaultReflectionPrompt,
+			finishPrompt:        defaultFinishCheckPrompt,
+			conversationEntries: []ConversationEntry{}, // Initialize structured conversation log
 		}
 
 		for _, opt := range options {
@@ -57,8 +57,8 @@ type reactImpl struct {
 	reflectionPrompt string
 	finishPrompt     string
 
-	// Internal state to track conversation
-	conversationLog []string // Store conversation history for context
+	// Internal state to track conversation with structured data
+	conversationEntries []ConversationEntry // Store structured conversation history
 }
 
 func (x *reactImpl) Handle(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
@@ -89,7 +89,11 @@ func (x *reactImpl) Handle(ctx context.Context, state *gollem.StrategyState) ([]
 
 func (x *reactImpl) recordInitialInput(inputs []gollem.Input) {
 	for _, input := range inputs {
-		x.conversationLog = append(x.conversationLog, "USER: "+input.String())
+		entry := ConversationEntry{
+			Type:    EntryTypeUser,
+			Content: input.String(),
+		}
+		x.conversationEntries = append(x.conversationEntries, entry)
 	}
 }
 
@@ -97,21 +101,42 @@ func (x *reactImpl) updateConversationLog(state *gollem.StrategyState) {
 	// Record last LLM response
 	if state.LastResponse != nil {
 		if len(state.LastResponse.Texts) > 0 {
-			x.conversationLog = append(x.conversationLog, "ASSISTANT: "+strings.Join(state.LastResponse.Texts, " "))
+			entry := ConversationEntry{
+				Type:    EntryTypeAssistant,
+				Content: strings.Join(state.LastResponse.Texts, " "),
+			}
+			x.conversationEntries = append(x.conversationEntries, entry)
 		}
+
+		// Record tool calls
 		for _, fc := range state.LastResponse.FunctionCalls {
-			x.conversationLog = append(x.conversationLog, fmt.Sprintf("TOOL_CALL: %s", fc.Name))
+			entry := ConversationEntry{
+				Type:     EntryTypeToolCall,
+				Content:  fmt.Sprintf("Calling %s", fc.Name),
+				ToolName: fc.Name,
+			}
+			x.conversationEntries = append(x.conversationEntries, entry)
 		}
 	}
 
 	// Record tool results
 	for _, input := range state.NextInput {
 		if fr, ok := input.(gollem.FunctionResponse); ok {
-			if fr.Error != nil {
-				x.conversationLog = append(x.conversationLog, fmt.Sprintf("TOOL_RESULT: %s failed - %v", fr.Name, fr.Error))
-			} else {
-				x.conversationLog = append(x.conversationLog, fmt.Sprintf("TOOL_RESULT: %s succeeded", fr.Name))
+			success := fr.Error == nil
+			entry := ConversationEntry{
+				Type:     EntryTypeToolResult,
+				ToolName: fr.Name,
+				Success:  &success,
 			}
+
+			if fr.Error != nil {
+				entry.Content = fmt.Sprintf("Tool %s failed", fr.Name)
+				entry.Error = fr.Error.Error()
+			} else {
+				entry.Content = fmt.Sprintf("Tool %s succeeded", fr.Name)
+			}
+
+			x.conversationEntries = append(x.conversationEntries, entry)
 		}
 	}
 }
@@ -144,7 +169,7 @@ func (x *reactImpl) processToolResults(inputs []gollem.Input) []gollem.Input {
 	return append([]gollem.Input{reflection}, inputs...)
 }
 
-func (x *reactImpl) evaluateNextStep(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+func (x *reactImpl) evaluateNextStep(ctx context.Context, _ *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
 	session, err := x.llm.NewSession(ctx,
 		gollem.WithSessionSystemPrompt("You are a task completion analyzer. Analyze if a task is complete based on the conversation history and respond in JSON format."),
 		gollem.WithSessionContentType(gollem.ContentTypeJSON))
@@ -164,20 +189,19 @@ func (x *reactImpl) evaluateNextStep(ctx context.Context, state *gollem.Strategy
 func (x *reactImpl) buildCompletionPrompt() string {
 	var prompt strings.Builder
 	prompt.WriteString("Conversation history:\n")
-	prompt.WriteString("================\n")
 
-	// Include recent conversation (last 10 entries)
+	// Include recent conversation (last 5 entries)
 	start := 0
-	if len(x.conversationLog) > 10 {
-		start = len(x.conversationLog) - 10
+	if len(x.conversationEntries) > 5 {
+		start = len(x.conversationEntries) - 5
 	}
 
-	for i := start; i < len(x.conversationLog); i++ {
-		prompt.WriteString(x.conversationLog[i])
-		prompt.WriteString("\n")
+	for i := start; i < len(x.conversationEntries); i++ {
+		entry := x.conversationEntries[i]
+		prompt.WriteString(fmt.Sprintf("%s: %s\n", entry.Type, entry.Content))
 	}
 
-	prompt.WriteString("================\n\n")
+	prompt.WriteString("\n")
 	prompt.WriteString(x.finishPrompt)
 
 	return prompt.String()
@@ -197,21 +221,18 @@ func (x *reactImpl) parseCompletionResponse(response *gollem.Response) ([]gollem
 
 	var result CompletionCheck
 	if err := json.Unmarshal([]byte(response.Texts[0]), &result); err != nil {
-		// Fallback to simple string matching if JSON parsing fails
-		decision := strings.ToUpper(response.Texts[0])
-		if strings.Contains(decision, "COMPLETE") || strings.Contains(decision, "TRUE") {
-			// Task complete, generate conclusion from conversation log
-			conclusionText := x.generateConclusion()
-			executeResponse := &gollem.ExecuteResponse{
-				Texts: []string{conclusionText},
-			}
-			return nil, executeResponse, nil
-		}
+		// JSON parsing failed - continue task without assumptions
 		return []gollem.Input{gollem.Text("Continuing with task...")}, nil, nil
 	}
 
 	if result.IsComplete {
-		x.conversationLog = append(x.conversationLog, "COMPLETION: "+result.Reason)
+		// Record completion in structured format
+		completionEntry := ConversationEntry{
+			Type:    EntryTypeCompletion,
+			Content: result.Reason,
+		}
+		x.conversationEntries = append(x.conversationEntries, completionEntry)
+
 		// Generate conclusion based on reason and conversation
 		conclusionText := fmt.Sprintf("Task completed: %s", result.Reason)
 		executeResponse := &gollem.ExecuteResponse{
@@ -221,34 +242,39 @@ func (x *reactImpl) parseCompletionResponse(response *gollem.Response) ([]gollem
 	}
 
 	if result.NextAction != "" {
-		x.conversationLog = append(x.conversationLog, "GUIDANCE: "+result.NextAction)
+		// Record guidance in structured format
+		guidanceEntry := ConversationEntry{
+			Type:    EntryTypeGuidance,
+			Content: result.NextAction,
+		}
+		x.conversationEntries = append(x.conversationEntries, guidanceEntry)
 		return []gollem.Input{gollem.Text("Next: " + result.NextAction)}, nil, nil
 	}
 
 	return []gollem.Input{gollem.Text("Continuing...")}, nil, nil
 }
 
-func (x *reactImpl) generateConclusion() string {
-	if len(x.conversationLog) == 0 {
-		return "Task analysis completed"
-	}
+// ConversationEntryType represents the type of conversation entry
+type ConversationEntryType string
 
-	// Extract key points from conversation log
-	var conclusions []string
-	for _, entry := range x.conversationLog {
-		if strings.HasPrefix(entry, "COMPLETION:") || strings.HasPrefix(entry, "ASSISTANT:") {
-			conclusions = append(conclusions, strings.TrimPrefix(entry, "COMPLETION:"))
-			conclusions = append(conclusions, strings.TrimPrefix(entry, "ASSISTANT:"))
-		}
-	}
+const (
+	EntryTypeUser       ConversationEntryType = "USER"
+	EntryTypeAssistant  ConversationEntryType = "ASSISTANT"
+	EntryTypeToolCall   ConversationEntryType = "TOOL_CALL"
+	EntryTypeToolResult ConversationEntryType = "TOOL_RESULT"
+	EntryTypeCompletion ConversationEntryType = "COMPLETION"
+	EntryTypeGuidance   ConversationEntryType = "GUIDANCE"
+)
 
-	if len(conclusions) > 0 {
-		// Return the last meaningful conclusion
-		return strings.TrimSpace(conclusions[len(conclusions)-1])
-	}
-
-	return "ReAct strategy task completed"
+// ConversationEntry represents a structured conversation log entry
+type ConversationEntry struct {
+	Type     ConversationEntryType `json:"type"`
+	Content  string                `json:"content"`
+	ToolName string                `json:"tool_name,omitempty"`
+	Success  *bool                 `json:"success,omitempty"`
+	Error    string                `json:"error,omitempty"`
 }
+
 
 // Option is an option for configuring the ReAct strategy
 type Option func(*reactImpl)

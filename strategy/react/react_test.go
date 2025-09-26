@@ -287,8 +287,8 @@ func TestReactStrategy(t *testing.T) {
 
 		result, _, err = handler(ctx, state)
 		gt.NoError(t, err)
-		// Should return nil when complete
-		gt.V(t, result).Nil()
+		// Should continue with task when no explicit completion
+		gt.NotNil(t, result)
 	})
 
 	t.Run("handles multiple tool results", func(t *testing.T) {
@@ -372,7 +372,7 @@ func TestReactStrategy(t *testing.T) {
 		result, _, err := handler(ctx, state)
 		gt.NoError(t, err)
 
-		// Should return nil when response contains "COMPLETE"
-		gt.V(t, result).Nil()
+		// Should continue when JSON parsing fails (no assumptions)
+		gt.NotNil(t, result)
 	})
 }
