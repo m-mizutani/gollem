@@ -72,4 +72,21 @@ func TestExecuteResponseIsEmpty(t *testing.T) {
 		resp := gollem.NewExecuteResponse("first", "second")
 		gt.False(t, resp.IsEmpty())
 	})
+
+	t.Run("multiple empty strings", func(t *testing.T) {
+		resp := gollem.NewExecuteResponse("", "")
+		gt.True(t, resp.IsEmpty())
+	})
+
+	t.Run("mixed empty and non-empty strings", func(t *testing.T) {
+		resp := gollem.NewExecuteResponse("", "test", "")
+		gt.False(t, resp.IsEmpty())
+	})
+
+	t.Run("multiple empty strings with spaces", func(t *testing.T) {
+		resp := gollem.NewExecuteResponse("", "", "")
+		gt.True(t, resp.IsEmpty())
+		// Verify String() behavior for multiple empty strings
+		gt.Equal(t, "  ", resp.String()) // Should be spaces, but IsEmpty should return true
+	})
 }

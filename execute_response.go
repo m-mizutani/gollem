@@ -25,7 +25,15 @@ func (r *ExecuteResponse) String() string {
 	return strings.Join(r.Texts, " ")
 }
 
-// IsEmpty returns true if the response has no texts
+// IsEmpty returns true if the response has no texts or all texts are empty
 func (r *ExecuteResponse) IsEmpty() bool {
-	return r == nil || len(r.Texts) == 0 || (len(r.Texts) == 1 && r.Texts[0] == "")
+	if r == nil || len(r.Texts) == 0 {
+		return true
+	}
+	for _, s := range r.Texts {
+		if s != "" {
+			return false
+		}
+	}
+	return true
 }
