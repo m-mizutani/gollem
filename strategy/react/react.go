@@ -47,7 +47,6 @@ func (s *reactStrategy) Init(ctx context.Context, inputs []gollem.Input) error {
 func (s *reactStrategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
 	// First iteration: Add thought prompt
 	if state.Iteration == 0 {
-		s.recordInitialInput(state.InitInput)
 		thought := gollem.Text(s.thoughtPrompt)
 		return append([]gollem.Input{thought}, state.InitInput...), nil, nil
 	}
