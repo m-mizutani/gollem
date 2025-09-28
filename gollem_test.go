@@ -674,7 +674,6 @@ func (t *mockToolSet) Run(ctx context.Context, name string, args map[string]any)
 	return t.run(ctx, name, args)
 }
 
-
 func TestExecuteWithExecuteResponse(t *testing.T) {
 	t.Run("strategy returns ExecuteResponse", func(t *testing.T) {
 		// Create a strategy that immediately returns an ExecuteResponse
@@ -748,6 +747,53 @@ func TestExecuteWithExecuteResponse(t *testing.T) {
 
 		gt.NoError(t, err)
 		gt.Nil(t, result)
+	})
+
+	t.Run("strategy tool name conflict detection", func(t *testing.T) {
+		conflictingToolName := "conflicting_tool"
+
+		// Create a regular tool with a specific name
+		userTool := &mockTool{
+			spec: gollem.ToolSpec{
+				Name:        conflictingToolName,
+				Description: "User provided tool",
+			},
+			run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+				return map[string]any{"source": "user"}, nil
+			},
+		}
+
+		// Create a strategy that provides a tool with the same name
+		strategy := &mock.StrategyMock{
+			InitFunc: func(ctx context.Context, inputs []gollem.Input) error {
+				return nil
+			},
+			HandleFunc: func(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+				return nil, gollem.NewExecuteResponse("Should not reach here"), nil
+			},
+			ToolsFunc: func(ctx context.Context) ([]gollem.Tool, error) {
+				strategyTool := &mockTool{
+					spec: gollem.ToolSpec{
+						Name:        conflictingToolName,
+						Description: "Strategy provided tool",
+					},
+					run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+						return map[string]any{"source": "strategy"}, nil
+					},
+				}
+				return []gollem.Tool{strategyTool}, nil
+			},
+		}
+
+		agent := gollem.New(&mock.LLMClientMock{},
+			gollem.WithTools(userTool),
+			gollem.WithStrategy(strategy))
+
+		// Execute should fail with tool name conflict error
+		_, err := agent.Execute(context.Background(), gollem.Text("test"))
+
+		gt.Error(t, err)
+		gt.True(t, errors.Is(err, gollem.ErrToolNameConflict))
 	})
 }
 

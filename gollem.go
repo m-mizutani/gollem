@@ -258,6 +258,9 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, 
 
 	// Add strategy tools to the tool list
 	for _, tool := range strategyTools {
+		if _, ok := toolMap[tool.Spec().Name]; ok {
+			return nil, goerr.Wrap(ErrToolNameConflict, "tool name conflict with strategy tool", goerr.V("tool_name", tool.Spec().Name))
+		}
 		toolList = append(toolList, tool)
 		toolMap[tool.Spec().Name] = tool
 	}
@@ -501,7 +504,7 @@ func buildToolMap(ctx context.Context, tools []Tool, toolSets []ToolSet) (map[st
 
 		for _, spec := range specs {
 			if _, ok := toolMap[spec.Name]; ok {
-				return nil, goerr.Wrap(ErrToolNameConflict, "tool name conflict (builtintool sets)", goerr.V("tool_name", spec.Name))
+				return nil, goerr.Wrap(ErrToolNameConflict, "tool name conflict (builtin tool sets)", goerr.V("tool_name", spec.Name))
 			}
 			toolMap[spec.Name] = &toolWrapper{
 				spec: spec,
