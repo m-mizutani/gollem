@@ -7,6 +7,7 @@ import (
 )
 
 // simpleStrategy implements a simple loop strategy that continues as long as there is input
+// Note: This implementation should be kept in sync with defaultStrategy in ../../strategy.go
 type simpleStrategy struct{}
 
 // New creates a simple loop strategy that continues as long as there is input

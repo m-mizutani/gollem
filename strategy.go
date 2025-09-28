@@ -32,6 +32,7 @@ type StrategyState struct {
 }
 
 // defaultStrategy implements the default simple loop strategy
+// Note: This implementation should be kept in sync with strategy/simple/simple.go
 type defaultStrategy struct{}
 
 // newDefaultStrategy creates a new default strategy instance
@@ -45,21 +46,21 @@ func (s *defaultStrategy) Init(ctx context.Context, inputs []Input) error {
 }
 
 func (s *defaultStrategy) Handle(ctx context.Context, state *StrategyState) ([]Input, *ExecuteResponse, error) {
-	// Initial iteration: send user input to LLM
 	if state.Iteration == 0 {
 		return state.InitInput, nil, nil
 	}
 
-	// Check LLM's last response
-	if state.LastResponse != nil && len(state.LastResponse.FunctionCalls) == 0 {
-		// No tool calls = final response, use as conclusion
-		executeResponse := &ExecuteResponse{
-			Texts: state.LastResponse.Texts,
+	// Check LLM's last response for termination condition
+	if state.LastResponse != nil {
+		if len(state.LastResponse.FunctionCalls) == 0 {
+			// No tool calls = final response, use as conclusion
+			executeResponse := &ExecuteResponse{
+				Texts: state.LastResponse.Texts,
+			}
+			return nil, executeResponse, nil
 		}
-		return nil, executeResponse, nil
 	}
 
-	// Tool calls exist, continue with next input
 	return state.NextInput, nil, nil
 }
 
