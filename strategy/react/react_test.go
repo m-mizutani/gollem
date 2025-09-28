@@ -23,8 +23,7 @@ func TestReactStrategy(t *testing.T) {
 
 	t.Run("initial iteration adds thought prompt", func(t *testing.T) {
 		mockClient := &mock.LLMClientMock{}
-		strategy := react.New()
-		handler := strategy(mockClient)
+		strategy := react.New(mockClient)
 
 		initInput := []gollem.Input{
 			gollem.Text("solve this problem"),
@@ -35,7 +34,7 @@ func TestReactStrategy(t *testing.T) {
 			Iteration: 0,
 		}
 
-		result, _, err := handler(ctx, state)
+		result, _, err := strategy.Handle(ctx, state)
 		gt.NoError(t, err)
 
 		// Should have thought prompt + initial input
@@ -53,8 +52,7 @@ func TestReactStrategy(t *testing.T) {
 
 	t.Run("processes tool results with reflection", func(t *testing.T) {
 		mockClient := &mock.LLMClientMock{}
-		strategy := react.New()
-		handler := strategy(mockClient)
+		strategy := react.New(mockClient)
 
 		toolResponse := gollem.FunctionResponse{
 			ID:   "call-123",
@@ -73,7 +71,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, _, err := handler(ctx, state)
+		result, _, err := strategy.Handle(ctx, state)
 		gt.NoError(t, err)
 
 		// Should have reflection prompt + tool response
@@ -115,8 +113,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		strategy := react.New()
-		handler := strategy(mockClient)
+		strategy := react.New(mockClient)
 
 		state := &gollem.StrategyState{
 			InitInput: []gollem.Input{gollem.Text("task")},
@@ -127,7 +124,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, resp, err := handler(ctx, state)
+		result, resp, err := strategy.Handle(ctx, state)
 		gt.NoError(t, err)
 
 		// Should return nil when task is complete
@@ -166,8 +163,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		strategy := react.New()
-		handler := strategy(mockClient)
+		strategy := react.New(mockClient)
 
 		state := &gollem.StrategyState{
 			InitInput: []gollem.Input{gollem.Text("task")},
@@ -178,7 +174,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, _, err := handler(ctx, state)
+		result, _, err := strategy.Handle(ctx, state)
 		gt.NoError(t, err)
 
 		// Should return next action
@@ -190,8 +186,7 @@ func TestReactStrategy(t *testing.T) {
 
 	t.Run("handles error in tool response", func(t *testing.T) {
 		mockClient := &mock.LLMClientMock{}
-		strategy := react.New()
-		handler := strategy(mockClient)
+		strategy := react.New(mockClient)
 
 		errorResponse := gollem.FunctionResponse{
 			ID:    "call-456",
@@ -210,7 +205,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, _, err := handler(ctx, state)
+		result, _, err := strategy.Handle(ctx, state)
 		gt.NoError(t, err)
 
 		// Should have reflection prompt + error response
@@ -245,12 +240,11 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		strategy := react.New(
+		strategy := react.New(mockClient,
 			react.WithThoughtPrompt(customThought),
 			react.WithReflectionPrompt(customReflection),
 			react.WithFinishPrompt(customFinish),
 		)
-		handler := strategy(mockClient)
 
 		// Test custom thought prompt
 		state := &gollem.StrategyState{
@@ -258,7 +252,7 @@ func TestReactStrategy(t *testing.T) {
 			Iteration: 0,
 		}
 
-		result, _, err := handler(ctx, state)
+		result, _, err := strategy.Handle(ctx, state)
 		gt.NoError(t, err)
 		gt.Equal(t, customThought, result[0].String())
 
@@ -275,7 +269,7 @@ func TestReactStrategy(t *testing.T) {
 			Iteration: 1,
 		}
 
-		result, _, err = handler(ctx, state)
+		result, _, err = strategy.Handle(ctx, state)
 		gt.NoError(t, err)
 		if !containsString(result[0].String(), "Custom reflection:") {
 			t.Errorf("Expected result to contain 'Custom reflection:', got: %s", result[0].String())
@@ -289,7 +283,7 @@ func TestReactStrategy(t *testing.T) {
 			LastResponse: &gollem.Response{Texts: []string{"text"}},
 		}
 
-		result, _, err = handler(ctx, state)
+		result, _, err = strategy.Handle(ctx, state)
 		gt.NoError(t, err)
 		// Should continue with task when no explicit completion
 		gt.NotNil(t, result)
@@ -297,8 +291,7 @@ func TestReactStrategy(t *testing.T) {
 
 	t.Run("handles multiple tool results", func(t *testing.T) {
 		mockClient := &mock.LLMClientMock{}
-		strategy := react.New()
-		handler := strategy(mockClient)
+		strategy := react.New(mockClient)
 
 		toolResponses := []gollem.Input{
 			gollem.FunctionResponse{
@@ -325,7 +318,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		result, _, err := handler(ctx, state)
+		result, _, err := strategy.Handle(ctx, state)
 		gt.NoError(t, err)
 
 		// Should have reflection prompt + both tool responses
@@ -363,8 +356,7 @@ func TestReactStrategy(t *testing.T) {
 			},
 		}
 
-		strategy := react.New()
-		handler := strategy(mockClient)
+		strategy := react.New(mockClient)
 
 		state := &gollem.StrategyState{
 			InitInput:    []gollem.Input{gollem.Text("task")},
@@ -373,7 +365,7 @@ func TestReactStrategy(t *testing.T) {
 			LastResponse: &gollem.Response{Texts: []string{"text"}},
 		}
 
-		result, _, err := handler(ctx, state)
+		result, _, err := strategy.Handle(ctx, state)
 		gt.NoError(t, err)
 
 		// Should continue when JSON parsing fails (no assumptions)

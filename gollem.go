@@ -101,7 +101,7 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 
 			responseMode: ResponseModeBlocking,
 			logger:       slog.New(slog.DiscardHandler),
-			strategy:     defaultStrategy(),
+			strategy:     newDefaultStrategy(),
 		},
 	}
 
@@ -239,10 +239,30 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, 
 	)
 	defer logger.Debug("[end] gollem execution")
 
+	// Initialize strategy
+	if err := cfg.strategy.Init(ctx, input); err != nil {
+		return nil, goerr.Wrap(err, "failed to initialize strategy")
+	}
+
 	// Setup tools for the current execution
 	toolMap, toolList, err := setupTools(ctx, cfg)
 	if err != nil {
 		return nil, err
+	}
+
+	// Get strategy-specific tools and merge them
+	strategyTools, err := cfg.strategy.Tools(ctx)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get strategy tools")
+	}
+
+	// Add strategy tools to the tool list
+	for _, tool := range strategyTools {
+		if _, ok := toolMap[tool.Spec().Name]; ok {
+			return nil, goerr.Wrap(ErrToolNameConflict, "tool name conflict with strategy tool", goerr.V("tool_name", tool.Spec().Name))
+		}
+		toolList = append(toolList, tool)
+		toolMap[tool.Spec().Name] = tool
 	}
 
 	// If no current session exists, create a new one
@@ -273,7 +293,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, 
 		g.currentSession = ssn
 	}
 
-	strategy := g.gollemConfig.strategy(g.llm)
+	strategy := g.gollemConfig.strategy
 
 	var lastResponse *Response
 	nextInput := input
@@ -285,7 +305,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, 
 			NextInput:    nextInput,
 			Iteration:    i,
 		}
-		strategyInputs, executeResponse, err := strategy(ctx, state)
+		strategyInputs, executeResponse, err := strategy.Handle(ctx, state)
 		if err != nil {
 			return nil, err
 		}
@@ -484,7 +504,7 @@ func buildToolMap(ctx context.Context, tools []Tool, toolSets []ToolSet) (map[st
 
 		for _, spec := range specs {
 			if _, ok := toolMap[spec.Name]; ok {
-				return nil, goerr.Wrap(ErrToolNameConflict, "tool name conflict (builtintool sets)", goerr.V("tool_name", spec.Name))
+				return nil, goerr.Wrap(ErrToolNameConflict, "tool name conflict (builtin tool sets)", goerr.V("tool_name", spec.Name))
 			}
 			toolMap[spec.Name] = &toolWrapper{
 				spec: spec,

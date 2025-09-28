@@ -4,15 +4,23 @@ import (
 	"context"
 )
 
-// Strategy is a factory of actual execution strategy.
-type Strategy func(client LLMClient) StrategyHandler
+// Strategy defines the interface for execution strategies
+type Strategy interface {
+	// Init initializes the strategy with initial inputs
+	// Called once when Execute is invoked, before the execution loop begins
+	Init(ctx context.Context, inputs []Input) error
 
-// StrategyHandler is a function that determines the next input for the LLM based on the current state.
-// Returns ([]Input, *ExecuteResponse, error) where:
-// - []Input: next input for LLM (nil means no LLM call)
-// - *ExecuteResponse: strategy's conclusion (nil means let LLM decide)
-// - error: execution error
-type StrategyHandler func(ctx context.Context, state *StrategyState) ([]Input, *ExecuteResponse, error)
+	// Handle determines the next input for the LLM based on the current state
+	// Returns ([]Input, *ExecuteResponse, error) where:
+	// - []Input: next input for LLM (nil means no LLM call)
+	// - *ExecuteResponse: strategy's conclusion (nil means let LLM decide)
+	// - error: execution error
+	Handle(ctx context.Context, state *StrategyState) ([]Input, *ExecuteResponse, error)
+
+	// Tools returns the tools that this strategy provides
+	// This allows strategies to offer their own specialized tools
+	Tools(ctx context.Context) ([]Tool, error)
+}
 
 // StrategyState contains the current state of the execution
 type StrategyState struct {
@@ -23,28 +31,40 @@ type StrategyState struct {
 	Iteration    int       // Current iteration count
 }
 
-// defaultStrategy returns the default simple loop strategy
-func defaultStrategy() Strategy {
-	return func(client LLMClient) StrategyHandler {
-		return func(ctx context.Context, state *StrategyState) ([]Input, *ExecuteResponse, error) {
-			// Initial iteration: send user input to LLM
-			if state.Iteration == 0 {
-				return state.InitInput, nil, nil
-			}
+// defaultStrategy implements the default simple loop strategy
+// Note: This implementation should be kept in sync with strategy/simple/simple.go
+type defaultStrategy struct{}
 
-			// Check LLM's last response
-			if state.LastResponse != nil {
-				if len(state.LastResponse.FunctionCalls) == 0 {
-					// No tool calls = final response, use as conclusion
-					executeResponse := &ExecuteResponse{
-						Texts: state.LastResponse.Texts,
-					}
-					return nil, executeResponse, nil
-				}
-			}
+// newDefaultStrategy creates a new default strategy instance
+func newDefaultStrategy() *defaultStrategy {
+	return &defaultStrategy{}
+}
 
-			// Tool calls exist, continue with next input
-			return state.NextInput, nil, nil
+func (s *defaultStrategy) Init(ctx context.Context, inputs []Input) error {
+	// Default strategy needs no special initialization
+	return nil
+}
+
+func (s *defaultStrategy) Handle(ctx context.Context, state *StrategyState) ([]Input, *ExecuteResponse, error) {
+	if state.Iteration == 0 {
+		return state.InitInput, nil, nil
+	}
+
+	// Check LLM's last response for termination condition
+	if state.LastResponse != nil {
+		if len(state.LastResponse.FunctionCalls) == 0 {
+			// No tool calls = final response, use as conclusion
+			executeResponse := &ExecuteResponse{
+				Texts: state.LastResponse.Texts,
+			}
+			return nil, executeResponse, nil
 		}
 	}
+
+	return state.NextInput, nil, nil
+}
+
+func (s *defaultStrategy) Tools(ctx context.Context) ([]Tool, error) {
+	// Default strategy provides no additional tools
+	return []Tool{}, nil
 }

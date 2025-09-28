@@ -526,3 +526,177 @@ func (mock *ToolMock) SpecCalls() []struct {
 	mock.lockSpec.RUnlock()
 	return calls
 }
+
+// StrategyMock is a mock implementation of gollem.Strategy.
+//
+//	func TestSomethingThatUsesStrategy(t *testing.T) {
+//
+//		// make and configure a mocked gollem.Strategy
+//		mockedStrategy := &StrategyMock{
+//			HandleFunc: func(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+//				panic("mock out the Handle method")
+//			},
+//			InitFunc: func(ctx context.Context, inputs []gollem.Input) error {
+//				panic("mock out the Init method")
+//			},
+//			ToolsFunc: func(ctx context.Context) ([]gollem.Tool, error) {
+//				panic("mock out the Tools method")
+//			},
+//		}
+//
+//		// use mockedStrategy in code that requires gollem.Strategy
+//		// and then make assertions.
+//
+//	}
+type StrategyMock struct {
+	// HandleFunc mocks the Handle method.
+	HandleFunc func(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error)
+
+	// InitFunc mocks the Init method.
+	InitFunc func(ctx context.Context, inputs []gollem.Input) error
+
+	// ToolsFunc mocks the Tools method.
+	ToolsFunc func(ctx context.Context) ([]gollem.Tool, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Handle holds details about calls to the Handle method.
+		Handle []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// State is the state argument value.
+			State *gollem.StrategyState
+		}
+		// Init holds details about calls to the Init method.
+		Init []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Inputs is the inputs argument value.
+			Inputs []gollem.Input
+		}
+		// Tools holds details about calls to the Tools method.
+		Tools []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+		}
+	}
+	lockHandle sync.RWMutex
+	lockInit   sync.RWMutex
+	lockTools  sync.RWMutex
+}
+
+// Handle calls HandleFunc.
+func (mock *StrategyMock) Handle(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+	callInfo := struct {
+		Ctx   context.Context
+		State *gollem.StrategyState
+	}{
+		Ctx:   ctx,
+		State: state,
+	}
+	mock.lockHandle.Lock()
+	mock.calls.Handle = append(mock.calls.Handle, callInfo)
+	mock.lockHandle.Unlock()
+	if mock.HandleFunc == nil {
+		var (
+			inputsOut          []gollem.Input
+			executeResponseOut *gollem.ExecuteResponse
+			errOut             error
+		)
+		return inputsOut, executeResponseOut, errOut
+	}
+	return mock.HandleFunc(ctx, state)
+}
+
+// HandleCalls gets all the calls that were made to Handle.
+// Check the length with:
+//
+//	len(mockedStrategy.HandleCalls())
+func (mock *StrategyMock) HandleCalls() []struct {
+	Ctx   context.Context
+	State *gollem.StrategyState
+} {
+	var calls []struct {
+		Ctx   context.Context
+		State *gollem.StrategyState
+	}
+	mock.lockHandle.RLock()
+	calls = mock.calls.Handle
+	mock.lockHandle.RUnlock()
+	return calls
+}
+
+// Init calls InitFunc.
+func (mock *StrategyMock) Init(ctx context.Context, inputs []gollem.Input) error {
+	callInfo := struct {
+		Ctx    context.Context
+		Inputs []gollem.Input
+	}{
+		Ctx:    ctx,
+		Inputs: inputs,
+	}
+	mock.lockInit.Lock()
+	mock.calls.Init = append(mock.calls.Init, callInfo)
+	mock.lockInit.Unlock()
+	if mock.InitFunc == nil {
+		var (
+			errOut error
+		)
+		return errOut
+	}
+	return mock.InitFunc(ctx, inputs)
+}
+
+// InitCalls gets all the calls that were made to Init.
+// Check the length with:
+//
+//	len(mockedStrategy.InitCalls())
+func (mock *StrategyMock) InitCalls() []struct {
+	Ctx    context.Context
+	Inputs []gollem.Input
+} {
+	var calls []struct {
+		Ctx    context.Context
+		Inputs []gollem.Input
+	}
+	mock.lockInit.RLock()
+	calls = mock.calls.Init
+	mock.lockInit.RUnlock()
+	return calls
+}
+
+// Tools calls ToolsFunc.
+func (mock *StrategyMock) Tools(ctx context.Context) ([]gollem.Tool, error) {
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockTools.Lock()
+	mock.calls.Tools = append(mock.calls.Tools, callInfo)
+	mock.lockTools.Unlock()
+	if mock.ToolsFunc == nil {
+		var (
+			toolsOut []gollem.Tool
+			errOut   error
+		)
+		return toolsOut, errOut
+	}
+	return mock.ToolsFunc(ctx)
+}
+
+// ToolsCalls gets all the calls that were made to Tools.
+// Check the length with:
+//
+//	len(mockedStrategy.ToolsCalls())
+func (mock *StrategyMock) ToolsCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockTools.RLock()
+	calls = mock.calls.Tools
+	mock.lockTools.RUnlock()
+	return calls
+}
