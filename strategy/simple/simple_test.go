@@ -11,10 +11,11 @@ import (
 
 func TestSimpleStrategy(t *testing.T) {
 	ctx := context.Background()
-	strategy := simple.New()
+	strategy := simple.New() // No client needed for simple strategy
 
-	// Mock LLM client is not needed for simple strategy test
-	handler := strategy(nil)
+	// Initialize strategy
+	err := strategy.Init(ctx, []gollem.Input{gollem.Text("test")})
+	gt.NoError(t, err)
 
 	t.Run("initial iteration returns InitInput", func(t *testing.T) {
 		initInput := []gollem.Input{
@@ -27,7 +28,7 @@ func TestSimpleStrategy(t *testing.T) {
 			Iteration: 0,
 		}
 
-		result, _, err := handler(ctx, state)
+		result, _, err := strategy.Handle(ctx, state)
 		gt.NoError(t, err)
 		gt.Equal(t, len(initInput), len(result))
 		gt.Equal(t, initInput[0].String(), result[0].String())
@@ -45,7 +46,7 @@ func TestSimpleStrategy(t *testing.T) {
 			Iteration: 1,
 		}
 
-		result, _, err := handler(ctx, state)
+		result, _, err := strategy.Handle(ctx, state)
 		gt.NoError(t, err)
 		gt.Equal(t, len(nextInput), len(result))
 		gt.Equal(t, nextInput[0].String(), result[0].String())
@@ -58,7 +59,7 @@ func TestSimpleStrategy(t *testing.T) {
 			Iteration: 2,
 		}
 
-		result, _, err := handler(ctx, state)
+		result, _, err := strategy.Handle(ctx, state)
 		gt.NoError(t, err)
 		gt.Equal(t, 0, len(result))
 	})
@@ -76,7 +77,7 @@ func TestSimpleStrategy(t *testing.T) {
 			Iteration: 3,
 		}
 
-		result, _, err := handler(ctx, state)
+		result, _, err := strategy.Handle(ctx, state)
 		gt.NoError(t, err)
 		gt.Equal(t, 1, len(result))
 

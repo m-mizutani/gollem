@@ -674,13 +674,20 @@ func (t *mockToolSet) Run(ctx context.Context, name string, args map[string]any)
 	return t.run(ctx, name, args)
 }
 
+
 func TestExecuteWithExecuteResponse(t *testing.T) {
 	t.Run("strategy returns ExecuteResponse", func(t *testing.T) {
 		// Create a strategy that immediately returns an ExecuteResponse
-		strategy := func(client gollem.LLMClient) gollem.StrategyHandler {
-			return func(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+		strategy := &mock.StrategyMock{
+			InitFunc: func(ctx context.Context, inputs []gollem.Input) error {
+				return nil
+			},
+			HandleFunc: func(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
 				return nil, gollem.NewExecuteResponse("Test conclusion"), nil
-			}
+			},
+			ToolsFunc: func(ctx context.Context) ([]gollem.Tool, error) {
+				return []gollem.Tool{}, nil
+			},
 		}
 
 		agent := gollem.New(&mock.LLMClientMock{}, gollem.WithStrategy(strategy))
@@ -696,12 +703,18 @@ func TestExecuteWithExecuteResponse(t *testing.T) {
 		logger := slog.New(slog.NewTextHandler(&logOutput, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 		// Strategy that returns both ExecuteResponse and Input
-		strategy := func(client gollem.LLMClient) gollem.StrategyHandler {
-			return func(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+		strategy := &mock.StrategyMock{
+			InitFunc: func(ctx context.Context, inputs []gollem.Input) error {
+				return nil
+			},
+			HandleFunc: func(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
 				return []gollem.Input{gollem.Text("ignored")},
 					gollem.NewExecuteResponse("conclusion"),
 					nil
-			}
+			},
+			ToolsFunc: func(ctx context.Context) ([]gollem.Tool, error) {
+				return []gollem.Tool{}, nil
+			},
 		}
 
 		agent := gollem.New(&mock.LLMClientMock{},
@@ -718,10 +731,16 @@ func TestExecuteWithExecuteResponse(t *testing.T) {
 	})
 
 	t.Run("strategy returns nil for both", func(t *testing.T) {
-		strategy := func(client gollem.LLMClient) gollem.StrategyHandler {
-			return func(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+		strategy := &mock.StrategyMock{
+			InitFunc: func(ctx context.Context, inputs []gollem.Input) error {
+				return nil
+			},
+			HandleFunc: func(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
 				return nil, nil, nil
-			}
+			},
+			ToolsFunc: func(ctx context.Context) ([]gollem.Tool, error) {
+				return []gollem.Tool{}, nil
+			},
 		}
 
 		agent := gollem.New(&mock.LLMClientMock{}, gollem.WithStrategy(strategy))

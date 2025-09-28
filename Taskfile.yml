@@ -14,7 +14,7 @@ tasks:
         -pkg mock
         -rm -skip-ensure -stub
         .
-        LLMClient Session Tool
+        LLMClient Session Tool Strategy
       # OpenAI package apiClient mock generation
       - go run github.com/matryer/moq@v0.5.3
         -out ./llm/openai/mock_gen_test.go
