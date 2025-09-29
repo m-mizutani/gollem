@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/google/uuid"
 	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
@@ -17,6 +18,9 @@ func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []golle
 	// Create a new session with JSON content type
 	sessionOpts := []gollem.SessionOption{
 		gollem.WithSessionContentType(gollem.ContentTypeJSON),
+	}
+	for _, mw := range middleware {
+		sessionOpts = append(sessionOpts, gollem.WithSessionContentBlockMiddleware(mw))
 	}
 
 	session, err := client.NewSession(ctx, sessionOpts...)
@@ -82,6 +86,7 @@ func parsePlanFromResponse(ctx context.Context, response *gollem.Response) (*Pla
 
 	for i, t := range planResponse.Tasks {
 		plan.Tasks[i] = Task{
+			ID:          uuid.New().String(),
 			Description: t.Description,
 			State:       TaskStatePending,
 		}

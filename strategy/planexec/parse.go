@@ -1,7 +1,6 @@
 package planexec
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -9,7 +8,7 @@ import (
 )
 
 // parseTaskResult extracts the task execution result from LLM response
-func parseTaskResult(ctx context.Context, response *gollem.Response) string {
+func parseTaskResult(response *gollem.Response) string {
 	if response == nil || len(response.Texts) == 0 {
 		return ""
 	}

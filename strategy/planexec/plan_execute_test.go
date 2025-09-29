@@ -3,6 +3,7 @@ package planexec_test
 import (
 	"context"
 	"os"
+	"sync/atomic"
 	"testing"
 
 	"github.com/m-mizutani/gollem"
@@ -92,9 +93,7 @@ func TestBasicPlanExecution(t *testing.T) {
 		mockClient := createDirectResponseMock("The answer is 4")
 
 		// Create strategy with mock client
-		strategy := planexec.NewPlanExecuteStrategy(
-			planexec.WithLLMClient(mockClient),
-		)
+		strategy := planexec.New(mockClient)
 
 		// Create agent and test
 		agent := gollem.New(mockClient, gollem.WithStrategy(strategy))
@@ -109,9 +108,7 @@ func TestBasicPlanExecution(t *testing.T) {
 		mockClient := createPlanExecutionMock()
 
 		// Create strategy with mock client
-		strategy := planexec.NewPlanExecuteStrategy(
-			planexec.WithLLMClient(mockClient),
-		)
+		strategy := planexec.New(mockClient)
 
 		// Create agent and test
 		agent := gollem.New(mockClient, gollem.WithStrategy(strategy))
@@ -119,6 +116,147 @@ func TestBasicPlanExecution(t *testing.T) {
 		gt.NoError(t, err)
 		gt.V(t, resp).NotNil()
 		gt.True(t, len(resp.Texts) > 0)
+	})
+
+	t.Run("Comprehensive test with Hooks and Middleware", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Track hook calls
+		var planCreatedCalled int32
+		var planUpdatedCalled int32
+		var createdPlan *planexec.Plan
+		var updatedPlan *planexec.Plan
+
+		// Track middleware calls
+		var middlewareApplied int32
+
+		// Create hooks
+		hooks := planexec.PlanExecuteHooks{
+			OnPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
+				atomic.AddInt32(&planCreatedCalled, 1)
+				createdPlan = plan
+				return nil
+			},
+			OnPlanUpdated: func(ctx context.Context, plan *planexec.Plan) error {
+				atomic.AddInt32(&planUpdatedCalled, 1)
+				updatedPlan = plan
+				return nil
+			},
+		}
+
+		// Create middleware
+		mockMiddleware := func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+			return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+				return next(ctx, req)
+			}
+		}
+
+		// Create mock client that tests plan updates
+		callCount := 0
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				// Apply options to check middleware is passed
+				cfg := &gollem.SessionConfig{}
+				for _, opt := range options {
+					opt(cfg)
+				}
+
+				// Check if middleware was applied to the session
+				if len(cfg.ContentBlockMiddlewares()) > 0 {
+					atomic.AddInt32(&middlewareApplied, 1)
+				}
+
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						callCount++
+						switch callCount {
+						case 1:
+							// First call: return a plan with 2 tasks
+							return &gollem.Response{
+								Texts: []string{`{
+									"needs_plan": true,
+									"goal": "Process data",
+									"tasks": [
+										{"description": "Load data"},
+										{"description": "Transform data"}
+									]
+								}`},
+							}, nil
+						case 2:
+							// Execute first task
+							return &gollem.Response{
+								Texts: []string{"Data loaded successfully"},
+							}, nil
+						case 3:
+							// Reflection with plan update
+							return &gollem.Response{
+								Texts: []string{`{
+									"should_continue": true,
+									"goal_achieved": false,
+									"reason": "Need additional validation step",
+									"plan_updates": {
+										"new_tasks": ["Validate data"],
+										"remove_task_ids": []
+									}
+								}`},
+							}, nil
+						case 4:
+							// Execute second task
+							return &gollem.Response{
+								Texts: []string{"Data transformed"},
+							}, nil
+						case 5:
+							// Reflection to continue
+							return &gollem.Response{
+								Texts: []string{`{"should_continue": true, "goal_achieved": false}`},
+							}, nil
+						case 6:
+							// Execute validation task
+							return &gollem.Response{
+								Texts: []string{"Data validated"},
+							}, nil
+						default:
+							// Complete due to max iterations (testing limit)
+							return &gollem.Response{
+								Texts: []string{`{"should_continue": false, "goal_achieved": true}`},
+							}, nil
+						}
+					},
+					HistoryFunc: func() (*gollem.History, error) {
+						return &gollem.History{}, nil
+					},
+				}, nil
+			},
+			CountTokensFunc: func(ctx context.Context, history *gollem.History) (int, error) {
+				return 100, nil
+			},
+			IsCompatibleHistoryFunc: func(ctx context.Context, history *gollem.History) error {
+				return nil
+			},
+		}
+
+		// Create strategy with all options
+		strategy := planexec.New(mockClient,
+			planexec.WithHooks(hooks),
+			planexec.WithMiddleware([]gollem.ContentBlockMiddleware{mockMiddleware}),
+		)
+
+		// Create agent and test
+		agent := gollem.New(mockClient, gollem.WithStrategy(strategy))
+		resp, err := agent.Execute(ctx, gollem.Text("Process data"))
+		gt.NoError(t, err)
+		gt.V(t, resp).NotNil()
+
+		// Verify all hooks were called
+		gt.V(t, atomic.LoadInt32(&planCreatedCalled)).Equal(int32(1))
+		gt.V(t, atomic.LoadInt32(&planUpdatedCalled)).Equal(int32(1)) // Should be called when new task is added
+		gt.V(t, createdPlan).NotNil()
+		gt.V(t, createdPlan.Goal).Equal("Process data")
+		gt.V(t, updatedPlan).NotNil()
+		gt.V(t, len(updatedPlan.Tasks)).Equal(3) // Original 2 tasks + 1 new task
+
+		// Verify middleware was applied
+		gt.True(t, atomic.LoadInt32(&middlewareApplied) > 0) // Should be applied at least once
 	})
 }
 
@@ -130,9 +268,7 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 			ctx := context.Background()
 
 			// Create strategy
-			strategy := planexec.NewPlanExecuteStrategy(
-				planexec.WithLLMClient(client),
-			)
+			strategy := planexec.New(client)
 
 			// Create agent with the strategy
 			agent := gollem.New(client, gollem.WithStrategy(strategy))

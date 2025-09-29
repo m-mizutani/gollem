@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/google/uuid"
 	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
@@ -17,6 +18,9 @@ func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, middlewar
 	// Create a new session for reflection with JSON content type
 	sessionOpts := []gollem.SessionOption{
 		gollem.WithSessionContentType(gollem.ContentTypeJSON),
+	}
+	for _, mw := range middleware {
+		sessionOpts = append(sessionOpts, gollem.WithSessionContentBlockMiddleware(mw))
 	}
 
 	session, err := client.NewSession(ctx, sessionOpts...)
@@ -56,8 +60,8 @@ func parseReflectionFromResponse(ctx context.Context, response *gollem.Response,
 		ShouldContinue bool   `json:"should_continue"`
 		Reason         string `json:"reason"`
 		PlanUpdates    struct {
-			NewTasks    []string `json:"new_tasks"`
-			RemoveTasks []string `json:"remove_tasks"`
+			NewTasks      []string `json:"new_tasks"`       // Task descriptions for new tasks
+			RemoveTaskIDs []string `json:"remove_task_ids"` // Task IDs to remove
 		} `json:"plan_updates"`
 	}
 
@@ -73,28 +77,29 @@ func parseReflectionFromResponse(ctx context.Context, response *gollem.Response,
 
 	// If plan updates are needed, create updated plan
 	var updatedPlan *Plan
-	if len(reflectionResponse.PlanUpdates.NewTasks) > 0 || len(reflectionResponse.PlanUpdates.RemoveTasks) > 0 {
+	if len(reflectionResponse.PlanUpdates.NewTasks) > 0 || len(reflectionResponse.PlanUpdates.RemoveTaskIDs) > 0 {
 		// Create a copy of the current plan
 		updatedPlan = &Plan{
 			Goal:  currentPlan.Goal,
 			Tasks: make([]Task, 0, len(currentPlan.Tasks)),
 		}
 
-		// Copy existing tasks (except those to be removed)
+		// Copy existing tasks (except those to be removed by ID)
 		removeMap := make(map[string]bool)
-		for _, taskDesc := range reflectionResponse.PlanUpdates.RemoveTasks {
-			removeMap[taskDesc] = true
+		for _, taskID := range reflectionResponse.PlanUpdates.RemoveTaskIDs {
+			removeMap[taskID] = true
 		}
 
 		for _, task := range currentPlan.Tasks {
-			if !removeMap[task.Description] {
+			if !removeMap[task.ID] {
 				updatedPlan.Tasks = append(updatedPlan.Tasks, task)
 			}
 		}
 
-		// Add new tasks
+		// Add new tasks with unique IDs
 		for _, taskDesc := range reflectionResponse.PlanUpdates.NewTasks {
 			updatedPlan.Tasks = append(updatedPlan.Tasks, Task{
+				ID:          uuid.New().String(),
 				Description: taskDesc,
 				State:       TaskStatePending,
 			})
@@ -102,7 +107,7 @@ func parseReflectionFromResponse(ctx context.Context, response *gollem.Response,
 
 		logger := ctxlog.From(ctx)
 		logger.Debug("plan updated", "new_tasks", len(reflectionResponse.PlanUpdates.NewTasks),
-			"removed_tasks", len(reflectionResponse.PlanUpdates.RemoveTasks))
+			"removed_tasks", len(reflectionResponse.PlanUpdates.RemoveTaskIDs))
 	}
 
 	return updatedPlan, shouldContinue, nil

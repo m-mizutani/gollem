@@ -9,7 +9,7 @@ import (
 )
 
 // getNextPendingTask returns the next task that needs to be executed
-func getNextPendingTask(ctx context.Context, plan *Plan) *Task {
+func getNextPendingTask(_ context.Context, plan *Plan) *Task {
 	if plan == nil {
 		return nil
 	}

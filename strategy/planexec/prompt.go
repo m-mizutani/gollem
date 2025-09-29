@@ -78,13 +78,15 @@ Respond in JSON format:
   "should_continue": true/false,
   "reason": "Explanation of your decision",
   "plan_updates": {
-    "new_tasks": ["any new tasks if needed"],
-    "remove_tasks": ["any tasks to remove"]
+    "new_tasks": ["description of any new tasks if needed"],
+    "remove_task_ids": ["IDs of any tasks to remove"]
   }
-}`
+}
+
+Note: Use task IDs (not descriptions) when specifying tasks to remove.`
 
 // buildPlanPrompt creates a prompt for analyzing and planning
-func buildPlanPrompt(ctx context.Context, inputs []gollem.Input) []gollem.Input {
+func buildPlanPrompt(_ context.Context, inputs []gollem.Input) []gollem.Input {
 	// Combine all input texts
 	var inputTexts []string
 	for _, input := range inputs {
@@ -103,9 +105,9 @@ func buildPlanPrompt(ctx context.Context, inputs []gollem.Input) []gollem.Input 
 func buildExecutePrompt(ctx context.Context, task *Task, plan *Plan) []gollem.Input {
 	// Build list of completed tasks
 	var completedTasks []string
-	for i, t := range plan.Tasks {
+	for _, t := range plan.Tasks {
 		if t.State == TaskStateCompleted {
-			completedTasks = append(completedTasks, fmt.Sprintf("%d. %s", i+1, t.Description))
+			completedTasks = append(completedTasks, fmt.Sprintf("[ID: %s] %s", t.ID, t.Description))
 			if t.Result != "" {
 				completedTasks = append(completedTasks, fmt.Sprintf("   Result: %s", t.Result))
 			}
@@ -129,8 +131,8 @@ func buildReflectPrompt(ctx context.Context, plan *Plan) []gollem.Input {
 	var remainingTasks []string
 	var latestResult string
 
-	for i, task := range plan.Tasks {
-		taskStr := fmt.Sprintf("%d. %s", i+1, task.Description)
+	for _, task := range plan.Tasks {
+		taskStr := fmt.Sprintf("[ID: %s] %s", task.ID, task.Description)
 
 		switch task.State {
 		case TaskStateCompleted:

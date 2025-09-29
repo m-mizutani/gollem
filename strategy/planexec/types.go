@@ -17,6 +17,7 @@ const (
 
 // Task represents an executable task in the plan
 type Task struct {
+	ID          string // Unique identifier for the task
 	Description string
 	State       TaskState
 	Result      string
@@ -37,10 +38,9 @@ type PlanExecuteHooks struct {
 
 // PlanExecuteStrategy implements the Strategy interface for plan-and-execute approach
 type PlanExecuteStrategy struct {
-	client        gollem.LLMClient
-	middleware    []gollem.ContentBlockMiddleware
-	hooks         PlanExecuteHooks
-	maxIterations int
+	client     gollem.LLMClient
+	middleware []gollem.ContentBlockMiddleware
+	hooks      PlanExecuteHooks
 
 	// Runtime state
 	plan           *Plan

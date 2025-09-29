@@ -8,10 +8,10 @@ import (
 	"github.com/m-mizutani/gollem"
 )
 
-// NewPlanExecuteStrategy creates a new PlanExecuteStrategy instance
-func NewPlanExecuteStrategy(opts ...PlanExecuteOption) *PlanExecuteStrategy {
+// New creates a new PlanExecuteStrategy instance
+func New(client gollem.LLMClient, opts ...PlanExecuteOption) *PlanExecuteStrategy {
 	s := &PlanExecuteStrategy{
-		maxIterations: 20, // default max iterations
+		client: client,
 	}
 
 	for _, opt := range opts {
@@ -67,7 +67,10 @@ func (s *PlanExecuteStrategy) Handle(ctx context.Context, state *gollem.Strategy
 	// ========== Phase 2: Task Result Processing and Reflection ==========
 	if s.waitingForTask && state.LastResponse != nil {
 		// Save task result
-		s.currentTask.Result = parseTaskResult(ctx, state.LastResponse)
+		if s.currentTask == nil {
+			return nil, nil, goerr.New("unexpected state: waiting for task but no current task is set")
+		}
+		s.currentTask.Result = parseTaskResult(state.LastResponse)
 		s.currentTask.State = TaskStateCompleted
 		s.waitingForTask = false
 
@@ -123,13 +126,6 @@ func (s *PlanExecuteStrategy) Tools(ctx context.Context) ([]gollem.Tool, error) 
 
 // Option functions
 
-// WithLLMClient sets the LLM client for the strategy
-func WithLLMClient(client gollem.LLMClient) PlanExecuteOption {
-	return func(s *PlanExecuteStrategy) {
-		s.client = client
-	}
-}
-
 // WithMiddleware sets the content block middleware
 func WithMiddleware(middleware []gollem.ContentBlockMiddleware) PlanExecuteOption {
 	return func(s *PlanExecuteStrategy) {
@@ -141,12 +137,5 @@ func WithMiddleware(middleware []gollem.ContentBlockMiddleware) PlanExecuteOptio
 func WithHooks(hooks PlanExecuteHooks) PlanExecuteOption {
 	return func(s *PlanExecuteStrategy) {
 		s.hooks = hooks
-	}
-}
-
-// WithMaxIterations sets the maximum number of iterations
-func WithMaxIterations(max int) PlanExecuteOption {
-	return func(s *PlanExecuteStrategy) {
-		s.maxIterations = max
 	}
 }
