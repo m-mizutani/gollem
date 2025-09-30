@@ -3,6 +3,7 @@ package planexec_test
 import (
 	"context"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -88,27 +89,24 @@ func TestBasicPlanExecution(t *testing.T) {
 		}
 	}
 
-	t.Run("Direct response without plan using Agent", func(t *testing.T) {
-		ctx := context.Background()
-		mockClient := createDirectResponseMock("The answer is 4")
-
-		// Create strategy with mock client
-		strategy := planexec.New(mockClient)
-
-		// Create agent and test
-		agent := gollem.New(mockClient, gollem.WithStrategy(strategy))
-		resp, err := agent.Execute(ctx, gollem.Text("What is 2 + 2?"))
-		gt.NoError(t, err)
-		gt.V(t, resp).NotNil()
-		gt.V(t, resp.Texts[0]).Equal("The answer is 4")
-	})
-
-	t.Run("Simple plan with single task using Agent", func(t *testing.T) {
+	t.Run("Plan with single task execution", func(t *testing.T) {
 		ctx := context.Background()
 		mockClient := createPlanExecutionMock()
 
-		// Create strategy with mock client
-		strategy := planexec.New(mockClient)
+		// Track task execution
+		var planCreatedCalled int32
+		var createdPlan *planexec.Plan
+
+		hooks := planexec.PlanExecuteHooks{
+			OnPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
+				atomic.AddInt32(&planCreatedCalled, 1)
+				createdPlan = plan
+				return nil
+			},
+		}
+
+		// Create strategy with hooks
+		strategy := planexec.New(mockClient, planexec.WithHooks(hooks))
 
 		// Create agent and test
 		agent := gollem.New(mockClient, gollem.WithStrategy(strategy))
@@ -116,6 +114,45 @@ func TestBasicPlanExecution(t *testing.T) {
 		gt.NoError(t, err)
 		gt.V(t, resp).NotNil()
 		gt.True(t, len(resp.Texts) > 0)
+
+		// Verify plan was created with tasks
+		gt.V(t, atomic.LoadInt32(&planCreatedCalled)).Equal(int32(1))
+		gt.V(t, createdPlan).NotNil()
+		gt.V(t, len(createdPlan.Tasks)).Equal(1)
+		gt.S(t, createdPlan.Tasks[0].Description).Contains("Add 10 and 5")
+	})
+
+	t.Run("Direct response without tasks", func(t *testing.T) {
+		ctx := context.Background()
+		mockClient := createDirectResponseMock("The answer is 4")
+
+		// Track plan creation
+		var planCreatedCalled int32
+		var createdPlan *planexec.Plan
+
+		hooks := planexec.PlanExecuteHooks{
+			OnPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
+				atomic.AddInt32(&planCreatedCalled, 1)
+				createdPlan = plan
+				return nil
+			},
+		}
+
+		// Create strategy with hooks
+		strategy := planexec.New(mockClient, planexec.WithHooks(hooks))
+
+		// Create agent and test
+		agent := gollem.New(mockClient, gollem.WithStrategy(strategy))
+		resp, err := agent.Execute(ctx, gollem.Text("What is 2 + 2?"))
+		gt.NoError(t, err)
+		gt.V(t, resp).NotNil()
+		gt.V(t, resp.Texts[0]).Equal("The answer is 4")
+
+		// Verify plan was created but with no tasks (direct response)
+		gt.V(t, atomic.LoadInt32(&planCreatedCalled)).Equal(int32(1))
+		gt.V(t, createdPlan).NotNil()
+		gt.V(t, len(createdPlan.Tasks)).Equal(0)
+		gt.V(t, createdPlan.DirectResponse).Equal("The answer is 4")
 	})
 
 	t.Run("Comprehensive test with Hooks and Middleware", func(t *testing.T) {
@@ -267,27 +304,112 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 		return func(t *testing.T) {
 			ctx := context.Background()
 
-			// Create strategy
-			strategy := planexec.New(client)
+			// Test simple calculation (likely direct response)
+			t.Run("SimpleCalculation", func(t *testing.T) {
+				// Track hooks
+				var planCreatedCalled int32
+				var createdPlan *planexec.Plan
 
-			// Create agent with the strategy
-			agent := gollem.New(client, gollem.WithStrategy(strategy))
+				hooks := planexec.PlanExecuteHooks{
+					OnPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
+						atomic.AddInt32(&planCreatedCalled, 1)
+						createdPlan = plan
+						return nil
+					},
+				}
 
-			// Test direct response
-			t.Run("DirectResponse", func(t *testing.T) {
+				// Create strategy with hooks
+				strategy := planexec.New(client, planexec.WithHooks(hooks))
+
+				// Create agent with the strategy
+				agent := gollem.New(client, gollem.WithStrategy(strategy))
+
 				response, err := agent.Execute(ctx, gollem.Text("What is 2 + 2?"))
 				gt.NoError(t, err)
 				gt.V(t, response).NotNil()
 				gt.True(t, len(response.Texts) > 0)
+
+				// Verify the response contains "4"
+				responseText := strings.Join(response.Texts, " ")
+				gt.S(t, responseText).Contains("4")
+
+				// Simple questions should create a plan (but with 0 tasks for direct response)
+				gt.V(t, atomic.LoadInt32(&planCreatedCalled)).Equal(int32(1))
+				gt.V(t, createdPlan).NotNil()
+				gt.V(t, len(createdPlan.Tasks)).Equal(0) // Direct response should have no tasks
 			})
 
-			// Test multiple task execution
-			t.Run("MultipleTaskExecution", func(t *testing.T) {
+			// Test task creation and execution with reflection
+			t.Run("TaskExecutionWithReflection", func(t *testing.T) {
+				// Track hooks and middleware
+				var planCreatedCalled int32
+				var createdPlan *planexec.Plan
+				var sessionCreationCount int32
+				var reflectionInputs []string
+
+				hooks := planexec.PlanExecuteHooks{
+					OnPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
+						atomic.AddInt32(&planCreatedCalled, 1)
+						createdPlan = plan
+						return nil
+					},
+				}
+
+				// Create middleware to track LLM calls and detect reflection
+				mockMiddleware := func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+					return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+						atomic.AddInt32(&sessionCreationCount, 1)
+
+						// Check if this is a reflection call by looking for reflection-related keywords
+						for _, input := range req.Inputs {
+							if text, ok := input.(gollem.Text); ok {
+								inputStr := strings.ToLower(string(text))
+								if strings.Contains(inputStr, "goal_achieved") ||
+								   strings.Contains(inputStr, "should_continue") ||
+								   strings.Contains(inputStr, "completed tasks") {
+									reflectionInputs = append(reflectionInputs, inputStr)
+								}
+							}
+						}
+
+						return next(ctx, req)
+					}
+				}
+
+				// Create strategy with hooks and middleware
+				strategy := planexec.New(client,
+					planexec.WithHooks(hooks),
+					planexec.WithMiddleware([]gollem.ContentBlockMiddleware{mockMiddleware}),
+				)
+
+				// Create agent with the strategy
+				agent := gollem.New(client, gollem.WithStrategy(strategy))
+
+				// Use a prompt that forces task creation
 				response, err := agent.Execute(ctx,
-					gollem.Text("List three primary colors and explain why they are called primary"))
+					gollem.Text("Please follow these steps exactly: Step 1: Calculate 2+2. Step 2: Calculate 3+3. Step 3: Add the results from step 1 and step 2."))
 				gt.NoError(t, err)
 				gt.V(t, response).NotNil()
 				gt.True(t, len(response.Texts) > 0)
+
+				// Verify the response contains expected content
+				responseText := strings.ToLower(strings.Join(response.Texts, " "))
+				gt.S(t, responseText).ContainsAny("4", "6", "10", "four", "six", "ten")
+
+				// Verify plan was created
+				gt.V(t, atomic.LoadInt32(&planCreatedCalled)).Equal(int32(1))
+				gt.V(t, createdPlan).NotNil()
+
+				// Verify multiple sessions were created (minimum: plan + execution + reflection)
+				// If tasks were created, we expect at least 3 sessions:
+				// 1. Initial plan creation
+				// 2. At least one task execution
+				// 3. At least one reflection after task
+				sessionCount := atomic.LoadInt32(&sessionCreationCount)
+				gt.True(t, sessionCount >= 3)
+
+				// Verify reflection was called (check if we captured reflection inputs)
+				gt.True(t, len(reflectionInputs) > 0)
 			})
 		}
 	}

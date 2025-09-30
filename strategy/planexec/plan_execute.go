@@ -48,18 +48,18 @@ func (s *PlanExecuteStrategy) Handle(ctx context.Context, state *gollem.Strategy
 		}
 		s.plan = plan
 
+		// Hook: plan created (always call after plan is created)
+		if s.hooks.OnPlanCreated != nil {
+			if err := s.hooks.OnPlanCreated(ctx, plan); err != nil {
+				return nil, nil, goerr.Wrap(err, "hook OnPlanCreated failed")
+			}
+		}
+
 		// No plan needed - return direct response
 		if len(plan.Tasks) == 0 {
 			return nil, &gollem.ExecuteResponse{
 				Texts: []string{plan.DirectResponse},
 			}, nil
-		}
-
-		// Hook: plan created
-		if s.hooks.OnPlanCreated != nil {
-			if err := s.hooks.OnPlanCreated(ctx, plan); err != nil {
-				return nil, nil, goerr.Wrap(err, "hook OnPlanCreated failed")
-			}
 		}
 		// Proceed to phase 3 to select first task
 	}
