@@ -286,6 +286,9 @@ func TestStreamMiddleware(t *testing.T) {
 		// Generate stream with original prompt (will be modified by middleware)
 		streamChan, err := session.GenerateStream(t.Context(), gollem.Text("Say ORIGINAL_PROMPT"))
 		gt.NoError(t, err)
+		if err != nil {
+			return // Early return if stream creation failed
+		}
 
 		// Collect all streaming responses
 		var collectedTexts []string
@@ -327,7 +330,8 @@ func TestStreamMiddleware(t *testing.T) {
 			t.Skip("TEST_OPENAI_API_KEY is not set")
 		}
 		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
-			return openai.New(context.Background(), apiKey)
+			// Use gpt-5-nano for streaming tests as it supports streaming without organization verification
+			return openai.New(context.Background(), apiKey, openai.WithModel("gpt-5-nano"))
 		})
 	})
 

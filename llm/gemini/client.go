@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	DefaultModel          = "gemini-2.0-flash"
+	DefaultModel          = "gemini-2.5-flash"
 	DefaultEmbeddingModel = "text-embedding-004"
 )
 
@@ -185,13 +185,19 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 		return nil, goerr.New("location is required")
 	}
 
+	var budget int32 = 0
+
 	client := &Client{
-		projectID:        projectID,
-		location:         location,
-		defaultModel:     DefaultModel,
-		embeddingModel:   DefaultEmbeddingModel,
-		contentType:      gollem.ContentTypeText,
-		generationConfig: &genai.GenerateContentConfig{},
+		projectID:      projectID,
+		location:       location,
+		defaultModel:   DefaultModel,
+		embeddingModel: DefaultEmbeddingModel,
+		contentType:    gollem.ContentTypeText,
+		generationConfig: &genai.GenerateContentConfig{
+			ThinkingConfig: &genai.ThinkingConfig{
+				ThinkingBudget: &budget,
+			},
+		},
 	}
 
 	for _, option := range options {
@@ -873,41 +879,6 @@ func (c *Client) GenerateEmbedding(ctx context.Context, dimension int, input []s
 	}
 
 	return embeddings, nil
-}
-
-// IsCompatibleHistory checks if the given history is compatible with the Gemini client.
-func (c *Client) IsCompatibleHistory(ctx context.Context, history *gollem.History) error {
-	if history == nil {
-		return nil
-	}
-	if history.LLType != gollem.LLMTypeGemini {
-		return goerr.New("history is not compatible with Gemini", goerr.V("expected", gollem.LLMTypeGemini), goerr.V("actual", history.LLType))
-	}
-	if history.Version != gollem.HistoryVersion {
-		return goerr.New("history version is not supported", goerr.V("expected", gollem.HistoryVersion), goerr.V("actual", history.Version))
-	}
-	return nil
-}
-
-// CountTokens counts the number of tokens in the given history.
-func (c *Client) CountTokens(ctx context.Context, history *gollem.History) (int, error) {
-	if history == nil {
-		return 0, nil
-	}
-
-	// Convert history to new format
-	contents, err := history.ToGemini()
-	if err != nil {
-		return 0, goerr.Wrap(err, "failed to convert history")
-	}
-
-	// Count tokens using the model (contents are already in new SDK format)
-	result, err := c.client.Models.CountTokens(ctx, c.defaultModel, contents, nil)
-	if err != nil {
-		return 0, goerr.Wrap(err, "failed to count tokens")
-	}
-
-	return int(result.TotalTokens), nil
 }
 
 // Helper function to convert new SDK history to gollem.History

@@ -41,6 +41,12 @@ type generationParameters struct {
 	// FrequencyPenalty decreases the model's likelihood to repeat the same line verbatim.
 	// Range: -2.0 to 2.0
 	FrequencyPenalty float32
+
+	// ReasoningEffort tunes how much reasoning time the model spends ("minimal", "medium", "high").
+	ReasoningEffort string
+
+	// Verbosity controls the amount of output tokens generated ("low", "medium", "high").
+	Verbosity string
 }
 
 // Client is a client for the OpenAI API.
@@ -68,7 +74,7 @@ type Client struct {
 }
 
 const (
-	DefaultModel          = "gpt-4.1"
+	DefaultModel          = "gpt-5"
 	DefaultEmbeddingModel = "text-embedding-3-small"
 )
 
@@ -135,6 +141,22 @@ func WithFrequencyPenalty(penalty float32) Option {
 	}
 }
 
+// WithReasoningEffort sets the reasoning_effort parameter for GPT-5 models.
+// Supported values (as of 2025-10-04): "minimal", "medium", "high".
+func WithReasoningEffort(effort string) Option {
+	return func(c *Client) {
+		c.params.ReasoningEffort = effort
+	}
+}
+
+// WithVerbosity sets the verbosity parameter for GPT-5 models.
+// Supported values (as of 2025-10-04): "low", "medium", "high".
+func WithVerbosity(verbosity string) Option {
+	return func(c *Client) {
+		c.params.Verbosity = verbosity
+	}
+}
+
 // WithSystemPrompt sets the system prompt to use for chat completions.
 func WithSystemPrompt(prompt string) Option {
 	return func(c *Client) {
@@ -156,8 +178,11 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 	client := &Client{
 		defaultModel:   DefaultModel,
 		embeddingModel: DefaultEmbeddingModel,
-		params:         generationParameters{},
-		contentType:    gollem.ContentTypeText,
+		params: generationParameters{
+			ReasoningEffort: "medium",
+			Verbosity:       "low",
+		},
+		contentType: gollem.ContentTypeText,
 	}
 
 	for _, option := range options {
@@ -364,6 +389,14 @@ func (s *Session) createRequest(stream bool) (openai.ChatCompletionRequest, erro
 		PresencePenalty:  s.params.PresencePenalty,
 		FrequencyPenalty: s.params.FrequencyPenalty,
 		Stream:           stream,
+	}
+
+	if s.params.ReasoningEffort != "" {
+		req.ReasoningEffort = s.params.ReasoningEffort
+	}
+
+	if s.params.Verbosity != "" {
+		req.Verbosity = s.params.Verbosity
 	}
 
 	// Add content type to the request
@@ -617,6 +650,15 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 
 			// Process streaming chunks
 			for {
+				select {
+				case <-ctx.Done():
+					responseChan <- &gollem.ContentResponse{
+						Error: goerr.Wrap(ctx.Err(), "context cancelled during streaming"),
+					}
+					return
+				default:
+				}
+
 				resp, err := stream.Recv()
 				if err != nil {
 					if err == io.EOF {
@@ -800,6 +842,11 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 		return nil, err
 	}
 
+	// Sanity check: streamChan should not be nil if err is nil
+	if streamChan == nil {
+		return nil, goerr.New("middleware returned nil channel without error")
+	}
+
 	// Convert ContentStreamResponse channel to Response channel
 	responseChan := make(chan *gollem.Response)
 	go func() {
@@ -821,69 +868,4 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	}()
 
 	return responseChan, nil
-}
-
-// IsCompatibleHistory checks if the given history is compatible with the OpenAI client.
-func (c *Client) IsCompatibleHistory(ctx context.Context, history *gollem.History) error {
-	if history == nil {
-		return nil
-	}
-	if history.LLType != gollem.LLMTypeOpenAI {
-		return goerr.New("history is not compatible with OpenAI", goerr.V("expected", gollem.LLMTypeOpenAI), goerr.V("actual", history.LLType))
-	}
-	if history.Version != gollem.HistoryVersion {
-		return goerr.New("history version is not supported", goerr.V("expected", gollem.HistoryVersion), goerr.V("actual", history.Version))
-	}
-	return nil
-}
-
-// CountTokens counts the number of tokens in the history for OpenAI models.
-// This implementation uses a character-based estimation since the official
-// tiktoken library for Go is not available. For production use, consider
-// integrating with OpenAI's official token counting API or tiktoken-go library.
-func (c *Client) CountTokens(ctx context.Context, history *gollem.History) (int, error) {
-	if history == nil {
-		return 0, nil
-	}
-
-	messages, err := history.ToOpenAI()
-	if err != nil {
-		return 0, goerr.Wrap(err, "failed to convert history to OpenAI format")
-	}
-
-	totalChars := 0
-	for _, msg := range messages {
-		// Count role and content characters
-		totalChars += len(msg.Role) + len(msg.Content)
-
-		// Count tool calls
-		if msg.ToolCalls != nil {
-			for _, call := range msg.ToolCalls {
-				totalChars += len(call.Function.Name) + len(call.Function.Arguments)
-			}
-		}
-
-		// Count tool call ID if present
-		if msg.ToolCallID != "" {
-			totalChars += len(msg.ToolCallID)
-		}
-	}
-
-	// Enhanced estimation for OpenAI models
-	// GPT-4 typically uses about 3.5-4 characters per token for English text
-	// We also add overhead for message structure (role, content fields, etc.)
-	messageOverhead := len(messages) * 10 // Estimated overhead per message
-	estimatedTokens := (totalChars + messageOverhead) / 4
-
-	// Add model-specific adjustments
-	switch c.defaultModel {
-	case openai.GPT4, openai.GPT4TurboPreview, openai.GPT4Turbo:
-		// GPT-4 models tend to be more efficient
-		estimatedTokens = int(float64(estimatedTokens) * 0.9)
-	case openai.GPT3Dot5Turbo:
-		// GPT-3.5 tends to use slightly more tokens
-		estimatedTokens = int(float64(estimatedTokens) * 1.1)
-	}
-
-	return estimatedTokens, nil
 }

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	DefaultEmbeddingModel = "claude-3-sonnet-20240229"
+	DefaultEmbeddingModel = "claude-sonnet-4-5-20250929"
 )
 
 var (
@@ -1014,69 +1014,4 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	}()
 
 	return responseChan, nil
-}
-
-// IsCompatibleHistory checks if the given history is compatible with the Claude client.
-func (c *Client) IsCompatibleHistory(ctx context.Context, history *gollem.History) error {
-	if history == nil {
-		return nil
-	}
-	if history.LLType != gollem.LLMTypeClaude {
-		return goerr.New("history is not compatible with Claude", goerr.V("expected", gollem.LLMTypeClaude), goerr.V("actual", history.LLType))
-	}
-	if history.Version != gollem.HistoryVersion {
-		return goerr.New("history version is not supported", goerr.V("expected", gollem.HistoryVersion), goerr.V("actual", history.Version))
-	}
-	return nil
-}
-
-// CountTokens counts the number of tokens in the history for Claude models.
-// Claude uses a different tokenization approach compared to OpenAI.
-// This implementation provides an estimated count based on Claude's characteristics.
-func (c *Client) CountTokens(ctx context.Context, history *gollem.History) (int, error) {
-	if history == nil {
-		return 0, nil
-	}
-
-	if history.LLType != gollem.LLMTypeClaude {
-		return 0, goerr.New("history is not for Claude")
-	}
-
-	totalChars := 0
-
-	// Use unified Messages field for accurate counting
-	for _, msg := range history.Messages {
-		// Count role characters
-		totalChars += len(string(msg.Role))
-
-		// Count content characters
-		for _, content := range msg.Contents {
-			// Estimate based on Data field size
-			totalChars += len(content.Data)
-		}
-	}
-
-	// Claude-specific token estimation
-	// Claude typically uses about 3.8-4.2 characters per token for English text
-	// Claude has less message overhead compared to OpenAI
-	messageOverhead := len(history.Messages) * 5 // Lower overhead for Claude
-	estimatedTokens := (totalChars + messageOverhead) / 4
-
-	// Model-specific adjustments for Claude
-	switch c.defaultModel {
-	case "claude-3-opus-20240229":
-		// Opus tends to be more verbose in tokenization
-		estimatedTokens = int(float64(estimatedTokens) * 1.05)
-	case "claude-3-sonnet-20240229":
-		// Sonnet is balanced
-		estimatedTokens = int(float64(estimatedTokens) * 1.0)
-	case "claude-3-haiku-20240307":
-		// Haiku is more efficient
-		estimatedTokens = int(float64(estimatedTokens) * 0.95)
-	case "claude-3-5-sonnet-20241022":
-		// Claude 3.5 Sonnet is highly efficient
-		estimatedTokens = int(float64(estimatedTokens) * 0.9)
-	}
-
-	return estimatedTokens, nil
 }

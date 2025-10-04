@@ -18,11 +18,3 @@ func init() {
 }
 
 func DebugLogger() *slog.Logger { return debugLogger }
-
-// Export buildCompactedHistory for testing
-var BuildCompactedHistory = buildCompactedHistory
-
-// Export conversion functions for testing
-var (
-	MessagesToTemplateMessages = messagesToTemplateMessages
-)
