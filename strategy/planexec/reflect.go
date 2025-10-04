@@ -17,7 +17,7 @@ type reflectionResult struct {
 }
 
 // reflect performs reflection after task completion to update or add tasks
-func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware) (*reflectionResult, error) {
+func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completedTask *Task, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware) (*reflectionResult, error) {
 	logger := ctxlog.From(ctx)
 	logger.Debug("performing reflection")
 
@@ -38,7 +38,7 @@ func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, tools []g
 	}
 
 	// Build reflection prompt
-	reflectPrompt := buildReflectPrompt(ctx, plan, tools)
+	reflectPrompt := buildReflectPrompt(ctx, plan, completedTask.Result, tools)
 
 	// Generate reflection using LLM
 	response, err := session.GenerateContent(ctx, reflectPrompt...)
@@ -63,8 +63,13 @@ func parseReflectionFromResponse(ctx context.Context, response *gollem.Response,
 		NewTasks:     []Task{},
 	}
 
-	if response == nil || len(response.Texts) == 0 {
+	if response == nil {
 		// If no response, return empty result (no updates)
+		return result, nil
+	}
+
+	if len(response.Texts) == 0 {
+		// If no text but has function calls, return empty result (no updates)
 		return result, nil
 	}
 

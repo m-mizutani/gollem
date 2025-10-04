@@ -34,13 +34,13 @@ type Plan struct {
 }
 
 // PlanExecuteHooks provides hook points for plan lifecycle events
-type PlanExecuteHooks struct {
-	OnPlanCreated func(ctx context.Context, plan *Plan) error
-	OnPlanUpdated func(ctx context.Context, plan *Plan) error
+type PlanExecuteHooks interface {
+	OnCreated(ctx context.Context, plan *Plan) error
+	OnUpdated(ctx context.Context, plan *Plan) error
 }
 
-// PlanExecuteStrategy implements the Strategy interface for plan-and-execute approach
-type PlanExecuteStrategy struct {
+// Strategy implements the gollem.Strategy interface for plan-and-execute approach
+type Strategy struct {
 	client        gollem.LLMClient
 	middleware    []gollem.ContentBlockMiddleware
 	hooks         PlanExecuteHooks
@@ -53,5 +53,5 @@ type PlanExecuteStrategy struct {
 	taskIterationCount int // Counts completed tasks
 }
 
-// PlanExecuteOption is a functional option for configuring PlanExecuteStrategy
-type PlanExecuteOption func(*PlanExecuteStrategy)
+// Option is a functional option for configuring Strategy
+type Option func(*Strategy)

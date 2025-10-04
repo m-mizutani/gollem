@@ -9,7 +9,7 @@ import (
 
 // parseTaskResult extracts the task execution result from LLM response
 func parseTaskResult(response *gollem.Response) string {
-	if response == nil || len(response.Texts) == 0 {
+	if response == nil {
 		return ""
 	}
 

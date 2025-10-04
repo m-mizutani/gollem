@@ -8,9 +8,9 @@ import (
 	"github.com/m-mizutani/gollem"
 )
 
-// New creates a new PlanExecuteStrategy instance
-func New(client gollem.LLMClient, opts ...PlanExecuteOption) *PlanExecuteStrategy {
-	s := &PlanExecuteStrategy{
+// New creates a new Strategy instance
+func New(client gollem.LLMClient, opts ...Option) *Strategy {
+	s := &Strategy{
 		client:        client,
 		maxIterations: DefaultMaxIterations,
 	}
@@ -23,7 +23,7 @@ func New(client gollem.LLMClient, opts ...PlanExecuteOption) *PlanExecuteStrateg
 }
 
 // Init initializes the strategy with initial inputs
-func (s *PlanExecuteStrategy) Init(ctx context.Context, inputs []gollem.Input) error {
+func (s *Strategy) Init(ctx context.Context, inputs []gollem.Input) error {
 	// Initialize strategy state
 	s.plan = nil
 	s.currentTask = nil
@@ -33,7 +33,7 @@ func (s *PlanExecuteStrategy) Init(ctx context.Context, inputs []gollem.Input) e
 }
 
 // Handle determines the next input for the LLM based on the current state
-func (s *PlanExecuteStrategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
 	logger := ctxlog.From(ctx)
 	logger.Debug("plan-execute strategy handle",
 		"iteration", state.Iteration,
@@ -63,9 +63,9 @@ func (s *PlanExecuteStrategy) Handle(ctx context.Context, state *gollem.Strategy
 		s.plan = plan
 
 		// Hook: plan created (always call after plan is created)
-		if s.hooks.OnPlanCreated != nil {
-			if err := s.hooks.OnPlanCreated(ctx, plan); err != nil {
-				return nil, nil, goerr.Wrap(err, "hook OnPlanCreated failed")
+		if s.hooks != nil {
+			if err := s.hooks.OnCreated(ctx, plan); err != nil {
+				return nil, nil, goerr.Wrap(err, "hook OnCreated failed")
 			}
 		}
 
@@ -100,7 +100,7 @@ func (s *PlanExecuteStrategy) Handle(ctx context.Context, state *gollem.Strategy
 		}
 
 		// Perform reflection only if enabled
-		reflectionResult, err := reflect(ctx, s.client, s.plan, state.Tools, s.middleware)
+		reflectionResult, err := reflect(ctx, s.client, s.plan, s.currentTask, state.Tools, s.middleware)
 		if err != nil {
 			return nil, nil, goerr.Wrap(err, "reflection failed")
 		}
@@ -122,9 +122,9 @@ func (s *PlanExecuteStrategy) Handle(ctx context.Context, state *gollem.Strategy
 		// Add new tasks from reflection
 		if len(reflectionResult.NewTasks) > 0 {
 			s.plan.Tasks = append(s.plan.Tasks, reflectionResult.NewTasks...)
-			if s.hooks.OnPlanUpdated != nil {
-				if err := s.hooks.OnPlanUpdated(ctx, s.plan); err != nil {
-					return nil, nil, goerr.Wrap(err, "hook OnPlanUpdated failed")
+			if s.hooks != nil {
+				if err := s.hooks.OnUpdated(ctx, s.plan); err != nil {
+					return nil, nil, goerr.Wrap(err, "hook OnUpdated failed")
 				}
 			}
 		}
@@ -160,7 +160,7 @@ func (s *PlanExecuteStrategy) Handle(ctx context.Context, state *gollem.Strategy
 }
 
 // Tools returns the tools that this strategy provides
-func (s *PlanExecuteStrategy) Tools(ctx context.Context) ([]gollem.Tool, error) {
+func (s *Strategy) Tools(ctx context.Context) ([]gollem.Tool, error) {
 	// Plan & Execute strategy does not provide additional tools
 	return []gollem.Tool{}, nil
 }
@@ -168,22 +168,22 @@ func (s *PlanExecuteStrategy) Tools(ctx context.Context) ([]gollem.Tool, error) 
 // Option functions
 
 // WithMiddleware sets the content block middleware
-func WithMiddleware(middleware ...gollem.ContentBlockMiddleware) PlanExecuteOption {
-	return func(s *PlanExecuteStrategy) {
+func WithMiddleware(middleware ...gollem.ContentBlockMiddleware) Option {
+	return func(s *Strategy) {
 		s.middleware = append(s.middleware, middleware...)
 	}
 }
 
 // WithHooks sets the lifecycle hooks
-func WithHooks(hooks PlanExecuteHooks) PlanExecuteOption {
-	return func(s *PlanExecuteStrategy) {
+func WithHooks(hooks PlanExecuteHooks) Option {
+	return func(s *Strategy) {
 		s.hooks = hooks
 	}
 }
 
 // WithMaxIterations sets the maximum number of task execution iterations
-func WithMaxIterations(max int) PlanExecuteOption {
-	return func(s *PlanExecuteStrategy) {
+func WithMaxIterations(max int) Option {
+	return func(s *Strategy) {
 		s.maxIterations = max
 	}
 }

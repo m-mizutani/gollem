@@ -52,7 +52,10 @@ func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []golle
 
 // parsePlanFromResponse extracts plan from LLM response
 func parsePlanFromResponse(ctx context.Context, response *gollem.Response) (*Plan, error) {
-	if response == nil || len(response.Texts) == 0 {
+	if response == nil {
+		return nil, goerr.New("response is nil")
+	}
+	if len(response.Texts) == 0 {
 		return nil, goerr.New("empty response from LLM")
 	}
 

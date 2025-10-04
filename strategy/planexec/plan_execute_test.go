@@ -19,6 +19,26 @@ import (
 	"github.com/m-mizutani/gt"
 )
 
+// testHooks is a test implementation of PlanExecuteHooks
+type testHooks struct {
+	onCreated func(ctx context.Context, plan *planexec.Plan) error
+	onUpdated func(ctx context.Context, plan *planexec.Plan) error
+}
+
+func (h *testHooks) OnCreated(ctx context.Context, plan *planexec.Plan) error {
+	if h.onCreated != nil {
+		return h.onCreated(ctx, plan)
+	}
+	return nil
+}
+
+func (h *testHooks) OnUpdated(ctx context.Context, plan *planexec.Plan) error {
+	if h.onUpdated != nil {
+		return h.onUpdated(ctx, plan)
+	}
+	return nil
+}
+
 // testTool is a simple implementation of gollem.Tool for testing
 type testTool struct {
 	name        string
@@ -122,8 +142,8 @@ func TestBasicPlanExecution(t *testing.T) {
 		var planCreatedCalled int32
 		var createdPlan *planexec.Plan
 
-		hooks := planexec.PlanExecuteHooks{
-			OnPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
+		hooks := &testHooks{
+			onCreated: func(ctx context.Context, plan *planexec.Plan) error {
 				atomic.AddInt32(&planCreatedCalled, 1)
 				createdPlan = plan
 				return nil
@@ -155,8 +175,8 @@ func TestBasicPlanExecution(t *testing.T) {
 		var planCreatedCalled int32
 		var createdPlan *planexec.Plan
 
-		hooks := planexec.PlanExecuteHooks{
-			OnPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
+		hooks := &testHooks{
+			onCreated: func(ctx context.Context, plan *planexec.Plan) error {
 				atomic.AddInt32(&planCreatedCalled, 1)
 				createdPlan = plan
 				return nil
@@ -193,13 +213,13 @@ func TestBasicPlanExecution(t *testing.T) {
 		var middlewareApplied int32
 
 		// Create hooks
-		hooks := planexec.PlanExecuteHooks{
-			OnPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
+		hooks := &testHooks{
+			onCreated: func(ctx context.Context, plan *planexec.Plan) error {
 				atomic.AddInt32(&planCreatedCalled, 1)
 				createdPlan = plan
 				return nil
 			},
-			OnPlanUpdated: func(ctx context.Context, plan *planexec.Plan) error {
+			onUpdated: func(ctx context.Context, plan *planexec.Plan) error {
 				atomic.AddInt32(&planUpdatedCalled, 1)
 				updatedPlan = plan
 				return nil
@@ -435,8 +455,8 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 			var createdPlan *planexec.Plan
 			var taskCount int
 
-			hooks := planexec.PlanExecuteHooks{
-				OnPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
+			hooks := &testHooks{
+				onCreated: func(ctx context.Context, plan *planexec.Plan) error {
 					atomic.AddInt32(&planCreatedCalled, 1)
 					createdPlan = plan
 					taskCount = len(plan.Tasks)

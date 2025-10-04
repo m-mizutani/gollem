@@ -88,11 +88,10 @@ func buildExecutePrompt(ctx context.Context, task *Task, plan *Plan) []gollem.In
 }
 
 // buildReflectPrompt creates a prompt for reflection after task completion
-func buildReflectPrompt(ctx context.Context, plan *Plan, tools []gollem.Tool) []gollem.Input {
+func buildReflectPrompt(ctx context.Context, plan *Plan, latestResult string, tools []gollem.Tool) []gollem.Input {
 	// Build completed tasks list
 	var completedTasks []string
 	var remainingTasks []string
-	var latestResult string
 
 	for _, task := range plan.Tasks {
 		taskStr := fmt.Sprintf("[ID: %s] %s", task.ID, task.Description)
@@ -100,9 +99,6 @@ func buildReflectPrompt(ctx context.Context, plan *Plan, tools []gollem.Tool) []
 		switch task.State {
 		case TaskStateCompleted:
 			completedTasks = append(completedTasks, taskStr)
-			if task.Result != "" {
-				latestResult = task.Result // Keep track of the latest result
-			}
 		case TaskStatePending:
 			remainingTasks = append(remainingTasks, taskStr)
 		}
