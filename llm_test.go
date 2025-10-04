@@ -330,6 +330,7 @@ func TestStreamMiddleware(t *testing.T) {
 			t.Skip("TEST_OPENAI_API_KEY is not set")
 		}
 		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			// Use gpt-5-nano for streaming tests as it supports streaming without organization verification
 			return openai.New(context.Background(), apiKey, openai.WithModel("gpt-5-nano"))
 		})
 	})

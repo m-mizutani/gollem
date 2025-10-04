@@ -227,47 +227,6 @@ func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...go
 	)
 }
 
-// CountTokens estimates the number of tokens in the given history for Claude Vertex models.
-func (c *VertexClient) CountTokens(ctx context.Context, history *gollem.History) (int, error) {
-	if history == nil {
-		return 0, nil
-	}
-
-	// Fallback: estimate based on character count
-	totalChars := 0
-
-	if history.LLType != gollem.LLMTypeClaude {
-		return 0, nil
-	}
-
-	for _, msg := range history.Messages {
-		totalChars += len(string(msg.Role))
-		for _, content := range msg.Contents {
-			// Estimate based on Data field size
-			totalChars += len(content.Data)
-		}
-	}
-
-	// Message overhead
-	messageOverhead := history.ToCount() * 10
-
-	// Base estimation: 4 characters = 1 token
-	estimatedTokens := (totalChars + messageOverhead) / 4
-
-	// Model-specific adjustments for Claude Vertex models
-	modelName := c.defaultModel
-	switch modelName {
-	case "claude-3-opus-20240229":
-		estimatedTokens = int(float64(estimatedTokens) * 1.05) // Slightly higher token usage
-	case "claude-3-5-sonnet-20241022", "claude-sonnet-4@20250514":
-		estimatedTokens = int(float64(estimatedTokens) * 0.9) // More efficient tokenization
-	case "claude-3-haiku-20240307":
-		estimatedTokens = int(float64(estimatedTokens) * 0.85) // Most efficient
-	}
-
-	return estimatedTokens, nil
-}
-
 // GenerateEmbedding generates embeddings for the given input texts.
 func (c *VertexClient) GenerateEmbedding(ctx context.Context, dimension int, input []string) ([][]float64, error) {
 	return nil, goerr.New("embedding generation not supported for Claude models via Vertex AI")

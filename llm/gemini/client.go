@@ -881,27 +881,6 @@ func (c *Client) GenerateEmbedding(ctx context.Context, dimension int, input []s
 	return embeddings, nil
 }
 
-// CountTokens counts the number of tokens in the given history.
-func (c *Client) CountTokens(ctx context.Context, history *gollem.History) (int, error) {
-	if history == nil {
-		return 0, nil
-	}
-
-	// Convert history to new format
-	contents, err := history.ToGemini()
-	if err != nil {
-		return 0, goerr.Wrap(err, "failed to convert history")
-	}
-
-	// Count tokens using the model (contents are already in new SDK format)
-	result, err := c.client.Models.CountTokens(ctx, c.defaultModel, contents, nil)
-	if err != nil {
-		return 0, goerr.Wrap(err, "failed to count tokens")
-	}
-
-	return int(result.TotalTokens), nil
-}
-
 // Helper function to convert new SDK history to gollem.History
 
 func convertNewHistoryToGollem(history []*genai.Content) (*gollem.History, error) {
