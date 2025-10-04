@@ -41,6 +41,12 @@ type generationParameters struct {
 	// FrequencyPenalty decreases the model's likelihood to repeat the same line verbatim.
 	// Range: -2.0 to 2.0
 	FrequencyPenalty float32
+
+	// ReasoningEffort tunes how much reasoning time the model spends ("minimal", "medium", "high").
+	ReasoningEffort string
+
+	// Verbosity controls the amount of output tokens generated ("low", "medium", "high").
+	Verbosity string
 }
 
 // Client is a client for the OpenAI API.
@@ -68,7 +74,7 @@ type Client struct {
 }
 
 const (
-	DefaultModel          = "gpt-4.1"
+	DefaultModel          = "gpt-5"
 	DefaultEmbeddingModel = "text-embedding-3-small"
 )
 
@@ -135,6 +141,22 @@ func WithFrequencyPenalty(penalty float32) Option {
 	}
 }
 
+// WithReasoningEffort sets the reasoning_effort parameter for GPT-5 models.
+// Supported values (as of 2025-10-04): "minimal", "medium", "high".
+func WithReasoningEffort(effort string) Option {
+	return func(c *Client) {
+		c.params.ReasoningEffort = effort
+	}
+}
+
+// WithVerbosity sets the verbosity parameter for GPT-5 models.
+// Supported values (as of 2025-10-04): "low", "medium", "high".
+func WithVerbosity(verbosity string) Option {
+	return func(c *Client) {
+		c.params.Verbosity = verbosity
+	}
+}
+
 // WithSystemPrompt sets the system prompt to use for chat completions.
 func WithSystemPrompt(prompt string) Option {
 	return func(c *Client) {
@@ -156,8 +178,11 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 	client := &Client{
 		defaultModel:   DefaultModel,
 		embeddingModel: DefaultEmbeddingModel,
-		params:         generationParameters{},
-		contentType:    gollem.ContentTypeText,
+		params: generationParameters{
+			ReasoningEffort: "minimal",
+			Verbosity:       "low",
+		},
+		contentType: gollem.ContentTypeText,
 	}
 
 	for _, option := range options {
@@ -364,6 +389,14 @@ func (s *Session) createRequest(stream bool) (openai.ChatCompletionRequest, erro
 		PresencePenalty:  s.params.PresencePenalty,
 		FrequencyPenalty: s.params.FrequencyPenalty,
 		Stream:           stream,
+	}
+
+	if s.params.ReasoningEffort != "" {
+		req.ReasoningEffort = s.params.ReasoningEffort
+	}
+
+	if s.params.Verbosity != "" {
+		req.Verbosity = s.params.Verbosity
 	}
 
 	// Add content type to the request
