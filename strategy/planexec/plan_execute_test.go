@@ -81,12 +81,6 @@ func TestBasicPlanExecution(t *testing.T) {
 					},
 				}, nil
 			},
-			CountTokensFunc: func(ctx context.Context, history *gollem.History) (int, error) {
-				return 100, nil
-			},
-			IsCompatibleHistoryFunc: func(ctx context.Context, history *gollem.History) error {
-				return nil
-			},
 		}
 	}
 
@@ -133,12 +127,6 @@ func TestBasicPlanExecution(t *testing.T) {
 						return &gollem.History{}, nil
 					},
 				}, nil
-			},
-			CountTokensFunc: func(ctx context.Context, history *gollem.History) (int, error) {
-				return 100, nil
-			},
-			IsCompatibleHistoryFunc: func(ctx context.Context, history *gollem.History) error {
-				return nil
 			},
 		}
 	}
@@ -326,12 +314,6 @@ func TestBasicPlanExecution(t *testing.T) {
 						return &gollem.History{}, nil
 					},
 				}, nil
-			},
-			CountTokensFunc: func(ctx context.Context, history *gollem.History) (int, error) {
-				return 100, nil
-			},
-			IsCompatibleHistoryFunc: func(ctx context.Context, history *gollem.History) error {
-				return nil
 			},
 		}
 

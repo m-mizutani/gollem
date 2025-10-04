@@ -179,7 +179,7 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 		defaultModel:   DefaultModel,
 		embeddingModel: DefaultEmbeddingModel,
 		params: generationParameters{
-			ReasoningEffort: "minimal",
+			ReasoningEffort: "medium",
 			Verbosity:       "low",
 		},
 		contentType: gollem.ContentTypeText,
@@ -650,6 +650,15 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 
 			// Process streaming chunks
 			for {
+				select {
+				case <-ctx.Done():
+					responseChan <- &gollem.ContentResponse{
+						Error: goerr.Wrap(ctx.Err(), "context cancelled during streaming"),
+					}
+					return
+				default:
+				}
+
 				resp, err := stream.Recv()
 				if err != nil {
 					if err == io.EOF {
@@ -831,6 +840,11 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	streamChan, err := handler(ctx, contentReq)
 	if err != nil {
 		return nil, err
+	}
+
+	// Sanity check: streamChan should not be nil if err is nil
+	if streamChan == nil {
+		return nil, goerr.New("middleware returned nil channel without error")
 	}
 
 	// Convert ContentStreamResponse channel to Response channel

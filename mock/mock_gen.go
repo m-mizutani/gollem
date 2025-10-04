@@ -15,14 +15,8 @@ import (
 //
 //		// make and configure a mocked gollem.LLMClient
 //		mockedLLMClient := &LLMClientMock{
-//			CountTokensFunc: func(ctx context.Context, history *gollem.History) (int, error) {
-//				panic("mock out the CountTokens method")
-//			},
 //			GenerateEmbeddingFunc: func(ctx context.Context, dimension int, input []string) ([][]float64, error) {
 //				panic("mock out the GenerateEmbedding method")
-//			},
-//			IsCompatibleHistoryFunc: func(ctx context.Context, history *gollem.History) error {
-//				panic("mock out the IsCompatibleHistory method")
 //			},
 //			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 //				panic("mock out the NewSession method")
@@ -34,27 +28,14 @@ import (
 //
 //	}
 type LLMClientMock struct {
-	// CountTokensFunc mocks the CountTokens method.
-	CountTokensFunc func(ctx context.Context, history *gollem.History) (int, error)
-
 	// GenerateEmbeddingFunc mocks the GenerateEmbedding method.
 	GenerateEmbeddingFunc func(ctx context.Context, dimension int, input []string) ([][]float64, error)
-
-	// IsCompatibleHistoryFunc mocks the IsCompatibleHistory method.
-	IsCompatibleHistoryFunc func(ctx context.Context, history *gollem.History) error
 
 	// NewSessionFunc mocks the NewSession method.
 	NewSessionFunc func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
-		// CountTokens holds details about calls to the CountTokens method.
-		CountTokens []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// History is the history argument value.
-			History *gollem.History
-		}
 		// GenerateEmbedding holds details about calls to the GenerateEmbedding method.
 		GenerateEmbedding []struct {
 			// Ctx is the ctx argument value.
@@ -64,13 +45,6 @@ type LLMClientMock struct {
 			// Input is the input argument value.
 			Input []string
 		}
-		// IsCompatibleHistory holds details about calls to the IsCompatibleHistory method.
-		IsCompatibleHistory []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// History is the history argument value.
-			History *gollem.History
-		}
 		// NewSession holds details about calls to the NewSession method.
 		NewSession []struct {
 			// Ctx is the ctx argument value.
@@ -79,50 +53,8 @@ type LLMClientMock struct {
 			Options []gollem.SessionOption
 		}
 	}
-	lockCountTokens         sync.RWMutex
-	lockGenerateEmbedding   sync.RWMutex
-	lockIsCompatibleHistory sync.RWMutex
-	lockNewSession          sync.RWMutex
-}
-
-// CountTokens calls CountTokensFunc.
-func (mock *LLMClientMock) CountTokens(ctx context.Context, history *gollem.History) (int, error) {
-	callInfo := struct {
-		Ctx     context.Context
-		History *gollem.History
-	}{
-		Ctx:     ctx,
-		History: history,
-	}
-	mock.lockCountTokens.Lock()
-	mock.calls.CountTokens = append(mock.calls.CountTokens, callInfo)
-	mock.lockCountTokens.Unlock()
-	if mock.CountTokensFunc == nil {
-		var (
-			nOut   int
-			errOut error
-		)
-		return nOut, errOut
-	}
-	return mock.CountTokensFunc(ctx, history)
-}
-
-// CountTokensCalls gets all the calls that were made to CountTokens.
-// Check the length with:
-//
-//	len(mockedLLMClient.CountTokensCalls())
-func (mock *LLMClientMock) CountTokensCalls() []struct {
-	Ctx     context.Context
-	History *gollem.History
-} {
-	var calls []struct {
-		Ctx     context.Context
-		History *gollem.History
-	}
-	mock.lockCountTokens.RLock()
-	calls = mock.calls.CountTokens
-	mock.lockCountTokens.RUnlock()
-	return calls
+	lockGenerateEmbedding sync.RWMutex
+	lockNewSession        sync.RWMutex
 }
 
 // GenerateEmbedding calls GenerateEmbeddingFunc.
@@ -166,45 +98,6 @@ func (mock *LLMClientMock) GenerateEmbeddingCalls() []struct {
 	mock.lockGenerateEmbedding.RLock()
 	calls = mock.calls.GenerateEmbedding
 	mock.lockGenerateEmbedding.RUnlock()
-	return calls
-}
-
-// IsCompatibleHistory calls IsCompatibleHistoryFunc.
-func (mock *LLMClientMock) IsCompatibleHistory(ctx context.Context, history *gollem.History) error {
-	callInfo := struct {
-		Ctx     context.Context
-		History *gollem.History
-	}{
-		Ctx:     ctx,
-		History: history,
-	}
-	mock.lockIsCompatibleHistory.Lock()
-	mock.calls.IsCompatibleHistory = append(mock.calls.IsCompatibleHistory, callInfo)
-	mock.lockIsCompatibleHistory.Unlock()
-	if mock.IsCompatibleHistoryFunc == nil {
-		var (
-			errOut error
-		)
-		return errOut
-	}
-	return mock.IsCompatibleHistoryFunc(ctx, history)
-}
-
-// IsCompatibleHistoryCalls gets all the calls that were made to IsCompatibleHistory.
-// Check the length with:
-//
-//	len(mockedLLMClient.IsCompatibleHistoryCalls())
-func (mock *LLMClientMock) IsCompatibleHistoryCalls() []struct {
-	Ctx     context.Context
-	History *gollem.History
-} {
-	var calls []struct {
-		Ctx     context.Context
-		History *gollem.History
-	}
-	mock.lockIsCompatibleHistory.RLock()
-	calls = mock.calls.IsCompatibleHistory
-	mock.lockIsCompatibleHistory.RUnlock()
 	return calls
 }
 

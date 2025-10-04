@@ -1016,20 +1016,6 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	return responseChan, nil
 }
 
-// IsCompatibleHistory checks if the given history is compatible with the Claude client.
-func (c *Client) IsCompatibleHistory(ctx context.Context, history *gollem.History) error {
-	if history == nil {
-		return nil
-	}
-	if history.LLType != gollem.LLMTypeClaude {
-		return goerr.New("history is not compatible with Claude", goerr.V("expected", gollem.LLMTypeClaude), goerr.V("actual", history.LLType))
-	}
-	if history.Version != gollem.HistoryVersion {
-		return goerr.New("history version is not supported", goerr.V("expected", gollem.HistoryVersion), goerr.V("actual", history.Version))
-	}
-	return nil
-}
-
 // CountTokens counts the number of tokens in the history for Claude models.
 // Claude uses a different tokenization approach compared to OpenAI.
 // This implementation provides an estimated count based on Claude's characteristics.
