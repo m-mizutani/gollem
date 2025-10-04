@@ -2,11 +2,13 @@ package planexec_test
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
 	"github.com/m-mizutani/gollem/llm/gemini"
@@ -399,7 +401,8 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 	// Helper function for testing with Agent.Execute
 	testWithAgent := func(client gollem.LLMClient) func(t *testing.T) {
 		return func(t *testing.T) {
-			ctx := context.Background()
+			logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			ctx := ctxlog.With(context.Background(), logger)
 
 			// Test with multiple tool calls
 			t.Run("MultipleToolCalls", func(t *testing.T) {
@@ -454,6 +457,7 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 				agent := gollem.New(client,
 					gollem.WithStrategy(strategy),
 					gollem.WithTools(tools...),
+					gollem.WithContentBlockMiddleware(toolTracker),
 				)
 
 				// Execute task that requires multiple tool calls
@@ -461,6 +465,9 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 					gollem.Text("Please get the weather for Tokyo, then calculate the distance from Tokyo to Osaka, and finally search the database for 'travel guide'. Report all results."))
 				gt.NoError(t, err)
 				gt.V(t, response).NotNil()
+				if response == nil {
+					return // Skip if API failed
+				}
 				gt.True(t, len(response.Texts) > 0)
 
 				// Verify plan was created

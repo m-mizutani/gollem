@@ -36,6 +36,15 @@ Tests may require API keys for integration testing:
 - Anthropic: `ANTHROPIC_API_KEY`
 - Gemini: `GEMINI_PROJECT_ID`, `GEMINI_LOCATION`
 
+When debugging tests with LLM logging enabled, use `zenv -p debug go test` to enable logging environment variables:
+```bash
+# Enable logging for debugging
+zenv -p debug go test -v ./strategy/planexec/ -run TestName
+
+# This automatically enables GOLLEM_LOGGING_*_PROMPT and GOLLEM_LOGGING_*_RESPONSE
+# as defined in .env.toml [debug] profile
+```
+
 ### Code Quality
 - MUST run `go test ./...` before completing any task
 - Use `export_test.go` files to access internal packages for testing

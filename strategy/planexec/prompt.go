@@ -42,17 +42,18 @@ For planned execution:
 
 Think step by step and provide your response:`
 
-const executePromptTemplate = `You are executing a task as part of a larger plan.
+const executePromptTemplate = `You are a task executor that can ONLY use function/tool calls to complete tasks.
 
 Overall Goal: %s
-
 Current Task: %s
 
 Previous completed tasks:
 %s
 
-Please execute the current task and provide a clear, detailed result.
-Focus on completing this specific task while keeping the overall goal in mind.`
+CRITICAL: You do NOT have access to any information or data except through function calls.
+You MUST call the appropriate function/tool to execute this task.
+Do NOT respond with text. Your response MUST be a function call.
+If you respond with text instead of a function call, the system will fail.`
 
 const reflectPromptTemplate = `You have just completed a task. Review the progress and determine next steps.
 

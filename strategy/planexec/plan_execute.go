@@ -33,7 +33,19 @@ func (s *PlanExecuteStrategy) Init(ctx context.Context, inputs []gollem.Input) e
 // Handle determines the next input for the LLM based on the current state
 func (s *PlanExecuteStrategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
 	logger := ctxlog.From(ctx)
-	logger.Debug("plan-execute strategy handle", "iteration", state.Iteration)
+	logger.Debug("plan-execute strategy handle",
+		"iteration", state.Iteration,
+		"next_input_len", len(state.NextInput),
+		"last_response_nil", state.LastResponse == nil)
+
+	// ========== Phase 0: Pass through NextInput (e.g., tool responses) ==========
+	// If there's pending input (like tool responses), we must send it to the LLM
+	// before proceeding with strategy logic.
+	// IMPORTANT: Don't pass through on iteration 0 - that's the initial input for planning
+	if state.Iteration > 0 && len(state.NextInput) > 0 {
+		logger.Debug("passing through NextInput", "count", len(state.NextInput))
+		return state.NextInput, nil, nil
+	}
 
 	// ========== Phase 1: Initialization and Planning ==========
 	if state.Iteration == 0 {
