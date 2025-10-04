@@ -113,10 +113,19 @@ func TestBasicPlanExecution(t *testing.T) {
 							return &gollem.Response{
 								Texts: []string{"The result is 15"},
 							}, nil
-						default:
+						case 3:
 							// Third call: reflection to complete
 							return &gollem.Response{
-								Texts: []string{`{"should_continue": false, "goal_achieved": true}`},
+								Texts: []string{`{
+									"new_tasks": [],
+									"updated_tasks": [],
+									"reason": "All tasks completed."
+								}`},
+							}, nil
+						default:
+							// Fourth call: final conclusion
+							return &gollem.Response{
+								Texts: []string{"The calculation is complete. The result is 15."},
 							}, nil
 						}
 					},
