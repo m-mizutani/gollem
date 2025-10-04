@@ -11,11 +11,14 @@ import (
 )
 
 // analyzeAndPlan analyzes user input and creates a plan using LLM
-func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []gollem.Input, middleware []gollem.ContentBlockMiddleware) (*Plan, error) {
+func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []gollem.Input, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware) (*Plan, error) {
 	logger := ctxlog.From(ctx)
 	logger.Debug("analyzing and planning")
 
 	// Create a new session with JSON content type
+	// NOTE: Do NOT pass tools to planning session.
+	// When tools are provided, some LLM providers (like Gemini) prioritize function calls
+	// over JSON text responses, which breaks the planning phase that requires JSON output.
 	sessionOpts := []gollem.SessionOption{
 		gollem.WithSessionContentType(gollem.ContentTypeJSON),
 	}
@@ -29,7 +32,7 @@ func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []golle
 	}
 
 	// Build planning prompt
-	planPrompt := buildPlanPrompt(ctx, inputs)
+	planPrompt := buildPlanPrompt(ctx, inputs, tools)
 
 	// Generate plan using LLM
 	response, err := session.GenerateContent(ctx, planPrompt...)

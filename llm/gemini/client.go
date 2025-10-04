@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	DefaultModel          = "gemini-2.0-flash"
+	DefaultModel          = "gemini-2.5-flash"
 	DefaultEmbeddingModel = "text-embedding-004"
 )
 
@@ -185,13 +185,19 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 		return nil, goerr.New("location is required")
 	}
 
+	var budget int32 = 0
+
 	client := &Client{
-		projectID:        projectID,
-		location:         location,
-		defaultModel:     DefaultModel,
-		embeddingModel:   DefaultEmbeddingModel,
-		contentType:      gollem.ContentTypeText,
-		generationConfig: &genai.GenerateContentConfig{},
+		projectID:      projectID,
+		location:       location,
+		defaultModel:   DefaultModel,
+		embeddingModel: DefaultEmbeddingModel,
+		contentType:    gollem.ContentTypeText,
+		generationConfig: &genai.GenerateContentConfig{
+			ThinkingConfig: &genai.ThinkingConfig{
+				ThinkingBudget: &budget,
+			},
+		},
 	}
 
 	for _, option := range options {

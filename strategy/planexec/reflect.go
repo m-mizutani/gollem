@@ -10,12 +10,21 @@ import (
 	"github.com/m-mizutani/gollem"
 )
 
-// reflect performs reflection after task completion to determine next steps
-func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, middleware []gollem.ContentBlockMiddleware) (*Plan, bool, error) {
+// reflectionResult holds the result of reflection
+type reflectionResult struct {
+	UpdatedTasks []Task // Modified tasks
+	NewTasks     []Task // New tasks to add
+}
+
+// reflect performs reflection after task completion to update or add tasks
+func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware) (*reflectionResult, error) {
 	logger := ctxlog.From(ctx)
 	logger.Debug("performing reflection")
 
 	// Create a new session for reflection with JSON content type
+	// NOTE: Do NOT pass tools to reflection session.
+	// When tools are provided, some LLM providers (like Gemini) prioritize function calls
+	// over JSON text responses, which breaks the reflection phase that requires JSON output.
 	sessionOpts := []gollem.SessionOption{
 		gollem.WithSessionContentType(gollem.ContentTypeJSON),
 	}
@@ -25,90 +34,88 @@ func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, middlewar
 
 	session, err := client.NewSession(ctx, sessionOpts...)
 	if err != nil {
-		return nil, false, goerr.Wrap(err, "failed to create session for reflection")
+		return nil, goerr.Wrap(err, "failed to create session for reflection")
 	}
 
 	// Build reflection prompt
-	reflectPrompt := buildReflectPrompt(ctx, plan)
+	reflectPrompt := buildReflectPrompt(ctx, plan, tools)
 
 	// Generate reflection using LLM
 	response, err := session.GenerateContent(ctx, reflectPrompt...)
 	if err != nil {
-		return nil, false, goerr.Wrap(err, "failed to generate reflection")
+		return nil, goerr.Wrap(err, "failed to generate reflection")
 	}
 
 	// Parse the reflection response
-	updatedPlan, shouldContinue, err := parseReflectionFromResponse(ctx, response, plan)
+	result, err := parseReflectionFromResponse(ctx, response, plan)
 	if err != nil {
-		return nil, false, goerr.Wrap(err, "failed to parse reflection response")
+		return nil, goerr.Wrap(err, "failed to parse reflection response")
 	}
 
-	logger.Debug("reflection completed", "should_continue", shouldContinue)
-	return updatedPlan, shouldContinue, nil
+	logger.Debug("reflection completed", "new_tasks", len(result.NewTasks), "updated_tasks", len(result.UpdatedTasks))
+	return result, nil
 }
 
 // parseReflectionFromResponse extracts reflection results from LLM response
-func parseReflectionFromResponse(ctx context.Context, response *gollem.Response, currentPlan *Plan) (*Plan, bool, error) {
+func parseReflectionFromResponse(ctx context.Context, response *gollem.Response, currentPlan *Plan) (*reflectionResult, error) {
+	result := &reflectionResult{
+		UpdatedTasks: []Task{},
+		NewTasks:     []Task{},
+	}
+
 	if response == nil || len(response.Texts) == 0 {
-		// If no response, continue with current plan
-		return nil, true, nil
+		// If no response, return empty result (no updates)
+		return result, nil
 	}
 
 	// Parse JSON response directly (WithSessionContentType ensures JSON format)
 	var reflectionResponse struct {
-		GoalAchieved   bool   `json:"goal_achieved"`
-		ShouldContinue bool   `json:"should_continue"`
-		Reason         string `json:"reason"`
-		PlanUpdates    struct {
-			NewTasks      []string `json:"new_tasks"`       // Task descriptions for new tasks
-			RemoveTaskIDs []string `json:"remove_task_ids"` // Task IDs to remove
-		} `json:"plan_updates"`
+		NewTasks     []string `json:"new_tasks"` // Task descriptions for new tasks
+		UpdatedTasks []struct {
+			ID          string `json:"id"`
+			Description string `json:"description"`
+			State       string `json:"state"`
+		} `json:"updated_tasks"` // Tasks to update (mark as failed, pending, etc.)
+		Reason string `json:"reason"` // Explanation
 	}
 
 	if err := json.Unmarshal([]byte(response.Texts[0]), &reflectionResponse); err != nil {
-		// If JSON parsing fails, continue with current plan
+		// If JSON parsing fails, return empty result
 		logger := ctxlog.From(ctx)
-		logger.Debug("failed to parse reflection JSON, continuing with current plan", "error", err.Error())
-		return nil, true, nil
+		logger.Debug("failed to parse reflection JSON, returning empty result", "error", err.Error())
+		return result, nil
 	}
 
-	// Check if we should continue
-	shouldContinue := reflectionResponse.ShouldContinue && !reflectionResponse.GoalAchieved
-
-	// If plan updates are needed, create updated plan
-	var updatedPlan *Plan
-	if len(reflectionResponse.PlanUpdates.NewTasks) > 0 || len(reflectionResponse.PlanUpdates.RemoveTaskIDs) > 0 {
-		// Create a copy of the current plan
-		updatedPlan = &Plan{
-			Goal:  currentPlan.Goal,
-			Tasks: make([]Task, 0, len(currentPlan.Tasks)),
-		}
-
-		// Copy existing tasks (except those to be removed by ID)
-		removeMap := make(map[string]bool)
-		for _, taskID := range reflectionResponse.PlanUpdates.RemoveTaskIDs {
-			removeMap[taskID] = true
-		}
-
-		for _, task := range currentPlan.Tasks {
-			if !removeMap[task.ID] {
-				updatedPlan.Tasks = append(updatedPlan.Tasks, task)
-			}
-		}
-
-		// Add new tasks with unique IDs
-		for _, taskDesc := range reflectionResponse.PlanUpdates.NewTasks {
-			updatedPlan.Tasks = append(updatedPlan.Tasks, Task{
-				ID:          uuid.New().String(),
-				Description: taskDesc,
-				State:       TaskStatePending,
-			})
-		}
-
-		logger := ctxlog.From(ctx)
-		logger.Debug("plan updated", "new_tasks", len(reflectionResponse.PlanUpdates.NewTasks),
-			"removed_tasks", len(reflectionResponse.PlanUpdates.RemoveTaskIDs))
+	// Process new tasks
+	for _, taskDesc := range reflectionResponse.NewTasks {
+		result.NewTasks = append(result.NewTasks, Task{
+			ID:          uuid.New().String(),
+			Description: taskDesc,
+			State:       TaskStatePending,
+		})
 	}
 
-	return updatedPlan, shouldContinue, nil
+	// Process updated tasks
+	for _, updatedTask := range reflectionResponse.UpdatedTasks {
+		state := TaskStatePending
+		switch updatedTask.State {
+		case "pending":
+			state = TaskStatePending
+		case "in_progress":
+			state = TaskStateInProgress
+		case "completed":
+			state = TaskStateCompleted
+		}
+
+		result.UpdatedTasks = append(result.UpdatedTasks, Task{
+			ID:          updatedTask.ID,
+			Description: updatedTask.Description,
+			State:       state,
+		})
+	}
+
+	logger := ctxlog.From(ctx)
+	logger.Debug("reflection parsed", "new_tasks", len(result.NewTasks), "updated_tasks", len(result.UpdatedTasks), "reason", reflectionResponse.Reason)
+
+	return result, nil
 }

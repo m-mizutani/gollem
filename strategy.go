@@ -29,6 +29,7 @@ type StrategyState struct {
 	LastResponse *Response // Last LLM response (nil on first call)
 	NextInput    []Input   // Next input (same with InitInput in 1st iter, tool results in others)
 	Iteration    int       // Current iteration count
+	Tools        []Tool    // Available tools for this execution
 }
 
 // defaultStrategy implements the default simple loop strategy

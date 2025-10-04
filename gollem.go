@@ -304,6 +304,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, 
 			LastResponse: lastResponse,
 			NextInput:    nextInput,
 			Iteration:    i,
+			Tools:        toolList,
 		}
 		strategyInputs, executeResponse, err := strategy.Handle(ctx, state)
 		if err != nil {

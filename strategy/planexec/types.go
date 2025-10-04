@@ -13,6 +13,9 @@ const (
 	TaskStatePending    TaskState = "pending"
 	TaskStateInProgress TaskState = "in_progress"
 	TaskStateCompleted  TaskState = "completed"
+
+	// DefaultMaxIterations is the default maximum number of task execution iterations
+	DefaultMaxIterations = 32
 )
 
 // Task represents an executable task in the plan
@@ -38,14 +41,16 @@ type PlanExecuteHooks struct {
 
 // PlanExecuteStrategy implements the Strategy interface for plan-and-execute approach
 type PlanExecuteStrategy struct {
-	client     gollem.LLMClient
-	middleware []gollem.ContentBlockMiddleware
-	hooks      PlanExecuteHooks
+	client        gollem.LLMClient
+	middleware    []gollem.ContentBlockMiddleware
+	hooks         PlanExecuteHooks
+	maxIterations int
 
 	// Runtime state
-	plan           *Plan
-	currentTask    *Task
-	waitingForTask bool
+	plan               *Plan
+	currentTask        *Task
+	waitingForTask     bool
+	taskIterationCount int // Counts completed tasks
 }
 
 // PlanExecuteOption is a functional option for configuring PlanExecuteStrategy

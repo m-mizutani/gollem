@@ -11,7 +11,8 @@ import (
 // New creates a new PlanExecuteStrategy instance
 func New(client gollem.LLMClient, opts ...PlanExecuteOption) *PlanExecuteStrategy {
 	s := &PlanExecuteStrategy{
-		client: client,
+		client:        client,
+		maxIterations: DefaultMaxIterations,
 	}
 
 	for _, opt := range opts {
@@ -27,6 +28,7 @@ func (s *PlanExecuteStrategy) Init(ctx context.Context, inputs []gollem.Input) e
 	s.plan = nil
 	s.currentTask = nil
 	s.waitingForTask = false
+	s.taskIterationCount = 0
 	return nil
 }
 
@@ -54,7 +56,7 @@ func (s *PlanExecuteStrategy) Handle(ctx context.Context, state *gollem.Strategy
 		}
 
 		// Analyze and create plan using LLM
-		plan, err := analyzeAndPlan(ctx, s.client, state.InitInput, s.middleware)
+		plan, err := analyzeAndPlan(ctx, s.client, state.InitInput, state.Tools, s.middleware)
 		if err != nil {
 			return nil, nil, goerr.Wrap(err, "failed to analyze and plan")
 		}
@@ -85,16 +87,41 @@ func (s *PlanExecuteStrategy) Handle(ctx context.Context, state *gollem.Strategy
 		s.currentTask.Result = parseTaskResult(state.LastResponse)
 		s.currentTask.State = TaskStateCompleted
 		s.waitingForTask = false
+		s.taskIterationCount++
 
-		// Perform reflection
-		updatedPlan, shouldContinue, err := reflect(ctx, s.client, s.plan, s.middleware)
+		// Check max iteration limit (safety net against infinite loops)
+		if s.taskIterationCount >= s.maxIterations {
+			finalResponse, err := getFinalConclusion(ctx, s.client, s.plan, s.middleware)
+			if err != nil {
+				logger.Debug("failed to generate conclusion, using simple summary", "error", err.Error())
+				return nil, generateFinalResponse(ctx, s.plan), nil
+			}
+			return nil, finalResponse, nil
+		}
+
+		// Perform reflection only if enabled
+		reflectionResult, err := reflect(ctx, s.client, s.plan, state.Tools, s.middleware)
 		if err != nil {
 			return nil, nil, goerr.Wrap(err, "reflection failed")
 		}
 
-		// Update plan if changed
-		if updatedPlan != nil {
-			s.plan = updatedPlan
+		// Apply task updates from reflection
+		if len(reflectionResult.UpdatedTasks) > 0 {
+			taskMap := make(map[string]*Task)
+			for i := range s.plan.Tasks {
+				taskMap[s.plan.Tasks[i].ID] = &s.plan.Tasks[i]
+			}
+			for _, updatedTask := range reflectionResult.UpdatedTasks {
+				if task, exists := taskMap[updatedTask.ID]; exists {
+					task.Description = updatedTask.Description
+					task.State = updatedTask.State
+				}
+			}
+		}
+
+		// Add new tasks from reflection
+		if len(reflectionResult.NewTasks) > 0 {
+			s.plan.Tasks = append(s.plan.Tasks, reflectionResult.NewTasks...)
 			if s.hooks.OnPlanUpdated != nil {
 				if err := s.hooks.OnPlanUpdated(ctx, s.plan); err != nil {
 					return nil, nil, goerr.Wrap(err, "hook OnPlanUpdated failed")
@@ -102,10 +129,6 @@ func (s *PlanExecuteStrategy) Handle(ctx context.Context, state *gollem.Strategy
 			}
 		}
 
-		// Check if we should terminate
-		if !shouldContinue || allTasksCompleted(ctx, s.plan) {
-			return nil, generateFinalResponse(ctx, s.plan), nil
-		}
 		// Proceed to phase 3 to select next task
 	}
 
@@ -113,9 +136,15 @@ func (s *PlanExecuteStrategy) Handle(ctx context.Context, state *gollem.Strategy
 	if !s.waitingForTask {
 		s.currentTask = getNextPendingTask(ctx, s.plan)
 
-		// All tasks completed
+		// All tasks completed - get final conclusion from LLM
 		if s.currentTask == nil {
-			return nil, generateFinalResponse(ctx, s.plan), nil
+			finalResponse, err := getFinalConclusion(ctx, s.client, s.plan, s.middleware)
+			if err != nil {
+				// If conclusion generation fails, fall back to simple summary
+				logger.Debug("failed to generate conclusion, using simple summary", "error", err.Error())
+				return nil, generateFinalResponse(ctx, s.plan), nil
+			}
+			return nil, finalResponse, nil
 		}
 
 		// Start task execution
@@ -139,9 +168,9 @@ func (s *PlanExecuteStrategy) Tools(ctx context.Context) ([]gollem.Tool, error) 
 // Option functions
 
 // WithMiddleware sets the content block middleware
-func WithMiddleware(middleware []gollem.ContentBlockMiddleware) PlanExecuteOption {
+func WithMiddleware(middleware ...gollem.ContentBlockMiddleware) PlanExecuteOption {
 	return func(s *PlanExecuteStrategy) {
-		s.middleware = middleware
+		s.middleware = append(s.middleware, middleware...)
 	}
 }
 
@@ -149,5 +178,12 @@ func WithMiddleware(middleware []gollem.ContentBlockMiddleware) PlanExecuteOptio
 func WithHooks(hooks PlanExecuteHooks) PlanExecuteOption {
 	return func(s *PlanExecuteStrategy) {
 		s.hooks = hooks
+	}
+}
+
+// WithMaxIterations sets the maximum number of task execution iterations
+func WithMaxIterations(max int) PlanExecuteOption {
+	return func(s *PlanExecuteStrategy) {
+		s.maxIterations = max
 	}
 }

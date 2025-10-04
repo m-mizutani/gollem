@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	DefaultEmbeddingModel = "claude-3-sonnet-20240229"
+	DefaultEmbeddingModel = "claude-sonnet-4-5-20250929"
 )
 
 var (

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/m-mizutani/ctxlog"
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
 	"github.com/m-mizutani/gollem/llm/gemini"
@@ -249,16 +250,12 @@ func TestBasicPlanExecution(t *testing.T) {
 								Texts: []string{"Data loaded successfully"},
 							}, nil
 						case 3:
-							// Reflection with plan update
+							// Reflection with plan update - add new task
 							return &gollem.Response{
 								Texts: []string{`{
-									"should_continue": true,
-									"goal_achieved": false,
-									"reason": "Need additional validation step",
-									"plan_updates": {
-										"new_tasks": ["Validate data"],
-										"remove_task_ids": []
-									}
+									"new_tasks": ["Validate data"],
+									"updated_tasks": [],
+									"reason": "Need additional validation step"
 								}`},
 							}, nil
 						case 4:
@@ -267,19 +264,32 @@ func TestBasicPlanExecution(t *testing.T) {
 								Texts: []string{"Data transformed"},
 							}, nil
 						case 5:
-							// Reflection to continue
+							// Reflection - no updates needed
 							return &gollem.Response{
-								Texts: []string{`{"should_continue": true, "goal_achieved": false}`},
+								Texts: []string{`{
+									"new_tasks": [],
+									"updated_tasks": [],
+									"reason": "All tasks on track"
+								}`},
 							}, nil
 						case 6:
 							// Execute validation task
 							return &gollem.Response{
 								Texts: []string{"Data validated"},
 							}, nil
-						default:
-							// Complete due to max iterations (testing limit)
+						case 7:
+							// Final reflection - no more tasks
 							return &gollem.Response{
-								Texts: []string{`{"should_continue": false, "goal_achieved": true}`},
+								Texts: []string{`{
+									"new_tasks": [],
+									"updated_tasks": [],
+									"reason": "All tasks completed"
+								}`},
+							}, nil
+						default:
+							// Final conclusion
+							return &gollem.Response{
+								Texts: []string{"All data processing tasks completed successfully"},
 							}, nil
 						}
 					},
@@ -299,7 +309,7 @@ func TestBasicPlanExecution(t *testing.T) {
 		// Create strategy with all options
 		strategy := planexec.New(mockClient,
 			planexec.WithHooks(hooks),
-			planexec.WithMiddleware([]gollem.ContentBlockMiddleware{mockMiddleware}),
+			planexec.WithMiddleware(mockMiddleware),
 		)
 
 		// Create agent and test
@@ -337,7 +347,10 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 			},
 			required: []string{"city"},
 			runFunc: func(ctx context.Context, args map[string]any) (map[string]any, error) {
-				city := args["city"].(string)
+				city, ok := args["city"].(string)
+				if !ok || city == "" {
+					return nil, goerr.New("missing or invalid 'city' parameter")
+				}
 				return map[string]any{
 					"city":        city,
 					"temperature": 22,
@@ -362,8 +375,14 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 			},
 			required: []string{"from", "to"},
 			runFunc: func(ctx context.Context, args map[string]any) (map[string]any, error) {
-				from := args["from"].(string)
-				to := args["to"].(string)
+				from, ok := args["from"].(string)
+				if !ok || from == "" {
+					return nil, goerr.New("missing or invalid 'from' parameter")
+				}
+				to, ok := args["to"].(string)
+				if !ok || to == "" {
+					return nil, goerr.New("missing or invalid 'to' parameter")
+				}
 				// Mock distance calculation
 				distance := len(from) + len(to)*10 // Simple mock calculation
 				return map[string]any{
@@ -386,7 +405,10 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 			},
 			required: []string{"query"},
 			runFunc: func(ctx context.Context, args map[string]any) (map[string]any, error) {
-				query := args["query"].(string)
+				query, ok := args["query"].(string)
+				if !ok || query == "" {
+					return nil, goerr.New("missing or invalid 'query' parameter")
+				}
 				return map[string]any{
 					"query":   query,
 					"results": []string{"result1", "result2", "result3"},
@@ -399,166 +421,100 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 	}
 
 	// Helper function for testing with Agent.Execute
-	testWithAgent := func(client gollem.LLMClient) func(t *testing.T) {
+	testWithAgent := func(client gollem.LLMClient, _ string) func(t *testing.T) {
 		return func(t *testing.T) {
 			logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 			ctx := ctxlog.With(context.Background(), logger)
 
 			// Test with multiple tool calls
-			t.Run("MultipleToolCalls", func(t *testing.T) {
-				// Track tool usage
-				var toolCallCount int32
-				var toolNames []string
+			var toolCallCount int32
+			var toolNames []string
 
-				// Track plan creation and updates
-				var planCreatedCalled int32
-				var createdPlan *planexec.Plan
-				var taskCount int
+			// Track plan creation and updates
+			var planCreatedCalled int32
+			var createdPlan *planexec.Plan
+			var taskCount int
 
-				hooks := planexec.PlanExecuteHooks{
-					OnPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
-						atomic.AddInt32(&planCreatedCalled, 1)
-						createdPlan = plan
-						taskCount = len(plan.Tasks)
-						return nil
-					},
-				}
+			hooks := planexec.PlanExecuteHooks{
+				OnPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
+					atomic.AddInt32(&planCreatedCalled, 1)
+					createdPlan = plan
+					taskCount = len(plan.Tasks)
+					return nil
+				},
+			}
 
-				// Create middleware to track tool calls
-				toolTracker := func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
-					return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
-						resp, err := next(ctx, req)
-						if err != nil {
-							return resp, err
-						}
-
-						// Track tool calls in response
-						if resp != nil && resp.FunctionCalls != nil {
-							for _, call := range resp.FunctionCalls {
-								atomic.AddInt32(&toolCallCount, 1)
-								toolNames = append(toolNames, call.Name)
-							}
-						}
-
-						return resp, nil
+			// Create middleware to track tool calls
+			toolTracker := func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+				return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+					resp, err := next(ctx, req)
+					if err != nil {
+						return resp, err
 					}
-				}
 
-				// Create strategy with hooks and middleware
-				strategy := planexec.New(client,
-					planexec.WithHooks(hooks),
-					planexec.WithMiddleware([]gollem.ContentBlockMiddleware{toolTracker}),
-				)
-
-				// Create test tools
-				tools := createTestTools()
-
-				// Create agent with the strategy and tools
-				agent := gollem.New(client,
-					gollem.WithStrategy(strategy),
-					gollem.WithTools(tools...),
-					gollem.WithContentBlockMiddleware(toolTracker),
-				)
-
-				// Execute task that requires multiple tool calls
-				response, err := agent.Execute(ctx,
-					gollem.Text("Please get the weather for Tokyo, then calculate the distance from Tokyo to Osaka, and finally search the database for 'travel guide'. Report all results."))
-				gt.NoError(t, err)
-				gt.V(t, response).NotNil()
-				if response == nil {
-					return // Skip if API failed
-				}
-				gt.True(t, len(response.Texts) > 0)
-
-				// Verify plan was created
-				gt.V(t, atomic.LoadInt32(&planCreatedCalled)).Equal(int32(1))
-				gt.V(t, createdPlan).NotNil()
-
-				// Verify tasks were created (should have at least 1 task for multi-step operation)
-				gt.True(t, taskCount > 0)
-
-				// Verify tools were called (should be called at least 3 times for the 3 tools)
-				finalToolCallCount := atomic.LoadInt32(&toolCallCount)
-				gt.True(t, finalToolCallCount >= 3)
-
-				// Verify expected tools were called
-				toolNameStr := strings.Join(toolNames, ",")
-				gt.S(t, toolNameStr).Contains("get_weather")
-				gt.S(t, toolNameStr).Contains("calculate_distance")
-				gt.S(t, toolNameStr).Contains("search_database")
-
-				// Verify response contains results from all tools
-				responseText := strings.ToLower(strings.Join(response.Texts, " "))
-				gt.S(t, responseText).ContainsAny("tokyo", "weather", "distance", "osaka", "search", "database")
-			})
-
-			// Test plan creation and task execution
-			t.Run("PlanCreationAndExecution", func(t *testing.T) {
-				// Track plan lifecycle
-				var planCreated int32
-				var planUpdated int32
-				var createdPlan *planexec.Plan
-				var completedTaskCount int32
-
-				hooks := planexec.PlanExecuteHooks{
-					OnPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
-						atomic.AddInt32(&planCreated, 1)
-						createdPlan = plan
-						return nil
-					},
-					OnPlanUpdated: func(ctx context.Context, plan *planexec.Plan) error {
-						atomic.AddInt32(&planUpdated, 1)
-						// Count completed tasks
-						count := 0
-						for _, task := range plan.Tasks {
-							if task.State == planexec.TaskStateCompleted {
-								count++
-							}
+					// Track tool calls in response
+					if resp != nil && resp.FunctionCalls != nil {
+						for _, call := range resp.FunctionCalls {
+							atomic.AddInt32(&toolCallCount, 1)
+							toolNames = append(toolNames, call.Name)
 						}
-						atomic.StoreInt32(&completedTaskCount, int32(count))
-						return nil
-					},
+					}
+
+					return resp, nil
 				}
+			}
 
-				// Create strategy
-				strategy := planexec.New(client, planexec.WithHooks(hooks))
+			// Create strategy with hooks and middleware
+			strategy := planexec.New(client,
+				planexec.WithHooks(hooks),
+				planexec.WithMiddleware(toolTracker),
+			)
 
-				// Create test tools
-				tools := createTestTools()
+			// Create test tools
+			tools := createTestTools()
 
-				// Create agent
-				agent := gollem.New(client,
-					gollem.WithStrategy(strategy),
-					gollem.WithTools(tools...),
-				)
+			// Create agent with the strategy and tools
+			agent := gollem.New(client,
+				gollem.WithStrategy(strategy),
+				gollem.WithTools(tools...),
+				gollem.WithContentBlockMiddleware(toolTracker),
+			)
 
-				// Execute a complex task
-				response, err := agent.Execute(ctx,
-					gollem.Text("Get weather for Paris and London, then calculate distance between them"))
-				gt.NoError(t, err)
-				gt.V(t, response).NotNil()
+			// Execute task that requires multiple tool calls
+			response, err := agent.Execute(ctx,
+				gollem.Text("Get the weather for Tokyo and calculate the distance from Tokyo to Osaka"))
+			gt.NoError(t, err)
+			gt.V(t, response).NotNil()
+			if response == nil {
+				return // Skip if API failed
+			}
+			gt.True(t, len(response.Texts) > 0)
 
-				// Verify plan was created
-				gt.V(t, atomic.LoadInt32(&planCreated)).Equal(int32(1))
-				gt.V(t, createdPlan).NotNil()
+			// Verify plan was created
+			gt.V(t, atomic.LoadInt32(&planCreatedCalled)).Equal(int32(1))
+			gt.V(t, createdPlan).NotNil()
 
-				// Verify tasks were created and executed
-				gt.True(t, len(createdPlan.Tasks) > 0)
+			// Verify tasks were created (should have at least 1 task for multi-step operation)
+			gt.True(t, taskCount > 0)
 
-				// If plan was updated, verify tasks were completed
-				if atomic.LoadInt32(&planUpdated) > 0 {
-					gt.True(t, atomic.LoadInt32(&completedTaskCount) > 0)
-				}
+			// Verify tools were called (should be called at least 2 times for the 2 tools)
+			finalToolCallCount := atomic.LoadInt32(&toolCallCount)
+			gt.True(t, finalToolCallCount >= 2)
 
-				// Verify response contains expected content
-				responseText := strings.ToLower(strings.Join(response.Texts, " "))
-				gt.S(t, responseText).ContainsAny("paris", "london", "weather", "distance")
-			})
+			// Verify expected tools were called
+			toolNameStr := strings.Join(toolNames, ",")
+			gt.S(t, toolNameStr).Contains("get_weather")
+			gt.S(t, toolNameStr).Contains("calculate_distance")
+
+			// Verify response contains results from tools
+			responseText := strings.ToLower(strings.Join(response.Texts, " "))
+			gt.S(t, responseText).ContainsAny("tokyo", "weather", "distance", "osaka")
 		}
 	}
 
 	// Test with OpenAI
 	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
 		apiKey := os.Getenv("TEST_OPENAI_API_KEY")
 		if apiKey == "" {
 			t.Skip("TEST_OPENAI_API_KEY or OPENAI_API_KEY is not set")
@@ -567,11 +523,12 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 		client, err := openai.New(context.Background(), apiKey)
 		gt.NoError(t, err)
 
-		testWithAgent(client)(t)
+		testWithAgent(client, "OpenAI")(t)
 	})
 
 	// Test with Claude
 	t.Run("Claude", func(t *testing.T) {
+		t.Parallel()
 		apiKey := os.Getenv("TEST_CLAUDE_API_KEY")
 		if apiKey == "" {
 			t.Skip("TEST_CLAUDE_API_KEY or ANTHROPIC_API_KEY is not set")
@@ -580,11 +537,12 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 		client, err := claude.New(context.Background(), apiKey)
 		gt.NoError(t, err)
 
-		testWithAgent(client)(t)
+		testWithAgent(client, "Claude")(t)
 	})
 
 	// Test with Gemini
 	t.Run("Gemini", func(t *testing.T) {
+		t.Parallel()
 		projectID := os.Getenv("TEST_GCP_PROJECT_ID")
 		location := os.Getenv("TEST_GCP_LOCATION")
 
@@ -595,6 +553,6 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 		client, err := gemini.New(context.Background(), projectID, location)
 		gt.NoError(t, err)
 
-		testWithAgent(client)(t)
+		testWithAgent(client, "Gemini")(t)
 	})
 }

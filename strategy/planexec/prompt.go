@@ -1,93 +1,28 @@
 package planexec
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
 	"fmt"
 	"strings"
+	"text/template"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 )
 
-const planPromptTemplate = `You are a helpful assistant that analyzes user requests and creates execution plans when needed.
+//go:embed prompts/plan.md
+var planPromptTemplate string
 
-Analyze the user's request and determine if it requires a step-by-step plan or can be answered directly.
+//go:embed prompts/execute.md
+var executePromptTemplate string
 
-If the request is simple and can be answered immediately (like a question, greeting, or simple calculation), respond directly without creating a plan.
-
-If the request requires multiple steps or complex execution, create a structured plan with clear tasks.
-
-User request: %s
-
-Respond in the following JSON format:
-
-For direct response (no plan needed):
-{
-  "needs_plan": false,
-  "direct_response": "Your direct answer here"
-}
-
-For planned execution:
-{
-  "needs_plan": true,
-  "goal": "The overall goal",
-  "tasks": [
-    {
-      "description": "First task description"
-    },
-    {
-      "description": "Second task description"
-    }
-  ]
-}
-
-Think step by step and provide your response:`
-
-const executePromptTemplate = `You are a task executor that can ONLY use function/tool calls to complete tasks.
-
-Overall Goal: %s
-Current Task: %s
-
-Previous completed tasks:
-%s
-
-CRITICAL: You do NOT have access to any information or data except through function calls.
-You MUST call the appropriate function/tool to execute this task.
-Do NOT respond with text. Your response MUST be a function call.
-If you respond with text instead of a function call, the system will fail.`
-
-const reflectPromptTemplate = `You have just completed a task. Review the progress and determine next steps.
-
-Overall Goal: %s
-
-Completed Tasks:
-%s
-
-Remaining Tasks:
-%s
-
-Latest Task Result:
-%s
-
-Based on the progress so far:
-1. Have we achieved the overall goal?
-2. Should we continue with remaining tasks?
-3. Do we need to modify the plan?
-
-Respond in JSON format:
-{
-  "goal_achieved": true/false,
-  "should_continue": true/false,
-  "reason": "Explanation of your decision",
-  "plan_updates": {
-    "new_tasks": ["description of any new tasks if needed"],
-    "remove_task_ids": ["IDs of any tasks to remove"]
-  }
-}
-
-Note: Use task IDs (not descriptions) when specifying tasks to remove.`
+//go:embed prompts/reflect.md
+var reflectPromptTemplate string
 
 // buildPlanPrompt creates a prompt for analyzing and planning
-func buildPlanPrompt(_ context.Context, inputs []gollem.Input) []gollem.Input {
+func buildPlanPrompt(_ context.Context, inputs []gollem.Input, tools []gollem.Tool) []gollem.Input {
 	// Combine all input texts
 	var inputTexts []string
 	for _, input := range inputs {
@@ -97,9 +32,24 @@ func buildPlanPrompt(_ context.Context, inputs []gollem.Input) []gollem.Input {
 	}
 
 	userRequest := strings.Join(inputTexts, " ")
-	prompt := fmt.Sprintf(planPromptTemplate, userRequest)
 
-	return []gollem.Input{gollem.Text(prompt)}
+	// Build tool list
+	toolList := buildToolList(tools)
+
+	tmpl, err := template.New("plan").Parse(planPromptTemplate)
+	if err != nil {
+		panic(goerr.Wrap(err, "failed to parse plan template"))
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, map[string]interface{}{
+		"UserRequest": userRequest,
+		"ToolList":    toolList,
+	}); err != nil {
+		panic(goerr.Wrap(err, "failed to execute plan template"))
+	}
+
+	return []gollem.Input{gollem.Text(buf.String())}
 }
 
 // buildExecutePrompt creates a prompt for executing a specific task
@@ -120,13 +70,25 @@ func buildExecutePrompt(ctx context.Context, task *Task, plan *Plan) []gollem.In
 		completedStr = strings.Join(completedTasks, "\n")
 	}
 
-	prompt := fmt.Sprintf(executePromptTemplate, plan.Goal, task.Description, completedStr)
+	tmpl, err := template.New("execute").Parse(executePromptTemplate)
+	if err != nil {
+		panic(goerr.Wrap(err, "failed to parse execute template"))
+	}
 
-	return []gollem.Input{gollem.Text(prompt)}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, map[string]interface{}{
+		"Goal":            plan.Goal,
+		"TaskDescription": task.Description,
+		"CompletedTasks":  completedStr,
+	}); err != nil {
+		panic(goerr.Wrap(err, "failed to execute execute template"))
+	}
+
+	return []gollem.Input{gollem.Text(buf.String())}
 }
 
 // buildReflectPrompt creates a prompt for reflection after task completion
-func buildReflectPrompt(ctx context.Context, plan *Plan) []gollem.Input {
+func buildReflectPrompt(ctx context.Context, plan *Plan, tools []gollem.Tool) []gollem.Input {
 	// Build completed tasks list
 	var completedTasks []string
 	var remainingTasks []string
@@ -156,7 +118,52 @@ func buildReflectPrompt(ctx context.Context, plan *Plan) []gollem.Input {
 		remainingStr = "None"
 	}
 
-	prompt := fmt.Sprintf(reflectPromptTemplate, plan.Goal, completedStr, remainingStr, latestResult)
+	// Build tool list
+	toolList := buildToolList(tools)
 
-	return []gollem.Input{gollem.Text(prompt)}
+	tmpl, err := template.New("reflect").Parse(reflectPromptTemplate)
+	if err != nil {
+		panic(goerr.Wrap(err, "failed to parse reflect template"))
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, map[string]interface{}{
+		"Goal":           plan.Goal,
+		"CompletedTasks": completedStr,
+		"RemainingTasks": remainingStr,
+		"LatestResult":   latestResult,
+		"ToolList":       toolList,
+	}); err != nil {
+		panic(goerr.Wrap(err, "failed to execute reflect template"))
+	}
+
+	return []gollem.Input{gollem.Text(buf.String())}
+}
+
+// buildToolList creates a formatted list of available tools
+func buildToolList(tools []gollem.Tool) string {
+	if len(tools) == 0 {
+		return "No tools available"
+	}
+
+	var toolDescriptions []string
+	for _, tool := range tools {
+		spec := tool.Spec()
+		toolDesc := fmt.Sprintf("- **%s**: %s", spec.Name, spec.Description)
+
+		// Add parameter information if available
+		if len(spec.Parameters) > 0 {
+			var params []string
+			for paramName := range spec.Parameters {
+				params = append(params, paramName)
+			}
+			if len(params) > 0 {
+				toolDesc += fmt.Sprintf("\n  Parameters: %s", strings.Join(params, ", "))
+			}
+		}
+
+		toolDescriptions = append(toolDescriptions, toolDesc)
+	}
+
+	return strings.Join(toolDescriptions, "\n")
 }
