@@ -88,7 +88,7 @@ This feature is particularly useful for complex reasoning tasks where you want t
 ```go
 client, err := gemini.New(ctx, projectID, location,
     gemini.WithTemperature(0.7),
-    gemini.WithMaxTokens(2048),
+    gemini.WithMaxTokens(8192),  // Optional, omit for model's max capacity
     gemini.WithTopP(0.9),
 )
 ```
@@ -119,11 +119,12 @@ client, err := claude.New(ctx, "your-api-key")
 
 ```go
 client, err := claude.New(ctx, apiKey,
-    claude.WithModel("claude-3-5-sonnet-20241022"),
+    claude.WithModel("claude-sonnet-4-5-20250929"),
 )
 ```
 
 Available models:
+- `claude-sonnet-4-5-20250929` - Latest Sonnet 4.5 model (default)
 - `claude-opus-4-1-20250805` - Most powerful model, best for complex tasks (August 2025)
 - `claude-sonnet-4-20250514` - Balanced performance and efficiency
 - `claude-3-5-sonnet-20241022` - Previous generation, still widely available
@@ -131,14 +132,17 @@ Available models:
 
 Note: Claude Opus 4.1 and Sonnet 4 are hybrid models offering both instant and extended thinking modes.
 
-#### Temperature and Max Tokens
+#### Temperature, Top-P and Max Tokens
 
 ```go
 client, err := claude.New(ctx, apiKey,
-    claude.WithTemperature(0.7),
-    claude.WithMaxTokens(4096),
+    claude.WithTemperature(0.7),  // Optional: use either temperature OR top_p, not both
+    // claude.WithTopP(0.9),      // Alternative to temperature
+    claude.WithMaxTokens(8192),   // Optional (default: 8192)
 )
 ```
+
+**Note**: Claude Sonnet 4.5 does not allow both `temperature` and `top_p` to be specified simultaneously. Use one or the other.
 
 ### Environment Variables
 
@@ -242,7 +246,7 @@ Note: GPT-4.5 is in research preview. o1 models are being phased out in favor of
 ```go
 client, err := openai.New(ctx, apiKey,
     openai.WithTemperature(0.7),
-    openai.WithMaxTokens(2048),
+    openai.WithMaxTokens(4096),  // Optional, omit for infinity (model's max)
     openai.WithTopP(0.9),
     openai.WithFrequencyPenalty(0.5),
     openai.WithPresencePenalty(0.5),
