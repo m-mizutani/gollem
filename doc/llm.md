@@ -138,7 +138,7 @@ Note: Claude Opus 4.1 and Sonnet 4 are hybrid models offering both instant and e
 client, err := claude.New(ctx, apiKey,
     claude.WithTemperature(0.7),  // Optional: use either temperature OR top_p, not both
     // claude.WithTopP(0.9),      // Alternative to temperature
-    claude.WithMaxTokens(8192),   // Required (default: 8192)
+    claude.WithMaxTokens(8192),   // Optional (default: 8192)
 )
 ```
 
