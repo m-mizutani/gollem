@@ -39,6 +39,23 @@ type generationParameters struct {
 	MaxTokens int64
 }
 
+// setTemperatureAndTopP sets temperature and/or top_p on the request params.
+// Claude Sonnet 4.5 does not allow both to be specified simultaneously.
+// If both are set, temperature takes priority and a warning is logged.
+func setTemperatureAndTopP(ctx context.Context, params *anthropic.MessageNewParams, temperature, topP float64) {
+	// Claude Sonnet 4.5 does not allow both temperature and top_p.
+	// Set only one, prioritizing temperature if both are set.
+	if temperature >= 0 {
+		if topP >= 0 {
+			logger := ctxlog.From(ctx)
+			logger.Warn("Both Temperature and TopP are set for Claude; using Temperature as it is prioritized")
+		}
+		params.Temperature = anthropic.Float(temperature)
+	} else if topP >= 0 {
+		params.TopP = anthropic.Float(topP)
+	}
+}
+
 // Client is a client for the Claude API.
 // It provides methods to interact with Anthropic's Claude models.
 type Client struct {
@@ -123,7 +140,9 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 		defaultModel: "claude-sonnet-4-5-20250929",
 		apiKey:       apiKey,
 		params: generationParameters{
-			MaxTokens: 8192,
+			Temperature: -1.0, // -1 indicates not set (0.0 is valid)
+			TopP:        -1.0, // -1 indicates not set (0.0 is valid)
+			MaxTokens:   8192,
 		},
 		timeout: 30 * time.Second, // Default timeout
 	}
@@ -383,14 +402,8 @@ func generateClaudeContent(
 		Messages:  messages,
 	}
 
-	// Claude Sonnet 4.5 does not allow both temperature and top_p
-	// Set only the one that is explicitly configured (non-zero)
-	if params.Temperature > 0 {
-		msgParams.Temperature = anthropic.Float(params.Temperature)
-	}
-	if params.TopP > 0 {
-		msgParams.TopP = anthropic.Float(params.TopP)
-	}
+	// Set temperature and/or top_p (mutually exclusive for Claude Sonnet 4.5)
+	setTemperatureAndTopP(ctx, &msgParams, params.Temperature, params.TopP)
 
 	if len(tools) > 0 {
 		msgParams.Tools = tools
@@ -486,14 +499,8 @@ func generateClaudeStream(
 		Messages:  messages,
 	}
 
-	// Claude Sonnet 4.5 does not allow both temperature and top_p
-	// Set only the one that is explicitly configured (non-zero)
-	if params.Temperature > 0 {
-		msgParams.Temperature = anthropic.Float(params.Temperature)
-	}
-	if params.TopP > 0 {
-		msgParams.TopP = anthropic.Float(params.TopP)
-	}
+	// Set temperature and/or top_p (mutually exclusive for Claude Sonnet 4.5)
+	setTemperatureAndTopP(ctx, &msgParams, params.Temperature, params.TopP)
 
 	if len(tools) > 0 {
 		msgParams.Tools = tools
@@ -745,14 +752,8 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 			MaxTokens: s.params.MaxTokens,
 		}
 
-		// Claude Sonnet 4.5 does not allow both temperature and top_p
-		// Set only the one that is explicitly configured (non-zero)
-		if s.params.Temperature > 0 {
-			request.Temperature = anthropic.Float(s.params.Temperature)
-		}
-		if s.params.TopP > 0 {
-			request.TopP = anthropic.Float(s.params.TopP)
-		}
+		// Set temperature and/or top_p (mutually exclusive for Claude Sonnet 4.5)
+		setTemperatureAndTopP(ctx, &request, s.params.Temperature, s.params.TopP)
 
 		if len(systemPrompt) > 0 {
 			request.System = systemPrompt
@@ -922,14 +923,8 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 			MaxTokens: s.params.MaxTokens,
 		}
 
-		// Claude Sonnet 4.5 does not allow both temperature and top_p
-		// Set only the one that is explicitly configured (non-zero)
-		if s.params.Temperature > 0 {
-			request.Temperature = anthropic.Float(s.params.Temperature)
-		}
-		if s.params.TopP > 0 {
-			request.TopP = anthropic.Float(s.params.TopP)
-		}
+		// Set temperature and/or top_p (mutually exclusive for Claude Sonnet 4.5)
+		setTemperatureAndTopP(ctx, &request, s.params.Temperature, s.params.TopP)
 
 		if len(systemPrompt) > 0 {
 			request.System = systemPrompt

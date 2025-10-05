@@ -179,7 +179,7 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 		defaultModel:   DefaultModel,
 		embeddingModel: DefaultEmbeddingModel,
 		params: generationParameters{
-			ReasoningEffort: "medium",
+			ReasoningEffort: "minimal",
 			Verbosity:       "low",
 		},
 		contentType: gollem.ContentTypeText,

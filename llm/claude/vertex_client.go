@@ -92,7 +92,9 @@ func NewWithVertex(ctx context.Context, region, projectID string, options ...Ver
 		defaultModel:   DefaultVertexClaudeModel,
 		embeddingModel: "text-embedding-004",
 		params: generationParameters{
-			MaxTokens: 8192,
+			Temperature: -1.0, // -1 indicates not set (0.0 is valid)
+			TopP:        -1.0, // -1 indicates not set (0.0 is valid)
+			MaxTokens:   8192,
 		},
 	}
 
