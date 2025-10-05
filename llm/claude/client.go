@@ -17,10 +17,6 @@ import (
 	"github.com/m-mizutani/jsonex"
 )
 
-const (
-	DefaultEmbeddingModel = "claude-sonnet-4-5-20250929"
-)
-
 var (
 	// claudePromptScope is the logging scope for Claude prompts
 	claudePromptScope = ctxlog.NewScope("claude_prompt", ctxlog.EnabledBy("GOLLEM_LOGGING_CLAUDE_PROMPT"))
@@ -53,10 +49,6 @@ type Client struct {
 	// It can be overridden using WithModel option.
 	defaultModel string
 
-	// embeddingModel is the model to use for embeddings.
-	// It can be overridden using WithEmbeddingModel option.
-	embeddingModel string
-
 	// apiKey is the API key for authentication.
 	apiKey string
 
@@ -82,15 +74,6 @@ func WithModel(modelName string) Option {
 	}
 }
 
-// WithEmbeddingModel sets the embedding model to use for embeddings.
-// The model name should be a valid Claude model identifier.
-// Default: DefaultEmbeddingModel
-func WithEmbeddingModel(modelName string) Option {
-	return func(c *Client) {
-		c.embeddingModel = modelName
-	}
-}
-
 // WithTemperature sets the temperature parameter for text generation.
 // Higher values make the output more random, lower values make it more focused.
 // Range: 0.0 to 1.0
@@ -112,7 +95,7 @@ func WithTopP(topP float64) Option {
 }
 
 // WithMaxTokens sets the maximum number of tokens to generate.
-// Default: 4096
+// Default: 8192
 func WithMaxTokens(maxTokens int64) Option {
 	return func(c *Client) {
 		c.params.MaxTokens = maxTokens
@@ -137,13 +120,10 @@ func WithSystemPrompt(prompt string) Option {
 // It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
 	client := &Client{
-		defaultModel:   string(anthropic.ModelClaude3_5SonnetLatest),
-		embeddingModel: DefaultEmbeddingModel,
-		apiKey:         apiKey,
+		defaultModel: "claude-sonnet-4-5-20250929",
+		apiKey:       apiKey,
 		params: generationParameters{
-			Temperature: 0.7,
-			TopP:        1.0,
-			MaxTokens:   4096,
+			MaxTokens: 8192,
 		},
 		timeout: 30 * time.Second, // Default timeout
 	}
@@ -398,11 +378,18 @@ func generateClaudeContent(
 
 	// Prepare message parameters
 	msgParams := anthropic.MessageNewParams{
-		Model:       anthropic.Model(model),
-		MaxTokens:   params.MaxTokens,
-		Temperature: anthropic.Float(params.Temperature),
-		TopP:        anthropic.Float(params.TopP),
-		Messages:    messages,
+		Model:     anthropic.Model(model),
+		MaxTokens: params.MaxTokens,
+		Messages:  messages,
+	}
+
+	// Claude Sonnet 4.5 does not allow both temperature and top_p
+	// Set only the one that is explicitly configured (non-zero)
+	if params.Temperature > 0 {
+		msgParams.Temperature = anthropic.Float(params.Temperature)
+	}
+	if params.TopP > 0 {
+		msgParams.TopP = anthropic.Float(params.TopP)
 	}
 
 	if len(tools) > 0 {
@@ -494,11 +481,18 @@ func generateClaudeStream(
 ) (<-chan *gollem.Response, error) {
 	// Prepare message parameters
 	msgParams := anthropic.MessageNewParams{
-		Model:       anthropic.Model(model),
-		MaxTokens:   params.MaxTokens,
-		Temperature: anthropic.Float(params.Temperature),
-		TopP:        anthropic.Float(params.TopP),
-		Messages:    messages,
+		Model:     anthropic.Model(model),
+		MaxTokens: params.MaxTokens,
+		Messages:  messages,
+	}
+
+	// Claude Sonnet 4.5 does not allow both temperature and top_p
+	// Set only the one that is explicitly configured (non-zero)
+	if params.Temperature > 0 {
+		msgParams.Temperature = anthropic.Float(params.Temperature)
+	}
+	if params.TopP > 0 {
+		msgParams.TopP = anthropic.Float(params.TopP)
 	}
 
 	if len(tools) > 0 {
@@ -746,11 +740,18 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		// Create the request and call the API
 		systemPrompt := createSystemPrompt(s.cfg)
 		request := anthropic.MessageNewParams{
-			Model:       anthropic.Model(s.defaultModel),
-			Messages:    apiMessages,
-			MaxTokens:   s.params.MaxTokens,
-			Temperature: anthropic.Float(s.params.Temperature),
-			TopP:        anthropic.Float(s.params.TopP),
+			Model:     anthropic.Model(s.defaultModel),
+			Messages:  apiMessages,
+			MaxTokens: s.params.MaxTokens,
+		}
+
+		// Claude Sonnet 4.5 does not allow both temperature and top_p
+		// Set only the one that is explicitly configured (non-zero)
+		if s.params.Temperature > 0 {
+			request.Temperature = anthropic.Float(s.params.Temperature)
+		}
+		if s.params.TopP > 0 {
+			request.TopP = anthropic.Float(s.params.TopP)
 		}
 
 		if len(systemPrompt) > 0 {
@@ -916,11 +917,18 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 		// Create request params
 		systemPrompt := createSystemPrompt(s.cfg)
 		request := anthropic.MessageNewParams{
-			Model:       anthropic.Model(s.defaultModel),
-			Messages:    allMessages,
-			MaxTokens:   s.params.MaxTokens,
-			Temperature: anthropic.Float(s.params.Temperature),
-			TopP:        anthropic.Float(s.params.TopP),
+			Model:     anthropic.Model(s.defaultModel),
+			Messages:  allMessages,
+			MaxTokens: s.params.MaxTokens,
+		}
+
+		// Claude Sonnet 4.5 does not allow both temperature and top_p
+		// Set only the one that is explicitly configured (non-zero)
+		if s.params.Temperature > 0 {
+			request.Temperature = anthropic.Float(s.params.Temperature)
+		}
+		if s.params.TopP > 0 {
+			request.TopP = anthropic.Float(s.params.TopP)
 		}
 
 		if len(systemPrompt) > 0 {
