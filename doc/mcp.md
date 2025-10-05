@@ -107,13 +107,22 @@ if mcpRemote != nil {
 
 agent := gollem.New(client,
     gollem.WithToolSets(toolSets...),
-    gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-        fmt.Printf("🤖 %s\n", msg)
-        return nil
+    gollem.WithContentBlockMiddleware(func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+        return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+            resp, err := next(ctx, req)
+            if err == nil && len(resp.Texts) > 0 {
+                for _, text := range resp.Texts {
+                    fmt.Printf("🤖 %s\n", text)
+                }
+            }
+            return resp, err
+        }
     }),
-    gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
-        fmt.Printf("⚡ Using MCP tool: %s\n", tool.Name)
-        return nil
+    gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+        return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+            fmt.Printf("⚡ Using MCP tool: %s\n", req.Tool.Name)
+            return next(ctx, req)
+        }
     }),
 )
 

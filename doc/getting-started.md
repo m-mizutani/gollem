@@ -47,9 +47,16 @@ func main() {
     agent := gollem.New(client,
         gollem.WithToolSets(mcpClient),
         gollem.WithSystemPrompt("You are a helpful assistant."),
-        gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-            fmt.Println(msg)
-            return nil
+        gollem.WithContentBlockMiddleware(func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+            return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+                resp, err := next(ctx, req)
+                if err == nil && len(resp.Texts) > 0 {
+                    for _, text := range resp.Texts {
+                        fmt.Println(text)
+                    }
+                }
+                return resp, err
+            }
         }),
     )
 
@@ -168,26 +175,38 @@ if err != nil {
 history = newHistory
 ```
 
-## Hook System
+## Middleware System
 
-gollem provides comprehensive hooks for monitoring and controlling agent behavior:
+gollem provides comprehensive middleware for monitoring and controlling agent behavior:
 
 ```go
 agent := gollem.New(client,
-    gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-        // Process each message from the LLM
-        fmt.Printf("🤖 %s\n", msg)
-        return nil
+    gollem.WithContentBlockMiddleware(func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+        return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+            // Process each message from the LLM
+            resp, err := next(ctx, req)
+            if err == nil && len(resp.Texts) > 0 {
+                for _, text := range resp.Texts {
+                    fmt.Printf("🤖 %s\n", text)
+                }
+            }
+            return resp, err
+        }
     }),
-    gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
-        // Monitor tool execution
-        fmt.Printf("⚡ Executing: %s\n", tool.Name)
-        return nil
-    }),
-    gollem.WithToolErrorHook(func(ctx context.Context, err error, tool gollem.FunctionCall) error {
-        // Handle tool errors
-        fmt.Printf("❌ Tool %s failed: %v\n", tool.Name, err)
-        return nil // Continue execution
+    gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+        return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+            // Monitor tool execution
+            fmt.Printf("⚡ Executing: %s\n", req.Tool.Name)
+
+            resp, err := next(ctx, req)
+
+            // Handle tool errors
+            if resp.Error != nil {
+                fmt.Printf("❌ Tool %s failed: %v\n", req.Tool.Name, resp.Error)
+            }
+
+            return resp, err
+        }
     }),
 )
 ```

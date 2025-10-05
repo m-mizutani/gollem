@@ -34,9 +34,16 @@ func main() {
 	agent := gollem.New(client,
 		gollem.WithToolSets(mcpLocal),
 		gollem.WithSystemPrompt("You are a helpful assistant with access to MCP tools."),
-		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-			fmt.Printf("🤖 %s\n", msg)
-			return nil
+		gollem.WithContentBlockMiddleware(func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+			return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+				resp, err := next(ctx, req)
+				if err == nil && len(resp.Texts) > 0 {
+					for _, text := range resp.Texts {
+						fmt.Printf("🤖 %s\n", text)
+					}
+				}
+				return resp, err
+			}
 		}),
 	)
 

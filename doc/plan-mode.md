@@ -188,32 +188,28 @@ sequenceDiagram
     
     loop For each ToDo
         Plan->>Hook: ▶️ WithPlanToDoStartHook
-        Plan->>Hook: 💬 WithMessageHook (action)
         Plan->>LLM: Execute step
         LLM->>Tool: Call tool
         Tool-->>LLM: Tool result
         LLM-->>Plan: Step result
-        Plan->>Hook: 💬 WithMessageHook (response)
-        
+
         alt Task Completed
             Plan->>Hook: ✅ WithPlanToDoCompletedHook
         else Task Failed
             Plan->>Hook: ❌ WithPlanToDoCompletedHook (with error)
         end
-        
+
         Plan->>LLM: Reflect on progress
         LLM-->>Plan: Reflection result
-        
+
         alt Skip Decision
             Plan->>Hook: ⏭️ WithSkipConfirmationHook
             Hook-->>Plan: Skip approved/denied
         end
-        
+
         alt Plan Modified
             Plan->>Hook: 📝 WithPlanToDoUpdatedHook
         end
-        
-        Plan->>Hook: 💬 WithMessageHook (thought)
     end
     
     Plan->>LLM: Summarize results
@@ -229,18 +225,17 @@ graph LR
     subgraph "Plan Creation"
         A[WithPlanCreatedHook]
     end
-    
+
     subgraph "Task Execution"
         B[WithPlanToDoStartHook]
         C[WithPlanToDoCompletedHook]
-        D[WithMessageHook]
     end
-    
+
     subgraph "Plan Adaptation"
         E[WithPlanToDoUpdatedHook]
         F[WithSkipConfirmationHook]
     end
-    
+
     subgraph "Plan Completion"
         G[WithPlanCompletedHook]
     end
@@ -733,47 +728,6 @@ func executePlanWithRetry(agent *gollem.Agent, goal string, maxRetries int) (*go
 }
 ```
 
-### History Compaction for Long Plans
-
-```go
-// Custom compactor that preserves important context
-type SmartCompactor struct{}
-
-func (sc *SmartCompactor) Compact(history *gollem.History) (*gollem.History, error) {
-    messages := history.Messages()
-    if len(messages) <= 10 {
-        return history, nil // Don't compact small histories
-    }
-    
-    // Keep first message (goal), tool results, and recent messages
-    compacted := &gollem.History{}
-    
-    // Always keep the goal
-    compacted.AddMessage(messages[0])
-    
-    // Keep tool results and errors
-    for _, msg := range messages[1 : len(messages)-5] {
-        if msg.ToolCalls != nil || strings.Contains(msg.Content, "error") {
-            compacted.AddMessage(msg)
-        }
-    }
-    
-    // Keep last 5 messages for context
-    for _, msg := range messages[len(messages)-5:] {
-        compacted.AddMessage(msg)
-    }
-    
-    return compacted, nil
-}
-
-// Usage
-plan, err := agent.Plan(ctx, "Process large dataset",
-    gollem.WithPlanAutoCompact(true),
-    gollem.WithPlanMaxHistorySize(50),
-    gollem.WithPlanHistoryCompactor(&SmartCompactor{}),
-)
-```
-
 ### Execution Iteration Limits
 
 Plan mode includes automatic iteration limiting to prevent infinite loops during task execution:
@@ -956,8 +910,11 @@ func executeWithResourceLimits(plan *gollem.Plan, maxDuration time.Duration, max
 | `WithPlanToDoStartHook` | Task execution starts | Progress updates |
 | `WithPlanToDoCompletedHook` | Task execution ends | Error handling |
 | `WithPlanToDoUpdatedHook` | Plan modifications | Track changes |
-| `WithMessageHook` | Agent messages (including plan) | Detailed logging |
 | `WithSkipConfirmationHook` | Skip decision made | User confirmation |
+
+**Note**: For monitoring LLM responses and tool execution, use agent-level middleware:
+- `WithContentBlockMiddleware` for LLM response monitoring
+- `WithToolMiddleware` for tool execution monitoring
 
 ### Plan Methods
 
@@ -1000,6 +957,5 @@ func executeWithResourceLimits(plan *gollem.Plan, maxDuration time.Duration, max
 - Use `PlanExecutionModeComplete` to disable skipping
 
 **Q: Memory usage grows with long plans**
-- Enable auto-compaction with `WithPlanAutoCompact(true)`
-- Implement custom compactor for domain-specific optimization
-- Monitor history size with hooks
+- Use appropriate loop limits with `WithLoopLimit()`
+- Monitor history size with plan hooks

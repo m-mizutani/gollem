@@ -15,7 +15,7 @@ GO for Large LanguagE Model (GOLLEM)
   - Automatic session management for continuous conversations
   - Portable conversational memory with history for stateless/distributed applications
   - Intelligent memory management with automatic history compaction
-  - Diverse agent behavior control mechanisms (Hooks, Facilitators)
+  - Middleware system for monitoring, logging, and controlling agent behavior
 
 ## Supported LLMs
 
@@ -129,13 +129,20 @@ func main() {
 		panic(err)
 	}
 
-	// Create agent with tools and hooks
+	// Create agent with tools and middleware
 	agent := gollem.New(client,
 		gollem.WithTools(&GreetingTool{}),
 		gollem.WithSystemPrompt("You are a helpful assistant."),
-		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-			fmt.Printf("🤖 %s\n", msg)
-			return nil
+		gollem.WithContentBlockMiddleware(func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+			return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+				resp, err := next(ctx, req)
+				if err == nil && len(resp.Texts) > 0 {
+					for _, text := range resp.Texts {
+						fmt.Printf("🤖 %s\n", text)
+					}
+				}
+				return resp, err
+			}
 		}),
 	)
 
@@ -243,9 +250,16 @@ func main() {
 	// Create agent with MCP tools
 	agent := gollem.New(client,
 		gollem.WithToolSets(mcpLocal, mcpRemote),
-		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-			fmt.Printf("🤖 %s\n", msg)
-			return nil
+		gollem.WithContentBlockMiddleware(func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+			return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+				resp, err := next(ctx, req)
+				if err == nil && len(resp.Texts) > 0 {
+					for _, text := range resp.Texts {
+						fmt.Printf("🤖 %s\n", text)
+					}
+				}
+				return resp, err
+			}
 		}),
 	)
 
@@ -279,14 +293,19 @@ err = agent.Execute(ctx, "Can you help me with the next step?")
 history := agent.Session().History()
 ```
 
-### Manual History Management (Legacy)
+### Manual Session Management (Advanced)
 
-For backward compatibility, the `Prompt` method is still available but deprecated:
+For advanced use cases where you need direct session control:
 
 ```go
-// Legacy approach (not recommended)
-history1, err := agent.Prompt(ctx, "Hello")
-history2, err := agent.Prompt(ctx, "Continue", gollem.WithHistory(history1))
+// Create session manually
+session, err := client.NewSession(ctx)
+if err != nil {
+	panic(err)
+}
+
+// Use session directly
+result, err := session.GenerateContent(ctx, gollem.Text("Hello"))
 ```
 
 ### Tool Integration
@@ -311,105 +330,155 @@ Choose between blocking and streaming responses:
 ```go
 agent := gollem.New(client,
 	gollem.WithResponseMode(gollem.ResponseModeStreaming), // Real-time streaming
-	gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-		fmt.Print(msg) // Print tokens as they arrive
-		return nil
+	gollem.WithContentStreamMiddleware(func(next gollem.ContentStreamHandler) gollem.ContentStreamHandler {
+		return func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
+			ch, err := next(ctx, req)
+			if err != nil {
+				return nil, err
+			}
+			// Print tokens as they arrive
+			outCh := make(chan *gollem.ContentResponse)
+			go func() {
+				defer close(outCh)
+				for resp := range ch {
+					if len(resp.Texts) > 0 {
+						for _, text := range resp.Texts {
+							fmt.Print(text)
+						}
+					}
+					outCh <- resp
+				}
+			}()
+			return outCh, nil
+		}
 	}),
 )
 ```
 
-### Comprehensive Hook System
+### Middleware System
 
-gollem provides a powerful hook system for monitoring, logging, and controlling agent behavior. Hooks are callback functions that are invoked at specific points during execution.
+gollem provides a powerful middleware system for monitoring, logging, and controlling agent behavior. Middleware functions wrap the core handlers to add cross-cutting concerns.
 
-#### Available Hooks
+#### Available Middleware Types
 
-**1. MessageHook** - Called when the LLM generates text
+**1. ContentBlockMiddleware** - Wraps synchronous content generation
 ```go
-gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-	// Log or process each message from the LLM
-	log.Printf("🤖 LLM: %s", msg)
-	
-	// Stream to UI, save to database, etc.
-	if err := streamToUI(msg); err != nil {
-		return err // Abort execution on error
+gollem.WithContentBlockMiddleware(func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+	return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+		// Pre-processing: log request, validate inputs
+		log.Printf("📝 Generating content with %d inputs", len(req.Inputs))
+
+		// Execute core handler
+		resp, err := next(ctx, req)
+
+		// Post-processing: log response, track metrics
+		if err == nil && len(resp.Texts) > 0 {
+			for _, text := range resp.Texts {
+				log.Printf("🤖 LLM: %s", text)
+			}
+			metrics.IncrementCounter("llm_messages_total")
+		}
+
+		return resp, err
 	}
-	return nil
 })
 ```
 
-**2. ToolRequestHook** - Called before executing any tool
+**2. ContentStreamMiddleware** - Wraps streaming content generation
 ```go
-gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
-	// Monitor tool usage, implement access control
-	log.Printf("⚡ Executing tool: %s with args: %v", tool.Name, tool.Arguments)
-	
-	// Implement security checks
-	if !isToolAllowed(tool.Name) {
-		return fmt.Errorf("tool %s not allowed", tool.Name)
+gollem.WithContentStreamMiddleware(func(next gollem.ContentStreamHandler) gollem.ContentStreamHandler {
+	return func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
+		// Execute core handler
+		ch, err := next(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+
+		// Wrap response channel for processing
+		outCh := make(chan *gollem.ContentResponse)
+		go func() {
+			defer close(outCh)
+			for resp := range ch {
+				// Process each streaming chunk
+				if len(resp.Texts) > 0 {
+					for _, text := range resp.Texts {
+						fmt.Print(text) // Stream to UI
+					}
+				}
+				outCh <- resp
+			}
+		}()
+
+		return outCh, nil
 	}
-	
-	// Rate limiting, usage tracking, etc.
-	return trackToolUsage(tool.Name)
 })
 ```
 
-**3. ToolResponseHook** - Called after successful tool execution
+**3. ToolMiddleware** - Wraps tool execution
 ```go
-gollem.WithToolResponseHook(func(ctx context.Context, tool gollem.FunctionCall, response map[string]any) error {
-	// Log successful tool executions
-	log.Printf("✅ Tool %s completed: %v", tool.Name, response)
-	
-	// Post-process results, update metrics
-	return updateToolMetrics(tool.Name, response)
-})
-```
+gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+	return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+		// Pre-execution: security checks, logging
+		log.Printf("⚡ Executing tool: %s", req.Tool.Name)
 
-**4. ToolErrorHook** - Called when tool execution fails
-```go
-gollem.WithToolErrorHook(func(ctx context.Context, err error, tool gollem.FunctionCall) error {
-	// Handle tool failures
-	log.Printf("❌ Tool %s failed: %v", tool.Name, err)
-	
-	// Decide whether to continue or abort
-	if isCriticalTool(tool.Name) {
-		return err // Abort execution
+		// Implement access control
+		if !isToolAllowed(req.Tool.Name) {
+			return &gollem.ToolExecResponse{
+				Error: fmt.Errorf("tool %s not allowed", req.Tool.Name),
+			}, nil
+		}
+
+		// Execute tool
+		resp, err := next(ctx, req)
+
+		// Post-execution: metrics, error handling
+		if resp.Error != nil {
+			log.Printf("❌ Tool %s failed: %v", req.Tool.Name, resp.Error)
+			metrics.IncrementCounter("tool_errors_total", "tool", req.Tool.Name)
+		} else {
+			log.Printf("✅ Tool %s completed in %dms", req.Tool.Name, resp.Duration)
+			metrics.RecordDuration("tool_execution_duration", req.Tool.Name, resp.Duration)
+		}
+
+		return resp, err
 	}
-	
-	// Log and continue for non-critical tools
-	logToolError(tool.Name, err)
-	return nil // Continue execution
 })
 ```
 
-**5. LoopHook** - Called at the start of each conversation loop
-```go
-gollem.WithLoopHook(func(ctx context.Context, loop int, input []gollem.Input) error {
-	// Monitor conversation progress
-	log.Printf("🔄 Loop %d starting with %d inputs", loop, len(input))
-	
-	// Implement custom loop limits or conditions
-	if loop > customLimit {
-		return fmt.Errorf("custom loop limit exceeded")
-	}
-	
-	// Track conversation metrics
-	return updateLoopMetrics(loop, input)
-})
-```
-
-#### Practical Hook Examples
+#### Practical Middleware Examples
 
 **Real-time Streaming to WebSocket:**
 ```go
 agent := gollem.New(client,
-	gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-		// Stream LLM responses to WebSocket clients
-		return websocketBroadcast(msg)
+	gollem.WithContentStreamMiddleware(func(next gollem.ContentStreamHandler) gollem.ContentStreamHandler {
+		return func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
+			ch, err := next(ctx, req)
+			if err != nil {
+				return nil, err
+			}
+
+			outCh := make(chan *gollem.ContentResponse)
+			go func() {
+				defer close(outCh)
+				for resp := range ch {
+					// Broadcast to WebSocket clients
+					if len(resp.Texts) > 0 {
+						for _, text := range resp.Texts {
+							websocketBroadcast(text)
+						}
+					}
+					outCh <- resp
+				}
+			}()
+			return outCh, nil
+		}
 	}),
-	gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
-		// Notify clients about tool execution
-		return websocketSend(fmt.Sprintf("Executing: %s", tool.Name))
+	gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+		return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+			// Notify clients about tool execution
+			websocketSend(fmt.Sprintf("Executing: %s", req.Tool.Name))
+			return next(ctx, req)
+		}
 	}),
 )
 ```
@@ -417,37 +486,42 @@ agent := gollem.New(client,
 **Comprehensive Logging and Monitoring:**
 ```go
 agent := gollem.New(client,
-	gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-		logger.Info("LLM response", "message", msg, "length", len(msg))
-		metrics.IncrementCounter("llm_messages_total")
-		return nil
-	}),
-	gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
-		logger.Info("Tool execution started", 
-			"tool", tool.Name, 
-			"args", tool.Arguments,
-			"request_id", ctx.Value("request_id"))
-		metrics.IncrementCounter("tool_executions_total", "tool", tool.Name)
-		return nil
-	}),
-	gollem.WithToolResponseHook(func(ctx context.Context, tool gollem.FunctionCall, response map[string]any) error {
-		logger.Info("Tool execution completed", 
-			"tool", tool.Name, 
-			"response_size", len(response))
-		metrics.RecordDuration("tool_execution_duration", tool.Name, time.Since(startTime))
-		return nil
-	}),
-	gollem.WithToolErrorHook(func(ctx context.Context, err error, tool gollem.FunctionCall) error {
-		logger.Error("Tool execution failed", 
-			"tool", tool.Name, 
-			"error", err)
-		metrics.IncrementCounter("tool_errors_total", "tool", tool.Name)
-
-		// Continue execution for non-critical errors
-		if !isCriticalError(err) {
-			return nil
+	gollem.WithContentBlockMiddleware(func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+		return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+			resp, err := next(ctx, req)
+			if err == nil {
+				logger.Info("LLM response",
+					"texts", len(resp.Texts),
+					"input_tokens", resp.InputToken,
+					"output_tokens", resp.OutputToken)
+				metrics.IncrementCounter("llm_messages_total")
+			}
+			return resp, err
 		}
-		return err
+	}),
+	gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+		return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+			logger.Info("Tool execution started",
+				"tool", req.Tool.Name,
+				"args", req.Tool.Arguments,
+				"request_id", ctx.Value("request_id"))
+
+			resp, err := next(ctx, req)
+
+			if resp.Error != nil {
+				logger.Error("Tool execution failed",
+					"tool", req.Tool.Name,
+					"error", resp.Error)
+				metrics.IncrementCounter("tool_errors_total", "tool", req.Tool.Name)
+			} else {
+				logger.Info("Tool execution completed",
+					"tool", req.Tool.Name,
+					"duration_ms", resp.Duration)
+				metrics.RecordDuration("tool_execution_duration", req.Tool.Name, resp.Duration)
+			}
+
+			return resp, err
+		}
 	}),
 )
 ```
@@ -455,20 +529,26 @@ agent := gollem.New(client,
 **Security and Access Control:**
 ```go
 agent := gollem.New(client,
-	gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
-		userID := ctx.Value("user_id").(string)
+	gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+		return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+			userID := ctx.Value("user_id").(string)
 
-		// Check permissions
-		if !hasPermission(userID, tool.Name) {
-			return fmt.Errorf("user %s not authorized for tool %s", userID, tool.Name)
+			// Check permissions
+			if !hasPermission(userID, req.Tool.Name) {
+				return &gollem.ToolExecResponse{
+					Error: fmt.Errorf("user %s not authorized for tool %s", userID, req.Tool.Name),
+				}, nil
+			}
+
+			// Rate limiting
+			if isRateLimited(userID, req.Tool.Name) {
+				return &gollem.ToolExecResponse{
+					Error: fmt.Errorf("rate limit exceeded for user %s", userID),
+				}, nil
+			}
+
+			return next(ctx, req)
 		}
-
-		// Rate limiting
-		if isRateLimited(userID, tool.Name) {
-			return fmt.Errorf("rate limit exceeded for user %s", userID)
-		}
-
-		return nil
 	}),
 )
 ```
@@ -476,180 +556,123 @@ agent := gollem.New(client,
 **Error Recovery and Fallbacks:**
 ```go
 agent := gollem.New(client,
-	gollem.WithToolErrorHook(func(ctx context.Context, err error, tool gollem.FunctionCall) error {
-		// Implement fallback mechanisms
-		switch tool.Name {
-		case "external_api":
-			// Use cached data as fallback
-			if cachedData := getFromCache(tool.Arguments); cachedData != nil {
-				log.Printf("Using cached data for %s", tool.Name)
-				return nil // Continue with cached data
-			}
-		case "file_operation":
-			// Retry with different parameters
-			if retryCount < maxRetries {
-				return retryWithBackoff(tool, retryCount)
-			}
-		}
+	gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+		return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+			resp, err := next(ctx, req)
 
-		// Log error and continue for non-critical tools
-		logError(tool.Name, err)
-		return nil
+			// Implement fallback mechanisms
+			if resp.Error != nil {
+				switch req.Tool.Name {
+				case "external_api":
+					// Use cached data as fallback
+					if cachedData := getFromCache(req.Tool.Arguments); cachedData != nil {
+						log.Printf("Using cached data for %s", req.Tool.Name)
+						return &gollem.ToolExecResponse{
+							Result: cachedData,
+						}, nil
+					}
+				case "file_operation":
+					// Retry with backoff
+					if retryCount < maxRetries {
+						time.Sleep(backoffDuration(retryCount))
+						return next(ctx, req) // Retry
+					}
+				}
+			}
+
+			return resp, err
+		}
 	}),
-	gollem.WithLoopLimit(10),    // Prevent infinite loops
-	gollem.WithRetryLimit(3),    // Retry failed operations
+	gollem.WithLoopLimit(10), // Prevent infinite loops
 )
 ```
 
-### Plan Mode - Goal-Oriented Agent
+### Strategy Pattern for Agent Behavior
 
-Plan mode enables goal-oriented task execution with intelligent planning and adaptive execution. The agent breaks down complex goals into structured steps and can intelligently skip redundant tasks based on previous execution results.
+gollem uses the Strategy pattern to customize how agents process tasks and make decisions. Strategies control the core execution logic, from simple request-response to complex planning workflows.
+
+#### Built-in Strategies
+
+**1. Default Strategy** - Simple request-response pattern
+```go
+// Used automatically when no strategy is specified
+agent := gollem.New(client,
+	gollem.WithTools(&MyTool{}),
+)
+```
+
+**2. React Strategy** - ReAct (Reasoning + Acting) pattern with step-by-step reasoning
+```go
+import "github.com/m-mizutani/gollem/strategy/react"
+
+strategy := react.New(client)
+agent := gollem.New(client,
+	gollem.WithStrategy(strategy),
+	gollem.WithTools(&MyTool{}),
+)
+```
+
+**3. Plan & Execute Strategy** - Goal-oriented task planning and execution
+```go
+import "github.com/m-mizutani/gollem/strategy/planexec"
+
+strategy := planexec.New(client)
+agent := gollem.New(client,
+	gollem.WithStrategy(strategy),
+	gollem.WithTools(&SearchTool{}, &AnalysisTool{}),
+)
+```
+
+#### Custom Strategy Implementation
+
+Implement the `Strategy` interface for custom agent behavior:
 
 ```go
-package main
-
-import (
-	"context"
-	"fmt"
-	"os"
-
-	"github.com/m-mizutani/gollem"
-	"github.com/m-mizutani/gollem/llm/openai"
-)
-
-func main() {
-	ctx := context.Background()
-
-	// Create LLM client
-	client, err := openai.New(ctx, os.Getenv("OPENAI_API_KEY"))
-	if err != nil {
-		panic(err)
-	}
-
-	// Create agent with plan mode configuration
-	agent := gollem.New(client,
-		gollem.WithTools(&SearchTool{}, &AnalysisTool{}, &ReportTool{}),
-		gollem.WithPlanExecutionMode(gollem.PlanExecutionModeBalanced), // Default: intelligent skipping
-		gollem.WithSkipConfidenceThreshold(0.8), // Skip tasks with 80%+ confidence
-		gollem.WithSkipConfirmationHook(func(ctx context.Context, plan *gollem.Plan, decision gollem.SkipDecision) bool {
-			// Custom skip confirmation logic
-			fmt.Printf("🤔 Skip decision (confidence: %.2f): %s\n", decision.Confidence, decision.SkipReason)
-			return decision.Confidence >= 0.8 // Auto-approve high confidence skips
-		}),
-		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-			fmt.Printf("🤖 %s\n", msg)
-			return nil
-		}),
-	)
-
-	// Create and execute a plan
-	plan, err := agent.Plan(ctx, "Research and analyze the latest trends in AI for 2024, then create a comprehensive report")
-	if err != nil {
-		panic(err)
-	}
-
-	// Execute the plan (plan automatically handles step-by-step execution)
-	result, err := plan.Execute(ctx)
-	if err != nil {
-		panic(err)
-	}
-
-	// Get plan progress
-	todos := plan.GetToDos()
-	completed := 0
-	for _, todo := range todos {
-		if todo.Status == "Completed" {
-			completed++
-		}
-	}
-	fmt.Printf("✅ Plan completed: %s\n", result)
-	fmt.Printf("📊 Executed %d out of %d steps\n", completed, len(todos))
+type Strategy interface {
+	Init(ctx context.Context, inputs []Input) error
+	Handle(ctx context.Context, state *StrategyState) ([]Input, *ExecuteResponse, error)
+	Tools(ctx context.Context) ([]Tool, error)
 }
 ```
 
-**Key Features:**
-- **Intelligent Planning**: Automatically breaks down complex goals into manageable steps
-- **Adaptive Execution**: Skips redundant tasks based on previous results and confidence levels
-- **Execution Modes**: Complete (no skipping), Balanced (default, smart skipping), Efficient (aggressive skipping)
-- **Transparency**: Detailed reasoning for all skip decisions with confidence scores
-
-### Memory Management with History Compactor
-
-gollem provides intelligent memory management through automatic history compaction, which summarizes old conversation messages to reduce token usage while preserving context. **History compaction is enabled by default** to prevent token limit issues during long conversations.
-
+**Example: Custom Strategy**
 ```go
-package main
-
-import (
-	"context"
-	"fmt"
-	"os"
-
-	"github.com/m-mizutani/gollem"
-	"github.com/m-mizutani/gollem/llm/openai"
-)
-
-func main() {
-	ctx := context.Background()
-
-	// Create LLM client
-	client, err := openai.New(ctx, os.Getenv("OPENAI_API_KEY"))
-	if err != nil {
-		panic(err)
-	}
-
-	// Agent with default compaction (automatically enabled)
-	agent := gollem.New(client,
-		gollem.WithTools(&YourTool{}),
-		// History compaction is enabled by default with standard settings
-	)
-
-	// Or customize compaction behavior
-	compactor := gollem.NewHistoryCompactor(client,
-		gollem.WithMaxTokens(50000),           // Start compaction at 50k tokens
-		gollem.WithPreserveRecentTokens(10000), // Preserve 10k tokens of recent context
-		gollem.WithCompactionSystemPrompt("Custom summarization instructions..."),
-	)
-
-	// Agent with custom compaction settings
-	agentCustom := gollem.New(client,
-		gollem.WithTools(&YourTool{}),
-		gollem.WithHistoryCompactor(compactor), // Override default compactor
-		gollem.WithCompactionHook(func(ctx context.Context, original, compacted *gollem.History) error {
-			fmt.Printf("🗜️  History compacted: %d → %d messages (%.1f%% reduction)\n", 
-				original.ToCount(), compacted.ToCount(),
-				float64(original.ToCount()-compacted.ToCount())/float64(original.ToCount())*100)
-			return nil
-		}),
-	)
-
-	// Long conversation that will trigger automatic compaction
-	for i := 0; i < 20; i++ {
-		prompt := fmt.Sprintf("Tell me about topic %d in detail", i)
-		if err := agent.Execute(ctx, prompt); err != nil {
-			panic(err)
-		}
-		// Or use the default agent - compaction still happens automatically
-		if err := agentCustom.Execute(ctx, prompt); err != nil {
-			panic(err)
-		}
-	}
+type myStrategy struct {
+	client gollem.LLMClient
 }
+
+func (s *myStrategy) Init(ctx context.Context, inputs []Input) error {
+	// Initialize strategy state
+	return nil
+}
+
+func (s *myStrategy) Handle(ctx context.Context, state *StrategyState) ([]Input, *ExecuteResponse, error) {
+	// Custom decision logic
+	resp, err := state.GenerateContent(ctx, state.Inputs...)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Return next inputs and optional completion response
+	return nil, &gollem.ExecuteResponse{Message: resp.Texts[0]}, nil
+}
+
+func (s *myStrategy) Tools(ctx context.Context) ([]Tool, error) {
+	// Return available tools for this strategy
+	return []Tool{}, nil
+}
+
+// Use custom strategy
+agent := gollem.New(client,
+	gollem.WithStrategy(&myStrategy{client: client}),
+)
 ```
 
 **Key Features:**
-- **Intelligent Summarization**: Automatically summarizes old messages while preserving critical context
-- **Configurable Thresholds**: Control when compaction triggers based on token count or LLM context limits  
-- **Recent Message Preservation**: Always keeps recent messages intact for conversation continuity
-- **Context-Aware**: Preserves tool calls, responses, and important conversation state
-- **Multi-LLM Support**: Works with OpenAI, Claude, and Gemini models with appropriate token limits
-
-**Compaction Options:**
-- `WithMaxTokens(int)`: Set custom token threshold (default: 50,000)
-- `WithPreserveRecentTokens(int)`: Recent tokens to preserve (default: 10,000)
-- `WithCompactionSystemPrompt(string)`: Custom summarization instructions
-- `WithCompactionPromptTemplate(string)`: Custom prompt template for summarization
-- `WithHistoryCompaction(false)`: Disable automatic compaction if needed
+- **Pluggable Architecture**: Swap strategies without changing agent code
+- **Built-in Patterns**: ReAct, Plan & Execute, or default simple execution
+- **Custom Logic**: Implement your own decision-making algorithms
+- **State Management**: Full access to conversation state and history
 
 ## Examples
 
@@ -662,9 +685,6 @@ See the [examples](https://github.com/m-mizutani/gollem/tree/main/examples) dire
 - **[MCP](examples/mcp)**: Integration with MCP servers
 - **[Tools](examples/tools)**: Custom tool development
 - **[Embedding](examples/embedding)**: Text embedding generation
-- **[Plan Mode](examples/plan_mode)**: Goal-oriented agent with intelligent task planning
-- **[Memory Compaction](examples/memory_compaction)**: Automatic history compaction for long conversations
-- **[Plan Compaction](examples/plan_compaction)**: History compaction during plan execution
 
 ## Documentation
 
@@ -709,9 +729,16 @@ func main() {
 	// Use the same agent interface as other providers
 	agent := gollem.New(client,
 		gollem.WithTools(&YourCustomTool{}),
-		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-			fmt.Printf("🤖 %s\n", msg)
-			return nil
+		gollem.WithContentBlockMiddleware(func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+			return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+				resp, err := next(ctx, req)
+				if err == nil && len(resp.Texts) > 0 {
+					for _, text := range resp.Texts {
+						fmt.Printf("🤖 %s\n", text)
+					}
+				}
+				return resp, err
+			}
 		}),
 	)
 
@@ -747,15 +774,21 @@ gcloud auth application-default login
 
 ## Debugging
 
-### Logging LLM Prompts
+### Logging LLM Requests and Responses
 
-You can enable prompt logging for debugging purposes by setting environment variables:
+You can enable detailed logging for debugging purposes by setting environment variables:
 
+**Prompt Logging:**
 - `GOLLEM_LOGGING_CLAUDE_PROMPT=true` - Log all prompts sent to Claude
 - `GOLLEM_LOGGING_OPENAI_PROMPT=true` - Log all prompts sent to OpenAI
 - `GOLLEM_LOGGING_GEMINI_PROMPT=true` - Log all prompts sent to Gemini
 
-These will output the raw prompts to the standard logger before sending them to the LLM provider, which is useful for debugging conversation flow and tool usage.
+**Response Logging:**
+- `GOLLEM_LOGGING_CLAUDE_RESPONSE=true` - Log all responses from Claude
+- `GOLLEM_LOGGING_OPENAI_RESPONSE=true` - Log all responses from OpenAI
+- `GOLLEM_LOGGING_GEMINI_RESPONSE=true` - Log all responses from Gemini
+
+These will output the raw prompts and responses to the standard logger, which is useful for debugging conversation flow, tool usage, and token consumption.
 
 ## License
 
