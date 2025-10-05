@@ -16,7 +16,7 @@ gollem is a Go framework for building applications with Large Language Models (L
 - **Automatic Session Management**: Built-in conversation history management with the `Execute` method
 - **Custom Tools**: Create and integrate your own tools for LLMs to use
 - **MCP Integration**: Connect with external tools and resources through Model Context Protocol
-- **Comprehensive Hook System**: Monitor and control agent behavior with powerful callback functions
+- **Middleware System**: Monitor and control agent behavior with powerful middleware functions
 - **Streaming Support**: Real-time response streaming for better user experience
 - **Error Handling**: Robust error handling with retry mechanisms and graceful degradation
 
@@ -46,9 +46,16 @@ func main() {
     // Create agent with automatic session management
     agent := gollem.New(client,
         gollem.WithSystemPrompt("You are a helpful assistant."),
-        gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-            fmt.Printf("🤖 %s\n", msg)
-            return nil
+        gollem.WithContentBlockMiddleware(func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+            return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+                resp, err := next(ctx, req)
+                if err == nil && len(resp.Texts) > 0 {
+                    for _, text := range resp.Texts {
+                        fmt.Printf("🤖 %s\n", text)
+                    }
+                }
+                return resp, err
+            }
         }),
     )
 
@@ -82,13 +89,11 @@ gollem provides two main approaches for LLM interaction:
 
 ## Advanced Features
 
-### Hook System
+### Middleware System
 Monitor and control every aspect of agent behavior:
-- **MessageHook**: Process LLM responses in real-time
-- **ToolRequestHook**: Monitor and control tool execution
-- **ToolResponseHook**: Process tool results
-- **ToolErrorHook**: Handle tool failures gracefully
-- **LoopHook**: Monitor conversation progress
+- **ContentBlockMiddleware**: Process LLM responses in real-time
+- **ContentStreamMiddleware**: Handle streaming responses
+- **ToolMiddleware**: Monitor and control tool execution with pre/post processing
 
 ### Tool Integration
 - **Custom Tools**: Implement your own tools with the `Tool` interface

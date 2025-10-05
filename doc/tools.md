@@ -87,13 +87,22 @@ You can add multiple tools:
 ```go
 agent := gollem.New(client,
     gollem.WithTools(&HelloTool{}, &CalculatorTool{}, &WeatherTool{}),
-    gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-        fmt.Printf("🤖 %s\n", msg)
-        return nil
+    gollem.WithContentBlockMiddleware(func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+        return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+            resp, err := next(ctx, req)
+            if err == nil && len(resp.Texts) > 0 {
+                for _, text := range resp.Texts {
+                    fmt.Printf("🤖 %s\n", text)
+                }
+            }
+            return resp, err
+        }
     }),
-    gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
-        fmt.Printf("⚡ Executing: %s\n", tool.Name)
-        return nil
+    gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+        return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+            fmt.Printf("⚡ Executing: %s\n", req.Tool.Name)
+            return next(ctx, req)
+        }
     }),
 )
 
@@ -104,42 +113,43 @@ if err != nil {
 }
 ```
 
-## Tool Monitoring with Hooks
+## Tool Monitoring with Middleware
 
-gollem provides comprehensive hooks for monitoring tool execution:
+gollem provides comprehensive middleware for monitoring tool execution:
 
 ```go
 agent := gollem.New(client,
     gollem.WithTools(&HelloTool{}, &CalculatorTool{}),
-    
-    // Monitor tool requests
-    gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
-        fmt.Printf("⚡ Executing tool: %s with args: %v\n", tool.Name, tool.Arguments)
-        
-        // Implement access control
-        if !isToolAllowed(tool.Name) {
-            return fmt.Errorf("tool %s not allowed", tool.Name)
+
+    // Monitor and control tool execution
+    gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+        return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+            fmt.Printf("⚡ Executing tool: %s with args: %v\n", req.Tool.Name, req.Tool.Arguments)
+
+            // Implement access control
+            if !isToolAllowed(req.Tool.Name) {
+                return &gollem.ToolExecResponse{
+                    Error: fmt.Errorf("tool %s not allowed", req.Tool.Name),
+                }, nil
+            }
+
+            // Execute tool
+            resp, err := next(ctx, req)
+
+            // Handle response
+            if resp.Error != nil {
+                fmt.Printf("❌ Tool %s failed: %v\n", req.Tool.Name, resp.Error)
+
+                // Decide whether to continue or abort
+                if isCriticalTool(req.Tool.Name) {
+                    return resp, err // Abort execution
+                }
+            } else {
+                fmt.Printf("✅ Tool %s completed: %v\n", req.Tool.Name, resp.Result)
+            }
+
+            return resp, err
         }
-        
-        return nil
-    }),
-    
-    // Monitor successful tool responses
-    gollem.WithToolResponseHook(func(ctx context.Context, tool gollem.FunctionCall, response map[string]any) error {
-        fmt.Printf("✅ Tool %s completed: %v\n", tool.Name, response)
-        return nil
-    }),
-    
-    // Handle tool errors
-    gollem.WithToolErrorHook(func(ctx context.Context, err error, tool gollem.FunctionCall) error {
-        fmt.Printf("❌ Tool %s failed: %v\n", tool.Name, err)
-        
-        // Decide whether to continue or abort
-        if isCriticalTool(tool.Name) {
-            return err // Abort execution
-        }
-        
-        return nil // Continue execution
     }),
 )
 

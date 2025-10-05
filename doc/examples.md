@@ -30,9 +30,16 @@ func main() {
     // Create agent with automatic session management
     agent := gollem.New(client,
         gollem.WithSystemPrompt("You are a helpful assistant."),
-        gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-            fmt.Printf("🤖 %s\n", msg)
-            return nil
+        gollem.WithContentBlockMiddleware(func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+            return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+                resp, err := next(ctx, req)
+                if err == nil && len(resp.Texts) > 0 {
+                    for _, text := range resp.Texts {
+                        fmt.Printf("🤖 %s\n", text)
+                    }
+                }
+                return resp, err
+            }
         }),
     )
 
@@ -129,13 +136,22 @@ func main() {
 
     agent := gollem.New(client,
         gollem.WithTools(&CalculatorTool{}),
-        gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-            fmt.Printf("🤖 %s\n", msg)
-            return nil
+        gollem.WithContentBlockMiddleware(func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+            return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+                resp, err := next(ctx, req)
+                if err == nil && len(resp.Texts) > 0 {
+                    for _, text := range resp.Texts {
+                        fmt.Printf("🤖 %s\n", text)
+                    }
+                }
+                return resp, err
+            }
         }),
-        gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
-            fmt.Printf("⚡ Executing: %s\n", tool.Name)
-            return nil
+        gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+            return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+                fmt.Printf("⚡ Executing: %s\n", req.Tool.Name)
+                return next(ctx, req)
+            }
         }),
     )
 
@@ -186,75 +202,70 @@ func (t *WeatherTool) Run(ctx context.Context, args map[string]any) (map[string]
 }
 ```
 
-## Comprehensive Hook Usage
+## Comprehensive Middleware Usage
 
-Example showing all available hooks for monitoring and control:
+Example showing middleware for monitoring and control:
 
 ```go
 func createMonitoredAgent(client gollem.LLMClient) *gollem.Agent {
     return gollem.New(client,
-        // Message hook for real-time output
-        gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-            fmt.Printf("🤖 LLM: %s\n", msg)
-            // Could stream to WebSocket, save to database, etc.
-            return nil
-        }),
-        
-        // Tool request hook for monitoring and access control
-        gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
-            fmt.Printf("⚡ Executing tool: %s with args: %v\n", tool.Name, tool.Arguments)
-            
-            // Example: Implement rate limiting
-            if isRateLimited(tool.Name) {
-                return fmt.Errorf("rate limit exceeded for tool %s", tool.Name)
-            }
-            
-            return nil
-        }),
-        
-        // Tool response hook for logging successful executions
-        gollem.WithToolResponseHook(func(ctx context.Context, tool gollem.FunctionCall, response map[string]any) error {
-            fmt.Printf("✅ Tool %s completed successfully\n", tool.Name)
-            // Log metrics, update dashboards, etc.
-            return nil
-        }),
-        
-        // Tool error hook for error handling and recovery
-        gollem.WithToolErrorHook(func(ctx context.Context, err error, tool gollem.FunctionCall) error {
-            fmt.Printf("❌ Tool %s failed: %v\n", tool.Name, err)
-            
-            // Example: Implement fallback mechanisms
-            if tool.Name == "external_api" {
-                // Use cached data as fallback
-                if cachedData := getFromCache(tool.Arguments); cachedData != nil {
-                    fmt.Printf("🔄 Using cached data for %s\n", tool.Name)
-                    return nil // Continue execution
+        // Content block middleware for real-time output
+        gollem.WithContentBlockMiddleware(func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+            return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+                resp, err := next(ctx, req)
+                if err == nil && len(resp.Texts) > 0 {
+                    for _, text := range resp.Texts {
+                        fmt.Printf("🤖 LLM: %s\n", text)
+                        // Could stream to WebSocket, save to database, etc.
+                    }
                 }
+                return resp, err
             }
-            
-            // For critical tools, abort execution
-            if isCriticalTool(tool.Name) {
-                return err
-            }
-            
-            return nil // Continue execution for non-critical tools
         }),
-        
-        // Loop hook for monitoring conversation progress
-        gollem.WithLoopHook(func(ctx context.Context, loop int, input []gollem.Input) error {
-            fmt.Printf("🔄 Loop %d starting with %d inputs\n", loop, len(input))
-            
-            // Example: Custom loop limits
-            if loop > 20 {
-                return fmt.Errorf("custom loop limit exceeded")
+
+        // Tool middleware for monitoring, access control, and error handling
+        gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+            return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+                fmt.Printf("⚡ Executing tool: %s with args: %v\n", req.Tool.Name, req.Tool.Arguments)
+
+                // Example: Implement rate limiting
+                if isRateLimited(req.Tool.Name) {
+                    return &gollem.ToolExecResponse{
+                        Error: fmt.Errorf("rate limit exceeded for tool %s", req.Tool.Name),
+                    }, nil
+                }
+
+                // Execute tool
+                resp, err := next(ctx, req)
+
+                // Handle response and errors
+                if resp.Error != nil {
+                    fmt.Printf("❌ Tool %s failed: %v\n", req.Tool.Name, resp.Error)
+
+                    // Example: Implement fallback mechanisms
+                    if req.Tool.Name == "external_api" {
+                        // Use cached data as fallback
+                        if cachedData := getFromCache(req.Tool.Arguments); cachedData != nil {
+                            fmt.Printf("🔄 Using cached data for %s\n", req.Tool.Name)
+                            return &gollem.ToolExecResponse{Result: cachedData}, nil
+                        }
+                    }
+
+                    // For critical tools, abort execution
+                    if isCriticalTool(req.Tool.Name) {
+                        return resp, err
+                    }
+                } else {
+                    fmt.Printf("✅ Tool %s completed successfully\n", req.Tool.Name)
+                    // Log metrics, update dashboards, etc.
+                }
+
+                return resp, err
             }
-            
-            return nil
         }),
-        
+
         // Configure limits
         gollem.WithLoopLimit(30),
-        gollem.WithRetryLimit(5),
     )
 }
 
@@ -317,15 +328,33 @@ Example of handling streaming responses:
 func streamingExample(ctx context.Context, client gollem.LLMClient) error {
     agent := gollem.New(client,
         gollem.WithResponseMode(gollem.ResponseModeStreaming),
-        gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-            // Stream each token to the user interface
-            fmt.Print(msg)
-            
-            // Could also send to WebSocket, SSE, etc.
-            return streamToWebSocket(msg)
+        gollem.WithContentStreamMiddleware(func(next gollem.ContentStreamHandler) gollem.ContentStreamHandler {
+            return func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
+                ch, err := next(ctx, req)
+                if err != nil {
+                    return nil, err
+                }
+
+                outCh := make(chan *gollem.ContentResponse)
+                go func() {
+                    defer close(outCh)
+                    for resp := range ch {
+                        // Stream each token to the user interface
+                        if len(resp.Texts) > 0 {
+                            for _, text := range resp.Texts {
+                                fmt.Print(text)
+                                // Could also send to WebSocket, SSE, etc.
+                                streamToWebSocket(text)
+                            }
+                        }
+                        outCh <- resp
+                    }
+                }()
+                return outCh, nil
+            }
         }),
     )
-    
+
     return agent.Execute(ctx, "Write a detailed explanation of Go's concurrency model")
 }
 

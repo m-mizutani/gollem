@@ -30,13 +30,22 @@ func main() {
 	agent := gollem.New(client,
 		gollem.WithTools(tools...),
 		gollem.WithSystemPrompt("You are a helpful calculator assistant. Use the available tools to perform mathematical operations."),
-		gollem.WithMessageHook(func(ctx context.Context, msg string) error {
-			log.Printf("🤖 %s", msg)
-			return nil
+		gollem.WithContentBlockMiddleware(func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+			return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+				resp, err := next(ctx, req)
+				if err == nil && len(resp.Texts) > 0 {
+					for _, text := range resp.Texts {
+						log.Printf("🤖 %s", text)
+					}
+				}
+				return resp, err
+			}
 		}),
-		gollem.WithToolRequestHook(func(ctx context.Context, tool gollem.FunctionCall) error {
-			log.Printf("⚡ Using tool: %s", tool.Name)
-			return nil
+		gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+			return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+				log.Printf("⚡ Using tool: %s", req.Tool.Name)
+				return next(ctx, req)
+			}
 		}),
 	)
 
