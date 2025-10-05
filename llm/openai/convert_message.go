@@ -1,4 +1,4 @@
-package gollem
+package openai
 
 import (
 	"encoding/base64"
@@ -6,16 +6,18 @@ import (
 	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/internal/convert"
 	"github.com/sashabaranov/go-openai"
 )
 
 // convertOpenAIToMessages converts OpenAI messages to common Message format
-func convertOpenAIToMessages(messages []openai.ChatCompletionMessage) ([]Message, error) {
+func convertOpenAIToMessages(messages []openai.ChatCompletionMessage) ([]gollem.Message, error) {
 	if len(messages) == 0 {
-		return []Message{}, nil
+		return []gollem.Message{}, nil
 	}
 
-	result := make([]Message, 0, len(messages))
+	result := make([]gollem.Message, 0, len(messages))
 
 	for _, msg := range messages {
 		commonMsg, err := convertOpenAIMessage(msg)
@@ -29,15 +31,16 @@ func convertOpenAIToMessages(messages []openai.ChatCompletionMessage) ([]Message
 }
 
 // convertOpenAIMessage converts a single OpenAI message to common format
-func convertOpenAIMessage(msg openai.ChatCompletionMessage) (Message, error) {
-	contents := make([]MessageContent, 0)
+func convertOpenAIMessage(msg openai.ChatCompletionMessage) (gollem.Message, error) {
+	contents := make([]gollem.MessageContent, 0)
 
 	// Handle different content types
-	if msg.Content != "" {
+	// Skip text content for tool/function roles as they have special handling
+	if msg.Content != "" && msg.Role != "tool" && msg.Role != "function" {
 		// Simple text content
-		content, err := NewTextContent(msg.Content)
+		content, err := gollem.NewTextContent(msg.Content)
 		if err != nil {
-			return Message{}, err
+			return gollem.Message{}, err
 		}
 		contents = append(contents, content)
 	}
@@ -46,9 +49,9 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (Message, error) {
 	if msg.MultiContent != nil {
 		for _, part := range msg.MultiContent {
 			if part.Type == "text" {
-				content, err := NewTextContent(part.Text)
+				content, err := gollem.NewTextContent(part.Text)
 				if err != nil {
-					return Message{}, err
+					return gollem.Message{}, err
 				}
 				contents = append(contents, content)
 			} else if part.Type == "image_url" && part.ImageURL != nil {
@@ -77,9 +80,9 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (Message, error) {
 					}
 				}
 
-				content, err := NewImageContent(mediaType, imageData, url, detail)
+				content, err := gollem.NewImageContent(mediaType, imageData, url, detail)
 				if err != nil {
-					return Message{}, err
+					return gollem.Message{}, err
 				}
 				contents = append(contents, content)
 			}
@@ -90,14 +93,14 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (Message, error) {
 	if msg.ToolCalls != nil {
 		for _, toolCall := range msg.ToolCalls {
 			if toolCall.Function.Name != "" {
-				args, err := parseJSONArguments(toolCall.Function.Arguments)
+				args, err := convert.ParseJSONArguments(toolCall.Function.Arguments)
 				if err != nil {
 					// Use raw string if parsing fails
 					args = map[string]interface{}{"arguments": toolCall.Function.Arguments}
 				}
-				content, err := NewToolCallContent(toolCall.ID, toolCall.Function.Name, args)
+				content, err := gollem.NewToolCallContent(toolCall.ID, toolCall.Function.Name, args)
 				if err != nil {
-					return Message{}, err
+					return gollem.Message{}, err
 				}
 				contents = append(contents, content)
 			}
@@ -106,9 +109,9 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (Message, error) {
 
 	// Handle legacy function call
 	if msg.FunctionCall != nil {
-		content, err := NewFunctionCallContent(msg.FunctionCall.Name, msg.FunctionCall.Arguments)
+		content, err := gollem.NewFunctionCallContent(msg.FunctionCall.Name, msg.FunctionCall.Arguments)
 		if err != nil {
-			return Message{}, err
+			return gollem.Message{}, err
 		}
 		contents = append(contents, content)
 	}
@@ -121,31 +124,31 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (Message, error) {
 			// If not JSON, wrap in a response object
 			response = map[string]interface{}{"content": msg.Content}
 		}
-		content, err := NewToolResponseContent(msg.ToolCallID, msg.Name, response, false)
+		content, err := gollem.NewToolResponseContent(msg.ToolCallID, msg.Name, response, false)
 		if err != nil {
-			return Message{}, err
+			return gollem.Message{}, err
 		}
 		contents = append(contents, content)
 	}
 
 	// Handle legacy function responses
 	if msg.Role == "function" {
-		content, err := NewFunctionResponseContent(msg.Name, msg.Content)
+		content, err := gollem.NewFunctionResponseContent(msg.Name, msg.Content)
 		if err != nil {
-			return Message{}, err
+			return gollem.Message{}, err
 		}
 		contents = append(contents, content)
 	}
 
-	return Message{
-		Role:     convertRoleToCommon(msg.Role),
+	return gollem.Message{
+		Role:     convert.ConvertRoleToCommon(msg.Role),
 		Contents: contents,
 		Name:     msg.Name,
 	}, nil
 }
 
 // convertMessagesToOpenAI converts common Messages to OpenAI format
-func convertMessagesToOpenAI(messages []Message) ([]openai.ChatCompletionMessage, error) {
+func convertMessagesToOpenAI(messages []gollem.Message) ([]openai.ChatCompletionMessage, error) {
 	if len(messages) == 0 {
 		return []openai.ChatCompletionMessage{}, nil
 	}
@@ -165,26 +168,26 @@ func convertMessagesToOpenAI(messages []Message) ([]openai.ChatCompletionMessage
 
 // convertMessageToOpenAI converts a single Message to OpenAI format
 // Returns multiple messages as tool responses need separate messages
-func convertMessageToOpenAI(msg Message) ([]openai.ChatCompletionMessage, error) {
+func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage, error) {
 	// Handle role conversion
 	role := ""
 	switch msg.Role {
-	case RoleSystem:
+	case gollem.RoleSystem:
 		role = "system"
-	case RoleUser:
+	case gollem.RoleUser:
 		role = "user"
-	case RoleAssistant, RoleModel:
+	case gollem.RoleAssistant, gollem.RoleModel:
 		role = "assistant"
-	case RoleTool:
+	case gollem.RoleTool:
 		role = "tool"
-	case RoleFunction:
+	case gollem.RoleFunction:
 		role = "function"
 	default:
 		role = string(msg.Role)
 	}
 
 	// Check if this is a simple text message
-	if len(msg.Contents) == 1 && msg.Contents[0].Type == MessageContentTypeText {
+	if len(msg.Contents) == 1 && msg.Contents[0].Type == gollem.MessageContentTypeText {
 		textContent, err := msg.Contents[0].GetTextContent()
 		if err != nil {
 			return nil, err
@@ -204,7 +207,7 @@ func convertMessageToOpenAI(msg Message) ([]openai.ChatCompletionMessage, error)
 
 	for _, content := range msg.Contents {
 		switch content.Type {
-		case MessageContentTypeText:
+		case gollem.MessageContentTypeText:
 			textContent, err := content.GetTextContent()
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to get text content")
@@ -214,7 +217,7 @@ func convertMessageToOpenAI(msg Message) ([]openai.ChatCompletionMessage, error)
 				Text: textContent.Text,
 			})
 
-		case MessageContentTypeImage:
+		case gollem.MessageContentTypeImage:
 			imgContent, err := content.GetImageContent()
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to get image content")
@@ -232,12 +235,12 @@ func convertMessageToOpenAI(msg Message) ([]openai.ChatCompletionMessage, error)
 				},
 			})
 
-		case MessageContentTypeToolCall:
+		case gollem.MessageContentTypeToolCall:
 			toolCall, err := content.GetToolCallContent()
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to get tool call content")
 			}
-			args, err := stringifyJSONArguments(toolCall.Arguments)
+			args, err := convert.StringifyJSONArguments(toolCall.Arguments)
 			if err != nil {
 				args = "{}"
 			}
@@ -250,12 +253,12 @@ func convertMessageToOpenAI(msg Message) ([]openai.ChatCompletionMessage, error)
 				},
 			})
 
-		case MessageContentTypeToolResponse:
+		case gollem.MessageContentTypeToolResponse:
 			toolResp, err := content.GetToolResponseContent()
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to get tool response content")
 			}
-			respStr, err := stringifyJSONArguments(toolResp.Response)
+			respStr, err := convert.StringifyJSONArguments(toolResp.Response)
 			if err != nil {
 				respStr = "{}"
 			}
@@ -266,7 +269,7 @@ func convertMessageToOpenAI(msg Message) ([]openai.ChatCompletionMessage, error)
 				ToolCallID: toolResp.ToolCallID,
 			})
 
-		case MessageContentTypeFunctionCall:
+		case gollem.MessageContentTypeFunctionCall:
 			funcCall, err := content.GetFunctionCallContent()
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to get function call content")
@@ -276,7 +279,7 @@ func convertMessageToOpenAI(msg Message) ([]openai.ChatCompletionMessage, error)
 				Arguments: funcCall.Arguments,
 			}
 
-		case MessageContentTypeFunctionResponse:
+		case gollem.MessageContentTypeFunctionResponse:
 			funcResp, err := content.GetFunctionResponseContent()
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to get function response content")
@@ -346,4 +349,29 @@ func convertMessageToOpenAI(msg Message) ([]openai.ChatCompletionMessage, error)
 	}
 
 	return result, nil
+}
+
+// ToMessages converts gollem.History to OpenAI messages
+func ToMessages(h *gollem.History) ([]openai.ChatCompletionMessage, error) {
+	if h == nil || len(h.Messages) == 0 {
+		return []openai.ChatCompletionMessage{}, nil
+	}
+	return convertMessagesToOpenAI(h.Messages)
+}
+
+// NewHistory creates gollem.History from OpenAI messages
+func NewHistory(messages []openai.ChatCompletionMessage) (*gollem.History, error) {
+	commonMessages, err := convertOpenAIToMessages(messages)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to convert OpenAI messages to common format")
+	}
+
+	return &gollem.History{
+		LLType:   gollem.LLMTypeOpenAI,
+		Version:  gollem.HistoryVersion,
+		Messages: commonMessages,
+		Metadata: &gollem.HistoryMetadata{
+			OriginalProvider: gollem.LLMTypeOpenAI,
+		},
+	}, nil
 }

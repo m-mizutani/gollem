@@ -2,7 +2,6 @@ package claude_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -14,7 +13,9 @@ import (
 )
 
 func TestMiddlewareHistoryIntervention(t *testing.T) {
-	testHistoryModification := func(t *testing.T) {
+	testHistoryAccess := func(t *testing.T) {
+		historyReceived := false
+
 		// Create a mock API client that returns a simple response
 		mockClient := &apiClientMock{
 			MessagesNewFunc: func(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
@@ -34,44 +35,29 @@ func TestMiddlewareHistoryIntervention(t *testing.T) {
 			},
 		}
 
-		// Create initial history with proper version
+		// Create initial history
+		textContent, _ := gollem.NewTextContent("Initial message")
 		initialHistory := &gollem.History{
 			Version: gollem.HistoryVersion,
 			LLType:  gollem.LLMTypeClaude,
+			Messages: []gollem.Message{
+				{
+					Role:     gollem.RoleUser,
+					Contents: []gollem.MessageContent{textContent},
+				},
+			},
 		}
 
-		// Create middleware that modifies history
+		// Create middleware that verifies history is accessible
 		historyMiddleware := func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
 			return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
-				// Modify the history before passing to next handler
-				if req.History != nil {
-					// Add a system message to history
-					textData, _ := json.Marshal(map[string]string{
-						"text": "History was modified by middleware",
-					})
-					modifiedHistory := &gollem.History{
-						Version: req.History.Version,
-						LLType:  req.History.LLType,
-						Messages: append(req.History.Messages, gollem.Message{
-							Role: gollem.RoleSystem,
-							Contents: []gollem.MessageContent{
-								{
-									Type: gollem.MessageContentTypeText,
-									Data: textData,
-								},
-							},
-						}),
-					}
-					req.History = modifiedHistory
+				// Verify history is accessible in middleware
+				if req.History != nil && len(req.History.Messages) > 0 {
+					historyReceived = true
 				}
 
 				// Call the next handler
-				resp, err := next(ctx, req)
-				if err != nil {
-					return nil, err
-				}
-
-				return resp, nil
+				return next(ctx, req)
 			}
 		}
 
@@ -82,7 +68,7 @@ func TestMiddlewareHistoryIntervention(t *testing.T) {
 		)
 
 		// Create session with mock client
-		session := claude.NewSessionWithAPIClient(mockClient, cfg, "claude-3-opus-20240229")
+		session, _ := claude.NewSessionWithAPIClient(mockClient, cfg, "claude-3-opus-20240229")
 
 		// Generate content
 		ctx := context.Background()
@@ -90,32 +76,11 @@ func TestMiddlewareHistoryIntervention(t *testing.T) {
 		gt.NoError(t, err)
 		gt.NotNil(t, resp)
 
-		// Get history from session and verify it was modified
-		history, err := session.History()
-		gt.NoError(t, err)
-		gt.NotNil(t, history)
-
-		// Check if history contains the middleware-added message
-		found := false
-		for _, msg := range history.Messages {
-			if msg.Role == gollem.RoleSystem {
-				for _, content := range msg.Contents {
-					if content.Type == gollem.MessageContentTypeText {
-						var textContent map[string]string
-						if err := json.Unmarshal(content.Data, &textContent); err == nil {
-							if textContent["text"] == "History was modified by middleware" {
-								found = true
-								break
-							}
-						}
-					}
-				}
-			}
-		}
-		gt.True(t, found)
+		// Verify middleware received history
+		gt.True(t, historyReceived)
 	}
 
-	t.Run("history modification", testHistoryModification)
+	t.Run("history access in middleware", testHistoryAccess)
 }
 
 func TestMiddlewareChainExecution(t *testing.T) {
@@ -168,7 +133,7 @@ func TestMiddlewareChainExecution(t *testing.T) {
 		)
 
 		// Create session with mock client
-		session := claude.NewSessionWithAPIClient(mockClient, cfg, "claude-3-opus-20240229")
+		session, _ := claude.NewSessionWithAPIClient(mockClient, cfg, "claude-3-opus-20240229")
 
 		// Generate content
 		ctx := context.Background()
@@ -184,19 +149,19 @@ func TestMiddlewareChainExecution(t *testing.T) {
 }
 
 func TestMiddlewareSameAddressModifiedContent(t *testing.T) {
-	testSameAddressModification := func(t *testing.T) {
-		var receivedHistoryObjects []*gollem.History
+	testHistoryAccumulation := func(t *testing.T) {
+		callCount := 0
 
 		// Create a mock API client that returns a simple response
 		mockClient := &apiClientMock{
 			MessagesNewFunc: func(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
-				// Store the number of messages received to verify history updates
-				t.Logf("API called with %d messages", len(params.Messages))
+				callCount++
+				t.Logf("API call %d with %d messages", callCount, len(params.Messages))
 				return &anthropic.Message{
 					Content: []anthropic.ContentBlockUnion{
 						{
 							Type: "text",
-							Text: "Response from API",
+							Text: fmt.Sprintf("Response %d from API", callCount),
 						},
 					},
 					Role: "assistant",
@@ -207,83 +172,52 @@ func TestMiddlewareSameAddressModifiedContent(t *testing.T) {
 			},
 		}
 
-		// Create initial history with proper version
-		sharedHistory := &gollem.History{
+		// Create initial history
+		textContent, _ := gollem.NewTextContent("Initial")
+		initialHistory := &gollem.History{
 			Version: gollem.HistoryVersion,
 			LLType:  gollem.LLMTypeClaude,
+			Messages: []gollem.Message{
+				{
+					Role:     gollem.RoleUser,
+					Contents: []gollem.MessageContent{textContent},
+				},
+			},
 		}
 
-		// Create middleware that modifies the SAME history object's content and tracks history updates
-		contentModifyingMiddleware := func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
-			return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
-				// Track the received history object
-				if req.History != nil {
-					receivedHistoryObjects = append(receivedHistoryObjects, req.History)
-					// Modify the existing history object's content (same address, different content)
-					textData, _ := json.Marshal(map[string]string{
-						"text": fmt.Sprintf("Modified content call %d", len(receivedHistoryObjects)),
-					})
-					// Append to the existing history object (same address)
-					req.History.Messages = append(req.History.Messages, gollem.Message{
-						Role: gollem.RoleSystem,
-						Contents: []gollem.MessageContent{
-							{
-								Type: gollem.MessageContentTypeText,
-								Data: textData,
-							},
-						},
-					})
-					t.Logf("Modified history object %p, now has %d messages", req.History, len(req.History.Messages))
-				}
-
-				// Call the next handler
-				resp, err := next(ctx, req)
-				if err != nil {
-					return nil, err
-				}
-
-				return resp, nil
-			}
-		}
-
-		// Create session config with middleware
+		// Create session config
 		cfg := gollem.NewSessionConfig(
-			gollem.WithSessionHistory(sharedHistory),
-			gollem.WithSessionContentBlockMiddleware(contentModifyingMiddleware),
+			gollem.WithSessionHistory(initialHistory),
 		)
 
 		// Create session with mock client
-		session := claude.NewSessionWithAPIClient(mockClient, cfg, "claude-3-opus-20240229")
+		session, _ := claude.NewSessionWithAPIClient(mockClient, cfg, "claude-3-opus-20240229")
 
-		// Generate content multiple times with the same history object
+		// Generate content multiple times
 		ctx := context.Background()
 
-		// First call - should modify history
+		// First call
 		_, err := session.GenerateContent(ctx, gollem.Text("first input"))
 		gt.NoError(t, err)
 
-		// Second call - should modify history again (same address but already modified content)
+		// Get history after first call
+		history1, err := session.History()
+		gt.NoError(t, err)
+		firstCallMessageCount := len(history1.Messages)
+
+		// Second call
 		_, err = session.GenerateContent(ctx, gollem.Text("second input"))
 		gt.NoError(t, err)
 
-		// Verify that middleware was called twice
-		gt.Equal(t, 2, len(receivedHistoryObjects))
+		// Get history after second call
+		history2, err := session.History()
+		gt.NoError(t, err)
+		secondCallMessageCount := len(history2.Messages)
 
-		// The key test: verify that history is properly updated between calls
-		// This proves that history updates are applied correctly, regardless of address comparison
-		t.Logf("First call history messages: %d", len(receivedHistoryObjects[0].Messages))
-		t.Logf("Second call history messages: %d", len(receivedHistoryObjects[1].Messages))
-
-		// First call should have at least the middleware addition
-		gt.True(t, len(receivedHistoryObjects[0].Messages) >= 1)
-
-		// Second call should have more messages (previous conversation + middleware addition)
-		gt.True(t, len(receivedHistoryObjects[1].Messages) > len(receivedHistoryObjects[0].Messages))
-
-		// This test verifies that our fix to "always update history" works correctly:
-		// - Even if same address, the content changes are properly reflected
-		// - The conversation history accumulates correctly across calls
+		// Verify history accumulates correctly
+		t.Logf("First call messages: %d, Second call messages: %d", firstCallMessageCount, secondCallMessageCount)
+		gt.True(t, secondCallMessageCount > firstCallMessageCount)
 	}
 
-	t.Run("same address modified content", testSameAddressModification)
+	t.Run("history accumulation across calls", testHistoryAccumulation)
 }

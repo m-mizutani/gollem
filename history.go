@@ -3,12 +3,6 @@ package gollem
 
 import (
 	"encoding/json"
-	"time"
-
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/m-mizutani/goerr/v2"
-	"github.com/sashabaranov/go-openai"
-	"google.golang.org/genai"
 )
 
 // History represents a conversation history that can be used across different LLM sessions.
@@ -75,91 +69,4 @@ func (x *History) Clone() *History {
 	}
 
 	return &clone
-}
-
-func (x *History) ToGemini() ([]*genai.Content, error) {
-	if x.Version != HistoryVersion {
-		return nil, goerr.Wrap(ErrHistoryVersionMismatch, "unsupported history version", goerr.V("expected", HistoryVersion), goerr.V("actual", x.Version))
-	}
-	if len(x.Messages) == 0 {
-		return []*genai.Content{}, nil
-	}
-	return convertMessagesToGemini(x.Messages)
-}
-
-func (x *History) ToClaude() ([]anthropic.MessageParam, error) {
-	if x.Version != HistoryVersion {
-		return nil, goerr.Wrap(ErrHistoryVersionMismatch, "unsupported history version", goerr.V("expected", HistoryVersion), goerr.V("actual", x.Version))
-	}
-	if len(x.Messages) == 0 {
-		return []anthropic.MessageParam{}, nil
-	}
-	return convertMessagesToClaude(x.Messages)
-}
-
-func (x *History) ToOpenAI() ([]openai.ChatCompletionMessage, error) {
-	if x.Version != HistoryVersion {
-		return nil, goerr.Wrap(ErrHistoryVersionMismatch, "unsupported history version", goerr.V("expected", HistoryVersion), goerr.V("actual", x.Version))
-	}
-	if len(x.Messages) == 0 {
-		return []openai.ChatCompletionMessage{}, nil
-	}
-	return convertMessagesToOpenAI(x.Messages)
-}
-
-func NewHistoryFromOpenAI(messages []openai.ChatCompletionMessage) (*History, error) {
-	// Convert to common format
-	commonMessages, err := convertOpenAIToMessages(messages)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to convert OpenAI messages to common format")
-	}
-
-	return &History{
-		LLType:   LLMTypeOpenAI,
-		Version:  HistoryVersion,
-		Messages: commonMessages,
-		Metadata: &HistoryMetadata{
-			OriginalProvider: LLMTypeOpenAI,
-			CreatedAt:        time.Now(),
-			UpdatedAt:        time.Now(),
-		},
-	}, nil
-}
-
-func NewHistoryFromClaude(messages []anthropic.MessageParam) (*History, error) {
-	// Convert to common format
-	commonMessages, err := convertClaudeToMessages(messages)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to convert Claude messages to common format")
-	}
-
-	return &History{
-		LLType:   LLMTypeClaude,
-		Version:  HistoryVersion,
-		Messages: commonMessages,
-		Metadata: &HistoryMetadata{
-			OriginalProvider: LLMTypeClaude,
-			CreatedAt:        time.Now(),
-			UpdatedAt:        time.Now(),
-		},
-	}, nil
-}
-
-func NewHistoryFromGemini(messages []*genai.Content) (*History, error) {
-	// Convert to common format
-	commonMessages, err := convertGeminiToMessages(messages)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to convert Gemini messages to common format")
-	}
-
-	return &History{
-		LLType:   LLMTypeGemini,
-		Version:  HistoryVersion,
-		Messages: commonMessages,
-		Metadata: &HistoryMetadata{
-			OriginalProvider: LLMTypeGemini,
-			CreatedAt:        time.Now(),
-			UpdatedAt:        time.Now(),
-		},
-	}, nil
 }

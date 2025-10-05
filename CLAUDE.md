@@ -19,6 +19,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Use named empty structure (e.g. `type ctxHogeKey struct{}` ) as private context key
 - Do not create binary. If you need to run, use `go run` command instead
 - When a `tmp` directory is specified, search for files within the `./tmp` directory relative to the project root.
+- **Naming Convention**: In Go, package names already express the subject, so avoid redundancy in method/struct names
+  - Good: `openai.NewHistory()`, `claude.ToMessages()`, `gemini.ToContents()`
+  - Bad: `openai.NewHistoryFromOpenAI()`, `claude.ToClaude()`, `gemini.ToGemini()`
+- **Environment Variables**: Outside of test code, NEVER use `os.Getenv()` or `os.LookupEnv()` directly. Always use `github.com/urfave/cli/v3` for environment variable access
+  - This ensures proper configuration management and testability
+  - Test code may use `os.Getenv()` for test setup purposes
+
 
 ## Commands
 

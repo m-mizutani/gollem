@@ -208,7 +208,7 @@ type Session struct {
 	tools []openai.Tool
 
 	// currentHistory maintains the gollem.History for middleware access.
-	currentHistory *gollem.History
+	historyMessages []openai.ChatCompletionMessage
 
 	// generation parameters
 	params generationParameters
@@ -227,42 +227,38 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		openaiTools[i] = convertTool(tool)
 	}
 
-	// Initialize currentHistory from config or create new
-	var currentHistory *gollem.History
+	// Initialize history from config (convert to OpenAI native format)
+	var historyMessages []openai.ChatCompletionMessage
 	if cfg.History() != nil {
-		currentHistory = cfg.History()
-	} else {
-		currentHistory = &gollem.History{
-			LLType:  gollem.LLMTypeOpenAI,
-			Version: gollem.HistoryVersion,
+		var err error
+		historyMessages, err = ToMessages(cfg.History())
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert history to OpenAI format")
 		}
 	}
 
 	session := &Session{
-		apiClient:      &realAPIClient{client: c.client},
-		defaultModel:   c.defaultModel,
-		tools:          openaiTools,
-		params:         c.params,
-		currentHistory: currentHistory,
-		cfg:            cfg,
+		apiClient:       &realAPIClient{client: c.client},
+		defaultModel:    c.defaultModel,
+		tools:           openaiTools,
+		params:          c.params,
+		historyMessages: historyMessages,
+		cfg:             cfg,
 	}
 
 	return session, nil
 }
 
 func (s *Session) History() (*gollem.History, error) {
-	return s.currentHistory, nil
+	return NewHistory(s.historyMessages)
 }
 
-// getMessages converts currentHistory to OpenAI messages for API calls
+// getMessages returns history messages (already in OpenAI format)
 func (s *Session) getMessages() ([]openai.ChatCompletionMessage, error) {
-	if s.currentHistory == nil || len(s.currentHistory.Messages) == 0 {
+	if len(s.historyMessages) == 0 {
 		return []openai.ChatCompletionMessage{}, nil
 	}
-	messages, err := s.currentHistory.ToOpenAI()
-	if err != nil {
-		return nil, err
-	}
+	messages := s.historyMessages
 
 	return messages, nil
 }
@@ -279,11 +275,7 @@ func (s *Session) updateHistoryWithResponse(assistantMessage openai.ChatCompleti
 	// DEBUG: Debug logging can be enabled here for troubleshooting tool_call_id issues
 
 	// Create new history from all messages
-	updatedHistory, err := gollem.NewHistoryFromOpenAI(allMessages)
-	if err != nil {
-		return goerr.Wrap(err, "failed to create history from messages")
-	}
-	s.currentHistory = updatedHistory
+	s.historyMessages = allMessages
 	return nil
 }
 
@@ -361,12 +353,8 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 		}
 		allMessages := append(currentMessages, newMessages...)
 
-		// Create new history from all messages
-		updatedHistory, err := gollem.NewHistoryFromOpenAI(allMessages)
-		if err != nil {
-			return goerr.Wrap(err, "failed to create history from messages")
-		}
-		s.currentHistory = updatedHistory
+		// Update history with all messages
+		s.historyMessages = allMessages
 	}
 
 	return nil
@@ -443,13 +431,12 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	var historyCopy *gollem.History
-	if s.currentHistory != nil {
-		historyCopy = &gollem.History{
-			Version:  s.currentHistory.Version,
-			LLType:   s.currentHistory.LLType,
-			Messages: make([]gollem.Message, len(s.currentHistory.Messages)),
+	var err error
+	if len(s.historyMessages) > 0 {
+		historyCopy, err = NewHistory(s.historyMessages)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create history copy for middleware")
 		}
-		copy(historyCopy.Messages, s.currentHistory.Messages)
 	}
 
 	contentReq := &gollem.ContentRequest{
@@ -461,7 +448,11 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
-			s.currentHistory = req.History
+			var err error
+			s.historyMessages, err = ToMessages(req.History)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to convert history from middleware")
+			}
 		}
 
 		// Convert inputs and perform the actual API call
@@ -605,16 +596,29 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 // It handles both text messages and function responses, and returns a channel for streaming responses.
 func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
 	// Build the content request for middleware
+	var historyCopy *gollem.History
+	var err error
+	if len(s.historyMessages) > 0 {
+		historyCopy, err = NewHistory(s.historyMessages)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create history copy for middleware")
+		}
+	}
+
 	contentReq := &gollem.ContentRequest{
 		Inputs:  input,
-		History: s.currentHistory,
+		History: historyCopy,
 	}
 
 	// Create the base handler that performs the actual API call
 	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
-			s.currentHistory = req.History
+			var err error
+			s.historyMessages, err = ToMessages(req.History)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to convert history from middleware")
+			}
 		}
 
 		// Convert inputs and perform the actual API call

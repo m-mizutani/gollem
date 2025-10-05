@@ -1,4 +1,4 @@
-package gollem
+package convert
 
 import (
 	"encoding/json"
@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/m-mizutani/gollem"
 )
 
 // Conversion errors
@@ -27,8 +28,8 @@ type ConversionWarning struct {
 	Value   interface{}
 }
 
-// parseJSONArguments attempts to parse a JSON string into a map
-func parseJSONArguments(jsonStr string) (map[string]interface{}, error) {
+// ParseJSONArguments attempts to parse a JSON string into a map
+func ParseJSONArguments(jsonStr string) (map[string]interface{}, error) {
 	var args map[string]interface{}
 	if err := json.Unmarshal([]byte(jsonStr), &args); err != nil {
 		return nil, goerr.Wrap(err, "failed to parse JSON arguments")
@@ -36,8 +37,8 @@ func parseJSONArguments(jsonStr string) (map[string]interface{}, error) {
 	return args, nil
 }
 
-// stringifyJSONArguments converts a map to a JSON string
-func stringifyJSONArguments(args map[string]interface{}) (string, error) {
+// StringifyJSONArguments converts a map to a JSON string
+func StringifyJSONArguments(args map[string]interface{}) (string, error) {
 	data, err := json.Marshal(args)
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to stringify JSON arguments")
@@ -45,30 +46,30 @@ func stringifyJSONArguments(args map[string]interface{}) (string, error) {
 	return string(data), nil
 }
 
-// convertRoleToCommon converts various provider roles to common MessageRole
-func convertRoleToCommon(role string) MessageRole {
+// ConvertRoleToCommon converts various provider roles to common MessageRole
+func ConvertRoleToCommon(role string) gollem.MessageRole {
 	switch role {
 	case "system":
-		return RoleSystem
+		return gollem.RoleSystem
 	case "user":
-		return RoleUser
+		return gollem.RoleUser
 	case "assistant":
-		return RoleAssistant
+		return gollem.RoleAssistant
 	case "tool":
-		return RoleTool
+		return gollem.RoleTool
 	case "function":
-		return RoleFunction
+		return gollem.RoleFunction
 	case "model":
-		return RoleModel
+		return gollem.RoleModel
 	default:
 		// Default to user role for unknown roles
-		return RoleUser
+		return gollem.RoleUser
 	}
 }
 
-// mergeSystemIntoFirstUser merges a system message into the first user message
+// MergeSystemIntoFirstUser merges a system message into the first user message
 // This is used for providers that don't support system messages directly (Claude, Gemini)
-func mergeSystemIntoFirstUser(messages []Message) []Message {
+func MergeSystemIntoFirstUser(messages []gollem.Message) []gollem.Message {
 	if len(messages) == 0 {
 		return messages
 	}
@@ -77,12 +78,12 @@ func mergeSystemIntoFirstUser(messages []Message) []Message {
 	var systemContent string
 	hasSystem := false
 	for i, msg := range messages {
-		if msg.Role == RoleSystem {
+		if msg.Role == gollem.RoleSystem {
 			hasSystem = true
 			// Extract text content from system message
 			for _, content := range msg.Contents {
-				if content.Type == MessageContentTypeText {
-					var textContent TextContent
+				if content.Type == gollem.MessageContentTypeText {
+					var textContent gollem.TextContent
 					if err := json.Unmarshal(content.Data, &textContent); err == nil {
 						if systemContent != "" {
 							systemContent += "\n"
@@ -103,12 +104,12 @@ func mergeSystemIntoFirstUser(messages []Message) []Message {
 
 	// Find first user message and prepend system content
 	for i, msg := range messages {
-		if msg.Role == RoleUser {
+		if msg.Role == gollem.RoleUser {
 			// Prepend system content to first user message
-			newContent := make([]MessageContent, 0, len(msg.Contents)+1)
+			newContent := make([]gollem.MessageContent, 0, len(msg.Contents)+1)
 
 			// Add system content first
-			if textContent, err := NewTextContent(systemContent + "\n\n"); err == nil {
+			if textContent, err := gollem.NewTextContent(systemContent + "\n\n"); err == nil {
 				newContent = append(newContent, textContent)
 			}
 
@@ -123,7 +124,7 @@ func mergeSystemIntoFirstUser(messages []Message) []Message {
 	return messages
 }
 
-// generateToolCallID generates a unique ID for tool calls if not present
-func generateToolCallID(name string, index int) string {
+// GenerateToolCallID generates a unique ID for tool calls if not present
+func GenerateToolCallID(name string, index int) string {
 	return "call_" + name + "_" + strconv.Itoa(index)
 }

@@ -1,4 +1,4 @@
-package gollem
+package claude
 
 import (
 	"encoding/base64"
@@ -7,18 +7,20 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/internal/convert"
 )
 
 // convertClaudeToMessages converts Claude messages to common Message format
-func convertClaudeToMessages(messages []anthropic.MessageParam) ([]Message, error) {
+func convertClaudeToMessages(messages []anthropic.MessageParam) ([]gollem.Message, error) {
 	if len(messages) == 0 {
-		return []Message{}, nil
+		return []gollem.Message{}, nil
 	}
 
-	result := make([]Message, 0, len(messages))
+	result := make([]gollem.Message, 0, len(messages))
 
 	for _, msg := range messages {
-		contents := make([]MessageContent, 0, len(msg.Content))
+		contents := make([]gollem.MessageContent, 0, len(msg.Content))
 
 		for _, block := range msg.Content {
 			content, err := convertClaudeContentBlock(block)
@@ -28,8 +30,8 @@ func convertClaudeToMessages(messages []anthropic.MessageParam) ([]Message, erro
 			contents = append(contents, content)
 		}
 
-		result = append(result, Message{
-			Role:     convertRoleToCommon(string(msg.Role)),
+		result = append(result, gollem.Message{
+			Role:     convert.ConvertRoleToCommon(string(msg.Role)),
 			Contents: contents,
 		})
 	}
@@ -38,10 +40,10 @@ func convertClaudeToMessages(messages []anthropic.MessageParam) ([]Message, erro
 }
 
 // convertClaudeContentBlock converts a single Claude content block to MessageContent
-func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion) (MessageContent, error) {
+func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion) (gollem.MessageContent, error) {
 	// Handle text blocks
 	if block.OfText != nil {
-		return NewTextContent(block.OfText.Text)
+		return gollem.NewTextContent(block.OfText.Text)
 	}
 
 	// Handle image blocks
@@ -54,7 +56,7 @@ func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion) (MessageC
 				// This allows handling of both valid Base64 and raw strings
 				decodedData = []byte(block.OfImage.Source.OfBase64.Data)
 			}
-			return NewImageContent(
+			return gollem.NewImageContent(
 				string(block.OfImage.Source.OfBase64.MediaType),
 				decodedData,
 				"",
@@ -83,7 +85,7 @@ func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion) (MessageC
 			_ = json.Unmarshal(data, &args)
 		}
 
-		return NewToolCallContent(
+		return gollem.NewToolCallContent(
 			block.OfToolUse.ID,
 			block.OfToolUse.Name,
 			args,
@@ -103,31 +105,38 @@ func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion) (MessageC
 			isError = block.OfToolResult.IsError.Value
 		}
 
-		return NewToolResponseContent(
+		// Try to parse responseText as JSON to preserve structure
+		var response map[string]interface{}
+		if err := json.Unmarshal([]byte(responseText), &response); err != nil {
+			// If not valid JSON, wrap in content field
+			response = map[string]interface{}{"content": responseText}
+		}
+
+		return gollem.NewToolResponseContent(
 			block.OfToolResult.ToolUseID,
 			"", // Claude doesn't include tool name in response
-			map[string]interface{}{"content": responseText},
+			response,
 			isError,
 		)
 	}
 
-	return MessageContent{}, goerr.Wrap(ErrUnsupportedContentType, "unknown Claude content block type")
+	return gollem.MessageContent{}, goerr.Wrap(convert.ErrUnsupportedContentType, "unknown Claude content block type")
 }
 
 // convertMessagesToClaude converts common Messages to Claude format
-func convertMessagesToClaude(messages []Message) ([]anthropic.MessageParam, error) {
+func convertMessagesToClaude(messages []gollem.Message) ([]anthropic.MessageParam, error) {
 	if len(messages) == 0 {
 		return []anthropic.MessageParam{}, nil
 	}
 
 	// Handle system messages by merging into first user message
-	messages = mergeSystemIntoFirstUser(messages)
+	messages = convert.MergeSystemIntoFirstUser(messages)
 
 	result := make([]anthropic.MessageParam, 0, len(messages))
 
 	for _, msg := range messages {
 		// Skip system messages as they've been merged
-		if msg.Role == RoleSystem {
+		if msg.Role == gollem.RoleSystem {
 			continue
 		}
 		// Skip empty messages
@@ -150,15 +159,15 @@ func convertMessagesToClaude(messages []Message) ([]anthropic.MessageParam, erro
 }
 
 // convertMessageToClaude converts a single Message to Claude format
-func convertMessageToClaude(msg Message) (anthropic.MessageParam, error) {
+func convertMessageToClaude(msg gollem.Message) (anthropic.MessageParam, error) {
 	// Convert role
 	var role anthropic.MessageParamRole
 	switch msg.Role {
-	case RoleUser:
+	case gollem.RoleUser:
 		role = anthropic.MessageParamRoleUser
-	case RoleAssistant, RoleModel:
+	case gollem.RoleAssistant, gollem.RoleModel:
 		role = anthropic.MessageParamRoleAssistant
-	case RoleTool, RoleFunction:
+	case gollem.RoleTool, gollem.RoleFunction:
 		// Tool/function responses should be in user role with tool_result block
 		role = anthropic.MessageParamRoleUser
 	default:
@@ -171,7 +180,7 @@ func convertMessageToClaude(msg Message) (anthropic.MessageParam, error) {
 		claudeContent, err := convertContentToClaude(content, msg.Role)
 		if err != nil {
 			// Skip unsupported content types instead of failing completely
-			if err == ErrUnsupportedContentType {
+			if err == convert.ErrUnsupportedContentType {
 				continue
 			}
 			return anthropic.MessageParam{}, goerr.Wrap(err, "failed to convert content to Claude format")
@@ -186,17 +195,17 @@ func convertMessageToClaude(msg Message) (anthropic.MessageParam, error) {
 }
 
 // convertContentToClaude converts MessageContent to Claude content block
-func convertContentToClaude(content MessageContent, messageRole MessageRole) (anthropic.ContentBlockParamUnion, error) {
+func convertContentToClaude(content gollem.MessageContent, messageRole gollem.MessageRole) (anthropic.ContentBlockParamUnion, error) {
 	_ = messageRole // Currently unused but may be needed for future conversions
 	switch content.Type {
-	case MessageContentTypeText:
+	case gollem.MessageContentTypeText:
 		textContent, err := content.GetTextContent()
 		if err != nil {
 			return anthropic.ContentBlockParamUnion{}, err
 		}
 		return anthropic.NewTextBlock(textContent.Text), nil
 
-	case MessageContentTypeImage:
+	case gollem.MessageContentTypeImage:
 		imgContent, err := content.GetImageContent()
 		if err != nil {
 			return anthropic.ContentBlockParamUnion{}, err
@@ -214,16 +223,16 @@ func convertContentToClaude(content MessageContent, messageRole MessageRole) (an
 			}
 			return anthropic.NewTextBlock(imageRef), nil
 		}
-		return anthropic.ContentBlockParamUnion{}, ErrUnsupportedContentType
+		return anthropic.ContentBlockParamUnion{}, convert.ErrUnsupportedContentType
 
-	case MessageContentTypeToolCall:
+	case gollem.MessageContentTypeToolCall:
 		toolCall, err := content.GetToolCallContent()
 		if err != nil {
 			return anthropic.ContentBlockParamUnion{}, err
 		}
 		return anthropic.NewToolUseBlock(toolCall.ID, toolCall.Arguments, toolCall.Name), nil
 
-	case MessageContentTypeToolResponse:
+	case gollem.MessageContentTypeToolResponse:
 		toolResp, err := content.GetToolResponseContent()
 		if err != nil {
 			return anthropic.ContentBlockParamUnion{}, err
@@ -240,26 +249,51 @@ func convertContentToClaude(content MessageContent, messageRole MessageRole) (an
 
 		return anthropic.NewToolResultBlock(toolResp.ToolCallID, contentStr, toolResp.IsError), nil
 
-	case MessageContentTypeFunctionCall:
+	case gollem.MessageContentTypeFunctionCall:
 		// Convert legacy function call to tool call
 		funcCall, err := content.GetFunctionCallContent()
 		if err != nil {
 			return anthropic.ContentBlockParamUnion{}, err
 		}
-		args, _ := parseJSONArguments(funcCall.Arguments)
-		return anthropic.NewToolUseBlock(generateToolCallID(funcCall.Name, 0), args, funcCall.Name), nil
+		args, _ := convert.ParseJSONArguments(funcCall.Arguments)
+		return anthropic.NewToolUseBlock(convert.GenerateToolCallID(funcCall.Name, 0), args, funcCall.Name), nil
 
-	case MessageContentTypeFunctionResponse:
+	case gollem.MessageContentTypeFunctionResponse:
 		// Convert legacy function response to tool result
 		funcResp, err := content.GetFunctionResponseContent()
 		if err != nil {
 			return anthropic.ContentBlockParamUnion{}, err
 		}
 		// Generate a tool call ID based on function name
-		toolCallID := generateToolCallID(funcResp.Name, 0)
+		toolCallID := convert.GenerateToolCallID(funcResp.Name, 0)
 		return anthropic.NewToolResultBlock(toolCallID, funcResp.Content, false), nil
 
 	default:
-		return anthropic.ContentBlockParamUnion{}, goerr.Wrap(ErrUnsupportedContentType, "unsupported content type for Claude", goerr.Value("type", content.Type))
+		return anthropic.ContentBlockParamUnion{}, goerr.Wrap(convert.ErrUnsupportedContentType, "unsupported content type for Claude", goerr.Value("type", content.Type))
 	}
+}
+
+// ToMessages converts gollem.History to Claude messages
+func ToMessages(h *gollem.History) ([]anthropic.MessageParam, error) {
+	if h == nil || len(h.Messages) == 0 {
+		return []anthropic.MessageParam{}, nil
+	}
+	return convertMessagesToClaude(h.Messages)
+}
+
+// NewHistory creates gollem.History from Claude messages
+func NewHistory(messages []anthropic.MessageParam) (*gollem.History, error) {
+	commonMessages, err := convertClaudeToMessages(messages)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to convert Claude messages to common format")
+	}
+
+	return &gollem.History{
+		LLType:   gollem.LLMTypeClaude,
+		Version:  gollem.HistoryVersion,
+		Messages: commonMessages,
+		Metadata: &gollem.HistoryMetadata{
+			OriginalProvider: gollem.LLMTypeClaude,
+		},
+	}, nil
 }

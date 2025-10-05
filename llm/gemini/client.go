@@ -2,7 +2,6 @@ package gemini
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -267,23 +266,22 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		config.Tools = tools
 	}
 
-	// Initialize currentHistory from config or create new
-	var currentHistory *gollem.History
+	// Initialize history from config (convert to Gemini native format)
+	var historyContents []*genai.Content
 	if cfg.History() != nil {
-		currentHistory = cfg.History()
-	} else {
-		currentHistory = &gollem.History{
-			LLType:  gollem.LLMTypeGemini,
-			Version: gollem.HistoryVersion,
+		var err error
+		historyContents, err = ToContents(cfg.History())
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert history to Gemini format")
 		}
 	}
 
 	session := &Session{
-		apiClient:      &realAPIClient{client: c.client},
-		model:          c.defaultModel,
-		config:         config,
-		currentHistory: currentHistory,
-		cfg:            cfg,
+		apiClient:       &realAPIClient{client: c.client},
+		model:           c.defaultModel,
+		config:          config,
+		historyContents: historyContents,
+		cfg:             cfg,
 	}
 
 	return session, nil
@@ -301,15 +299,15 @@ type Session struct {
 	// config is the generation configuration
 	config *genai.GenerateContentConfig
 
-	// currentHistory maintains the gollem.History for middleware access
-	currentHistory *gollem.History
+	// historyContents maintains history in Gemini native format for efficiency
+	historyContents []*genai.Content
 
 	// cfg is the session configuration
 	cfg gollem.SessionConfig
 }
 
 func (s *Session) History() (*gollem.History, error) {
-	return s.currentHistory, nil
+	return NewHistory(s.historyContents)
 }
 
 // convertInputs converts gollem.Input to Gemini parts
@@ -412,13 +410,12 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	var historyCopy *gollem.History
-	if s.currentHistory != nil {
-		historyCopy = &gollem.History{
-			Version:  s.currentHistory.Version,
-			LLType:   s.currentHistory.LLType,
-			Messages: make([]gollem.Message, len(s.currentHistory.Messages)),
+	if len(s.historyContents) > 0 {
+		var err error
+		historyCopy, err = NewHistory(s.historyContents)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert history from Gemini format")
 		}
-		copy(historyCopy.Messages, s.currentHistory.Messages)
 	}
 
 	contentReq := &gollem.ContentRequest{
@@ -430,19 +427,19 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
-			s.currentHistory = req.History
+			var err error
+			s.historyContents, err = ToContents(req.History)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to convert history to Gemini format")
+			}
 		}
 
 		// Build complete content list from history and inputs
 		var contents []*genai.Content
 
 		// Add history to contents if available
-		if s.currentHistory != nil {
-			historyContents, err := s.currentHistory.ToGemini()
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to convert history to Gemini format")
-			}
-			contents = append(contents, historyContents...)
+		if len(s.historyContents) > 0 {
+			contents = append(contents, s.historyContents...)
 		}
 
 		// Convert current inputs to parts
@@ -575,14 +572,9 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 			newContents = append(newContents, assistantContent)
 		}
 
-		// Convert new messages to gollem format and append to existing history
+		// Append new contents to history
 		if len(newContents) > 0 {
-			newHistory, err := convertNewHistoryToGollem(newContents)
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to convert new messages to history")
-			}
-			// Preserve middleware-modified history and append new messages
-			s.currentHistory.Messages = append(s.currentHistory.Messages, newHistory.Messages...)
+			s.historyContents = append(s.historyContents, newContents...)
 		}
 
 		return &gollem.ContentResponse{
@@ -619,13 +611,12 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	var historyCopy *gollem.History
-	if s.currentHistory != nil {
-		historyCopy = &gollem.History{
-			Version:  s.currentHistory.Version,
-			LLType:   s.currentHistory.LLType,
-			Messages: make([]gollem.Message, len(s.currentHistory.Messages)),
+	if len(s.historyContents) > 0 {
+		var err error
+		historyCopy, err = NewHistory(s.historyContents)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert history from Gemini format")
 		}
-		copy(historyCopy.Messages, s.currentHistory.Messages)
 	}
 
 	contentReq := &gollem.ContentRequest{
@@ -637,19 +628,19 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
-			s.currentHistory = req.History
+			var err error
+			s.historyContents, err = ToContents(req.History)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to convert history to Gemini format")
+			}
 		}
 
 		// Build complete content list from history and inputs
 		var contents []*genai.Content
 
 		// Add history to contents if available
-		if s.currentHistory != nil {
-			historyContents, err := s.currentHistory.ToGemini()
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to convert history to Gemini format")
-			}
-			contents = append(contents, historyContents...)
+		if len(s.historyContents) > 0 {
+			contents = append(contents, s.historyContents...)
 		}
 
 		// Convert current inputs to parts
@@ -751,51 +742,42 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 
 			// Update history with accumulated response
 			if len(accumulatedTexts) > 0 || len(accumulatedFunctionCalls) > 0 {
-				// Convert inputs and response to history format
-				inputMessage := gollem.Message{
-					Role:     gollem.RoleUser,
-					Contents: []gollem.MessageContent{},
-				}
-				for _, input := range req.Inputs {
-					if text, ok := input.(gollem.Text); ok {
-						textData, _ := json.Marshal(map[string]string{"text": string(text)})
-						inputMessage.Contents = append(inputMessage.Contents, gollem.MessageContent{
-							Type: gollem.MessageContentTypeText,
-							Data: textData,
-						})
-					} else if funcResp, ok := input.(gollem.FunctionResponse); ok {
-						funcData, _ := json.Marshal(funcResp)
-						inputMessage.Contents = append(inputMessage.Contents, gollem.MessageContent{
-							Type: gollem.MessageContentTypeFunctionResponse,
-							Data: funcData,
-						})
+				var newContents []*genai.Content
+
+				// Convert inputs to Gemini content
+				inputParts, err := s.convertInputs(req.Inputs...)
+				if err == nil && len(inputParts) > 0 {
+					userContent := &genai.Content{
+						Role:  "user",
+						Parts: inputParts,
 					}
+					newContents = append(newContents, userContent)
 				}
 
-				assistantMessage := gollem.Message{
-					Role:     gollem.RoleAssistant,
-					Contents: []gollem.MessageContent{},
-				}
+				// Convert accumulated response to Gemini content
+				var assistantParts []*genai.Part
 				for _, text := range accumulatedTexts {
-					textData, _ := json.Marshal(map[string]string{"text": text})
-					assistantMessage.Contents = append(assistantMessage.Contents, gollem.MessageContent{
-						Type: gollem.MessageContentTypeText,
-						Data: textData,
-					})
+					assistantParts = append(assistantParts, &genai.Part{Text: text})
 				}
 				for _, fc := range accumulatedFunctionCalls {
-					funcData, _ := json.Marshal(fc)
-					assistantMessage.Contents = append(assistantMessage.Contents, gollem.MessageContent{
-						Type: gollem.MessageContentTypeFunctionCall,
-						Data: funcData,
+					assistantParts = append(assistantParts, &genai.Part{
+						FunctionCall: &genai.FunctionCall{
+							Name: fc.Name,
+							Args: fc.Arguments,
+						},
 					})
 				}
-
-				if len(inputMessage.Contents) > 0 {
-					s.currentHistory.Messages = append(s.currentHistory.Messages, inputMessage)
+				if len(assistantParts) > 0 {
+					assistantContent := &genai.Content{
+						Role:  "model",
+						Parts: assistantParts,
+					}
+					newContents = append(newContents, assistantContent)
 				}
-				if len(assistantMessage.Contents) > 0 {
-					s.currentHistory.Messages = append(s.currentHistory.Messages, assistantMessage)
+
+				// Append new contents to history
+				if len(newContents) > 0 {
+					s.historyContents = append(s.historyContents, newContents...)
 				}
 			}
 		}()
@@ -882,20 +864,6 @@ func (c *Client) GenerateEmbedding(ctx context.Context, dimension int, input []s
 }
 
 // Helper function to convert new SDK history to gollem.History
-
-func convertNewHistoryToGollem(history []*genai.Content) (*gollem.History, error) {
-	// Convert new format history directly to gollem.History
-	if len(history) == 0 {
-		return &gollem.History{}, nil
-	}
-
-	// Directly pass to NewHistoryFromGemini since it now accepts new genai types
-	hist, err := gollem.NewHistoryFromGemini(history)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to convert Gemini history to gollem format")
-	}
-	return hist, nil
-}
 
 // convertToolToNewSDK converts gollem.Tool to new SDK's FunctionDeclaration
 func convertToolToNewSDK(tool gollem.Tool) *genai.FunctionDeclaration {
