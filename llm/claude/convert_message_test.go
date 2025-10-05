@@ -51,7 +51,8 @@ func TestClaudeMessageRoundTrip(t *testing.T) {
 			anthropic.NewUserMessage(
 				anthropic.NewToolResultBlock(
 					"toolu_abc123",
-					`{"temperature":25,"condition":"sunny"}`,
+					// JSON keys are alphabetically sorted after round-trip
+					`{"condition":"sunny","temperature":25}`,
 					false,
 				),
 			),
@@ -74,7 +75,8 @@ func TestClaudeMessageRoundTrip(t *testing.T) {
 			anthropic.NewUserMessage(
 				anthropic.NewToolResultBlock(
 					"toolu_xyz789",
-					`{"temperature":15,"condition":"rainy"}`,
+					// JSON keys are alphabetically sorted after round-trip
+					`{"condition":"rainy","temperature":15}`,
 					false,
 				),
 			),

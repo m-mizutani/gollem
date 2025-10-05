@@ -105,10 +105,17 @@ func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion) (gollem.M
 			isError = block.OfToolResult.IsError.Value
 		}
 
+		// Try to parse responseText as JSON to preserve structure
+		var response map[string]interface{}
+		if err := json.Unmarshal([]byte(responseText), &response); err != nil {
+			// If not valid JSON, wrap in content field
+			response = map[string]interface{}{"content": responseText}
+		}
+
 		return gollem.NewToolResponseContent(
 			block.OfToolResult.ToolUseID,
 			"", // Claude doesn't include tool name in response
-			map[string]interface{}{"content": responseText},
+			response,
 			isError,
 		)
 	}
