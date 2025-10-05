@@ -182,8 +182,8 @@ type Session struct {
 	// tools are the available tools for the session.
 	tools []anthropic.ToolUnionParam
 
-	// currentHistory maintains the gollem.History as the single source of truth
-	currentHistory *gollem.History
+	// historyMessages maintains history in Claude native format for efficiency
+	historyMessages []anthropic.MessageParam
 
 	// generation parameters
 	params generationParameters
@@ -202,31 +202,30 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		claudeTools[i] = convertTool(tool)
 	}
 
-	// Initialize currentHistory from config or create new
-	var currentHistory *gollem.History
+	// Initialize history from config (convert to Claude native format)
+	var historyMessages []anthropic.MessageParam
 	if cfg.History() != nil {
-		currentHistory = cfg.History()
-	} else {
-		currentHistory = &gollem.History{
-			Version: gollem.HistoryVersion,
-			LLType:  gollem.LLMTypeClaude,
+		var err error
+		historyMessages, err = ToMessages(cfg.History())
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert history to Claude format")
 		}
 	}
 
 	session := &Session{
-		apiClient:      &realAPIClient{client: c.client},
-		defaultModel:   c.defaultModel,
-		tools:          claudeTools,
-		params:         c.params,
-		currentHistory: currentHistory,
-		cfg:            cfg,
+		apiClient:       &realAPIClient{client: c.client},
+		defaultModel:    c.defaultModel,
+		tools:           claudeTools,
+		params:          c.params,
+		historyMessages: historyMessages,
+		cfg:             cfg,
 	}
 
 	return session, nil
 }
 
 func (s *Session) History() (*gollem.History, error) {
-	return s.currentHistory, nil
+	return NewHistory(s.historyMessages)
 }
 
 // convertInputs converts gollem.Input to Claude messages and tool results
@@ -695,13 +694,12 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	var historyCopy *gollem.History
-	if s.currentHistory != nil {
-		historyCopy = &gollem.History{
-			Version:  s.currentHistory.Version,
-			LLType:   s.currentHistory.LLType,
-			Messages: make([]gollem.Message, len(s.currentHistory.Messages)),
+	if len(s.historyMessages) > 0 {
+		var err error
+		historyCopy, err = NewHistory(s.historyMessages)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert history from Claude format")
 		}
-		copy(historyCopy.Messages, s.currentHistory.Messages)
 	}
 
 	contentReq := &gollem.ContentRequest{
@@ -715,7 +713,11 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
-			s.currentHistory = req.History
+			var err error
+			s.historyMessages, err = ToMessages(req.History)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to convert history from middleware")
+			}
 		}
 
 		messages, _, err := s.convertInputs(ctx, req.Inputs...)
@@ -723,15 +725,9 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 			return nil, err
 		}
 
-		// Convert current history to Claude messages
-		var apiMessages []anthropic.MessageParam
-		if s.currentHistory != nil {
-			historyMessages, err := s.currentHistory.ToClaude()
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to convert history to Claude messages")
-			}
-			apiMessages = append(apiMessages, historyMessages...)
-		}
+		// Use history messages directly (already in Claude format)
+		apiMessages := make([]anthropic.MessageParam, 0, len(s.historyMessages)+len(messages))
+		apiMessages = append(apiMessages, s.historyMessages...)
 		apiMessages = append(apiMessages, messages...)
 
 		// DEBUG: Log message history for debugging
@@ -812,22 +808,9 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		// Process response and extract content
 		processedResp := processResponseWithContentType(ctx, resp, s.cfg.ContentType())
 
-		// Update currentHistory after successful API call
-		// This is critical for tool_use/tool_result consistency
-		// Convert only the current input and response to gollem format and append to existing history
-		newInputHistory, err := gollem.NewHistoryFromClaude(messages)
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to create history from input messages")
-		}
-
-		newResponseHistory, err := gollem.NewHistoryFromClaude([]anthropic.MessageParam{resp.ToParam()})
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to create history from response")
-		}
-
-		// Preserve middleware-modified history and append only new input and response
-		s.currentHistory.Messages = append(s.currentHistory.Messages, newInputHistory.Messages...)
-		s.currentHistory.Messages = append(s.currentHistory.Messages, newResponseHistory.Messages...)
+		// Update history with new messages (already in Claude format)
+		s.historyMessages = append(s.historyMessages, messages...)
+		s.historyMessages = append(s.historyMessages, resp.ToParam())
 
 		return &gollem.ContentResponse{
 			Texts:         processedResp.Texts,
@@ -894,16 +877,30 @@ func (a *FunctionCallAccumulator) accumulate() (*gollem.FunctionCall, error) {
 // It handles both text messages and function responses, and returns a channel for streaming responses.
 func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
 	// Build the content request for middleware
+	// Create a copy of the current history to avoid middleware side effects
+	var historyCopy *gollem.History
+	if len(s.historyMessages) > 0 {
+		var err error
+		historyCopy, err = NewHistory(s.historyMessages)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert history from Claude format")
+		}
+	}
+
 	contentReq := &gollem.ContentRequest{
 		Inputs:  input,
-		History: s.currentHistory,
+		History: historyCopy,
 	}
 
 	// Create the base handler that performs the actual API call
 	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
 		// Update history if modified by middleware
 		if req.History != nil {
-			s.currentHistory = req.History
+			var err error
+			s.historyMessages, err = ToMessages(req.History)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to convert history from middleware")
+			}
 		}
 
 		messages, _, err := s.convertInputs(ctx, req.Inputs...)
@@ -911,15 +908,9 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 			return nil, err
 		}
 
-		// Convert current history to Claude messages and append new inputs
-		var allMessages []anthropic.MessageParam
-		if s.currentHistory != nil && len(s.currentHistory.Messages) > 0 {
-			historyMessages, err := s.currentHistory.ToClaude()
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to convert history to Claude messages")
-			}
-			allMessages = append(allMessages, historyMessages...)
-		}
+		// Use history messages directly (already in Claude format) and append new inputs
+		allMessages := make([]anthropic.MessageParam, 0, len(s.historyMessages)+len(messages))
+		allMessages = append(allMessages, s.historyMessages...)
 		allMessages = append(allMessages, messages...)
 
 		// Create request params
@@ -964,18 +955,9 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				}
 			}
 
-			// Update history after successful streaming
-			// Convert the new messages (input + response) to gollem format and append to existing history
-			newMessages, err := gollem.NewHistoryFromClaude(append(messages, resp.ToParam()))
-			if err != nil {
-				responseChan <- &gollem.ContentResponse{
-					Error: goerr.Wrap(err, "failed to create history from new messages"),
-				}
-				return
-			}
-
-			// Preserve middleware-modified history and append new messages
-			s.currentHistory.Messages = append(s.currentHistory.Messages, newMessages.Messages...)
+			// Update history after successful streaming (already in Claude format)
+			s.historyMessages = append(s.historyMessages, messages...)
+			s.historyMessages = append(s.historyMessages, resp.ToParam())
 		}()
 
 		return responseChan, nil

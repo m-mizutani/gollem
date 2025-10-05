@@ -20,23 +20,25 @@ func (c *Client) GetGenerationConfig() *genai.GenerateContentConfig {
 type APIClient = apiClient
 
 // NewSessionWithAPIClient creates a new session with a custom API client for testing
-func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model string) *Session {
-	// Initialize currentHistory from config or create new
-	var currentHistory *gollem.History
+func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model string) (*Session, error) {
+	// Initialize historyContents from config
+	var historyContents []*genai.Content
 	if cfg.History() != nil {
-		currentHistory = cfg.History()
-	} else {
-		currentHistory = &gollem.History{}
+		var err error
+		historyContents, err = ToContents(cfg.History())
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Create generation config
 	config := &genai.GenerateContentConfig{}
 
 	return &Session{
-		apiClient:      client,
-		model:          model,
-		config:         config,
-		currentHistory: currentHistory,
-		cfg:            cfg,
-	}
+		apiClient:       client,
+		model:           model,
+		config:          config,
+		historyContents: historyContents,
+		cfg:             cfg,
+	}, nil
 }

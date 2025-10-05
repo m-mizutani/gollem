@@ -15,30 +15,28 @@ var (
 type APIClient = apiClient
 
 // NewSessionWithAPIClient creates a new session with a custom API client for testing
-func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model string) *Session {
+func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model string) (*Session, error) {
 	tools := make([]openai.Tool, 0, len(cfg.Tools()))
 	for _, tool := range cfg.Tools() {
 		tools = append(tools, convertTool(tool))
 	}
 
-	// Build initial messages from system prompt and history
-	// Initialize currentHistory from config or create new
-	var currentHistory *gollem.History
+	// Initialize historyMessages from config
+	var historyMessages []openai.ChatCompletionMessage
 	if cfg.History() != nil {
-		currentHistory = cfg.History()
-	} else {
-		currentHistory = &gollem.History{
-			LLType:  gollem.LLMTypeOpenAI,
-			Version: gollem.HistoryVersion,
+		var err error
+		historyMessages, err = ToMessages(cfg.History())
+		if err != nil {
+			return nil, err
 		}
 	}
 
 	return &Session{
-		apiClient:      client,
-		defaultModel:   model,
-		tools:          tools,
-		currentHistory: currentHistory,
-		params:         generationParameters{},
-		cfg:            cfg,
-	}
+		apiClient:       client,
+		defaultModel:    model,
+		tools:           tools,
+		historyMessages: historyMessages,
+		params:          generationParameters{},
+		cfg:             cfg,
+	}, nil
 }

@@ -1,17 +1,19 @@
-package gollem
+package gemini
 
 import (
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/internal/convert"
 	"google.golang.org/genai"
 )
 
 // convertGeminiToMessages converts Gemini contents to common Message format
-func convertGeminiToMessages(contents []*genai.Content) ([]Message, error) {
+func convertGeminiToMessages(contents []*genai.Content) ([]gollem.Message, error) {
 	if len(contents) == 0 {
-		return []Message{}, nil
+		return []gollem.Message{}, nil
 	}
 
-	result := make([]Message, 0, len(contents))
+	result := make([]gollem.Message, 0, len(contents))
 
 	for _, content := range contents {
 		msg, err := convertGeminiContent(content)
@@ -25,39 +27,39 @@ func convertGeminiToMessages(contents []*genai.Content) ([]Message, error) {
 }
 
 // convertGeminiContent converts a single Gemini content to Message
-func convertGeminiContent(content *genai.Content) (Message, error) {
-	contents := make([]MessageContent, 0, len(content.Parts))
+func convertGeminiContent(content *genai.Content) (gollem.Message, error) {
+	contents := make([]gollem.MessageContent, 0, len(content.Parts))
 
 	for _, part := range content.Parts {
 		msgContent, err := convertGeminiPart(part)
 		if err != nil {
-			return Message{}, goerr.Wrap(err, "failed to convert Gemini part")
+			return gollem.Message{}, goerr.Wrap(err, "failed to convert Gemini part")
 		}
 		contents = append(contents, msgContent)
 	}
 
 	// Convert role
-	role := convertRoleToCommon(content.Role)
+	role := convert.ConvertRoleToCommon(content.Role)
 	if content.Role == "model" {
-		role = RoleModel // Preserve model role for round-trip
+		role = gollem.RoleModel // Preserve model role for round-trip
 	}
 
-	return Message{
+	return gollem.Message{
 		Role:     role,
 		Contents: contents,
 	}, nil
 }
 
 // convertGeminiPart converts a Gemini part to MessageContent
-func convertGeminiPart(part *genai.Part) (MessageContent, error) {
+func convertGeminiPart(part *genai.Part) (gollem.MessageContent, error) {
 	// Text part
 	if part.Text != "" {
-		return NewTextContent(part.Text)
+		return gollem.NewTextContent(part.Text)
 	}
 
 	// Inline data (image)
 	if part.InlineData != nil {
-		return NewImageContent(
+		return gollem.NewImageContent(
 			part.InlineData.MIMEType,
 			part.InlineData.Data,
 			"",
@@ -68,7 +70,7 @@ func convertGeminiPart(part *genai.Part) (MessageContent, error) {
 	// File data
 	if part.FileData != nil {
 		// Gemini uses file URIs, store as URL
-		return NewImageContent(
+		return gollem.NewImageContent(
 			part.FileData.MIMEType,
 			nil,
 			part.FileData.FileURI,
@@ -78,8 +80,8 @@ func convertGeminiPart(part *genai.Part) (MessageContent, error) {
 
 	// Function call
 	if part.FunctionCall != nil {
-		return NewToolCallContent(
-			generateToolCallID(part.FunctionCall.Name, 0),
+		return gollem.NewToolCallContent(
+			convert.GenerateToolCallID(part.FunctionCall.Name, 0),
 			part.FunctionCall.Name,
 			part.FunctionCall.Args,
 		)
@@ -87,31 +89,31 @@ func convertGeminiPart(part *genai.Part) (MessageContent, error) {
 
 	// Function response
 	if part.FunctionResponse != nil {
-		return NewToolResponseContent(
-			generateToolCallID(part.FunctionResponse.Name, 0),
+		return gollem.NewToolResponseContent(
+			convert.GenerateToolCallID(part.FunctionResponse.Name, 0),
 			part.FunctionResponse.Name,
 			part.FunctionResponse.Response,
 			false,
 		)
 	}
 
-	return MessageContent{}, goerr.Wrap(ErrUnsupportedContentType, "unknown Gemini part type")
+	return gollem.MessageContent{}, goerr.Wrap(convert.ErrUnsupportedContentType, "unknown Gemini part type")
 }
 
 // convertMessagesToGemini converts common Messages to Gemini format
-func convertMessagesToGemini(messages []Message) ([]*genai.Content, error) {
+func convertMessagesToGemini(messages []gollem.Message) ([]*genai.Content, error) {
 	if len(messages) == 0 {
 		return []*genai.Content{}, nil
 	}
 
 	// Handle system messages by merging into first user message
-	messages = mergeSystemIntoFirstUser(messages)
+	messages = convert.MergeSystemIntoFirstUser(messages)
 
 	result := make([]*genai.Content, 0, len(messages))
 
 	for _, msg := range messages {
 		// Skip system messages as they've been merged
-		if msg.Role == RoleSystem {
+		if msg.Role == gollem.RoleSystem {
 			continue
 		}
 
@@ -126,20 +128,20 @@ func convertMessagesToGemini(messages []Message) ([]*genai.Content, error) {
 }
 
 // convertMessageToGemini converts a single Message to Gemini format
-func convertMessageToGemini(msg Message) (*genai.Content, error) {
+func convertMessageToGemini(msg gollem.Message) (*genai.Content, error) {
 	// Convert role
 	role := ""
 	switch msg.Role {
-	case RoleUser:
+	case gollem.RoleUser:
 		role = "user"
-	case RoleAssistant:
+	case gollem.RoleAssistant:
 		role = "model"
-	case RoleModel:
+	case gollem.RoleModel:
 		role = "model"
-	case RoleTool:
+	case gollem.RoleTool:
 		// Tool responses go to user role in Gemini
 		role = "user"
-	case RoleFunction:
+	case gollem.RoleFunction:
 		// Function role is preserved for function responses
 		role = "function"
 	default:
@@ -163,16 +165,16 @@ func convertMessageToGemini(msg Message) (*genai.Content, error) {
 }
 
 // convertContentToGemini converts MessageContent to Gemini part
-func convertContentToGemini(content MessageContent) (*genai.Part, error) {
+func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) {
 	switch content.Type {
-	case MessageContentTypeText:
+	case gollem.MessageContentTypeText:
 		textContent, err := content.GetTextContent()
 		if err != nil {
 			return nil, err
 		}
 		return &genai.Part{Text: textContent.Text}, nil
 
-	case MessageContentTypeImage:
+	case gollem.MessageContentTypeImage:
 		imgContent, err := content.GetImageContent()
 		if err != nil {
 			return nil, err
@@ -194,9 +196,9 @@ func convertContentToGemini(content MessageContent) (*genai.Part, error) {
 				},
 			}, nil
 		}
-		return nil, goerr.Wrap(ErrInvalidMessageFormat, "image has neither data nor URL")
+		return nil, goerr.Wrap(convert.ErrInvalidMessageFormat, "image has neither data nor URL")
 
-	case MessageContentTypeToolCall:
+	case gollem.MessageContentTypeToolCall:
 		toolCall, err := content.GetToolCallContent()
 		if err != nil {
 			return nil, err
@@ -208,7 +210,7 @@ func convertContentToGemini(content MessageContent) (*genai.Part, error) {
 			},
 		}, nil
 
-	case MessageContentTypeToolResponse:
+	case gollem.MessageContentTypeToolResponse:
 		toolResp, err := content.GetToolResponseContent()
 		if err != nil {
 			return nil, err
@@ -220,13 +222,13 @@ func convertContentToGemini(content MessageContent) (*genai.Part, error) {
 			},
 		}, nil
 
-	case MessageContentTypeFunctionCall:
+	case gollem.MessageContentTypeFunctionCall:
 		// Convert legacy function call to tool call
 		funcCall, err := content.GetFunctionCallContent()
 		if err != nil {
 			return nil, err
 		}
-		args, _ := parseJSONArguments(funcCall.Arguments)
+		args, _ := convert.ParseJSONArguments(funcCall.Arguments)
 		return &genai.Part{
 			FunctionCall: &genai.FunctionCall{
 				Name: funcCall.Name,
@@ -234,7 +236,7 @@ func convertContentToGemini(content MessageContent) (*genai.Part, error) {
 			},
 		}, nil
 
-	case MessageContentTypeFunctionResponse:
+	case gollem.MessageContentTypeFunctionResponse:
 		// Convert legacy function response to tool response
 		funcResp, err := content.GetFunctionResponseContent()
 		if err != nil {
@@ -248,6 +250,31 @@ func convertContentToGemini(content MessageContent) (*genai.Part, error) {
 		}, nil
 
 	default:
-		return nil, goerr.Wrap(ErrUnsupportedContentType, "unsupported content type for Gemini", goerr.Value("type", content.Type))
+		return nil, goerr.Wrap(convert.ErrUnsupportedContentType, "unsupported content type for Gemini", goerr.Value("type", content.Type))
 	}
+}
+
+// ToContents converts gollem.History to Gemini contents
+func ToContents(h *gollem.History) ([]*genai.Content, error) {
+	if h == nil || len(h.Messages) == 0 {
+		return []*genai.Content{}, nil
+	}
+	return convertMessagesToGemini(h.Messages)
+}
+
+// NewHistory creates gollem.History from Gemini contents
+func NewHistory(contents []*genai.Content) (*gollem.History, error) {
+	commonMessages, err := convertGeminiToMessages(contents)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to convert Gemini messages to common format")
+	}
+
+	return &gollem.History{
+		LLType:   gollem.LLMTypeGemini,
+		Version:  gollem.HistoryVersion,
+		Messages: commonMessages,
+		Metadata: &gollem.HistoryMetadata{
+			OriginalProvider: gollem.LLMTypeGemini,
+		},
+	}, nil
 }
