@@ -11,6 +11,11 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
+const (
+	rawArgumentsKey = "arguments"
+	rawContentKey   = "content"
+)
+
 // convertOpenAIToMessages converts OpenAI messages to common Message format
 func convertOpenAIToMessages(messages []openai.ChatCompletionMessage) ([]gollem.Message, error) {
 	if len(messages) == 0 {
@@ -96,7 +101,7 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (gollem.Message, err
 				args, err := convert.ParseJSONArguments(toolCall.Function.Arguments)
 				if err != nil {
 					// Use raw string if parsing fails
-					args = map[string]interface{}{"arguments": toolCall.Function.Arguments}
+					args = map[string]interface{}{rawArgumentsKey: toolCall.Function.Arguments}
 				}
 				content, err := gollem.NewToolCallContent(toolCall.ID, toolCall.Function.Name, args)
 				if err != nil {
@@ -112,7 +117,7 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (gollem.Message, err
 		args, err := convert.ParseJSONArguments(msg.FunctionCall.Arguments)
 		if err != nil {
 			// Use raw string if parsing fails
-			args = map[string]interface{}{"arguments": msg.FunctionCall.Arguments}
+			args = map[string]interface{}{rawArgumentsKey: msg.FunctionCall.Arguments}
 		}
 		// Generate tool call ID for legacy function calls
 		toolCallID := convert.GenerateToolCallID(msg.FunctionCall.Name, 0)
@@ -129,7 +134,7 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (gollem.Message, err
 		var response map[string]interface{}
 		if err := json.Unmarshal([]byte(msg.Content), &response); err != nil {
 			// If not JSON, wrap in a response object
-			response = map[string]interface{}{"content": msg.Content}
+			response = map[string]interface{}{rawContentKey: msg.Content}
 		}
 		content, err := gollem.NewToolResponseContent(msg.ToolCallID, msg.Name, response, false)
 		if err != nil {
@@ -144,7 +149,7 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (gollem.Message, err
 		var response map[string]interface{}
 		if err := json.Unmarshal([]byte(msg.Content), &response); err != nil {
 			// If not JSON, wrap in a response object
-			response = map[string]interface{}{"content": msg.Content}
+			response = map[string]interface{}{rawContentKey: msg.Content}
 		}
 		// Generate tool call ID for legacy function responses
 		toolCallID := convert.GenerateToolCallID(msg.Name, 0)
