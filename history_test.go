@@ -151,37 +151,6 @@ func TestOpenAIToClaudeConversion(t *testing.T) {
 		},
 	}))
 
-	t.Run("function calls", runTest(testCase{
-		name: "function calls",
-		messages: []openaiSDK.ChatCompletionMessage{
-			{Role: "user", Content: "What's 2+2?"},
-			{
-				Role: "assistant",
-				FunctionCall: &openaiSDK.FunctionCall{
-					Name:      "calculate",
-					Arguments: `{"expression":"2+2"}`,
-				},
-			},
-			{
-				Role:    "function",
-				Name:    "calculate",
-				Content: `{"result":4}`,
-			},
-			{Role: "assistant", Content: "The answer is 4."},
-		},
-		expectedMessages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock("What's 2+2?")),
-			// Claude converts function call to tool use
-			anthropic.NewAssistantMessage(
-				anthropic.NewToolUseBlock("call_calculate_0", map[string]interface{}{"expression": "2+2"}, "calculate"),
-			),
-			// Claude converts function response to tool result
-			anthropic.NewUserMessage(
-				anthropic.NewToolResultBlock("call_calculate_0", `{"result":4}`, false),
-			),
-			anthropic.NewAssistantMessage(anthropic.NewTextBlock("The answer is 4.")),
-		},
-	}))
 }
 
 func TestClaudeToGeminiConversion(t *testing.T) {

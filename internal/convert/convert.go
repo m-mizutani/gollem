@@ -58,9 +58,11 @@ func ConvertRoleToCommon(role string) gollem.MessageRole {
 	case "tool":
 		return gollem.RoleTool
 	case "function":
-		return gollem.RoleFunction
+		// Legacy OpenAI function role is treated as tool
+		return gollem.RoleTool
 	case "model":
-		return gollem.RoleModel
+		// Gemini's model role is treated as assistant
+		return gollem.RoleAssistant
 	default:
 		// Default to user role for unknown roles
 		return gollem.RoleUser

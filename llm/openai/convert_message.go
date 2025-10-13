@@ -107,9 +107,16 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (gollem.Message, err
 		}
 	}
 
-	// Handle legacy function call
+	// Handle legacy function call - convert to tool call
 	if msg.FunctionCall != nil {
-		content, err := gollem.NewFunctionCallContent(msg.FunctionCall.Name, msg.FunctionCall.Arguments)
+		args, err := convert.ParseJSONArguments(msg.FunctionCall.Arguments)
+		if err != nil {
+			// Use raw string if parsing fails
+			args = map[string]interface{}{"arguments": msg.FunctionCall.Arguments}
+		}
+		// Generate tool call ID for legacy function calls
+		toolCallID := convert.GenerateToolCallID(msg.FunctionCall.Name, 0)
+		content, err := gollem.NewToolCallContent(toolCallID, msg.FunctionCall.Name, args)
 		if err != nil {
 			return gollem.Message{}, err
 		}
@@ -131,9 +138,17 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (gollem.Message, err
 		contents = append(contents, content)
 	}
 
-	// Handle legacy function responses
+	// Handle legacy function responses - convert to tool response
 	if msg.Role == "function" {
-		content, err := gollem.NewFunctionResponseContent(msg.Name, msg.Content)
+		// Parse content as response
+		var response map[string]interface{}
+		if err := json.Unmarshal([]byte(msg.Content), &response); err != nil {
+			// If not JSON, wrap in a response object
+			response = map[string]interface{}{"content": msg.Content}
+		}
+		// Generate tool call ID for legacy function responses
+		toolCallID := convert.GenerateToolCallID(msg.Name, 0)
+		content, err := gollem.NewToolResponseContent(toolCallID, msg.Name, response, false)
 		if err != nil {
 			return gollem.Message{}, err
 		}
@@ -176,12 +191,10 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 		role = "system"
 	case gollem.RoleUser:
 		role = "user"
-	case gollem.RoleAssistant, gollem.RoleModel:
+	case gollem.RoleAssistant:
 		role = "assistant"
 	case gollem.RoleTool:
 		role = "tool"
-	case gollem.RoleFunction:
-		role = "function"
 	default:
 		role = string(msg.Role)
 	}
@@ -202,7 +215,6 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 	// Handle complex messages
 	var textParts []openai.ChatMessagePart
 	var toolCalls []openai.ToolCall
-	var functionCall *openai.FunctionCall
 	var toolResponses []openai.ChatCompletionMessage
 
 	for _, content := range msg.Contents {
@@ -268,27 +280,6 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 				Name:       toolResp.Name,
 				ToolCallID: toolResp.ToolCallID,
 			})
-
-		case gollem.MessageContentTypeFunctionCall:
-			funcCall, err := content.GetFunctionCallContent()
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to get function call content")
-			}
-			functionCall = &openai.FunctionCall{
-				Name:      funcCall.Name,
-				Arguments: funcCall.Arguments,
-			}
-
-		case gollem.MessageContentTypeFunctionResponse:
-			funcResp, err := content.GetFunctionResponseContent()
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to get function response content")
-			}
-			toolResponses = append(toolResponses, openai.ChatCompletionMessage{
-				Role:    "function",
-				Content: funcResp.Content,
-				Name:    funcResp.Name,
-			})
 		}
 	}
 
@@ -307,7 +298,7 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 		}
 	} else {
 		// Add main message if it has content or tool calls
-		if len(textParts) > 0 || len(toolCalls) > 0 || functionCall != nil {
+		if len(textParts) > 0 || len(toolCalls) > 0 {
 			mainMsg := openai.ChatCompletionMessage{
 				Role: role,
 				Name: msg.Name,
@@ -325,11 +316,6 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 			// Add tool calls
 			if len(toolCalls) > 0 {
 				mainMsg.ToolCalls = toolCalls
-			}
-
-			// Add function call
-			if functionCall != nil {
-				mainMsg.FunctionCall = functionCall
 			}
 
 			result = append(result, mainMsg)
@@ -370,8 +356,5 @@ func NewHistory(messages []openai.ChatCompletionMessage) (*gollem.History, error
 		LLType:   gollem.LLMTypeOpenAI,
 		Version:  gollem.HistoryVersion,
 		Messages: commonMessages,
-		Metadata: &gollem.HistoryMetadata{
-			OriginalProvider: gollem.LLMTypeOpenAI,
-		},
 	}, nil
 }
