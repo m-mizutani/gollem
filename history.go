@@ -18,21 +18,13 @@ const (
 )
 
 const (
-	HistoryVersion = 2 // Unified format version
+	HistoryVersion = 3 // Unified format version (v3: removed legacy function calls and provider dialects)
 )
 
 type History struct {
-	LLType  LLMType `json:"type"`
-	Version int     `json:"version"`
-
-	// Unified format fields
-	Messages []Message        `json:"messages"`
-	Metadata *HistoryMetadata `json:"metadata,omitempty"`
-
-	// Compaction related fields
-	Summary     string `json:"summary,omitempty"`      // Summary information
-	Compacted   bool   `json:"compacted,omitempty"`    // Compaction flag
-	OriginalLen int    `json:"original_len,omitempty"` // Original length
+	LLType   LLMType   `json:"type"`
+	Version  int       `json:"version"`
+	Messages []Message `json:"messages"`
 }
 
 func (x *History) ToCount() int {

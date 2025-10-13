@@ -2,7 +2,6 @@ package gollem
 
 import (
 	"encoding/json"
-	"time"
 )
 
 // Message represents a unified message format that can be converted between different LLM providers.
@@ -23,9 +22,7 @@ const (
 	RoleSystem    MessageRole = "system"
 	RoleUser      MessageRole = "user"
 	RoleAssistant MessageRole = "assistant"
-	RoleTool      MessageRole = "tool"     // OpenAI tool response
-	RoleFunction  MessageRole = "function" // OpenAI function response (legacy)
-	RoleModel     MessageRole = "model"    // Gemini model role (maps to assistant)
+	RoleTool      MessageRole = "tool" // Tool response (unified across all providers)
 )
 
 // MessageContent represents the content of a message in a unified format
@@ -39,12 +36,10 @@ type MessageContent struct {
 type MessageContentType string
 
 const (
-	MessageContentTypeText             MessageContentType = "text"
-	MessageContentTypeImage            MessageContentType = "image"
-	MessageContentTypeToolCall         MessageContentType = "tool_call"
-	MessageContentTypeToolResponse     MessageContentType = "tool_response"
-	MessageContentTypeFunctionCall     MessageContentType = "function_call"     // OpenAI legacy
-	MessageContentTypeFunctionResponse MessageContentType = "function_response" // OpenAI legacy
+	MessageContentTypeText         MessageContentType = "text"
+	MessageContentTypeImage        MessageContentType = "image"
+	MessageContentTypeToolCall     MessageContentType = "tool_call"
+	MessageContentTypeToolResponse MessageContentType = "tool_response"
 )
 
 // TextContent represents text content in a message
@@ -73,30 +68,6 @@ type ToolResponseContent struct {
 	Name       string                 `json:"name,omitempty"`     // Tool/function name (required for Gemini)
 	Response   map[string]interface{} `json:"response"`           // Response content
 	IsError    bool                   `json:"is_error,omitempty"` // Whether this is an error response (Claude)
-}
-
-// FunctionCallContent represents a legacy OpenAI function call
-type FunctionCallContent struct {
-	Name      string `json:"name"`      // Function name
-	Arguments string `json:"arguments"` // Arguments as JSON string
-}
-
-// FunctionResponseContent represents a legacy OpenAI function response
-type FunctionResponseContent struct {
-	Name    string `json:"name"`    // Function name
-	Content string `json:"content"` // Response content as string
-}
-
-// HistoryMetadata contains metadata about the conversation history
-type HistoryMetadata struct {
-	OriginalProvider LLMType   `json:"original_provider,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
-
-	// Compaction related fields (preserved from existing functionality)
-	Compacted   bool   `json:"compacted,omitempty"`
-	Summary     string `json:"summary,omitempty"`
-	OriginalLen int    `json:"original_len,omitempty"`
 }
 
 // Helper methods for creating MessageContent
@@ -163,36 +134,6 @@ func NewToolResponseContent(toolCallID, name string, response map[string]interfa
 	}, nil
 }
 
-// NewFunctionCallContent creates a new function call message content (legacy OpenAI)
-func NewFunctionCallContent(name, arguments string) (MessageContent, error) {
-	data, err := json.Marshal(FunctionCallContent{
-		Name:      name,
-		Arguments: arguments,
-	})
-	if err != nil {
-		return MessageContent{}, err
-	}
-	return MessageContent{
-		Type: MessageContentTypeFunctionCall,
-		Data: data,
-	}, nil
-}
-
-// NewFunctionResponseContent creates a new function response message content (legacy OpenAI)
-func NewFunctionResponseContent(name, content string) (MessageContent, error) {
-	data, err := json.Marshal(FunctionResponseContent{
-		Name:    name,
-		Content: content,
-	})
-	if err != nil {
-		return MessageContent{}, err
-	}
-	return MessageContent{
-		Type: MessageContentTypeFunctionResponse,
-		Data: data,
-	}, nil
-}
-
 // Helper methods for extracting content from MessageContent
 
 // GetTextContent extracts text content from a MessageContent
@@ -237,30 +178,6 @@ func (mc *MessageContent) GetToolResponseContent() (*ToolResponseContent, error)
 		return nil, ErrInvalidHistoryData
 	}
 	var content ToolResponseContent
-	if err := json.Unmarshal(mc.Data, &content); err != nil {
-		return nil, err
-	}
-	return &content, nil
-}
-
-// GetFunctionCallContent extracts function call content from a MessageContent
-func (mc *MessageContent) GetFunctionCallContent() (*FunctionCallContent, error) {
-	if mc.Type != MessageContentTypeFunctionCall {
-		return nil, ErrInvalidHistoryData
-	}
-	var content FunctionCallContent
-	if err := json.Unmarshal(mc.Data, &content); err != nil {
-		return nil, err
-	}
-	return &content, nil
-}
-
-// GetFunctionResponseContent extracts function response content from a MessageContent
-func (mc *MessageContent) GetFunctionResponseContent() (*FunctionResponseContent, error) {
-	if mc.Type != MessageContentTypeFunctionResponse {
-		return nil, ErrInvalidHistoryData
-	}
-	var content FunctionResponseContent
 	if err := json.Unmarshal(mc.Data, &content); err != nil {
 		return nil, err
 	}

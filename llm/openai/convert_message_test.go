@@ -108,26 +108,7 @@ func TestOpenAIMessageRoundTrip(t *testing.T) {
 		},
 	}))
 
-	t.Run("function calls (legacy)", runTest(testCase{
-		name: "function calls",
-		messages: []openaiSDK.ChatCompletionMessage{
-			{
-				Role:    "user",
-				Content: "Calculate 2+2",
-			},
-			{
-				Role:    "assistant",
-				Content: "",
-				FunctionCall: &openaiSDK.FunctionCall{
-					Name:      "calculate",
-					Arguments: `{"expression":"2+2"}`,
-				},
-			},
-			{
-				Role:    "function",
-				Name:    "calculate",
-				Content: `{"result":4}`,
-			},
-		},
-	}))
+	// Legacy function calls are converted to tool calls internally,
+	// so round-trip conversion will not preserve the original function format.
+	// This is expected behavior in v3.
 }

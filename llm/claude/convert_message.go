@@ -165,10 +165,10 @@ func convertMessageToClaude(msg gollem.Message) (anthropic.MessageParam, error) 
 	switch msg.Role {
 	case gollem.RoleUser:
 		role = anthropic.MessageParamRoleUser
-	case gollem.RoleAssistant, gollem.RoleModel:
+	case gollem.RoleAssistant:
 		role = anthropic.MessageParamRoleAssistant
-	case gollem.RoleTool, gollem.RoleFunction:
-		// Tool/function responses should be in user role with tool_result block
+	case gollem.RoleTool:
+		// Tool responses should be in user role with tool_result block
 		role = anthropic.MessageParamRoleUser
 	default:
 		role = anthropic.MessageParamRoleUser
@@ -249,25 +249,6 @@ func convertContentToClaude(content gollem.MessageContent, messageRole gollem.Me
 
 		return anthropic.NewToolResultBlock(toolResp.ToolCallID, contentStr, toolResp.IsError), nil
 
-	case gollem.MessageContentTypeFunctionCall:
-		// Convert legacy function call to tool call
-		funcCall, err := content.GetFunctionCallContent()
-		if err != nil {
-			return anthropic.ContentBlockParamUnion{}, err
-		}
-		args, _ := convert.ParseJSONArguments(funcCall.Arguments)
-		return anthropic.NewToolUseBlock(convert.GenerateToolCallID(funcCall.Name, 0), args, funcCall.Name), nil
-
-	case gollem.MessageContentTypeFunctionResponse:
-		// Convert legacy function response to tool result
-		funcResp, err := content.GetFunctionResponseContent()
-		if err != nil {
-			return anthropic.ContentBlockParamUnion{}, err
-		}
-		// Generate a tool call ID based on function name
-		toolCallID := convert.GenerateToolCallID(funcResp.Name, 0)
-		return anthropic.NewToolResultBlock(toolCallID, funcResp.Content, false), nil
-
 	default:
 		return anthropic.ContentBlockParamUnion{}, goerr.Wrap(convert.ErrUnsupportedContentType, "unsupported content type for Claude", goerr.Value("type", content.Type))
 	}
@@ -292,8 +273,5 @@ func NewHistory(messages []anthropic.MessageParam) (*gollem.History, error) {
 		LLType:   gollem.LLMTypeClaude,
 		Version:  gollem.HistoryVersion,
 		Messages: commonMessages,
-		Metadata: &gollem.HistoryMetadata{
-			OriginalProvider: gollem.LLMTypeClaude,
-		},
 	}, nil
 }

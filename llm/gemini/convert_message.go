@@ -38,11 +38,8 @@ func convertGeminiContent(content *genai.Content) (gollem.Message, error) {
 		contents = append(contents, msgContent)
 	}
 
-	// Convert role
+	// Convert role - model is always converted to assistant
 	role := convert.ConvertRoleToCommon(content.Role)
-	if content.Role == "model" {
-		role = gollem.RoleModel // Preserve model role for round-trip
-	}
 
 	return gollem.Message{
 		Role:     role,
@@ -135,15 +132,11 @@ func convertMessageToGemini(msg gollem.Message) (*genai.Content, error) {
 	case gollem.RoleUser:
 		role = "user"
 	case gollem.RoleAssistant:
-		role = "model"
-	case gollem.RoleModel:
+		// Assistant is always converted to model for Gemini SDK
 		role = "model"
 	case gollem.RoleTool:
 		// Tool responses go to user role in Gemini
 		role = "user"
-	case gollem.RoleFunction:
-		// Function role is preserved for function responses
-		role = "function"
 	default:
 		role = "user"
 	}
@@ -222,33 +215,6 @@ func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) 
 			},
 		}, nil
 
-	case gollem.MessageContentTypeFunctionCall:
-		// Convert legacy function call to tool call
-		funcCall, err := content.GetFunctionCallContent()
-		if err != nil {
-			return nil, err
-		}
-		args, _ := convert.ParseJSONArguments(funcCall.Arguments)
-		return &genai.Part{
-			FunctionCall: &genai.FunctionCall{
-				Name: funcCall.Name,
-				Args: args,
-			},
-		}, nil
-
-	case gollem.MessageContentTypeFunctionResponse:
-		// Convert legacy function response to tool response
-		funcResp, err := content.GetFunctionResponseContent()
-		if err != nil {
-			return nil, err
-		}
-		return &genai.Part{
-			FunctionResponse: &genai.FunctionResponse{
-				Name:     funcResp.Name,
-				Response: map[string]interface{}{"content": funcResp.Content},
-			},
-		}, nil
-
 	default:
 		return nil, goerr.Wrap(convert.ErrUnsupportedContentType, "unsupported content type for Gemini", goerr.Value("type", content.Type))
 	}
@@ -273,8 +239,5 @@ func NewHistory(contents []*genai.Content) (*gollem.History, error) {
 		LLType:   gollem.LLMTypeGemini,
 		Version:  gollem.HistoryVersion,
 		Messages: commonMessages,
-		Metadata: &gollem.HistoryMetadata{
-			OriginalProvider: gollem.LLMTypeGemini,
-		},
 	}, nil
 }
