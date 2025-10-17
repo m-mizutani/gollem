@@ -862,7 +862,12 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 
 		// Update history with new messages (already in Claude format)
 		s.historyMessages = append(s.historyMessages, messages...)
-		s.historyMessages = append(s.historyMessages, resp.ToParam())
+
+		// Only add response to history if it has content
+		respParam := resp.ToParam()
+		if len(respParam.Content) > 0 {
+			s.historyMessages = append(s.historyMessages, respParam)
+		}
 
 		return &gollem.ContentResponse{
 			Texts:         processedResp.Texts,
@@ -1010,7 +1015,12 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 
 			// Update history after successful streaming (already in Claude format)
 			s.historyMessages = append(s.historyMessages, messages...)
-			s.historyMessages = append(s.historyMessages, resp.ToParam())
+
+			// Only add response to history if it has content
+			respParam := resp.ToParam()
+			if len(respParam.Content) > 0 {
+				s.historyMessages = append(s.historyMessages, respParam)
+			}
 		}()
 
 		return responseChan, nil

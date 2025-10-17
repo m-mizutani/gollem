@@ -192,7 +192,12 @@ func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...g
 
 	// Only update session history after successful API call
 	s.messages = append(s.messages, messages...)
-	s.messages = append(s.messages, resp.ToParam())
+
+	// Only add response to history if it has content
+	respParam := resp.ToParam()
+	if len(respParam.Content) > 0 {
+		s.messages = append(s.messages, respParam)
+	}
 
 	return processResponseWithContentType(ctx, resp, s.cfg.ContentType()), nil
 }
