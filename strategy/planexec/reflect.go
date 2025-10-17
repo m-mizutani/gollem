@@ -17,9 +17,9 @@ type reflectionResult struct {
 }
 
 // reflect performs reflection after task completion to update or add tasks
-// It evaluates task results against the Plan's goal (which contains all necessary constraints)
+// It evaluates task results against the Plan, which contains all necessary context and constraints.
 // NOTE: This function does NOT use system prompt or history - all necessary information
-// should already be embedded in the Plan's goal description during the planning phase
+// should already be embedded in the Plan structure during the planning phase.
 func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completedTask *Task, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware) (*reflectionResult, error) {
 	logger := ctxlog.From(ctx)
 	logger.Debug("performing reflection", "goal", plan.Goal)
