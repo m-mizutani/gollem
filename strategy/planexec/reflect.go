@@ -20,7 +20,7 @@ type reflectionResult struct {
 // It evaluates task results against the Plan, which contains all necessary context and constraints.
 // NOTE: This function does NOT use system prompt or history - all necessary information
 // should already be embedded in the Plan structure during the planning phase.
-func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completedTask *Task, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware) (*reflectionResult, error) {
+func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completedTask *Task, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, currentIteration, maxIterations int) (*reflectionResult, error) {
 	logger := ctxlog.From(ctx)
 	logger.Debug("performing reflection", "goal", plan.Goal)
 
@@ -43,7 +43,7 @@ func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completed
 	}
 
 	// Build reflection prompt
-	reflectPrompt := buildReflectPrompt(ctx, plan, completedTask.Result, tools)
+	reflectPrompt := buildReflectPrompt(ctx, plan, completedTask.Result, tools, currentIteration, maxIterations)
 
 	// Generate reflection using LLM
 	response, err := session.GenerateContent(ctx, reflectPrompt...)

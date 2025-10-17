@@ -313,6 +313,8 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, 
 			return nil, err
 		}
 
+		logger.Debug("gollem input", "input", strategyInputs, "loop", i, "response", executeResponse)
+
 		// ExecuteResponse priority processing
 		if executeResponse != nil {
 			// Input also specified? Log warning
@@ -331,8 +333,6 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, 
 			// Both nil: session terminated
 			return nil, nil
 		}
-
-		logger.Debug("gollem input", "input", strategyInputs, "loop", i)
 
 		switch cfg.responseMode {
 		case ResponseModeBlocking:

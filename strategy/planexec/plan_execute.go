@@ -38,6 +38,8 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 	logger.Debug("plan-execute strategy handle",
 		"iteration", state.Iteration,
 		"next_input_len", len(state.NextInput),
+		"plan", s.plan,
+		"current_task", s.currentTask,
 		"last_response_nil", state.LastResponse == nil)
 
 	// ========== Phase 0: Pass through NextInput (e.g., tool responses) ==========
@@ -101,10 +103,11 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 		}
 
 		// Perform reflection only if enabled
-		reflectionResult, err := reflect(ctx, s.client, s.plan, s.currentTask, state.Tools, s.middleware)
+		reflectionResult, err := reflect(ctx, s.client, s.plan, s.currentTask, state.Tools, s.middleware, s.taskIterationCount, s.maxIterations)
 		if err != nil {
 			return nil, nil, goerr.Wrap(err, "reflection failed")
 		}
+		logger.Debug("plan reflected", "result", reflectionResult)
 
 		// Apply task updates from reflection
 		if len(reflectionResult.UpdatedTasks) > 0 {
@@ -153,7 +156,7 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 		s.waitingForTask = true
 
 		// Return task execution prompt
-		return buildExecutePrompt(ctx, s.currentTask, s.plan), nil, nil
+		return buildExecutePrompt(ctx, s.currentTask, s.plan, s.taskIterationCount, s.maxIterations), nil, nil
 	}
 
 	// ========== Error: Unexpected State ==========

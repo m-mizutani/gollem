@@ -24,6 +24,18 @@ If the request requires:
 
 Then create a **structured plan** with clear tasks.
 
+**CRITICAL PLANNING PRINCIPLES**:
+1. **Sharp, Focused Goals**: Define a precise, concrete objective - NOT a vague aspiration
+   - Good: "Find the bug causing 500 errors in /api/users endpoint"
+   - Bad: "Improve the application quality"
+2. **Minimal Essential Tasks**: Include ONLY tasks that are absolutely necessary
+   - Do NOT add exploratory or "nice to have" tasks
+   - Each task must directly contribute to achieving the goal
+   - Avoid broad searches or unnecessary investigations
+3. **Bounded Scope**: Keep the task list compact and achievable
+   - Prefer 2-5 focused tasks over 10+ exploratory ones
+   - Remove any tasks that don't directly serve the goal
+
 ## Available Tools
 
 {{.ToolList}}
@@ -59,12 +71,15 @@ When creating tasks, specify:
 The plan will be evaluated later **without access to the system prompt or conversation history**. Therefore, you MUST embed all necessary context into the plan structure:
 
 1. **`goal`** - The objective to achieve
-   - Clear, specific description of what needs to be accomplished
+   - **MUST be sharp, specific, and concrete** - avoid vague descriptions
    - Include success criteria
+   - Example: "Fix the authentication bug preventing user login with OAuth tokens"
+   - NOT: "Improve authentication system"
 
 2. **`context_summary`** (if system prompt or history provides relevant context)
    - Summarize key background information from system prompt
    - Include relevant facts from conversation history
+   - Keep concise - only essential context
    - Example: "User is working on a medical application with patient data"
    - Example: "Previous conversation established the need for encrypted storage"
 

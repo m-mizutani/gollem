@@ -53,11 +53,13 @@ func buildPlanPrompt(_ context.Context, inputs []gollem.Input, tools []gollem.To
 }
 
 // buildExecutePrompt creates a prompt for executing a specific task
-func buildExecutePrompt(ctx context.Context, task *Task, plan *Plan) []gollem.Input {
+func buildExecutePrompt(ctx context.Context, task *Task, plan *Plan, currentIteration, maxIterations int) []gollem.Input {
 	// Build list of completed tasks
 	var completedTasks []string
+	completedTaskCount := 0
 	for _, t := range plan.Tasks {
 		if t.State == TaskStateCompleted {
+			completedTaskCount++
 			completedTasks = append(completedTasks, fmt.Sprintf("[ID: %s] %s", t.ID, t.Description))
 			if t.Result != "" {
 				completedTasks = append(completedTasks, fmt.Sprintf("   Result: %s", t.Result))
@@ -70,6 +72,8 @@ func buildExecutePrompt(ctx context.Context, task *Task, plan *Plan) []gollem.In
 		completedStr = strings.Join(completedTasks, "\n")
 	}
 
+	remainingIterations := maxIterations - currentIteration
+
 	tmpl, err := template.New("execute").Parse(executePromptTemplate)
 	if err != nil {
 		panic(goerr.Wrap(err, "failed to parse execute template"))
@@ -77,11 +81,15 @@ func buildExecutePrompt(ctx context.Context, task *Task, plan *Plan) []gollem.In
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, map[string]interface{}{
-		"Goal":            plan.Goal,
-		"ContextSummary":  plan.ContextSummary,
-		"Constraints":     plan.Constraints,
-		"TaskDescription": task.Description,
-		"CompletedTasks":  completedStr,
+		"Goal":                plan.Goal,
+		"ContextSummary":      plan.ContextSummary,
+		"Constraints":         plan.Constraints,
+		"TaskDescription":     task.Description,
+		"CompletedTasks":      completedStr,
+		"CurrentIteration":    currentIteration,
+		"MaxIterations":       maxIterations,
+		"CompletedTaskCount":  completedTaskCount,
+		"RemainingIterations": remainingIterations,
 	}); err != nil {
 		panic(goerr.Wrap(err, "failed to execute execute template"))
 	}
@@ -90,16 +98,18 @@ func buildExecutePrompt(ctx context.Context, task *Task, plan *Plan) []gollem.In
 }
 
 // buildReflectPrompt creates a prompt for reflection after task completion
-func buildReflectPrompt(ctx context.Context, plan *Plan, latestResult string, tools []gollem.Tool) []gollem.Input {
+func buildReflectPrompt(ctx context.Context, plan *Plan, latestResult string, tools []gollem.Tool, currentIteration, maxIterations int) []gollem.Input {
 	// Build completed tasks list
 	var completedTasks []string
 	var remainingTasks []string
+	completedTaskCount := 0
 
 	for _, task := range plan.Tasks {
 		taskStr := fmt.Sprintf("[ID: %s] %s", task.ID, task.Description)
 
 		switch task.State {
 		case TaskStateCompleted:
+			completedTaskCount++
 			completedTasks = append(completedTasks, taskStr)
 		case TaskStatePending:
 			remainingTasks = append(remainingTasks, taskStr)
@@ -116,6 +126,8 @@ func buildReflectPrompt(ctx context.Context, plan *Plan, latestResult string, to
 		remainingStr = "None"
 	}
 
+	remainingIterations := maxIterations - currentIteration
+
 	// Build tool list
 	toolList := buildToolList(tools)
 
@@ -126,13 +138,17 @@ func buildReflectPrompt(ctx context.Context, plan *Plan, latestResult string, to
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, map[string]interface{}{
-		"Goal":           plan.Goal,
-		"ContextSummary": plan.ContextSummary, // Embedded context from planning phase
-		"Constraints":    plan.Constraints,    // Embedded constraints from planning phase
-		"CompletedTasks": completedStr,
-		"RemainingTasks": remainingStr,
-		"LatestResult":   latestResult,
-		"ToolList":       toolList,
+		"Goal":                plan.Goal,
+		"ContextSummary":      plan.ContextSummary, // Embedded context from planning phase
+		"Constraints":         plan.Constraints,    // Embedded constraints from planning phase
+		"CompletedTasks":      completedStr,
+		"RemainingTasks":      remainingStr,
+		"LatestResult":        latestResult,
+		"ToolList":            toolList,
+		"CurrentIteration":    currentIteration,
+		"MaxIterations":       maxIterations,
+		"CompletedTaskCount":  completedTaskCount,
+		"RemainingIterations": remainingIterations,
 	}); err != nil {
 		panic(goerr.Wrap(err, "failed to execute reflect template"))
 	}

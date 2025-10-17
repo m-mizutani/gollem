@@ -2,6 +2,17 @@
 
 You have just completed a task. Review the progress and determine if any tasks need to be updated or added.
 
+## Progress Tracking
+
+**Current Iteration**: {{.CurrentIteration}} of {{.MaxIterations}}
+**Completed Tasks**: {{.CompletedTaskCount}}
+**Remaining Budget**: {{.RemainingIterations}} iterations
+
+**CRITICAL**: You have LIMITED iterations remaining. The plan MUST complete within {{.RemainingIterations}} more iterations.
+- Be HIGHLY selective about adding new tasks
+- Only add tasks that are ABSOLUTELY ESSENTIAL to achieve the goal
+- Remove or skip any non-critical tasks
+
 ## Context
 
 ### Overall Goal
@@ -69,7 +80,11 @@ Based on the progress so far, determine:
 
 - **Evaluate ONLY using the information provided above** (Goal, Context Summary, Constraints)
 - Do NOT assume access to system prompt or conversation history
-- **Only add new tasks if they require ESSENTIAL tool/function calls** not already covered by existing tasks
+- **CRITICAL: Respect the iteration budget** - with only {{.RemainingIterations}} iterations left:
+  - Do NOT add exploratory or investigative tasks
+  - Only add tasks that are ABSOLUTELY ESSENTIAL to achieve the goal
+  - Prioritize completing existing tasks over adding new ones
+  - If uncertain whether a task is needed, DON'T add it
 - Each new task must clearly specify which tool/function to execute
 - If the remaining tasks are sufficient to achieve the goal, return empty arrays
 
