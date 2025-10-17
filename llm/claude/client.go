@@ -445,52 +445,6 @@ func generateClaudeContent(
 	resp, err := client.Messages.New(ctx, msgParams)
 	if err != nil {
 		logger.Debug(apiName+" API request failed", "error", err)
-
-		// [DEBUG] If error is about empty content, log recent messages for debugging
-		if strings.Contains(err.Error(), "non-empty content") || strings.Contains(err.Error(), "empty content") {
-			// Log the last few messages to help debug empty content errors
-			debugMsgCount := 5
-			if len(messages) < debugMsgCount {
-				debugMsgCount = len(messages)
-			}
-			recentMessages := messages[len(messages)-debugMsgCount:]
-
-			var debugMessages []map[string]any
-			for i, msg := range recentMessages {
-				var contents []map[string]any
-				for j, content := range msg.Content {
-					contentInfo := map[string]any{
-						"index": j,
-					}
-					if content.OfText != nil {
-						contentInfo["type"] = "text"
-						contentInfo["text_length"] = len(content.OfText.Text)
-						contentInfo["is_empty"] = content.OfText.Text == ""
-					} else if content.OfToolUse != nil {
-						contentInfo["type"] = "tool_use"
-						contentInfo["name"] = content.OfToolUse.Name
-					} else if content.OfToolResult != nil {
-						contentInfo["type"] = "tool_result"
-						contentInfo["tool_use_id"] = content.OfToolResult.ToolUseID
-					} else if content.OfImage != nil {
-						contentInfo["type"] = "image"
-					}
-					contents = append(contents, contentInfo)
-				}
-				debugMessages = append(debugMessages, map[string]any{
-					"index":         len(messages) - debugMsgCount + i,
-					"role":          msg.Role,
-					"content_count": len(msg.Content),
-					"contents":      contents,
-				})
-			}
-
-			logger.Warn("Empty content error detected - recent messages",
-				"total_messages", len(messages),
-				"recent_messages", debugMessages,
-			)
-		}
-
 		return nil, goerr.Wrap(err, "failed to create message via "+apiName)
 	}
 
@@ -760,8 +714,6 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 
 	// Create the base handler that performs the actual API call
 	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
-		logger := ctxlog.From(ctx)
-
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
 			var err error
@@ -780,19 +732,6 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		apiMessages := make([]anthropic.MessageParam, 0, len(s.historyMessages)+len(messages))
 		apiMessages = append(apiMessages, s.historyMessages...)
 		apiMessages = append(apiMessages, messages...)
-
-		// DEBUG: Log message history for debugging
-		logger.Debug("Claude API request",
-			"message_count", len(apiMessages),
-			"input_count", len(req.Inputs))
-
-		// Log the last few messages to understand the conversation state
-		for i, msg := range apiMessages[max(0, len(apiMessages)-5):] {
-			logger.Debug("Claude message",
-				"index", i,
-				"role", msg.Role,
-				"content_blocks", len(msg.Content))
-		}
 
 		// Create the request and call the API
 		systemPrompt := createSystemPrompt(s.cfg)
