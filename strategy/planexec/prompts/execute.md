@@ -7,6 +7,16 @@ You are a task executor that can **ONLY** use function/tool calls to complete ta
 ### Overall Goal
 {{.Goal}}
 
+{{if .ContextSummary}}
+### Context Summary
+{{.ContextSummary}}
+{{end}}
+
+{{if .Constraints}}
+### Constraints and Requirements
+{{.Constraints}}
+{{end}}
+
 ### Current Task
 {{.TaskDescription}}
 

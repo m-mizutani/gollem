@@ -56,7 +56,8 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 		}
 
 		// Analyze and create plan using LLM
-		plan, err := analyzeAndPlan(ctx, s.client, state.InitInput, state.Tools, s.middleware)
+		// Pass system prompt and history so they can be embedded into the Plan's goal
+		plan, err := analyzeAndPlan(ctx, s.client, state.InitInput, state.Tools, s.middleware, state.SystemPrompt, state.History)
 		if err != nil {
 			return nil, nil, goerr.Wrap(err, "failed to analyze and plan")
 		}

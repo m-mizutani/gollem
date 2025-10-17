@@ -11,9 +11,10 @@ import (
 )
 
 // analyzeAndPlan analyzes user input and creates a plan using LLM
-func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []gollem.Input, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware) (*Plan, error) {
+// It uses system prompt and history to embed necessary context into the Plan's goal
+func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []gollem.Input, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, systemPrompt string, history *gollem.History) (*Plan, error) {
 	logger := ctxlog.From(ctx)
-	logger.Debug("analyzing and planning")
+	logger.Debug("analyzing and planning", "has_system_prompt", systemPrompt != "", "has_history", history != nil)
 
 	// Create a new session with JSON content type
 	// NOTE: Do NOT pass tools to planning session.
@@ -22,6 +23,21 @@ func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []golle
 	sessionOpts := []gollem.SessionOption{
 		gollem.WithSessionContentType(gollem.ContentTypeJSON),
 	}
+
+	// Add system prompt if provided
+	// The system prompt helps the planner understand domain-specific constraints
+	// which should be embedded into the Plan's goal description
+	if systemPrompt != "" {
+		sessionOpts = append(sessionOpts, gollem.WithSessionSystemPrompt(systemPrompt))
+	}
+
+	// Add history if provided
+	// The history provides conversation context that should be considered
+	// when creating the plan and embedded into the goal description
+	if history != nil {
+		sessionOpts = append(sessionOpts, gollem.WithSessionHistory(history))
+	}
+
 	for _, mw := range middleware {
 		sessionOpts = append(sessionOpts, gollem.WithSessionContentBlockMiddleware(mw))
 	}
@@ -64,6 +80,8 @@ func parsePlanFromResponse(ctx context.Context, response *gollem.Response) (*Pla
 		NeedsPlan      bool   `json:"needs_plan"`
 		DirectResponse string `json:"direct_response"`
 		Goal           string `json:"goal"`
+		ContextSummary string `json:"context_summary"`
+		Constraints    string `json:"constraints"`
 		Tasks          []struct {
 			Description string `json:"description"`
 		} `json:"tasks"`
@@ -86,8 +104,10 @@ func parsePlanFromResponse(ctx context.Context, response *gollem.Response) (*Pla
 
 	// Convert to Plan with Tasks
 	plan := &Plan{
-		Goal:  planResponse.Goal,
-		Tasks: make([]Task, len(planResponse.Tasks)),
+		Goal:           planResponse.Goal,
+		ContextSummary: planResponse.ContextSummary,
+		Constraints:    planResponse.Constraints,
+		Tasks:          make([]Task, len(planResponse.Tasks)),
 	}
 
 	for i, t := range planResponse.Tasks {

@@ -612,16 +612,23 @@ agent := gollem.New(client,
 )
 ```
 
-**3. Plan & Execute Strategy** - Goal-oriented task planning and execution
+**3. Plan & Execute Strategy** - Goal-oriented task planning and execution with context-aware planning
 ```go
 import "github.com/m-mizutani/gollem/strategy/planexec"
 
 strategy := planexec.New(client)
 agent := gollem.New(client,
 	gollem.WithStrategy(strategy),
+	gollem.WithSystemPrompt("You are an expert data analyst. All outputs must be HIPAA compliant."),
+	gollem.WithHistory(history), // Use conversation history
 	gollem.WithTools(&SearchTool{}, &AnalysisTool{}),
 )
 ```
+
+The Plan & Execute strategy uses a three-phase approach with context embedding:
+- **Planning**: Creates task breakdown with system prompt and history context. Important constraints and requirements are embedded into the Plan structure (`context_summary` and `constraints` fields), making the plan self-contained.
+- **Execution**: Executes tasks sequentially using the main session with full context (system prompt and history).
+- **Reflection**: After each task completion, evaluates results using ONLY the Plan's embedded information (goal, context summary, constraints) without accessing the original system prompt or history. This ensures consistent evaluation criteria and enables stateless reflection.
 
 #### Custom Strategy Implementation
 
