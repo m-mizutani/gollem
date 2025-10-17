@@ -33,7 +33,7 @@ func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []golle
 
 	// Add history if provided
 	// The history provides conversation context that should be considered
-	// when creating the plan and embedded into the goal description
+	// when creating the plan and embedded into the `context_summary` field.
 	if history != nil {
 		sessionOpts = append(sessionOpts, gollem.WithSessionHistory(history))
 	}
