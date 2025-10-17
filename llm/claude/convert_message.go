@@ -203,6 +203,10 @@ func convertContentToClaude(content gollem.MessageContent, messageRole gollem.Me
 		if err != nil {
 			return anthropic.ContentBlockParamUnion{}, err
 		}
+		// Skip empty text content
+		if textContent.Text == "" {
+			return anthropic.ContentBlockParamUnion{}, convert.ErrUnsupportedContentType
+		}
 		return anthropic.NewTextBlock(textContent.Text), nil
 
 	case gollem.MessageContentTypeImage:
