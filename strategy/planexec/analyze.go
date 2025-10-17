@@ -26,7 +26,7 @@ func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []golle
 
 	// Add system prompt if provided
 	// The system prompt helps the planner understand domain-specific constraints
-	// which should be embedded into the Plan's goal description
+	// which should be embedded into the Plan's `context_summary` and `constraints` fields.
 	if systemPrompt != "" {
 		sessionOpts = append(sessionOpts, gollem.WithSessionSystemPrompt(systemPrompt))
 	}
