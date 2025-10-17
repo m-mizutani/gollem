@@ -145,12 +145,19 @@ func TestBasicPlanExecution(t *testing.T) {
 
 		// Track task execution
 		var planCreatedCalled int32
+		var taskDoneCalled int32
 		var createdPlan *planexec.Plan
+		var completedTask *planexec.Task
 
 		hooks := &testHooks{
 			onPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
 				atomic.AddInt32(&planCreatedCalled, 1)
 				createdPlan = plan
+				return nil
+			},
+			onTaskDone: func(ctx context.Context, plan *planexec.Plan, task *planexec.Task) error {
+				atomic.AddInt32(&taskDoneCalled, 1)
+				completedTask = task
 				return nil
 			},
 		}
@@ -170,6 +177,11 @@ func TestBasicPlanExecution(t *testing.T) {
 		gt.V(t, createdPlan).NotNil()
 		gt.V(t, len(createdPlan.Tasks)).Equal(1)
 		gt.S(t, createdPlan.Tasks[0].Description).Contains("Add 10 and 5")
+
+		// Verify OnTaskDone was called
+		gt.V(t, atomic.LoadInt32(&taskDoneCalled)).Equal(int32(1))
+		gt.V(t, completedTask).NotNil()
+		gt.V(t, completedTask.State).Equal(planexec.TaskStateCompleted)
 	})
 
 	t.Run("Direct response without tasks", func(t *testing.T) {
@@ -211,6 +223,7 @@ func TestBasicPlanExecution(t *testing.T) {
 		// Track hook calls
 		var planCreatedCalled int32
 		var planUpdatedCalled int32
+		var taskDoneCalled int32
 		var createdPlan *planexec.Plan
 		var updatedPlan *planexec.Plan
 
@@ -227,6 +240,10 @@ func TestBasicPlanExecution(t *testing.T) {
 			onPlanUpdated: func(ctx context.Context, plan *planexec.Plan) error {
 				atomic.AddInt32(&planUpdatedCalled, 1)
 				updatedPlan = plan
+				return nil
+			},
+			onTaskDone: func(ctx context.Context, plan *planexec.Plan, task *planexec.Task) error {
+				atomic.AddInt32(&taskDoneCalled, 1)
 				return nil
 			},
 		}
@@ -344,6 +361,9 @@ func TestBasicPlanExecution(t *testing.T) {
 		gt.V(t, createdPlan.Goal).Equal("Process data")
 		gt.V(t, updatedPlan).NotNil()
 		gt.V(t, len(updatedPlan.Tasks)).Equal(3) // Original 2 tasks + 1 new task
+
+		// Verify OnTaskDone was called for each completed task (3 tasks total)
+		gt.V(t, atomic.LoadInt32(&taskDoneCalled)).Equal(int32(3))
 
 		// Verify middleware was applied
 		gt.True(t, atomic.LoadInt32(&middlewareApplied) > 0) // Should be applied at least once
