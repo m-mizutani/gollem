@@ -25,9 +25,18 @@ func convertClaudeToMessages(messages []anthropic.MessageParam) ([]gollem.Messag
 		for _, block := range msg.Content {
 			content, err := convertClaudeContentBlock(block)
 			if err != nil {
+				// Skip unsupported content types (like empty text blocks)
+				if err == convert.ErrUnsupportedContentType {
+					continue
+				}
 				return nil, goerr.Wrap(err, "failed to convert Claude content block")
 			}
 			contents = append(contents, content)
+		}
+
+		// Skip messages with no content after conversion
+		if len(contents) == 0 {
+			continue
 		}
 
 		result = append(result, gollem.Message{
@@ -43,6 +52,10 @@ func convertClaudeToMessages(messages []anthropic.MessageParam) ([]gollem.Messag
 func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion) (gollem.MessageContent, error) {
 	// Handle text blocks
 	if block.OfText != nil {
+		// Skip empty text blocks
+		if block.OfText.Text == "" {
+			return gollem.MessageContent{}, convert.ErrUnsupportedContentType
+		}
 		return gollem.NewTextContent(block.OfText.Text)
 	}
 

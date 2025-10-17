@@ -41,8 +41,9 @@ type Plan struct {
 
 // PlanExecuteHooks provides hook points for plan lifecycle events
 type PlanExecuteHooks interface {
-	OnCreated(ctx context.Context, plan *Plan) error
-	OnUpdated(ctx context.Context, plan *Plan) error
+	OnPlanCreated(ctx context.Context, plan *Plan) error
+	OnPlanUpdated(ctx context.Context, plan *Plan) error
+	OnTaskDone(ctx context.Context, plan *Plan, task *Task) error
 }
 
 // Strategy implements the gollem.Strategy interface for plan-and-execute approach

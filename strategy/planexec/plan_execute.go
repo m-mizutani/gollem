@@ -67,8 +67,8 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 
 		// Hook: plan created (always call after plan is created)
 		if s.hooks != nil {
-			if err := s.hooks.OnCreated(ctx, plan); err != nil {
-				return nil, nil, goerr.Wrap(err, "hook OnCreated failed")
+			if err := s.hooks.OnPlanCreated(ctx, plan); err != nil {
+				return nil, nil, goerr.Wrap(err, "hook OnPlanCreated failed")
 			}
 		}
 
@@ -92,6 +92,13 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 		s.waitingForTask = false
 		s.taskIterationCount++
 
+		// Hook: task done
+		if s.hooks != nil {
+			if err := s.hooks.OnTaskDone(ctx, s.plan, s.currentTask); err != nil {
+				return nil, nil, goerr.Wrap(err, "hook OnTaskDone failed")
+			}
+		}
+
 		// Check max iteration limit (safety net against infinite loops)
 		if s.taskIterationCount >= s.maxIterations {
 			finalResponse, err := getFinalConclusion(ctx, s.client, s.plan, s.middleware)
@@ -110,6 +117,7 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 		logger.Debug("plan reflected", "result", reflectionResult)
 
 		// Apply task updates from reflection
+		hasChanges := false
 		if len(reflectionResult.UpdatedTasks) > 0 {
 			taskMap := make(map[string]*Task)
 			for i := range s.plan.Tasks {
@@ -121,15 +129,19 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 					task.State = updatedTask.State
 				}
 			}
+			hasChanges = true
 		}
 
 		// Add new tasks from reflection
 		if len(reflectionResult.NewTasks) > 0 {
 			s.plan.Tasks = append(s.plan.Tasks, reflectionResult.NewTasks...)
-			if s.hooks != nil {
-				if err := s.hooks.OnUpdated(ctx, s.plan); err != nil {
-					return nil, nil, goerr.Wrap(err, "hook OnUpdated failed")
-				}
+			hasChanges = true
+		}
+
+		// Hook: plan updated (tasks added or modified)
+		if hasChanges && s.hooks != nil {
+			if err := s.hooks.OnPlanUpdated(ctx, s.plan); err != nil {
+				return nil, nil, goerr.Wrap(err, "hook OnPlanUpdated failed")
 			}
 		}
 

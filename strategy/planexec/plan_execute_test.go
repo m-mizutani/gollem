@@ -21,20 +21,28 @@ import (
 
 // testHooks is a test implementation of PlanExecuteHooks
 type testHooks struct {
-	onCreated func(ctx context.Context, plan *planexec.Plan) error
-	onUpdated func(ctx context.Context, plan *planexec.Plan) error
+	onPlanCreated func(ctx context.Context, plan *planexec.Plan) error
+	onPlanUpdated func(ctx context.Context, plan *planexec.Plan) error
+	onTaskDone    func(ctx context.Context, plan *planexec.Plan, task *planexec.Task) error
 }
 
-func (h *testHooks) OnCreated(ctx context.Context, plan *planexec.Plan) error {
-	if h.onCreated != nil {
-		return h.onCreated(ctx, plan)
+func (h *testHooks) OnPlanCreated(ctx context.Context, plan *planexec.Plan) error {
+	if h.onPlanCreated != nil {
+		return h.onPlanCreated(ctx, plan)
 	}
 	return nil
 }
 
-func (h *testHooks) OnUpdated(ctx context.Context, plan *planexec.Plan) error {
-	if h.onUpdated != nil {
-		return h.onUpdated(ctx, plan)
+func (h *testHooks) OnPlanUpdated(ctx context.Context, plan *planexec.Plan) error {
+	if h.onPlanUpdated != nil {
+		return h.onPlanUpdated(ctx, plan)
+	}
+	return nil
+}
+
+func (h *testHooks) OnTaskDone(ctx context.Context, plan *planexec.Plan, task *planexec.Task) error {
+	if h.onTaskDone != nil {
+		return h.onTaskDone(ctx, plan, task)
 	}
 	return nil
 }
@@ -140,7 +148,7 @@ func TestBasicPlanExecution(t *testing.T) {
 		var createdPlan *planexec.Plan
 
 		hooks := &testHooks{
-			onCreated: func(ctx context.Context, plan *planexec.Plan) error {
+			onPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
 				atomic.AddInt32(&planCreatedCalled, 1)
 				createdPlan = plan
 				return nil
@@ -173,7 +181,7 @@ func TestBasicPlanExecution(t *testing.T) {
 		var createdPlan *planexec.Plan
 
 		hooks := &testHooks{
-			onCreated: func(ctx context.Context, plan *planexec.Plan) error {
+			onPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
 				atomic.AddInt32(&planCreatedCalled, 1)
 				createdPlan = plan
 				return nil
@@ -211,12 +219,12 @@ func TestBasicPlanExecution(t *testing.T) {
 
 		// Create hooks
 		hooks := &testHooks{
-			onCreated: func(ctx context.Context, plan *planexec.Plan) error {
+			onPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
 				atomic.AddInt32(&planCreatedCalled, 1)
 				createdPlan = plan
 				return nil
 			},
-			onUpdated: func(ctx context.Context, plan *planexec.Plan) error {
+			onPlanUpdated: func(ctx context.Context, plan *planexec.Plan) error {
 				atomic.AddInt32(&planUpdatedCalled, 1)
 				updatedPlan = plan
 				return nil
@@ -447,7 +455,7 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 			var taskCount int
 
 			hooks := &testHooks{
-				onCreated: func(ctx context.Context, plan *planexec.Plan) error {
+				onPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
 					atomic.AddInt32(&planCreatedCalled, 1)
 					createdPlan = plan
 					taskCount = len(plan.Tasks)

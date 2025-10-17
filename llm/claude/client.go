@@ -265,6 +265,10 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 	for _, in := range input {
 		switch v := in.(type) {
 		case gollem.Text:
+			// Skip empty text blocks
+			if string(v) == "" {
+				continue
+			}
 			userContentBlocks = append(userContentBlocks, anthropic.NewTextBlock(string(v)))
 
 		case gollem.Image:
@@ -441,6 +445,52 @@ func generateClaudeContent(
 	resp, err := client.Messages.New(ctx, msgParams)
 	if err != nil {
 		logger.Debug(apiName+" API request failed", "error", err)
+
+		// [DEBUG] If error is about empty content, log recent messages for debugging
+		if strings.Contains(err.Error(), "non-empty content") || strings.Contains(err.Error(), "empty content") {
+			// Log the last few messages to help debug empty content errors
+			debugMsgCount := 5
+			if len(messages) < debugMsgCount {
+				debugMsgCount = len(messages)
+			}
+			recentMessages := messages[len(messages)-debugMsgCount:]
+
+			var debugMessages []map[string]any
+			for i, msg := range recentMessages {
+				var contents []map[string]any
+				for j, content := range msg.Content {
+					contentInfo := map[string]any{
+						"index": j,
+					}
+					if content.OfText != nil {
+						contentInfo["type"] = "text"
+						contentInfo["text_length"] = len(content.OfText.Text)
+						contentInfo["is_empty"] = content.OfText.Text == ""
+					} else if content.OfToolUse != nil {
+						contentInfo["type"] = "tool_use"
+						contentInfo["name"] = content.OfToolUse.Name
+					} else if content.OfToolResult != nil {
+						contentInfo["type"] = "tool_result"
+						contentInfo["tool_use_id"] = content.OfToolResult.ToolUseID
+					} else if content.OfImage != nil {
+						contentInfo["type"] = "image"
+					}
+					contents = append(contents, contentInfo)
+				}
+				debugMessages = append(debugMessages, map[string]any{
+					"index":         len(messages) - debugMsgCount + i,
+					"role":          msg.Role,
+					"content_count": len(msg.Content),
+					"contents":      contents,
+				})
+			}
+
+			logger.Warn("Empty content error detected - recent messages",
+				"total_messages", len(messages),
+				"recent_messages", debugMessages,
+			)
+		}
+
 		return nil, goerr.Wrap(err, "failed to create message via "+apiName)
 	}
 
