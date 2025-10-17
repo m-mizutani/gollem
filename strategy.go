@@ -30,6 +30,11 @@ type StrategyState struct {
 	NextInput    []Input   // Next input (same with InitInput in 1st iter, tool results in others)
 	Iteration    int       // Current iteration count
 	Tools        []Tool    // Available tools for this execution
+
+	// System prompt and history from Agent configuration
+	// These are available for strategies that need context-aware planning
+	SystemPrompt string   // User's system prompt from gollem.WithSystemPrompt
+	History      *History // Conversation history from gollem.WithHistory
 }
 
 // defaultStrategy implements the default simple loop strategy

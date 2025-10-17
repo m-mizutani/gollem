@@ -78,6 +78,8 @@ func buildExecutePrompt(ctx context.Context, task *Task, plan *Plan) []gollem.In
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, map[string]interface{}{
 		"Goal":            plan.Goal,
+		"ContextSummary":  plan.ContextSummary,
+		"Constraints":     plan.Constraints,
 		"TaskDescription": task.Description,
 		"CompletedTasks":  completedStr,
 	}); err != nil {
@@ -125,6 +127,8 @@ func buildReflectPrompt(ctx context.Context, plan *Plan, latestResult string, to
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, map[string]interface{}{
 		"Goal":           plan.Goal,
+		"ContextSummary": plan.ContextSummary, // Embedded context from planning phase
+		"Constraints":    plan.Constraints,    // Embedded constraints from planning phase
 		"CompletedTasks": completedStr,
 		"RemainingTasks": remainingStr,
 		"LatestResult":   latestResult,

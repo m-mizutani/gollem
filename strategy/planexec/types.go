@@ -31,6 +31,12 @@ type Plan struct {
 	Goal           string
 	Tasks          []Task
 	DirectResponse string // Used when no plan is needed
+
+	// Context embedded from system prompt and history for self-contained evaluation
+	// This information is used during reflection to evaluate task completion
+	// without needing access to the original system prompt or conversation history
+	ContextSummary string // Summary of relevant context from system prompt and history
+	Constraints    string // Key constraints and requirements (e.g., "HIPAA compliance required")
 }
 
 // PlanExecuteHooks provides hook points for plan lifecycle events

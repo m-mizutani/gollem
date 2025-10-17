@@ -305,6 +305,8 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, 
 			NextInput:    nextInput,
 			Iteration:    i,
 			Tools:        toolList,
+			SystemPrompt: cfg.systemPrompt,
+			History:      cfg.history.Clone(),
 		}
 		strategyInputs, executeResponse, err := strategy.Handle(ctx, state)
 		if err != nil {
