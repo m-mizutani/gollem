@@ -60,14 +60,13 @@ schema := &gollem.ResponseSchema{
             "age": {
                 Type:        gollem.TypeInteger,
                 Description: "Age in years",
-                Minimum:     Float64Ptr(0),
-                Maximum:     Float64Ptr(150),
+                Minimum:     Ptr(0.0),
+                Maximum:     Ptr(150.0),
             },
             // ... more fields
         },
         Required: []string{"name", "email"},
     },
-    Strict: true, // OpenAI strict mode
 }
 ```
 
@@ -98,9 +97,9 @@ resp, err := session.GenerateContent(ctx,
 ### OpenAI
 
 - Uses Structured Outputs with `response_format.json_schema`
-- Supports `Strict: true` for strict schema adherence
+- Uses strict mode (internal default: `strict=false` for flexibility)
 - Requires `gpt-4o-2024-08-06` or later models
-- 100% schema adherence when strict mode is enabled
+- Constrained decoding ensures high schema adherence
 
 ### Claude
 

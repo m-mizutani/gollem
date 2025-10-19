@@ -439,8 +439,8 @@ func createComplexBookSchema() *gollem.ResponseSchema {
 						"publishedYear": {
 							Type:        gollem.TypeInteger,
 							Description: "Year of publication",
-							Minimum:     Float64Ptr(1000),
-							Maximum:     Float64Ptr(2100),
+							Minimum:     Ptr(1000.0),
+							Maximum:     Ptr(2100.0),
 						},
 						"isbn": {
 							Type:        gollem.TypeString,
@@ -457,14 +457,14 @@ func createComplexBookSchema() *gollem.ResponseSchema {
 						"rating": {
 							Type:        gollem.TypeNumber,
 							Description: "Rating from 1.0 to 5.0",
-							Minimum:     Float64Ptr(1.0),
-							Maximum:     Float64Ptr(5.0),
+							Minimum:     Ptr(1.0),
+							Maximum:     Ptr(5.0),
 						},
 						"summary": {
 							Type:        gollem.TypeString,
 							Description: "Brief review summary",
-							MinLength:   IntPtr(10),
-							MaxLength:   IntPtr(500),
+							MinLength:   Ptr(10),
+							MaxLength:   Ptr(500),
 						},
 						"pros": {
 							Type: gollem.TypeArray,
@@ -472,7 +472,7 @@ func createComplexBookSchema() *gollem.ResponseSchema {
 								Type: gollem.TypeString,
 							},
 							Description: "Positive aspects",
-							MinItems:    IntPtr(1),
+							MinItems:    Ptr(1),
 						},
 						"cons": {
 							Type: gollem.TypeArray,
@@ -492,8 +492,8 @@ func createComplexBookSchema() *gollem.ResponseSchema {
 						Enum: []string{"fiction", "non-fiction", "mystery", "romance", "sci-fi", "fantasy", "biography", "history", "technical"},
 					},
 					Description: "Book genre tags",
-					MinItems:    IntPtr(1),
-					MaxItems:    IntPtr(5),
+					MinItems:    Ptr(1),
+					MaxItems:    Ptr(5),
 				},
 				"recommended": {
 					Type:        gollem.TypeBoolean,
@@ -505,12 +505,7 @@ func createComplexBookSchema() *gollem.ResponseSchema {
 	}
 }
 
-// Float64Ptr returns a pointer to a float64 value
-func Float64Ptr(v float64) *float64 {
-	return &v
-}
-
-// IntPtr returns a pointer to an int value
-func IntPtr(v int) *int {
+// Ptr returns a pointer to a value of any type
+func Ptr[T any](v T) *T {
 	return &v
 }

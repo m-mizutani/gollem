@@ -28,8 +28,8 @@ func createUserProfileSchema() *gollem.ResponseSchema {
 				"age": {
 					Type:        gollem.TypeInteger,
 					Description: "Age in years",
-					Minimum:     Float64Ptr(0),
-					Maximum:     Float64Ptr(150),
+					Minimum:     Ptr(0.0),
+					Maximum:     Ptr(150.0),
 				},
 				"email": {
 					Type:        gollem.TypeString,
@@ -62,9 +62,24 @@ func createUserProfileSchema() *gollem.ResponseSchema {
 	}
 }
 
-// Float64Ptr is a helper function to create a pointer to a float64
-func Float64Ptr(v float64) *float64 {
+// Ptr returns a pointer to a value of any type
+func Ptr[T any](v T) *T {
 	return &v
+}
+
+// prettyPrintJSON parses and pretty-prints JSON string
+func prettyPrintJSON(jsonStr string) (string, error) {
+	var data map[string]any
+	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+		return "", fmt.Errorf("failed to parse JSON: %w", err)
+	}
+
+	pretty, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+
+	return string(pretty), nil
 }
 
 func runOpenAIExample() error {
@@ -95,20 +110,13 @@ func runOpenAIExample() error {
 		return fmt.Errorf("failed to generate content: %w", err)
 	}
 
-	// Parse and pretty-print the JSON response
-	var profile map[string]any
-	jsonStr := resp.Texts[0]
-	if err := json.Unmarshal([]byte(jsonStr), &profile); err != nil {
-		return fmt.Errorf("failed to parse JSON: %w", err)
-	}
-
-	prettyJSON, err := json.MarshalIndent(profile, "", "  ")
+	prettyJSON, err := prettyPrintJSON(resp.Texts[0])
 	if err != nil {
-		return fmt.Errorf("failed to marshal JSON: %w", err)
+		return err
 	}
 
 	fmt.Println("=== OpenAI Result ===")
-	fmt.Println(string(prettyJSON))
+	fmt.Println(prettyJSON)
 	fmt.Println()
 
 	return nil
@@ -142,20 +150,13 @@ func runClaudeExample() error {
 		return fmt.Errorf("failed to generate content: %w", err)
 	}
 
-	// Parse and pretty-print the JSON response
-	var profile map[string]any
-	jsonStr := resp.Texts[0]
-	if err := json.Unmarshal([]byte(jsonStr), &profile); err != nil {
-		return fmt.Errorf("failed to parse JSON: %w", err)
-	}
-
-	prettyJSON, err := json.MarshalIndent(profile, "", "  ")
+	prettyJSON, err := prettyPrintJSON(resp.Texts[0])
 	if err != nil {
-		return fmt.Errorf("failed to marshal JSON: %w", err)
+		return err
 	}
 
 	fmt.Println("=== Claude Result ===")
-	fmt.Println(string(prettyJSON))
+	fmt.Println(prettyJSON)
 	fmt.Println()
 
 	return nil
@@ -190,20 +191,13 @@ func runGeminiExample() error {
 		return fmt.Errorf("failed to generate content: %w", err)
 	}
 
-	// Parse and pretty-print the JSON response
-	var profile map[string]any
-	jsonStr := resp.Texts[0]
-	if err := json.Unmarshal([]byte(jsonStr), &profile); err != nil {
-		return fmt.Errorf("failed to parse JSON: %w", err)
-	}
-
-	prettyJSON, err := json.MarshalIndent(profile, "", "  ")
+	prettyJSON, err := prettyPrintJSON(resp.Texts[0])
 	if err != nil {
-		return fmt.Errorf("failed to marshal JSON: %w", err)
+		return err
 	}
 
 	fmt.Println("=== Gemini Result ===")
-	fmt.Println(string(prettyJSON))
+	fmt.Println(prettyJSON)
 	fmt.Println()
 
 	return nil
