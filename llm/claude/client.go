@@ -354,11 +354,21 @@ func createSystemPrompt(cfg gollem.SessionConfig) []anthropic.TextBlockParam {
 
 	// Add content type instruction to system prompt
 	if cfg.ContentType() == gollem.ContentTypeJSON {
+		jsonInstruction := "\nPlease format your response as valid JSON."
+
+		// Add schema information if provided
+		if cfg.ResponseSchema() != nil {
+			schemaText, err := convertResponseSchemaToJSONString(cfg.ResponseSchema())
+			if err == nil && schemaText != "" {
+				jsonInstruction += "\n\nYour response must conform to this JSON Schema:\n" + schemaText
+			}
+		}
+
 		if len(systemPrompt) > 0 {
-			systemPrompt[0].Text += "\nPlease format your response as valid JSON."
+			systemPrompt[0].Text += jsonInstruction
 		} else {
 			systemPrompt = []anthropic.TextBlockParam{
-				{Text: "Please format your response as valid JSON."},
+				{Text: jsonInstruction},
 			}
 		}
 	}
@@ -650,7 +660,7 @@ func generateClaudeStream(
 }
 
 // processResponseWithContentType converts Claude response to gollem.Response with content type handling
-func processResponseWithContentType(ctx context.Context, resp *anthropic.Message, contentType gollem.ContentType) *gollem.Response {
+func processResponseWithContentType(ctx context.Context, resp *anthropic.Message, contentType gollem.ContentType, hasResponseSchema bool) *gollem.Response {
 	if len(resp.Content) == 0 {
 		return &gollem.Response{}
 	}
@@ -669,7 +679,8 @@ func processResponseWithContentType(ctx context.Context, resp *anthropic.Message
 			text := textBlock.Text
 
 			// Apply JSON extraction for Claude when ContentTypeJSON is specified
-			if contentType == gollem.ContentTypeJSON {
+			// but skip if ResponseSchema is used (as prefill already ensures proper JSON format)
+			if contentType == gollem.ContentTypeJSON && !hasResponseSchema {
 				text = extractJSON(ctx, text)
 			}
 
@@ -732,6 +743,16 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		apiMessages := make([]anthropic.MessageParam, 0, len(s.historyMessages)+len(messages))
 		apiMessages = append(apiMessages, s.historyMessages...)
 		apiMessages = append(apiMessages, messages...)
+
+		// Add prefill for JSON schema responses
+		usePrefill := s.cfg.ContentType() == gollem.ContentTypeJSON && s.cfg.ResponseSchema() != nil
+		if usePrefill {
+			// Add an assistant message with just "{" to prefill the response
+			prefillMessage := anthropic.NewAssistantMessage(
+				anthropic.NewTextBlock("{"),
+			)
+			apiMessages = append(apiMessages, prefillMessage)
+		}
 
 		// Create the request and call the API
 		systemPrompt := createSystemPrompt(s.cfg)
@@ -797,15 +818,41 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		}
 
 		// Process response and extract content
-		processedResp := processResponseWithContentType(ctx, resp, s.cfg.ContentType())
+		processedResp := processResponseWithContentType(ctx, resp, s.cfg.ContentType(), s.cfg.ResponseSchema() != nil)
 
-		// Update history with new messages (already in Claude format)
-		s.historyMessages = append(s.historyMessages, messages...)
+		// If we used prefill, prepend "{" to the first text response AND to the history
+		if usePrefill && len(processedResp.Texts) > 0 {
+			processedResp.Texts[0] = "{" + processedResp.Texts[0]
 
-		// Only add response to history if it has content
-		respParam := resp.ToParam()
-		if len(respParam.Content) > 0 {
-			s.historyMessages = append(s.historyMessages, respParam)
+			// Also update the response parameter for history
+			respParam := resp.ToParam()
+			if len(respParam.Content) > 0 {
+				// Update the first text content block in the response
+				for i, content := range respParam.Content {
+					if textContent := content.OfText; textContent != nil {
+						updatedText := "{" + textContent.Text
+						respParam.Content[i] = anthropic.NewTextBlock(updatedText)
+						break
+					}
+				}
+			}
+
+			// Update history with new messages (already in Claude format)
+			s.historyMessages = append(s.historyMessages, messages...)
+
+			// Add updated response to history
+			if len(respParam.Content) > 0 {
+				s.historyMessages = append(s.historyMessages, respParam)
+			}
+		} else {
+			// Update history with new messages (already in Claude format)
+			s.historyMessages = append(s.historyMessages, messages...)
+
+			// Only add response to history if it has content
+			respParam := resp.ToParam()
+			if len(respParam.Content) > 0 {
+				s.historyMessages = append(s.historyMessages, respParam)
+			}
 		}
 
 		return &gollem.ContentResponse{
@@ -998,4 +1045,101 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	}()
 
 	return responseChan, nil
+}
+
+// convertResponseSchemaToJSONString converts ResponseSchema to JSON Schema string
+// This reuses the same conversion logic as OpenAI to ensure consistency
+func convertResponseSchemaToJSONString(rs *gollem.ResponseSchema) (string, error) {
+	if rs == nil || rs.Schema == nil {
+		return "", nil
+	}
+
+	// Validate schema
+	if err := rs.Schema.Validate(); err != nil {
+		return "", goerr.Wrap(err, "invalid response schema")
+	}
+
+	// Build JSON Schema object
+	schemaObj := map[string]any{
+		"type":    "object",
+		"$schema": "http://json-schema.org/draft-07/schema#",
+	}
+
+	if rs.Description != "" {
+		schemaObj["description"] = rs.Description
+	}
+
+	// Convert Parameter to JSON Schema (reuse OpenAI's conversion logic)
+	innerSchema := convertParameterToJSONSchema(rs.Schema)
+
+	// Merge properties from inner schema
+	for k, v := range innerSchema {
+		schemaObj[k] = v
+	}
+
+	// Marshal to pretty JSON
+	schemaJSON, err := json.MarshalIndent(schemaObj, "", "  ")
+	if err != nil {
+		return "", goerr.Wrap(err, "failed to marshal schema")
+	}
+
+	return string(schemaJSON), nil
+}
+
+// convertParameterToJSONSchema converts gollem.Parameter to JSON Schema map
+// This is the same logic as in OpenAI client for consistency
+func convertParameterToJSONSchema(param *gollem.Parameter) map[string]any {
+	schema := map[string]any{
+		"type": string(param.Type),
+	}
+
+	if param.Description != "" {
+		schema["description"] = param.Description
+	}
+
+	if param.Type == gollem.TypeObject && param.Properties != nil {
+		props := make(map[string]any)
+		for name, prop := range param.Properties {
+			props[name] = convertParameterToJSONSchema(prop)
+		}
+		schema["properties"] = props
+		schema["additionalProperties"] = false
+
+		if len(param.Required) > 0 {
+			schema["required"] = param.Required
+		}
+	}
+
+	if param.Type == gollem.TypeArray && param.Items != nil {
+		schema["items"] = convertParameterToJSONSchema(param.Items)
+	}
+
+	if param.Enum != nil {
+		schema["enum"] = param.Enum
+	}
+
+	// Add constraints
+	if param.Minimum != nil {
+		schema["minimum"] = *param.Minimum
+	}
+	if param.Maximum != nil {
+		schema["maximum"] = *param.Maximum
+	}
+	if param.MinLength != nil {
+		schema["minLength"] = *param.MinLength
+	}
+	if param.MaxLength != nil {
+		schema["maxLength"] = *param.MaxLength
+	}
+	if param.Pattern != "" {
+		schema["pattern"] = param.Pattern
+	}
+	if param.MinItems != nil {
+		schema["minItems"] = *param.MinItems
+	}
+	if param.MaxItems != nil {
+		schema["maxItems"] = *param.MaxItems
+	}
+
+	return schema
 }

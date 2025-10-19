@@ -240,6 +240,15 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		config.ResponseMIMEType = "text/plain"
 	}
 
+	// Set response schema if provided
+	if cfg.ResponseSchema() != nil {
+		schema, err := convertResponseSchemaToGenai(cfg.ResponseSchema())
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert response schema")
+		}
+		config.ResponseSchema = schema
+	}
+
 	// Set system prompt
 	systemPrompt := cfg.SystemPrompt()
 	if systemPrompt == "" {
@@ -979,4 +988,21 @@ func getNewGeminiType(paramType gollem.ParameterType) genai.Type {
 	default:
 		return genai.TypeString
 	}
+}
+
+// convertResponseSchemaToGenai converts gollem.ResponseSchema to genai.Schema
+func convertResponseSchemaToGenai(rs *gollem.ResponseSchema) (*genai.Schema, error) {
+	if rs == nil || rs.Schema == nil {
+		return nil, nil
+	}
+
+	// Validate schema first
+	if err := rs.Schema.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "invalid response schema")
+	}
+
+	// Convert using existing convertParameterToNewSchema function
+	schema := convertParameterToNewSchema(rs.Schema)
+
+	return schema, nil
 }

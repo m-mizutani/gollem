@@ -11,10 +11,11 @@ type Session interface {
 
 // SessionConfig is the configuration for the new session. This is required for only LLM client implementations.
 type SessionConfig struct {
-	history      *History
-	contentType  ContentType
-	systemPrompt string
-	tools        []Tool
+	history        *History
+	contentType    ContentType
+	systemPrompt   string
+	tools          []Tool
+	responseSchema *ResponseSchema
 
 	// Middleware fields (ToolMiddleware excluded - managed at Agent layer)
 	contentBlockMiddlewares  []ContentBlockMiddleware
@@ -49,6 +50,11 @@ func (c *SessionConfig) ContentBlockMiddlewares() []ContentBlockMiddleware {
 // ContentStreamMiddlewares returns the content stream middlewares of the session.
 func (c *SessionConfig) ContentStreamMiddlewares() []ContentStreamMiddleware {
 	return c.contentStreamMiddlewares
+}
+
+// ResponseSchema returns the response schema of the session.
+func (c *SessionConfig) ResponseSchema() *ResponseSchema {
+	return c.responseSchema
 }
 
 // NewSessionConfig creates a new session configuration. This is required for only LLM client implementations.
@@ -114,6 +120,33 @@ func WithSessionContentBlockMiddleware(middlewares ...ContentBlockMiddleware) Se
 func WithSessionContentStreamMiddleware(middlewares ...ContentStreamMiddleware) SessionOption {
 	return func(cfg *SessionConfig) {
 		cfg.contentStreamMiddlewares = append(cfg.contentStreamMiddlewares, middlewares...)
+	}
+}
+
+// WithSessionResponseSchema sets the response schema for the session.
+// The schema defines the structure of JSON output from the LLM.
+// This option should be used with ContentTypeJSON.
+//
+// Usage:
+//
+//	schema := &gollem.ResponseSchema{
+//	    Name: "UserProfile",
+//	    Description: "User profile information",
+//	    Schema: &gollem.Parameter{
+//	        Type: gollem.TypeObject,
+//	        Properties: map[string]*gollem.Parameter{
+//	            "name": {Type: gollem.TypeString, Description: "User name"},
+//	            "age": {Type: gollem.TypeInteger, Description: "User age"},
+//	        },
+//	        Required: []string{"name"},
+//	    },
+//	}
+//	session, err := client.NewSession(ctx,
+//	    gollem.WithSessionContentType(gollem.ContentTypeJSON),
+//	    gollem.WithSessionResponseSchema(schema))
+func WithSessionResponseSchema(schema *ResponseSchema) SessionOption {
+	return func(cfg *SessionConfig) {
+		cfg.responseSchema = schema
 	}
 }
 
