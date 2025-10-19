@@ -14,6 +14,7 @@ import (
 	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/internal/schema"
 	"github.com/m-mizutani/jsonex"
 )
 
@@ -358,7 +359,7 @@ func createSystemPrompt(ctx context.Context, cfg gollem.SessionConfig) ([]anthro
 
 		// Add schema information if provided
 		if cfg.ResponseSchema() != nil {
-			schemaText, err := convertResponseSchemaToJSONString(cfg.ResponseSchema())
+			schemaText, err := schema.ConvertResponseSchemaToJSONString(cfg.ResponseSchema())
 			if err != nil {
 				ctxlog.From(ctx).Warn("Failed to convert response schema to JSON string for Claude prompt", "error", err)
 				return nil, goerr.Wrap(err, "failed to convert response schema to JSON string")
@@ -1063,101 +1064,4 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	}()
 
 	return responseChan, nil
-}
-
-// convertResponseSchemaToJSONString converts ResponseSchema to JSON Schema string
-// This reuses the same conversion logic as OpenAI to ensure consistency
-func convertResponseSchemaToJSONString(rs *gollem.ResponseSchema) (string, error) {
-	if rs == nil || rs.Schema == nil {
-		return "", nil
-	}
-
-	// Validate schema
-	if err := rs.Schema.Validate(); err != nil {
-		return "", goerr.Wrap(err, "invalid response schema")
-	}
-
-	// Build JSON Schema object
-	schemaObj := map[string]any{
-		"type":    "object",
-		"$schema": "http://json-schema.org/draft-07/schema#",
-	}
-
-	if rs.Description != "" {
-		schemaObj["description"] = rs.Description
-	}
-
-	// Convert Parameter to JSON Schema (reuse OpenAI's conversion logic)
-	innerSchema := convertParameterToJSONSchema(rs.Schema)
-
-	// Merge properties from inner schema
-	for k, v := range innerSchema {
-		schemaObj[k] = v
-	}
-
-	// Marshal to pretty JSON
-	schemaJSON, err := json.MarshalIndent(schemaObj, "", "  ")
-	if err != nil {
-		return "", goerr.Wrap(err, "failed to marshal schema")
-	}
-
-	return string(schemaJSON), nil
-}
-
-// convertParameterToJSONSchema converts gollem.Parameter to JSON Schema map
-// This is the same logic as in OpenAI client for consistency
-func convertParameterToJSONSchema(param *gollem.Parameter) map[string]any {
-	schema := map[string]any{
-		"type": string(param.Type),
-	}
-
-	if param.Description != "" {
-		schema["description"] = param.Description
-	}
-
-	if param.Type == gollem.TypeObject && param.Properties != nil {
-		props := make(map[string]any)
-		for name, prop := range param.Properties {
-			props[name] = convertParameterToJSONSchema(prop)
-		}
-		schema["properties"] = props
-		schema["additionalProperties"] = false
-
-		if len(param.Required) > 0 {
-			schema["required"] = param.Required
-		}
-	}
-
-	if param.Type == gollem.TypeArray && param.Items != nil {
-		schema["items"] = convertParameterToJSONSchema(param.Items)
-	}
-
-	if param.Enum != nil {
-		schema["enum"] = param.Enum
-	}
-
-	// Add constraints
-	if param.Minimum != nil {
-		schema["minimum"] = *param.Minimum
-	}
-	if param.Maximum != nil {
-		schema["maximum"] = *param.Maximum
-	}
-	if param.MinLength != nil {
-		schema["minLength"] = *param.MinLength
-	}
-	if param.MaxLength != nil {
-		schema["maxLength"] = *param.MaxLength
-	}
-	if param.Pattern != "" {
-		schema["pattern"] = param.Pattern
-	}
-	if param.MinItems != nil {
-		schema["minItems"] = *param.MinItems
-	}
-	if param.MaxItems != nil {
-		schema["maxItems"] = *param.MaxItems
-	}
-
-	return schema
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/internal/schema"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -930,12 +931,19 @@ func convertResponseSchemaToOpenAI(rs *gollem.ResponseSchema, strict bool) (*ope
 // convertParameterToJSONSchemaWithStrict converts gollem.Parameter to JSON Schema map
 // with optional strict mode handling for OpenAI
 func convertParameterToJSONSchemaWithStrict(param *gollem.Parameter, strict bool) map[string]any {
-	schema := map[string]any{
+	// For non-strict mode, use the shared conversion function
+	if !strict {
+		return schema.ConvertParameterToJSONSchema(param)
+	}
+
+	// Strict mode: OpenAI-specific handling
+	// In strict mode, all properties must be in the required array
+	result := map[string]any{
 		"type": string(param.Type),
 	}
 
 	if param.Description != "" {
-		schema["description"] = param.Description
+		result["description"] = param.Description
 	}
 
 	if param.Type == gollem.TypeObject && param.Properties != nil {
@@ -943,54 +951,48 @@ func convertParameterToJSONSchemaWithStrict(param *gollem.Parameter, strict bool
 		for name, prop := range param.Properties {
 			props[name] = convertParameterToJSONSchemaWithStrict(prop, strict)
 		}
-		schema["properties"] = props
-		// OpenAI Structured Outputs requires additionalProperties to be false
-		schema["additionalProperties"] = false
+		result["properties"] = props
+		result["additionalProperties"] = false
 
 		// In strict mode, OpenAI requires all properties to be in the required array
 		// This is a limitation of OpenAI's strict mode, not a general JSON Schema requirement
-		if strict {
-			// Collect all property keys
-			allKeys := make([]string, 0, len(param.Properties))
-			for key := range param.Properties {
-				allKeys = append(allKeys, key)
-			}
-			schema["required"] = allKeys
-		} else if len(param.Required) > 0 {
-			schema["required"] = param.Required
+		allKeys := make([]string, 0, len(param.Properties))
+		for key := range param.Properties {
+			allKeys = append(allKeys, key)
 		}
+		result["required"] = allKeys
 	}
 
 	if param.Type == gollem.TypeArray && param.Items != nil {
-		schema["items"] = convertParameterToJSONSchemaWithStrict(param.Items, strict)
+		result["items"] = convertParameterToJSONSchemaWithStrict(param.Items, strict)
 	}
 
 	if param.Enum != nil {
-		schema["enum"] = param.Enum
+		result["enum"] = param.Enum
 	}
 
 	// Add constraints
 	if param.Minimum != nil {
-		schema["minimum"] = *param.Minimum
+		result["minimum"] = *param.Minimum
 	}
 	if param.Maximum != nil {
-		schema["maximum"] = *param.Maximum
+		result["maximum"] = *param.Maximum
 	}
 	if param.MinLength != nil {
-		schema["minLength"] = *param.MinLength
+		result["minLength"] = *param.MinLength
 	}
 	if param.MaxLength != nil {
-		schema["maxLength"] = *param.MaxLength
+		result["maxLength"] = *param.MaxLength
 	}
 	if param.Pattern != "" {
-		schema["pattern"] = param.Pattern
+		result["pattern"] = param.Pattern
 	}
 	if param.MinItems != nil {
-		schema["minItems"] = *param.MinItems
+		result["minItems"] = *param.MinItems
 	}
 	if param.MaxItems != nil {
-		schema["maxItems"] = *param.MaxItems
+		result["maxItems"] = *param.MaxItems
 	}
 
-	return schema
+	return result
 }
