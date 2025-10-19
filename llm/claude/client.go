@@ -344,7 +344,7 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 // This is a shared helper function used by both standard Claude client and Vertex AI Claude client.
 // Returns []anthropic.TextBlockParam as per anthropic-sdk-go v1.5.0 specification.
 // This implementation follows the official SDK format: []anthropic.TextBlockParam{{Text: "..."}}
-func createSystemPrompt(cfg gollem.SessionConfig) []anthropic.TextBlockParam {
+func createSystemPrompt(ctx context.Context, cfg gollem.SessionConfig) ([]anthropic.TextBlockParam, error) {
 	var systemPrompt []anthropic.TextBlockParam
 	if cfg.SystemPrompt() != "" {
 		systemPrompt = []anthropic.TextBlockParam{
@@ -359,7 +359,11 @@ func createSystemPrompt(cfg gollem.SessionConfig) []anthropic.TextBlockParam {
 		// Add schema information if provided
 		if cfg.ResponseSchema() != nil {
 			schemaText, err := convertResponseSchemaToJSONString(cfg.ResponseSchema())
-			if err == nil && schemaText != "" {
+			if err != nil {
+				ctxlog.From(ctx).Warn("Failed to convert response schema to JSON string for Claude prompt", "error", err)
+				return nil, goerr.Wrap(err, "failed to convert response schema to JSON string")
+			}
+			if schemaText != "" {
 				jsonInstruction += "\n\nYour response must conform to this JSON Schema:\n" + schemaText
 			}
 		}
@@ -373,7 +377,7 @@ func createSystemPrompt(cfg gollem.SessionConfig) []anthropic.TextBlockParam {
 		}
 	}
 
-	return systemPrompt
+	return systemPrompt, nil
 }
 
 // extractJSON extracts JSON from noisy text using jsonex library
@@ -424,7 +428,11 @@ func generateClaudeContent(
 	}
 
 	// Add system prompt if available
-	if systemPrompt := createSystemPrompt(cfg); len(systemPrompt) > 0 {
+	systemPrompt, err := createSystemPrompt(ctx, cfg)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create system prompt")
+	}
+	if len(systemPrompt) > 0 {
 		msgParams.System = systemPrompt
 	}
 
@@ -521,7 +529,11 @@ func generateClaudeStream(
 	}
 
 	// Add system prompt if available
-	if systemPrompt := createSystemPrompt(cfg); len(systemPrompt) > 0 {
+	systemPrompt, err := createSystemPrompt(ctx, cfg)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create system prompt")
+	}
+	if len(systemPrompt) > 0 {
 		msgParams.System = systemPrompt
 	}
 
@@ -755,7 +767,10 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		}
 
 		// Create the request and call the API
-		systemPrompt := createSystemPrompt(s.cfg)
+		systemPrompt, err := createSystemPrompt(ctx, s.cfg)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create system prompt")
+		}
 		request := anthropic.MessageNewParams{
 			Model:     anthropic.Model(s.defaultModel),
 			Messages:  apiMessages,
@@ -957,7 +972,10 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 		allMessages = append(allMessages, messages...)
 
 		// Create request params
-		systemPrompt := createSystemPrompt(s.cfg)
+		systemPrompt, err := createSystemPrompt(ctx, s.cfg)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create system prompt")
+		}
 		request := anthropic.MessageNewParams{
 			Model:     anthropic.Model(s.defaultModel),
 			Messages:  allMessages,
