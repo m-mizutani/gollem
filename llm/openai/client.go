@@ -10,6 +10,7 @@ import (
 	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/internal/schema"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -214,6 +215,9 @@ type Session struct {
 	params generationParameters
 
 	cfg gollem.SessionConfig
+
+	// strictMode enables OpenAI's strict schema adherence (default: false)
+	strictMode bool
 }
 
 // NewSession creates a new session for the OpenAI API.
@@ -387,10 +391,23 @@ func (s *Session) createRequest(stream bool) (openai.ChatCompletionRequest, erro
 		req.Verbosity = s.params.Verbosity
 	}
 
-	// Add content type to the request
+	// Add content type and response schema to the request
 	if s.cfg.ContentType() == gollem.ContentTypeJSON {
-		req.ResponseFormat = &openai.ChatCompletionResponseFormat{
-			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+		if s.cfg.ResponseSchema() != nil {
+			// Use structured outputs with schema
+			schema, err := convertResponseSchemaToOpenAI(s.cfg.ResponseSchema(), s.strictMode)
+			if err != nil {
+				return openai.ChatCompletionRequest{}, goerr.Wrap(err, "failed to convert response schema")
+			}
+			req.ResponseFormat = &openai.ChatCompletionResponseFormat{
+				Type:       openai.ChatCompletionResponseFormatTypeJSONSchema,
+				JSONSchema: schema,
+			}
+		} else {
+			// Use simple JSON object mode (existing behavior)
+			req.ResponseFormat = &openai.ChatCompletionResponseFormat{
+				Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+			}
 		}
 	}
 
@@ -872,4 +889,110 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	}()
 
 	return responseChan, nil
+}
+
+// convertResponseSchemaToOpenAI converts gollem.ResponseSchema to OpenAI's JSONSchemaParams
+func convertResponseSchemaToOpenAI(rs *gollem.ResponseSchema, strict bool) (*openai.ChatCompletionResponseFormatJSONSchema, error) {
+	if rs == nil || rs.Schema == nil {
+		return nil, nil
+	}
+
+	// Validate schema
+	if err := rs.Schema.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "invalid response schema")
+	}
+
+	// Convert Parameter to JSON Schema format
+	// If strict mode is enabled, we need to adjust the schema to make all properties required
+	// This is a limitation of OpenAI's strict mode implementation
+	schemaObj := convertParameterToJSONSchemaWithStrict(rs.Schema, strict)
+
+	// Marshal to JSON for OpenAI API
+	schemaJSON, err := json.Marshal(schemaObj)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to marshal schema")
+	}
+
+	name := rs.Name
+	if name == "" {
+		name = "response"
+	}
+
+	result := &openai.ChatCompletionResponseFormatJSONSchema{
+		Name:        name,
+		Description: rs.Description,
+		Schema:      json.RawMessage(schemaJSON),
+		Strict:      strict,
+	}
+
+	return result, nil
+}
+
+// convertParameterToJSONSchemaWithStrict converts gollem.Parameter to JSON Schema map
+// with optional strict mode handling for OpenAI
+func convertParameterToJSONSchemaWithStrict(param *gollem.Parameter, strict bool) map[string]any {
+	// For non-strict mode, use the shared conversion function
+	if !strict {
+		return schema.ConvertParameterToJSONSchema(param)
+	}
+
+	// Strict mode: OpenAI-specific handling
+	// In strict mode, all properties must be in the required array
+	result := map[string]any{
+		"type": string(param.Type),
+	}
+
+	if param.Description != "" {
+		result["description"] = param.Description
+	}
+
+	if param.Type == gollem.TypeObject && param.Properties != nil {
+		props := make(map[string]any)
+		for name, prop := range param.Properties {
+			props[name] = convertParameterToJSONSchemaWithStrict(prop, strict)
+		}
+		result["properties"] = props
+		result["additionalProperties"] = false
+
+		// In strict mode, OpenAI requires all properties to be in the required array
+		// This is a limitation of OpenAI's strict mode, not a general JSON Schema requirement
+		allKeys := make([]string, 0, len(param.Properties))
+		for key := range param.Properties {
+			allKeys = append(allKeys, key)
+		}
+		result["required"] = allKeys
+	}
+
+	if param.Type == gollem.TypeArray && param.Items != nil {
+		result["items"] = convertParameterToJSONSchemaWithStrict(param.Items, strict)
+	}
+
+	if param.Enum != nil {
+		result["enum"] = param.Enum
+	}
+
+	// Add constraints
+	if param.Minimum != nil {
+		result["minimum"] = *param.Minimum
+	}
+	if param.Maximum != nil {
+		result["maximum"] = *param.Maximum
+	}
+	if param.MinLength != nil {
+		result["minLength"] = *param.MinLength
+	}
+	if param.MaxLength != nil {
+		result["maxLength"] = *param.MaxLength
+	}
+	if param.Pattern != "" {
+		result["pattern"] = param.Pattern
+	}
+	if param.MinItems != nil {
+		result["minItems"] = *param.MinItems
+	}
+	if param.MaxItems != nil {
+		result["maxItems"] = *param.MaxItems
+	}
+
+	return result
 }

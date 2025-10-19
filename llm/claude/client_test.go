@@ -38,9 +38,12 @@ func TestClaudeContentGenerate(t *testing.T) {
 
 // TestCreateSystemPrompt tests the createSystemPrompt function
 func TestCreateSystemPrompt(t *testing.T) {
+	ctx := context.Background()
+
 	t.Run("empty config returns empty slice", func(t *testing.T) {
 		cfg := gollem.NewSessionConfig()
-		result := claude.CreateSystemPrompt(cfg)
+		result, err := claude.CreateSystemPrompt(ctx, cfg)
+		gt.NoError(t, err)
 
 		// Should return empty slice when no system prompt
 		gt.Equal(t, 0, len(result))
@@ -48,7 +51,8 @@ func TestCreateSystemPrompt(t *testing.T) {
 
 	t.Run("result is correct type", func(t *testing.T) {
 		cfg := gollem.NewSessionConfig()
-		result := claude.CreateSystemPrompt(cfg)
+		result, err := claude.CreateSystemPrompt(ctx, cfg)
+		gt.NoError(t, err)
 
 		// Type assertion to verify it's []anthropic.TextBlockParam
 		var _ []anthropic.TextBlockParam = result
@@ -61,7 +65,8 @@ func TestCreateSystemPrompt(t *testing.T) {
 		cfg := gollem.NewSessionConfig()
 		// Manually set content type since we can't use WithContentType in test
 		// The actual functionality is tested in integration tests
-		result := claude.CreateSystemPrompt(cfg)
+		result, err := claude.CreateSystemPrompt(ctx, cfg)
+		gt.NoError(t, err)
 
 		// At minimum, should not panic and return valid type
 		var systemPrompt []anthropic.TextBlockParam = result
@@ -72,13 +77,16 @@ func TestCreateSystemPrompt(t *testing.T) {
 
 // TestSystemPromptSDKCompliance verifies SDK compliance
 func TestSystemPromptSDKCompliance(t *testing.T) {
+	ctx := context.Background()
+
 	t.Run("SDK format verification", func(t *testing.T) {
 		// This test verifies the format matches SDK expectations:
 		// []anthropic.TextBlockParam{{Text: "..."}}
 
 		// Create empty config
 		cfg := gollem.NewSessionConfig()
-		result := claude.CreateSystemPrompt(cfg)
+		result, err := claude.CreateSystemPrompt(ctx, cfg)
+		gt.NoError(t, err)
 
 		// Should be able to use as []anthropic.TextBlockParam
 		var systemBlocks []anthropic.TextBlockParam = result
@@ -105,6 +113,8 @@ func TestSystemPromptSDKCompliance(t *testing.T) {
 
 // TestSystemPromptComment verifies the implementation comment
 func TestSystemPromptComment(t *testing.T) {
+	ctx := context.Background()
+
 	// This test documents that the implementation follows the official SDK format
 	// The createSystemPrompt function should return []anthropic.TextBlockParam
 	// in the format: []anthropic.TextBlockParam{{Text: "..."}}
@@ -115,7 +125,8 @@ func TestSystemPromptComment(t *testing.T) {
 		// This test verifies that claim
 
 		cfg := gollem.NewSessionConfig()
-		result := claude.CreateSystemPrompt(cfg)
+		result, err := claude.CreateSystemPrompt(ctx, cfg)
+		gt.NoError(t, err)
 
 		// Should be the correct type
 		var _ []anthropic.TextBlockParam = result

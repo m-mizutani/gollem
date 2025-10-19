@@ -14,6 +14,7 @@ import (
 	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/internal/schema"
 	"github.com/m-mizutani/jsonex"
 )
 
@@ -344,7 +345,7 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 // This is a shared helper function used by both standard Claude client and Vertex AI Claude client.
 // Returns []anthropic.TextBlockParam as per anthropic-sdk-go v1.5.0 specification.
 // This implementation follows the official SDK format: []anthropic.TextBlockParam{{Text: "..."}}
-func createSystemPrompt(cfg gollem.SessionConfig) []anthropic.TextBlockParam {
+func createSystemPrompt(ctx context.Context, cfg gollem.SessionConfig) ([]anthropic.TextBlockParam, error) {
 	var systemPrompt []anthropic.TextBlockParam
 	if cfg.SystemPrompt() != "" {
 		systemPrompt = []anthropic.TextBlockParam{
@@ -354,16 +355,30 @@ func createSystemPrompt(cfg gollem.SessionConfig) []anthropic.TextBlockParam {
 
 	// Add content type instruction to system prompt
 	if cfg.ContentType() == gollem.ContentTypeJSON {
+		jsonInstruction := "\nPlease format your response as valid JSON."
+
+		// Add schema information if provided
+		if cfg.ResponseSchema() != nil {
+			schemaText, err := schema.ConvertResponseSchemaToJSONString(cfg.ResponseSchema())
+			if err != nil {
+				ctxlog.From(ctx).Warn("Failed to convert response schema to JSON string for Claude prompt", "error", err)
+				return nil, goerr.Wrap(err, "failed to convert response schema to JSON string")
+			}
+			if schemaText != "" {
+				jsonInstruction += "\n\nYour response must conform to this JSON Schema:\n" + schemaText
+			}
+		}
+
 		if len(systemPrompt) > 0 {
-			systemPrompt[0].Text += "\nPlease format your response as valid JSON."
+			systemPrompt[0].Text += jsonInstruction
 		} else {
 			systemPrompt = []anthropic.TextBlockParam{
-				{Text: "Please format your response as valid JSON."},
+				{Text: jsonInstruction},
 			}
 		}
 	}
 
-	return systemPrompt
+	return systemPrompt, nil
 }
 
 // extractJSON extracts JSON from noisy text using jsonex library
@@ -414,7 +429,11 @@ func generateClaudeContent(
 	}
 
 	// Add system prompt if available
-	if systemPrompt := createSystemPrompt(cfg); len(systemPrompt) > 0 {
+	systemPrompt, err := createSystemPrompt(ctx, cfg)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create system prompt")
+	}
+	if len(systemPrompt) > 0 {
 		msgParams.System = systemPrompt
 	}
 
@@ -511,7 +530,11 @@ func generateClaudeStream(
 	}
 
 	// Add system prompt if available
-	if systemPrompt := createSystemPrompt(cfg); len(systemPrompt) > 0 {
+	systemPrompt, err := createSystemPrompt(ctx, cfg)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create system prompt")
+	}
+	if len(systemPrompt) > 0 {
 		msgParams.System = systemPrompt
 	}
 
@@ -650,7 +673,7 @@ func generateClaudeStream(
 }
 
 // processResponseWithContentType converts Claude response to gollem.Response with content type handling
-func processResponseWithContentType(ctx context.Context, resp *anthropic.Message, contentType gollem.ContentType) *gollem.Response {
+func processResponseWithContentType(ctx context.Context, resp *anthropic.Message, contentType gollem.ContentType, hasResponseSchema bool) *gollem.Response {
 	if len(resp.Content) == 0 {
 		return &gollem.Response{}
 	}
@@ -669,7 +692,8 @@ func processResponseWithContentType(ctx context.Context, resp *anthropic.Message
 			text := textBlock.Text
 
 			// Apply JSON extraction for Claude when ContentTypeJSON is specified
-			if contentType == gollem.ContentTypeJSON {
+			// but skip if ResponseSchema is used (as prefill already ensures proper JSON format)
+			if contentType == gollem.ContentTypeJSON && !hasResponseSchema {
 				text = extractJSON(ctx, text)
 			}
 
@@ -733,8 +757,21 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		apiMessages = append(apiMessages, s.historyMessages...)
 		apiMessages = append(apiMessages, messages...)
 
+		// Add prefill for JSON schema responses
+		usePrefill := s.cfg.ContentType() == gollem.ContentTypeJSON && s.cfg.ResponseSchema() != nil
+		if usePrefill {
+			// Add an assistant message with just "{" to prefill the response
+			prefillMessage := anthropic.NewAssistantMessage(
+				anthropic.NewTextBlock("{"),
+			)
+			apiMessages = append(apiMessages, prefillMessage)
+		}
+
 		// Create the request and call the API
-		systemPrompt := createSystemPrompt(s.cfg)
+		systemPrompt, err := createSystemPrompt(ctx, s.cfg)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create system prompt")
+		}
 		request := anthropic.MessageNewParams{
 			Model:     anthropic.Model(s.defaultModel),
 			Messages:  apiMessages,
@@ -797,15 +834,41 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		}
 
 		// Process response and extract content
-		processedResp := processResponseWithContentType(ctx, resp, s.cfg.ContentType())
+		processedResp := processResponseWithContentType(ctx, resp, s.cfg.ContentType(), s.cfg.ResponseSchema() != nil)
 
-		// Update history with new messages (already in Claude format)
-		s.historyMessages = append(s.historyMessages, messages...)
+		// If we used prefill, prepend "{" to the first text response AND to the history
+		if usePrefill && len(processedResp.Texts) > 0 {
+			processedResp.Texts[0] = "{" + processedResp.Texts[0]
 
-		// Only add response to history if it has content
-		respParam := resp.ToParam()
-		if len(respParam.Content) > 0 {
-			s.historyMessages = append(s.historyMessages, respParam)
+			// Also update the response parameter for history
+			respParam := resp.ToParam()
+			if len(respParam.Content) > 0 {
+				// Update the first text content block in the response
+				for i, content := range respParam.Content {
+					if textContent := content.OfText; textContent != nil {
+						updatedText := "{" + textContent.Text
+						respParam.Content[i] = anthropic.NewTextBlock(updatedText)
+						break
+					}
+				}
+			}
+
+			// Update history with new messages (already in Claude format)
+			s.historyMessages = append(s.historyMessages, messages...)
+
+			// Add updated response to history
+			if len(respParam.Content) > 0 {
+				s.historyMessages = append(s.historyMessages, respParam)
+			}
+		} else {
+			// Update history with new messages (already in Claude format)
+			s.historyMessages = append(s.historyMessages, messages...)
+
+			// Only add response to history if it has content
+			respParam := resp.ToParam()
+			if len(respParam.Content) > 0 {
+				s.historyMessages = append(s.historyMessages, respParam)
+			}
 		}
 
 		return &gollem.ContentResponse{
@@ -910,7 +973,10 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 		allMessages = append(allMessages, messages...)
 
 		// Create request params
-		systemPrompt := createSystemPrompt(s.cfg)
+		systemPrompt, err := createSystemPrompt(ctx, s.cfg)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create system prompt")
+		}
 		request := anthropic.MessageNewParams{
 			Model:     anthropic.Model(s.defaultModel),
 			Messages:  allMessages,
