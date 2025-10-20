@@ -44,7 +44,7 @@ func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completed
 	}
 
 	// Build reflection prompt
-	reflectPrompt := buildReflectPrompt(ctx, plan, completedTask.Result, tools, currentIteration, maxIterations, history)
+	reflectPrompt := buildReflectPrompt(ctx, plan, completedTask.Result, tools, currentIteration, maxIterations)
 
 	// Generate reflection using LLM
 	response, err := session.GenerateContent(ctx, reflectPrompt...)
