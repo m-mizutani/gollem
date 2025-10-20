@@ -13,6 +13,7 @@ const (
 	TaskStatePending    TaskState = "pending"
 	TaskStateInProgress TaskState = "in_progress"
 	TaskStateCompleted  TaskState = "completed"
+	TaskStateSkipped    TaskState = "skipped" // Task was skipped (already executed or no longer needed)
 
 	// DefaultMaxIterations is the default maximum number of task execution iterations
 	DefaultMaxIterations = 32

@@ -98,7 +98,7 @@ func buildExecutePrompt(ctx context.Context, task *Task, plan *Plan, currentIter
 }
 
 // buildReflectPrompt creates a prompt for reflection after task completion
-func buildReflectPrompt(ctx context.Context, plan *Plan, latestResult string, tools []gollem.Tool, currentIteration, maxIterations int) []gollem.Input {
+func buildReflectPrompt(ctx context.Context, plan *Plan, latestResult string, tools []gollem.Tool, currentIteration, maxIterations int, history *gollem.History) []gollem.Input {
 	// Build completed tasks list
 	var completedTasks []string
 	var remainingTasks []string

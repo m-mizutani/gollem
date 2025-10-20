@@ -110,7 +110,7 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 		}
 
 		// Perform reflection only if enabled
-		reflectionResult, err := reflect(ctx, s.client, s.plan, s.currentTask, state.Tools, s.middleware, s.taskIterationCount, s.maxIterations)
+		reflectionResult, err := reflect(ctx, s.client, s.plan, s.currentTask, state.Tools, s.middleware, s.taskIterationCount, s.maxIterations, state.History)
 		if err != nil {
 			return nil, nil, goerr.Wrap(err, "reflection failed")
 		}

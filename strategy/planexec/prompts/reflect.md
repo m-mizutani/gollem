@@ -59,20 +59,30 @@ A task should specify:
 
 Based on the progress so far, determine:
 
-1. **Constraint Compliance**: Does the latest task result meet ALL constraints listed above?
+1. **Already Executed Tasks**: Have any pending tasks already been executed?
+   - **Check the conversation history** to see which tools have already been called
+   - If a pending task's tool/function was already called, mark the task as "skipped"
+   - Example: If "Task 2: Call otx_file_hash" is pending but otx_file_hash was already called in the history, update Task 2 to state: "skipped"
+
+2. **Unnecessary Tasks**: Are any remaining tasks no longer needed?
+   - Review goal achievement status based on completed tasks
+   - If the goal is already achieved, mark remaining tasks as "skipped"
+   - If a task is no longer relevant due to other completed tasks, mark it as "skipped"
+
+3. **Constraint Compliance**: Does the latest task result meet ALL constraints listed above?
    - Check "Constraints and Requirements" section (if present)
    - Example: If constraints mention "HIPAA compliance required", verify the task result demonstrates compliance
    - Example: If constraints mention "no hardcoded credentials", check task results don't violate this
 
-2. **Goal Alignment**: Does the latest task result move toward the Overall Goal?
+4. **Goal Alignment**: Does the latest task result move toward the Overall Goal?
    - Use "Context Summary" (if present) for background understanding
    - Verify the result is aligned with what the goal requires
 
-3. **Task Retry/Modification**: Do any completed tasks (tool executions) need to be retried or modified?
+5. **Task Retry/Modification**: Do any completed tasks (tool executions) need to be retried or modified?
    - Example: A tool call failed and needs different parameters or a different tool
    - Example: Result doesn't meet the constraints specified above
 
-4. **New Tasks**: Are there any NEW tool/function calls needed to achieve the goal?
+6. **New Tasks**: Are there any NEW tool/function calls needed to achieve the goal?
    - Consider what the goal requires that hasn't been addressed yet
    - Ensure new tasks align with any constraints specified above
 
@@ -115,6 +125,8 @@ Respond in JSON format:
   - Each entry must specify which tool/function to call and with what parameters
 - `updated_tasks`: Array of task modifications for tool executions that need to be retried or changed
   - Specify the task ID, new tool/function call description, and state
+  - Valid states: "pending", "in_progress", "completed", "skipped"
+  - Use "skipped" for tasks that are already executed or no longer needed
 - `reason`: Brief explanation of your decision
 
 ### Example (No Updates Needed)

@@ -3,8 +3,8 @@ package schema
 import (
 	"encoding/json"
 
-	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/m-mizutani/gollem"
 )
 
 // ConvertParameterToJSONSchema converts gollem.Parameter to JSON Schema map

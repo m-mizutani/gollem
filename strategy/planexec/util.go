@@ -25,14 +25,15 @@ func getNextPendingTask(_ context.Context, plan *Plan) *Task {
 	return nil
 }
 
-// allTasksCompleted checks if all tasks in the plan are completed
+// allTasksCompleted checks if all tasks in the plan are completed or skipped
 func allTasksCompleted(ctx context.Context, plan *Plan) bool {
 	if plan == nil || len(plan.Tasks) == 0 {
 		return true
 	}
 
 	for _, task := range plan.Tasks {
-		if task.State != TaskStateCompleted {
+		// Tasks that are completed or skipped are considered "done"
+		if task.State != TaskStateCompleted && task.State != TaskStateSkipped {
 			return false
 		}
 	}
