@@ -18,20 +18,21 @@ type reflectionResult struct {
 
 // reflect performs reflection after task completion to update or add tasks
 // It evaluates task results against the Plan, which contains all necessary context and constraints.
-// NOTE: This function does NOT use system prompt or history - all necessary information
-// should already be embedded in the Plan structure during the planning phase.
-func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completedTask *Task, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, currentIteration, maxIterations int) (*reflectionResult, error) {
+func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completedTask *Task, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, currentIteration, maxIterations int, history *gollem.History) (*reflectionResult, error) {
 	logger := ctxlog.From(ctx)
 	logger.Debug("performing reflection", "goal", plan.Goal)
 
 	// Create a new session for reflection with JSON content type
-	// NOTE: Do NOT pass tools, system prompt, or history to reflection session.
+	// NOTE: Do NOT pass tools or system prompt to reflection session.
 	// - Tools: When provided, some LLM providers (like Gemini) prioritize function calls
 	//   over JSON text responses, which breaks the reflection phase
-	// - System prompt & History: All necessary context should already be embedded
-	//   in the Plan's goal description
+	// - System prompt: Not needed - Plan contains necessary context
+	// - History: MUST be provided so reflection can detect already-executed tools
 	sessionOpts := []gollem.SessionOption{
 		gollem.WithSessionContentType(gollem.ContentTypeJSON),
+	}
+	if history != nil {
+		sessionOpts = append(sessionOpts, gollem.WithSessionHistory(history))
 	}
 	for _, mw := range middleware {
 		sessionOpts = append(sessionOpts, gollem.WithSessionContentBlockMiddleware(mw))
@@ -115,6 +116,8 @@ func parseReflectionFromResponse(ctx context.Context, response *gollem.Response,
 			state = TaskStateInProgress
 		case "completed":
 			state = TaskStateCompleted
+		case "skipped":
+			state = TaskStateSkipped
 		}
 
 		result.UpdatedTasks = append(result.UpdatedTasks, Task{
