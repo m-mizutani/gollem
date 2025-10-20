@@ -52,10 +52,11 @@ A task should specify:
 
 ## Evaluation Criteria
 
-**CRITICAL**: This reflection has NO ACCESS to the original system prompt or conversation history. You MUST evaluate using ONLY the information provided above:
+**CRITICAL**: This reflection has NO ACCESS to the original system prompt. You MUST evaluate using the information provided above and the conversation history:
 - **Overall Goal** - what needs to be accomplished
 - **Context Summary** (if provided) - background information embedded during planning
 - **Constraints and Requirements** (if provided) - compliance, security, quality requirements embedded during planning
+- **Conversation History** - available to check which tools have already been called
 
 Based on the progress so far, determine:
 
