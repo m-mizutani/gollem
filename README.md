@@ -355,6 +355,86 @@ agent := gollem.New(client,
 )
 ```
 
+### Structured Output with JSON Schema
+
+gollem supports structured output using JSON Schema to ensure LLM responses conform to a specific format. This is useful for data extraction, form filling, and structured data generation.
+
+```go
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/llm/openai"
+)
+
+func main() {
+	ctx := context.Background()
+	client, err := openai.New(ctx, os.Getenv("OPENAI_API_KEY"))
+	if err != nil {
+		panic(err)
+	}
+
+	// Define response schema
+	schema := &gollem.ResponseSchema{
+		Name:        "UserProfile",
+		Description: "Structured user profile information",
+		Schema: &gollem.Parameter{
+			Type: gollem.TypeObject,
+			Properties: map[string]*gollem.Parameter{
+				"name": {
+					Type:        gollem.TypeString,
+					Description: "Full name of the user",
+				},
+				"age": {
+					Type:        gollem.TypeInteger,
+					Description: "Age in years",
+				},
+				"email": {
+					Type:        gollem.TypeString,
+					Description: "Email address",
+				},
+			},
+			Required: []string{"name", "email"},
+		},
+	}
+
+	// Create session with JSON content type and schema
+	session, err := client.NewSession(ctx,
+		gollem.WithSessionContentType(gollem.ContentTypeJSON),
+		gollem.WithSessionResponseSchema(schema),
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	// Generate structured content
+	resp, err := session.GenerateContent(ctx,
+		gollem.Text("Extract user info: John Doe, 30 years old, john@example.com"))
+	if err != nil {
+		panic(err)
+	}
+
+	// Response will be valid JSON matching the schema
+	var profile map[string]any
+	json.Unmarshal([]byte(resp.Texts[0]), &profile)
+	fmt.Printf("Name: %s, Email: %s\n", profile["name"], profile["email"])
+}
+```
+
+**Key features:**
+- **Type safety**: Define expected structure with `gollem.Parameter` types (`TypeString`, `TypeInteger`, `TypeObject`, `TypeArray`, etc.)
+- **Validation**: Specify constraints like `Required`, `Minimum`, `Maximum`, `Pattern`, `Enum`
+- **Nested structures**: Support for nested objects and arrays
+- **Provider agnostic**: Works with OpenAI, Claude, and Gemini
+- **Guaranteed format**: LLM output always conforms to the schema
+
+See [examples/json_schema](examples/json_schema) for a complete working example with all providers.
+
 ### Middleware System
 
 gollem provides a powerful middleware system for monitoring, logging, and controlling agent behavior. Middleware functions wrap the core handlers to add cross-cutting concerns.
@@ -691,6 +771,7 @@ See the [examples](https://github.com/m-mizutani/gollem/tree/main/examples) dire
 - **[Chat](examples/chat)**: Interactive chat application
 - **[MCP](examples/mcp)**: Integration with MCP servers
 - **[Tools](examples/tools)**: Custom tool development
+- **[JSON Schema](examples/json_schema)**: Structured output with JSON Schema validation
 - **[Embedding](examples/embedding)**: Text embedding generation
 
 ## Documentation
@@ -700,6 +781,7 @@ For detailed documentation and advanced usage:
 - **[Getting Started Guide](doc/getting-started.md)**
 - **[Tool Development](doc/tools.md)**
 - **[MCP Integration](doc/mcp.md)**
+- **[Structured Output with JSON Schema](doc/schema.md)** - Define response formats and extract structured data
 - **[LLM Provider Configuration](doc/llm.md)** - Detailed configuration options for each LLM provider
 - **[API Reference](https://pkg.go.dev/github.com/m-mizutani/gollem)**
 
