@@ -1,7 +1,6 @@
 package gollem
 
 import (
-	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -79,7 +78,7 @@ func ToSchema(v any) (*Parameter, error) {
 func MustToSchema(v any) *Parameter {
 	param, err := ToSchema(v)
 	if err != nil {
-		panic(fmt.Sprintf("MustToSchema failed: %v", err))
+		panic(goerr.Wrap(err, "MustToSchema failed"))
 	}
 	return param
 }

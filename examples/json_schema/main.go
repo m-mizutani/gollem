@@ -237,7 +237,10 @@ func runStructToSchemaExample() error {
 		return fmt.Errorf("failed to convert struct to schema: %w", err)
 	}
 
-	paramJSON, _ := json.MarshalIndent(param, "", "  ")
+	paramJSON, err := json.MarshalIndent(param, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal schema to JSON: %w", err)
+	}
 	fmt.Println("Generated Schema from UserProfile struct:")
 	fmt.Println(string(paramJSON))
 	fmt.Println()
