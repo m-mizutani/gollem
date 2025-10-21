@@ -2,6 +2,7 @@ package gemini_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"math"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/m-mizutani/ctxlog"
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/gemini"
 	"github.com/m-mizutani/gt"
@@ -446,4 +448,132 @@ func TestThinkingBudgetIntegration(t *testing.T) {
 			gt.Value(t, len(response.Texts[0])).NotEqual(0)
 		})
 	}
+}
+
+func TestTokenLimitErrorOptions(t *testing.T) {
+	type testCase struct {
+		name   string
+		err    error
+		hasTag bool
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			opts := gemini.TokenLimitErrorOptions(tc.err)
+			if tc.hasTag {
+				gt.NotEqual(t, 0, len(opts))
+			} else {
+				gt.Equal(t, 0, len(opts))
+			}
+		}
+	}
+
+	t.Run("token exceeded error - max context length", runTest(testCase{
+		name: "max context length exceeded",
+		err: &genai.APIError{
+			Code:    400,
+			Message: "The model's maximum context length is 128000 tokens",
+			Status:  "INVALID_ARGUMENT",
+		},
+		hasTag: true,
+	}))
+
+	t.Run("token exceeded error - payload size", runTest(testCase{
+		name: "payload size exceeded",
+		err: &genai.APIError{
+			Code:    400,
+			Message: "Request payload size exceeds the limit: 10485760 bytes",
+			Status:  "INVALID_ARGUMENT",
+		},
+		hasTag: true,
+	}))
+
+	t.Run("different error code", runTest(testCase{
+		name: "error code 401",
+		err: &genai.APIError{
+			Code:    401,
+			Message: "Invalid API key",
+			Status:  "UNAUTHENTICATED",
+		},
+		hasTag: false,
+	}))
+
+	t.Run("different status", runTest(testCase{
+		name: "different status",
+		err: &genai.APIError{
+			Code:    400,
+			Message: "Invalid request",
+			Status:  "INVALID_REQUEST",
+		},
+		hasTag: false,
+	}))
+
+	t.Run("different message", runTest(testCase{
+		name: "different message",
+		err: &genai.APIError{
+			Code:    400,
+			Message: "Invalid model specified",
+			Status:  "INVALID_ARGUMENT",
+		},
+		hasTag: false,
+	}))
+
+	t.Run("correct code and status but wrong message", runTest(testCase{
+		name: "wrong message",
+		err: &genai.APIError{
+			Code:    400,
+			Message: "Some other error",
+			Status:  "INVALID_ARGUMENT",
+		},
+		hasTag: false,
+	}))
+
+	t.Run("nil error", runTest(testCase{
+		name:   "nil error",
+		err:    nil,
+		hasTag: false,
+	}))
+
+	t.Run("non-APIError", runTest(testCase{
+		name:   "generic error",
+		err:    errors.New("some error"),
+		hasTag: false,
+	}))
+}
+
+func TestGeminiTokenLimitErrorIntegration(t *testing.T) {
+	projectID, ok := os.LookupEnv("TEST_GEMINI_PROJECT_ID")
+	if !ok {
+		t.Skip("TEST_GEMINI_PROJECT_ID is not set")
+	}
+
+	location, ok := os.LookupEnv("TEST_GEMINI_LOCATION")
+	if !ok {
+		t.Skip("TEST_GEMINI_LOCATION is not set")
+	}
+
+	// Only run if explicitly requested via environment variable
+	if os.Getenv("TEST_TOKEN_LIMIT_ERROR") != "true" {
+		t.Skip("TEST_TOKEN_LIMIT_ERROR is not set to true")
+	}
+
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx = ctxlog.With(ctx, logger)
+
+	client, err := gemini.New(ctx, projectID, location)
+	gt.NoError(t, err)
+
+	session, err := client.NewSession(ctx)
+	gt.NoError(t, err)
+
+	// Create a very long prompt to exceed token limit
+	// Repeat a long text many times to ensure we exceed the limit
+	longText := strings.Repeat("This is a test sentence to make the prompt very long. ", 100000)
+
+	_, err = session.GenerateContent(ctx, gollem.Text(longText))
+	gt.Error(t, err)
+
+	// Verify the error has the token exceeded tag
+	gt.True(t, goerr.HasTag(err, gollem.ErrTagTokenExceeded))
 }

@@ -11,6 +11,7 @@ var (
 	ConvertParameterToSchema    = convertParameterToSchema
 	ConvertGollemInputsToClaude = convertGollemInputsToClaude
 	CreateSystemPrompt          = createSystemPrompt
+	TokenLimitErrorOptions      = tokenLimitErrorOptions
 )
 
 type JsonSchema = jsonSchema

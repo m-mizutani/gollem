@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -485,7 +486,8 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 
 		resp, err := s.apiClient.CreateChatCompletion(ctx, openaiReq)
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to create chat completion")
+			opts := tokenLimitErrorOptions(err)
+			return nil, goerr.Wrap(err, "failed to create chat completion", opts...)
 		}
 
 		if len(resp.Choices) == 0 {
@@ -655,7 +657,8 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 		}
 		stream, err := s.apiClient.CreateChatCompletionStream(ctx, openaiReq)
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to create chat completion stream")
+			opts := tokenLimitErrorOptions(err)
+			return nil, goerr.Wrap(err, "failed to create chat completion stream", opts...)
 		}
 
 		responseChan := make(chan *gollem.ContentResponse)
@@ -685,8 +688,9 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 					if err == io.EOF {
 						break
 					}
+					opts := tokenLimitErrorOptions(err)
 					responseChan <- &gollem.ContentResponse{
-						Error: goerr.Wrap(err, "failed to receive chat completion stream"),
+						Error: goerr.Wrap(err, "failed to receive chat completion stream", opts...),
 					}
 					return
 				}
@@ -995,4 +999,34 @@ func convertParameterToJSONSchemaWithStrict(param *gollem.Parameter, strict bool
 	}
 
 	return result
+}
+
+// tokenLimitErrorOptions checks if the error is a token limit exceeded error
+// and returns goerr.Option to tag the error with ErrTagTokenExceeded.
+// Returns nil if the error is not a token limit exceeded error.
+//
+// Detection logic:
+// - Error must be *openai.APIError
+// - Type must be "invalid_request_error"
+// - Code must be "context_length_exceeded" (as string)
+func tokenLimitErrorOptions(err error) []goerr.Option {
+	var apiErr *openai.APIError
+	if !errors.As(err, &apiErr) {
+		return nil
+	}
+
+	if apiErr.Type != "invalid_request_error" {
+		return nil
+	}
+
+	codeStr, ok := apiErr.Code.(string)
+	if !ok {
+		return nil
+	}
+
+	if codeStr == "context_length_exceeded" {
+		return []goerr.Option{goerr.Tag(gollem.ErrTagTokenExceeded)}
+	}
+
+	return nil
 }
