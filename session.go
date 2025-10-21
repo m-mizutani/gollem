@@ -15,7 +15,7 @@ type SessionConfig struct {
 	contentType    ContentType
 	systemPrompt   string
 	tools          []Tool
-	responseSchema *ResponseSchema
+	responseSchema *Parameter
 
 	// Middleware fields (ToolMiddleware excluded - managed at Agent layer)
 	contentBlockMiddlewares  []ContentBlockMiddleware
@@ -53,7 +53,7 @@ func (c *SessionConfig) ContentStreamMiddlewares() []ContentStreamMiddleware {
 }
 
 // ResponseSchema returns the response schema of the session.
-func (c *SessionConfig) ResponseSchema() *ResponseSchema {
+func (c *SessionConfig) ResponseSchema() *Parameter {
 	return c.responseSchema
 }
 
@@ -129,22 +129,20 @@ func WithSessionContentStreamMiddleware(middlewares ...ContentStreamMiddleware) 
 //
 // Usage:
 //
-//	schema := &gollem.ResponseSchema{
-//	    Name: "UserProfile",
+//	schema := &gollem.Parameter{
+//	    Title: "UserProfile",
 //	    Description: "User profile information",
-//	    Schema: &gollem.Parameter{
-//	        Type: gollem.TypeObject,
-//	        Properties: map[string]*gollem.Parameter{
-//	            "name": {Type: gollem.TypeString, Description: "User name"},
-//	            "age": {Type: gollem.TypeInteger, Description: "User age"},
-//	        },
-//	        Required: []string{"name"},
+//	    Type: gollem.TypeObject,
+//	    Properties: map[string]*gollem.Parameter{
+//	        "name": {Type: gollem.TypeString, Description: "User name"},
+//	        "age": {Type: gollem.TypeInteger, Description: "User age"},
 //	    },
+//	    Required: []string{"name"},
 //	}
 //	session, err := client.NewSession(ctx,
 //	    gollem.WithSessionContentType(gollem.ContentTypeJSON),
 //	    gollem.WithSessionResponseSchema(schema))
-func WithSessionResponseSchema(schema *ResponseSchema) SessionOption {
+func WithSessionResponseSchema(schema *Parameter) SessionOption {
 	return func(cfg *SessionConfig) {
 		cfg.responseSchema = schema
 	}

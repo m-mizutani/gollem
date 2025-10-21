@@ -990,19 +990,19 @@ func getNewGeminiType(paramType gollem.ParameterType) genai.Type {
 	}
 }
 
-// convertResponseSchemaToGenai converts gollem.ResponseSchema to genai.Schema
-func convertResponseSchemaToGenai(rs *gollem.ResponseSchema) (*genai.Schema, error) {
-	if rs == nil || rs.Schema == nil {
+// convertResponseSchemaToGenai converts gollem.Parameter to genai.Schema
+func convertResponseSchemaToGenai(param *gollem.Parameter) (*genai.Schema, error) {
+	if param == nil {
 		return nil, nil
 	}
 
 	// Validate schema first
-	if err := rs.Schema.Validate(); err != nil {
+	if err := param.Validate(); err != nil {
 		return nil, goerr.Wrap(err, "invalid response schema")
 	}
 
 	// Convert using existing convertParameterToNewSchema function
-	schema := convertParameterToNewSchema(rs.Schema)
+	schema := convertParameterToNewSchema(param)
 
 	return schema, nil
 }
