@@ -2,6 +2,8 @@ package claude_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"testing"
@@ -140,4 +142,129 @@ func TestSystemPromptComment(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestTokenLimitErrorOptions(t *testing.T) {
+	type testCase struct {
+		name   string
+		err    error
+		hasTag bool
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			opts := claude.TokenLimitErrorOptions(tc.err)
+			if tc.hasTag {
+				gt.NotEqual(t, 0, len(opts))
+			} else {
+				gt.Equal(t, 0, len(opts))
+			}
+		}
+	}
+
+	// Create a mock anthropic.Error with token exceeded error
+	createTokenExceededError := func() *anthropic.Error {
+		rawJSON := map[string]any{
+			"type": "error",
+			"error": map[string]any{
+				"type":    "invalid_request_error",
+				"message": "prompt is too long: 150000 tokens > 100000 maximum",
+			},
+		}
+		rawJSONBytes, _ := json.Marshal(rawJSON)
+
+		err := &anthropic.Error{
+			StatusCode: 400,
+		}
+		// Use UnmarshalJSON to properly set the internal raw field
+		_ = err.UnmarshalJSON(rawJSONBytes)
+		return err
+	}
+
+	createDifferentTypeError := func() *anthropic.Error {
+		rawJSON := map[string]any{
+			"type": "error",
+			"error": map[string]any{
+				"type":    "authentication_error",
+				"message": "Invalid API key",
+			},
+		}
+		rawJSONBytes, _ := json.Marshal(rawJSON)
+
+		err := &anthropic.Error{
+			StatusCode: 401,
+		}
+		_ = err.UnmarshalJSON(rawJSONBytes)
+		return err
+	}
+
+	createDifferentMessageError := func() *anthropic.Error {
+		rawJSON := map[string]any{
+			"type": "error",
+			"error": map[string]any{
+				"type":    "invalid_request_error",
+				"message": "Invalid model specified",
+			},
+		}
+		rawJSONBytes, _ := json.Marshal(rawJSON)
+
+		err := &anthropic.Error{
+			StatusCode: 400,
+		}
+		_ = err.UnmarshalJSON(rawJSONBytes)
+		return err
+	}
+
+	createDifferentStatusError := func() *anthropic.Error {
+		rawJSON := map[string]any{
+			"type": "error",
+			"error": map[string]any{
+				"type":    "invalid_request_error",
+				"message": "prompt is too long: 150000 tokens > 100000 maximum",
+			},
+		}
+		rawJSONBytes, _ := json.Marshal(rawJSON)
+
+		err := &anthropic.Error{
+			StatusCode: 500,
+		}
+		_ = err.UnmarshalJSON(rawJSONBytes)
+		return err
+	}
+
+	t.Run("token exceeded error", runTest(testCase{
+		name:   "prompt is too long",
+		err:    createTokenExceededError(),
+		hasTag: true,
+	}))
+
+	t.Run("different error type", runTest(testCase{
+		name:   "authentication error",
+		err:    createDifferentTypeError(),
+		hasTag: false,
+	}))
+
+	t.Run("different message", runTest(testCase{
+		name:   "invalid model",
+		err:    createDifferentMessageError(),
+		hasTag: false,
+	}))
+
+	t.Run("different status code", runTest(testCase{
+		name:   "status 500",
+		err:    createDifferentStatusError(),
+		hasTag: false,
+	}))
+
+	t.Run("nil error", runTest(testCase{
+		name:   "nil error",
+		err:    nil,
+		hasTag: false,
+	}))
+
+	t.Run("non-anthropic error", runTest(testCase{
+		name:   "generic error",
+		err:    errors.New("some error"),
+		hasTag: false,
+	}))
 }

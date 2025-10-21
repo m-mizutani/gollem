@@ -9,6 +9,7 @@ import (
 var (
 	ConvertTool              = convertTool
 	ConvertParameterToSchema = convertParameterToSchema
+	TokenLimitErrorOptions   = tokenLimitErrorOptions
 )
 
 // Export for testing

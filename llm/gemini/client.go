@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -504,7 +505,8 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		// Call the API
 		result, err := s.apiClient.GenerateContent(ctx, s.model, contents, s.config)
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to generate content")
+			opts := tokenLimitErrorOptions(err)
+			return nil, goerr.Wrap(err, "failed to generate content", opts...)
 		}
 
 		response, err := processResponse(result)
@@ -719,8 +721,9 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 
 			for streamResp := range apiStreamChan {
 				if streamResp.Err != nil {
+					opts := tokenLimitErrorOptions(streamResp.Err)
 					streamChan <- &gollem.ContentResponse{
-						Error: streamResp.Err,
+						Error: goerr.Wrap(streamResp.Err, "failed to generate content stream", opts...),
 					}
 					return
 				}
@@ -1005,4 +1008,32 @@ func convertResponseSchemaToGenai(param *gollem.Parameter) (*genai.Schema, error
 	schema := convertParameterToNewSchema(param)
 
 	return schema, nil
+}
+
+// tokenLimitErrorOptions checks if the error is a token limit exceeded error
+// and returns goerr.Option to tag the error with ErrTagTokenExceeded.
+// Returns nil if the error is not a token limit exceeded error.
+//
+// Detection logic:
+// - Error must be *genai.APIError
+// - Code must be 400 and Status must be "INVALID_ARGUMENT"
+// - Message must have one of these prefixes:
+//   - "The model's maximum context length is"
+//   - "Request payload size exceeds the limit"
+func tokenLimitErrorOptions(err error) []goerr.Option {
+	var apiErr *genai.APIError
+	if !errors.As(err, &apiErr) {
+		return nil
+	}
+
+	if apiErr.Code != 400 || apiErr.Status != "INVALID_ARGUMENT" {
+		return nil
+	}
+
+	if strings.HasPrefix(apiErr.Message, "The model's maximum context length is") ||
+		strings.HasPrefix(apiErr.Message, "Request payload size exceeds the limit") {
+		return []goerr.Option{goerr.Tag(gollem.ErrTagTokenExceeded)}
+	}
+
+	return nil
 }
