@@ -15,11 +15,11 @@ import (
 
 // UserProfile demonstrates struct-based schema with various constraints
 type UserProfile struct {
-	Name     string   `json:"name" description:"Full name of the user" required:"true"`
-	Age      int      `json:"age" description:"Age in years" min:"0" max:"150"`
-	Email    string   `json:"email" description:"Email address" required:"true"`
+	Name      string   `json:"name" description:"Full name of the user" required:"true"`
+	Age       int      `json:"age" description:"Age in years" min:"0" max:"150"`
+	Email     string   `json:"email" description:"Email address" required:"true"`
 	Interests []string `json:"interests" description:"List of interests or hobbies"`
-	Location Location `json:"location" description:"User's location"`
+	Location  Location `json:"location" description:"User's location"`
 }
 
 type Location struct {

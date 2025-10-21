@@ -339,16 +339,16 @@ func TestToSchemaMapType(t *testing.T) {
 
 func TestToSchemaAllIntegerTypes(t *testing.T) {
 	type Numbers struct {
-		I8   int8   `json:"i8"`
-		I16  int16  `json:"i16"`
-		I32  int32  `json:"i32"`
-		I64  int64  `json:"i64"`
-		U    uint   `json:"u"`
-		U8   uint8  `json:"u8"`
-		U16  uint16 `json:"u16"`
-		U32  uint32 `json:"u32"`
-		U64  uint64 `json:"u64"`
-		F32  float32 `json:"f32"`
+		I8  int8    `json:"i8"`
+		I16 int16   `json:"i16"`
+		I32 int32   `json:"i32"`
+		I64 int64   `json:"i64"`
+		U   uint    `json:"u"`
+		U8  uint8   `json:"u8"`
+		U16 uint16  `json:"u16"`
+		U32 uint32  `json:"u32"`
+		U64 uint64  `json:"u64"`
+		F32 float32 `json:"f32"`
 	}
 
 	param, err := gollem.ToSchema(Numbers{})

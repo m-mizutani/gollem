@@ -1,6 +1,6 @@
 # Task Reflection
 
-You have just completed a task. Review the progress and determine if any tasks need to be updated or added.
+You have just completed a task. Review the progress and determine if the goal can be achieved with remaining tasks, or if updates are needed.
 
 ## Progress Tracking
 
@@ -8,10 +8,13 @@ You have just completed a task. Review the progress and determine if any tasks n
 **Completed Tasks**: {{.CompletedTaskCount}}
 **Remaining Budget**: {{.RemainingIterations}} iterations
 
-**CRITICAL**: You have LIMITED iterations remaining. The plan MUST complete within {{.RemainingIterations}} more iterations.
-- Be HIGHLY selective about adding new tasks
-- Only add tasks that are ABSOLUTELY ESSENTIAL to achieve the goal
-- Remove or skip any non-critical tasks
+## Reflection Philosophy
+
+Maximum results with minimum effort.
+
+Before adding tasks, ask: can I answer the goal right now? If yes, you're done. If no, what single piece of information would make it possible?
+
+Default to finishing. Adding tasks is expensive - only do it when absolutely necessary.
 
 ## Context
 
@@ -41,101 +44,86 @@ You have just completed a task. Review the progress and determine if any tasks n
 
 {{.ToolList}}
 
-## Understanding Tasks
+## What You Know
 
-**IMPORTANT**: Each task represents a **function/tool call execution**.
+This reflection has no access to the original system prompt. Use only:
+- Overall Goal (what needs to be accomplished)
+- Context Summary (background information from planning)
+- Constraints (requirements from planning)
+- Completed and remaining tasks
+- Latest task result
 
-A task should specify:
-- Which tool/function to call
-- What parameters to pass
-- What result is expected
+## How to Reflect
 
-## Evaluation Criteria
+Ask yourself these questions in order:
 
-**CRITICAL**: This reflection has NO ACCESS to the original system prompt. You MUST evaluate using the information provided above and the conversation history:
-- **Overall Goal** - what needs to be accomplished
-- **Context Summary** (if provided) - background information embedded during planning
-- **Constraints and Requirements** (if provided) - compliance, security, quality requirements embedded during planning
-- **Conversation History** - available to check which tools have already been called
+1. **Can I answer the goal with current information?**
+   - If yes, you're done - mark remaining tasks as skipped
+   - If no, continue to next question
 
-Based on the progress so far, determine:
+2. **Are remaining tasks sufficient to answer the goal?**
+   - If yes, you're done - no updates needed
+   - If no, continue to next question
 
-1. **Already Executed Tasks**: Have any pending tasks already been executed?
-   - **Check the conversation history** to see which tools have already been called
-   - If a pending task's tool/function was already called, mark the task as "skipped"
-   - Example: If "Task 2: Call otx_file_hash" is pending but otx_file_hash was already called in the history, update Task 2 to state: "skipped"
+3. **Did any pending tasks already execute?**
+   - Check conversation history for tool calls
+   - Mark duplicates as skipped
 
-2. **Unnecessary Tasks**: Are any remaining tasks no longer needed?
-   - Review goal achievement status based on completed tasks
-   - If the goal is already achieved, mark remaining tasks as "skipped"
-   - If a task is no longer relevant due to other completed tasks, mark it as "skipped"
+4. **Did the latest task fail or violate constraints?**
+   - If yes, update it to retry with corrections
+   - If no, continue to next question
 
-3. **Constraint Compliance**: Does the latest task result meet ALL constraints listed above?
-   - Check "Constraints and Requirements" section (if present)
-   - Example: If constraints mention "HIPAA compliance required", verify the task result demonstrates compliance
-   - Example: If constraints mention "no hardcoded credentials", check task results don't violate this
+5. **Is there one specific missing piece preventing completion?**
+   - Add only that specific task
+   - Be concrete about what tool to call and why
 
-4. **Goal Alignment**: Does the latest task result move toward the Overall Goal?
-   - Use "Context Summary" (if present) for background understanding
-   - Verify the result is aligned with what the goal requires
+If you reach this point without updates, the remaining tasks are sufficient.
 
-5. **Task Retry/Modification**: Do any completed tasks (tool executions) need to be retried or modified?
-   - Example: A tool call failed and needs different parameters or a different tool
-   - Example: Result doesn't meet the constraints specified above
+## What Makes a Good Update
 
-6. **New Tasks**: Are there any NEW tool/function calls needed to achieve the goal?
-   - Consider what the goal requires that hasn't been addressed yet
-   - Ensure new tasks align with any constraints specified above
+Good updates are minimal:
+- Skip tasks that are redundant or unnecessary
+- Retry tasks that failed with specific corrections
+- Add missing tasks only when you can't answer without them
 
-## Important Guidelines
-
-- **Evaluate ONLY using the information provided above** (Goal, Context Summary, Constraints)
-- Do NOT assume access to system prompt or conversation history
-- **CRITICAL: Respect the iteration budget** - with only {{.RemainingIterations}} iterations left:
-  - Do NOT add exploratory or investigative tasks
-  - Only add tasks that are ABSOLUTELY ESSENTIAL to achieve the goal
-  - Prioritize completing existing tasks over adding new ones
-  - If uncertain whether a task is needed, DON'T add it
-- Each new task must clearly specify which tool/function to execute
-- If the remaining tasks are sufficient to achieve the goal, return empty arrays
+Bad updates expand scope:
+- Exploring related topics
+- Improving quality beyond requirements
+- Adding "nice to have" information
+- Checking edge cases not mentioned in goal
 
 ## Response Format
 
-Respond in JSON format:
+Respond in valid JSON only.
 
-```json
-{
-  "new_tasks": [
-    "Call tool_name with parameter X to obtain Y",
-    "Execute function_name to process Z"
-  ],
-  "updated_tasks": [
-    {
-      "id": "task-id",
-      "description": "Retry tool_name with different parameter A",
-      "state": "pending"
-    }
-  ],
-  "reason": "Brief explanation of why these updates are needed"
-}
-```
-
-### Field Descriptions
-
-- `new_tasks`: Array of tool/function call descriptions. Add only if essential new tool executions are needed.
-  - Each entry must specify which tool/function to call and with what parameters
-- `updated_tasks`: Array of task modifications for tool executions that need to be retried or changed
-  - Specify the task ID, new tool/function call description, and state
-  - Valid states: "pending", "in_progress", "completed", "skipped"
-  - Use "skipped" for tasks that are already executed or no longer needed
-- `reason`: Brief explanation of your decision
-
-### Example (No Updates Needed)
-
+### No updates needed:
 ```json
 {
   "new_tasks": [],
   "updated_tasks": [],
-  "reason": "All tasks on track"
+  "reason": "Remaining tasks sufficient to complete goal"
 }
 ```
+
+### With updates:
+```json
+{
+  "new_tasks": [
+    "Call specific_tool with parameter X to get missing information Y"
+  ],
+  "updated_tasks": [
+    {
+      "id": "task-123",
+      "description": "Updated description if needed",
+      "state": "skipped"
+    }
+  ],
+  "reason": "Brief explanation"
+}
+```
+
+Fields:
+- `new_tasks`: Tool calls needed to complete the goal (empty if none needed)
+- `updated_tasks`: Changes to existing tasks (empty if none needed)
+  - Valid states: "pending", "in_progress", "completed", "skipped"
+- `reason`: Why these updates are necessary

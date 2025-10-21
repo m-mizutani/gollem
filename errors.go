@@ -1,6 +1,10 @@
 package gollem
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/m-mizutani/goerr/v2"
+)
 
 var (
 	// ErrInvalidTool is returned when the tool validation of definition fails.
@@ -50,4 +54,7 @@ var (
 
 	// ErrProhibitedContent is returned when the content violates policy
 	ErrProhibitedContent = errors.New("prohibited content")
+
+	// ErrTagTokenExceeded is a tag for errors caused by token limit exceeded
+	ErrTagTokenExceeded = goerr.NewTag("token_exceeded")
 )

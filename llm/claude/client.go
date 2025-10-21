@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -800,7 +801,8 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 
 		resp, err := s.apiClient.MessagesNew(ctx, request)
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to create message")
+			opts := tokenLimitErrorOptions(err)
+			return nil, goerr.Wrap(err, "failed to create message", opts...)
 		}
 
 		// Log response if GOLLEM_LOGGING_CLAUDE_RESPONSE is set
@@ -998,7 +1000,8 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 		// For now, we'll use non-streaming API and simulate streaming
 		resp, err := s.apiClient.MessagesNew(ctx, request)
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to create message stream")
+			opts := tokenLimitErrorOptions(err)
+			return nil, goerr.Wrap(err, "failed to create message stream", opts...)
 		}
 
 		responseChan := make(chan *gollem.ContentResponse)
@@ -1064,4 +1067,49 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	}()
 
 	return responseChan, nil
+}
+
+// tokenLimitErrorOptions checks if the error is a token limit exceeded error
+// and returns goerr.Option to tag the error with ErrTagTokenExceeded.
+// Returns nil if the error is not a token limit exceeded error.
+//
+// Detection logic:
+// - Error must be *anthropic.Error
+// - StatusCode must be 400
+// - Parse RawJSON() to get error structure
+// - error.type must be "invalid_request_error"
+// - error.message must have prefix "prompt is too long:"
+func tokenLimitErrorOptions(err error) []goerr.Option {
+	var apiErr *anthropic.Error
+	if !errors.As(err, &apiErr) {
+		return nil
+	}
+
+	if apiErr.StatusCode != 400 {
+		return nil
+	}
+
+	// Parse RawJSON to get error details
+	type claudeErrorWrapper struct {
+		Type  string `json:"type"`
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	var wrapper claudeErrorWrapper
+	if err := json.Unmarshal([]byte(apiErr.RawJSON()), &wrapper); err != nil {
+		return nil
+	}
+
+	if wrapper.Error.Type != "invalid_request_error" {
+		return nil
+	}
+
+	if strings.HasPrefix(wrapper.Error.Message, "prompt is too long:") {
+		return []goerr.Option{goerr.Tag(gollem.ErrTagTokenExceeded)}
+	}
+
+	return nil
 }

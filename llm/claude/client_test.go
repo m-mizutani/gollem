@@ -2,12 +2,16 @@ package claude_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/m-mizutani/ctxlog"
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
 	"github.com/m-mizutani/gt"
@@ -140,4 +144,161 @@ func TestSystemPromptComment(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestTokenLimitErrorOptions(t *testing.T) {
+	type testCase struct {
+		name   string
+		err    error
+		hasTag bool
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			opts := claude.TokenLimitErrorOptions(tc.err)
+			if tc.hasTag {
+				gt.NotEqual(t, 0, len(opts))
+			} else {
+				gt.Equal(t, 0, len(opts))
+			}
+		}
+	}
+
+	// Create a mock anthropic.Error with token exceeded error
+	createTokenExceededError := func() *anthropic.Error {
+		rawJSON := map[string]any{
+			"type": "error",
+			"error": map[string]any{
+				"type":    "invalid_request_error",
+				"message": "prompt is too long: 150000 tokens > 100000 maximum",
+			},
+		}
+		rawJSONBytes, _ := json.Marshal(rawJSON)
+
+		err := &anthropic.Error{
+			StatusCode: 400,
+		}
+		// Use UnmarshalJSON to properly set the internal raw field
+		_ = err.UnmarshalJSON(rawJSONBytes)
+		return err
+	}
+
+	createDifferentTypeError := func() *anthropic.Error {
+		rawJSON := map[string]any{
+			"type": "error",
+			"error": map[string]any{
+				"type":    "authentication_error",
+				"message": "Invalid API key",
+			},
+		}
+		rawJSONBytes, _ := json.Marshal(rawJSON)
+
+		err := &anthropic.Error{
+			StatusCode: 401,
+		}
+		_ = err.UnmarshalJSON(rawJSONBytes)
+		return err
+	}
+
+	createDifferentMessageError := func() *anthropic.Error {
+		rawJSON := map[string]any{
+			"type": "error",
+			"error": map[string]any{
+				"type":    "invalid_request_error",
+				"message": "Invalid model specified",
+			},
+		}
+		rawJSONBytes, _ := json.Marshal(rawJSON)
+
+		err := &anthropic.Error{
+			StatusCode: 400,
+		}
+		_ = err.UnmarshalJSON(rawJSONBytes)
+		return err
+	}
+
+	createDifferentStatusError := func() *anthropic.Error {
+		rawJSON := map[string]any{
+			"type": "error",
+			"error": map[string]any{
+				"type":    "invalid_request_error",
+				"message": "prompt is too long: 150000 tokens > 100000 maximum",
+			},
+		}
+		rawJSONBytes, _ := json.Marshal(rawJSON)
+
+		err := &anthropic.Error{
+			StatusCode: 500,
+		}
+		_ = err.UnmarshalJSON(rawJSONBytes)
+		return err
+	}
+
+	t.Run("token exceeded error", runTest(testCase{
+		name:   "prompt is too long",
+		err:    createTokenExceededError(),
+		hasTag: true,
+	}))
+
+	t.Run("different error type", runTest(testCase{
+		name:   "authentication error",
+		err:    createDifferentTypeError(),
+		hasTag: false,
+	}))
+
+	t.Run("different message", runTest(testCase{
+		name:   "invalid model",
+		err:    createDifferentMessageError(),
+		hasTag: false,
+	}))
+
+	t.Run("different status code", runTest(testCase{
+		name:   "status 500",
+		err:    createDifferentStatusError(),
+		hasTag: false,
+	}))
+
+	t.Run("nil error", runTest(testCase{
+		name:   "nil error",
+		err:    nil,
+		hasTag: false,
+	}))
+
+	t.Run("non-anthropic error", runTest(testCase{
+		name:   "generic error",
+		err:    errors.New("some error"),
+		hasTag: false,
+	}))
+}
+
+func TestClaudeTokenLimitErrorIntegration(t *testing.T) {
+	apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
+	if !ok {
+		t.Skip("TEST_CLAUDE_API_KEY is not set")
+	}
+
+	// Only run if explicitly requested via environment variable
+	if os.Getenv("TEST_TOKEN_LIMIT_ERROR") != "true" {
+		t.Skip("TEST_TOKEN_LIMIT_ERROR is not set to true")
+	}
+
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx = ctxlog.With(ctx, logger)
+
+	client, err := claude.New(ctx, apiKey)
+	gt.NoError(t, err)
+
+	session, err := client.NewSession(ctx)
+	gt.NoError(t, err)
+
+	// Create a very long prompt to exceed token limit
+	// Repeat a long text many times to ensure we exceed the limit
+	longText := strings.Repeat("This is a test sentence to make the prompt very long. ", 100000)
+
+	_, err = session.GenerateContent(ctx, gollem.Text(longText))
+	gt.Error(t, err)
+
+	// Verify the error has the token exceeded tag
+	gt.True(t, goerr.HasTag(err, gollem.ErrTagTokenExceeded))
 }

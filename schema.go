@@ -68,7 +68,6 @@ func ToSchema(v any) (*Parameter, error) {
 	return convertWithPath(t, make(map[reflect.Type]bool), tagInfo{})
 }
 
-
 // MustToSchema is like ToSchema but panics on error.
 // Useful for static initializations where errors should be caught at development time.
 //
