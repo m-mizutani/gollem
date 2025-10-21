@@ -6,10 +6,12 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/m-mizutani/ctxlog"
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
 	"github.com/m-mizutani/gt"
@@ -267,4 +269,36 @@ func TestTokenLimitErrorOptions(t *testing.T) {
 		err:    errors.New("some error"),
 		hasTag: false,
 	}))
+}
+
+func TestClaudeTokenLimitErrorIntegration(t *testing.T) {
+	apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
+	if !ok {
+		t.Skip("TEST_CLAUDE_API_KEY is not set")
+	}
+
+	// Only run if explicitly requested via environment variable
+	if os.Getenv("TEST_TOKEN_LIMIT_ERROR") != "true" {
+		t.Skip("TEST_TOKEN_LIMIT_ERROR is not set to true")
+	}
+
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx = ctxlog.With(ctx, logger)
+
+	client, err := claude.New(ctx, apiKey)
+	gt.NoError(t, err)
+
+	session, err := client.NewSession(ctx)
+	gt.NoError(t, err)
+
+	// Create a very long prompt to exceed token limit
+	// Repeat a long text many times to ensure we exceed the limit
+	longText := strings.Repeat("This is a test sentence to make the prompt very long. ", 100000)
+
+	_, err = session.GenerateContent(ctx, gollem.Text(longText))
+	gt.Error(t, err)
+
+	// Verify the error has the token exceeded tag
+	gt.True(t, goerr.HasTag(err, gollem.ErrTagTokenExceeded))
 }

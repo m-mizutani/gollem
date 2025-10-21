@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/m-mizutani/ctxlog"
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/gemini"
 	"github.com/m-mizutani/gt"
@@ -538,4 +539,41 @@ func TestTokenLimitErrorOptions(t *testing.T) {
 		err:    errors.New("some error"),
 		hasTag: false,
 	}))
+}
+
+func TestGeminiTokenLimitErrorIntegration(t *testing.T) {
+	projectID, ok := os.LookupEnv("TEST_GEMINI_PROJECT_ID")
+	if !ok {
+		t.Skip("TEST_GEMINI_PROJECT_ID is not set")
+	}
+
+	location, ok := os.LookupEnv("TEST_GEMINI_LOCATION")
+	if !ok {
+		t.Skip("TEST_GEMINI_LOCATION is not set")
+	}
+
+	// Only run if explicitly requested via environment variable
+	if os.Getenv("TEST_TOKEN_LIMIT_ERROR") != "true" {
+		t.Skip("TEST_TOKEN_LIMIT_ERROR is not set to true")
+	}
+
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx = ctxlog.With(ctx, logger)
+
+	client, err := gemini.New(ctx, projectID, location)
+	gt.NoError(t, err)
+
+	session, err := client.NewSession(ctx)
+	gt.NoError(t, err)
+
+	// Create a very long prompt to exceed token limit
+	// Repeat a long text many times to ensure we exceed the limit
+	longText := strings.Repeat("This is a test sentence to make the prompt very long. ", 100000)
+
+	_, err = session.GenerateContent(ctx, gollem.Text(longText))
+	gt.Error(t, err)
+
+	// Verify the error has the token exceeded tag
+	gt.True(t, goerr.HasTag(err, gollem.ErrTagTokenExceeded))
 }
