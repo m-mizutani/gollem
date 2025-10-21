@@ -13,53 +13,78 @@ import (
 	"github.com/m-mizutani/gollem/llm/openai"
 )
 
+// UserProfile demonstrates struct-based schema with various constraints
+type UserProfile struct {
+	Name     string   `json:"name" description:"Full name of the user" required:"true"`
+	Age      int      `json:"age" description:"Age in years" min:"0" max:"150"`
+	Email    string   `json:"email" description:"Email address" required:"true"`
+	Interests []string `json:"interests" description:"List of interests or hobbies"`
+	Location Location `json:"location" description:"User's location"`
+}
+
+type Location struct {
+	City    string `json:"city" description:"City name"`
+	Country string `json:"country" description:"Country name"`
+}
+
 // createUserProfileSchema creates a schema for extracting user profile information
-func createUserProfileSchema() *gollem.ResponseSchema {
-	return &gollem.ResponseSchema{
-		Name:        "UserProfile",
+// This example demonstrates manual schema construction
+func createUserProfileSchema() *gollem.Parameter {
+	return &gollem.Parameter{
+		Title:       "UserProfile",
 		Description: "Structured user profile information",
-		Schema: &gollem.Parameter{
-			Type: gollem.TypeObject,
-			Properties: map[string]*gollem.Parameter{
-				"name": {
-					Type:        gollem.TypeString,
-					Description: "Full name of the user",
-				},
-				"age": {
-					Type:        gollem.TypeInteger,
-					Description: "Age in years",
-					Minimum:     Ptr(0.0),
-					Maximum:     Ptr(150.0),
-				},
-				"email": {
-					Type:        gollem.TypeString,
-					Description: "Email address",
-				},
-				"interests": {
-					Type: gollem.TypeArray,
-					Items: &gollem.Parameter{
-						Type: gollem.TypeString,
-					},
-					Description: "List of interests or hobbies",
-				},
-				"location": {
-					Type: gollem.TypeObject,
-					Properties: map[string]*gollem.Parameter{
-						"city": {
-							Type:        gollem.TypeString,
-							Description: "City name",
-						},
-						"country": {
-							Type:        gollem.TypeString,
-							Description: "Country name",
-						},
-					},
-					Description: "User's location",
-				},
+		Type:        gollem.TypeObject,
+		Properties: map[string]*gollem.Parameter{
+			"name": {
+				Type:        gollem.TypeString,
+				Description: "Full name of the user",
 			},
-			Required: []string{"name", "email"},
+			"age": {
+				Type:        gollem.TypeInteger,
+				Description: "Age in years",
+				Minimum:     Ptr(0.0),
+				Maximum:     Ptr(150.0),
+			},
+			"email": {
+				Type:        gollem.TypeString,
+				Description: "Email address",
+			},
+			"interests": {
+				Type: gollem.TypeArray,
+				Items: &gollem.Parameter{
+					Type: gollem.TypeString,
+				},
+				Description: "List of interests or hobbies",
+			},
+			"location": {
+				Type: gollem.TypeObject,
+				Properties: map[string]*gollem.Parameter{
+					"city": {
+						Type:        gollem.TypeString,
+						Description: "City name",
+					},
+					"country": {
+						Type:        gollem.TypeString,
+						Description: "Country name",
+					},
+				},
+				Description: "User's location",
+			},
 		},
+		Required: []string{"name", "email"},
 	}
+}
+
+// createUserProfileSchemaFromStruct creates a schema using ToSchema
+// This is the recommended approach for most use cases
+func createUserProfileSchemaFromStruct() (*gollem.Parameter, error) {
+	schema, err := gollem.ToSchema(UserProfile{})
+	if err != nil {
+		return nil, err
+	}
+	schema.Title = "UserProfile"
+	schema.Description = "Structured user profile information"
+	return schema, nil
 }
 
 // Ptr returns a pointer to a value of any type
@@ -203,10 +228,46 @@ func runGeminiExample() error {
 	return nil
 }
 
+func runStructToSchemaExample() error {
+	fmt.Println("=== Struct-to-Schema Conversion Example ===")
+
+	// Convert struct to Parameter
+	param, err := gollem.ToSchema(UserProfile{})
+	if err != nil {
+		return fmt.Errorf("failed to convert struct to schema: %w", err)
+	}
+
+	paramJSON, err := json.MarshalIndent(param, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal schema to JSON: %w", err)
+	}
+	fmt.Println("Generated Schema from UserProfile struct:")
+	fmt.Println(string(paramJSON))
+	fmt.Println()
+
+	// Create Parameter from struct with Title and Description
+	schema, err := createUserProfileSchemaFromStruct()
+	if err != nil {
+		return fmt.Errorf("failed to create schema: %w", err)
+	}
+
+	fmt.Printf("Schema Title: %s\n", schema.Title)
+	fmt.Printf("Description: %s\n", schema.Description)
+	fmt.Printf("Required fields: %v\n", schema.Required)
+	fmt.Println()
+
+	return nil
+}
+
 func main() {
 	fmt.Println("JSON Schema Example")
 	fmt.Println("===================")
 	fmt.Println()
+
+	// Demonstrate struct-to-schema conversion
+	if err := runStructToSchemaExample(); err != nil {
+		log.Printf("Struct-to-schema example failed: %v", err)
+	}
 
 	// Try each provider
 	if err := runOpenAIExample(); err != nil {

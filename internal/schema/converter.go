@@ -65,15 +65,15 @@ func ConvertParameterToJSONSchema(param *gollem.Parameter) map[string]any {
 	return schema
 }
 
-// ConvertResponseSchemaToJSONString converts ResponseSchema to a JSON Schema string
+// ConvertParameterToJSONString converts Parameter to a JSON Schema string
 // This is used by Claude for embedding schema in system prompt
-func ConvertResponseSchemaToJSONString(rs *gollem.ResponseSchema) (string, error) {
-	if rs == nil || rs.Schema == nil {
+func ConvertParameterToJSONString(param *gollem.Parameter) (string, error) {
+	if param == nil {
 		return "", nil
 	}
 
 	// Validate schema
-	if err := rs.Schema.Validate(); err != nil {
+	if err := param.Validate(); err != nil {
 		return "", goerr.Wrap(err, "invalid response schema")
 	}
 
@@ -83,12 +83,12 @@ func ConvertResponseSchemaToJSONString(rs *gollem.ResponseSchema) (string, error
 		"$schema": "http://json-schema.org/draft-07/schema#",
 	}
 
-	if rs.Description != "" {
-		schemaObj["description"] = rs.Description
+	if param.Description != "" {
+		schemaObj["description"] = param.Description
 	}
 
 	// Convert Parameter to JSON Schema
-	innerSchema := ConvertParameterToJSONSchema(rs.Schema)
+	innerSchema := ConvertParameterToJSONSchema(param)
 
 	// Merge properties from inner schema
 	for k, v := range innerSchema {

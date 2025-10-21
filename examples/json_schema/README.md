@@ -47,26 +47,24 @@ The example defines a `UserProfile` schema with the following fields:
 - `location` (object): User's location with `city` and `country` fields
 
 ```go
-schema := &gollem.ResponseSchema{
-    Name:        "UserProfile",
+schema := &gollem.Parameter{
+    Title:       "UserProfile",
     Description: "Structured user profile information",
-    Schema: &gollem.Parameter{
-        Type: gollem.TypeObject,
-        Properties: map[string]*gollem.Parameter{
-            "name": {
-                Type:        gollem.TypeString,
-                Description: "Full name of the user",
-            },
-            "age": {
-                Type:        gollem.TypeInteger,
-                Description: "Age in years",
-                Minimum:     Ptr(0.0),
-                Maximum:     Ptr(150.0),
-            },
-            // ... more fields
+    Type:        gollem.TypeObject,
+    Properties: map[string]*gollem.Parameter{
+        "name": {
+            Type:        gollem.TypeString,
+            Description: "Full name of the user",
         },
-        Required: []string{"name", "email"},
+        "age": {
+            Type:        gollem.TypeInteger,
+            Description: "Age in years",
+            Minimum:     Ptr(0.0),
+            Maximum:     Ptr(150.0),
+        },
+        // ... more fields
     },
+    Required: []string{"name", "email"},
 }
 ```
 

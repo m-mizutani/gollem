@@ -359,7 +359,7 @@ func createSystemPrompt(ctx context.Context, cfg gollem.SessionConfig) ([]anthro
 
 		// Add schema information if provided
 		if cfg.ResponseSchema() != nil {
-			schemaText, err := schema.ConvertResponseSchemaToJSONString(cfg.ResponseSchema())
+			schemaText, err := schema.ConvertParameterToJSONString(cfg.ResponseSchema())
 			if err != nil {
 				ctxlog.From(ctx).Warn("Failed to convert response schema to JSON string for Claude prompt", "error", err)
 				return nil, goerr.Wrap(err, "failed to convert response schema to JSON string")

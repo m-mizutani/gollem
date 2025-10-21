@@ -892,20 +892,20 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 }
 
 // convertResponseSchemaToOpenAI converts gollem.ResponseSchema to OpenAI's JSONSchemaParams
-func convertResponseSchemaToOpenAI(rs *gollem.ResponseSchema, strict bool) (*openai.ChatCompletionResponseFormatJSONSchema, error) {
-	if rs == nil || rs.Schema == nil {
+func convertResponseSchemaToOpenAI(param *gollem.Parameter, strict bool) (*openai.ChatCompletionResponseFormatJSONSchema, error) {
+	if param == nil {
 		return nil, nil
 	}
 
 	// Validate schema
-	if err := rs.Schema.Validate(); err != nil {
+	if err := param.Validate(); err != nil {
 		return nil, goerr.Wrap(err, "invalid response schema")
 	}
 
 	// Convert Parameter to JSON Schema format
 	// If strict mode is enabled, we need to adjust the schema to make all properties required
 	// This is a limitation of OpenAI's strict mode implementation
-	schemaObj := convertParameterToJSONSchemaWithStrict(rs.Schema, strict)
+	schemaObj := convertParameterToJSONSchemaWithStrict(param, strict)
 
 	// Marshal to JSON for OpenAI API
 	schemaJSON, err := json.Marshal(schemaObj)
@@ -913,14 +913,14 @@ func convertResponseSchemaToOpenAI(rs *gollem.ResponseSchema, strict bool) (*ope
 		return nil, goerr.Wrap(err, "failed to marshal schema")
 	}
 
-	name := rs.Name
+	name := param.Title
 	if name == "" {
 		name = "response"
 	}
 
 	result := &openai.ChatCompletionResponseFormatJSONSchema{
 		Name:        name,
-		Description: rs.Description,
+		Description: param.Description,
 		Schema:      json.RawMessage(schemaJSON),
 		Strict:      strict,
 	}

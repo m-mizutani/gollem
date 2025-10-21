@@ -380,27 +380,25 @@ func main() {
 	}
 
 	// Define response schema
-	schema := &gollem.ResponseSchema{
-		Name:        "UserProfile",
+	schema := &gollem.Parameter{
+		Title:       "UserProfile",
 		Description: "Structured user profile information",
-		Schema: &gollem.Parameter{
-			Type: gollem.TypeObject,
-			Properties: map[string]*gollem.Parameter{
-				"name": {
-					Type:        gollem.TypeString,
-					Description: "Full name of the user",
-				},
-				"age": {
-					Type:        gollem.TypeInteger,
-					Description: "Age in years",
-				},
-				"email": {
-					Type:        gollem.TypeString,
-					Description: "Email address",
-				},
+		Type:        gollem.TypeObject,
+		Properties: map[string]*gollem.Parameter{
+			"name": {
+				Type:        gollem.TypeString,
+				Description: "Full name of the user",
 			},
-			Required: []string{"name", "email"},
+			"age": {
+				Type:        gollem.TypeInteger,
+				Description: "Age in years",
+			},
+			"email": {
+				Type:        gollem.TypeString,
+				Description: "Email address",
+			},
 		},
+		Required: []string{"name", "email"},
 	}
 
 	// Create session with JSON content type and schema
@@ -433,7 +431,44 @@ func main() {
 - **Provider agnostic**: Works with OpenAI, Claude, and Gemini
 - **Guaranteed format**: LLM output always conforms to the schema
 
-See [examples/json_schema](examples/json_schema) for a complete working example with all providers.
+#### Creating Schemas from Go Structs
+
+Instead of manually constructing schema objects, you can automatically generate them from Go structs using field tags:
+
+```go
+type UserProfile struct {
+	Name     string `json:"name" description:"User's full name" required:"true"`
+	Email    string `json:"email" description:"Email address" pattern:"^[a-zA-Z0-9._%+-]+@..." required:"true"`
+	Age      int    `json:"age" description:"Age in years" min:"0" max:"150"`
+	Role     string `json:"role" description:"User role" enum:"admin,user,guest"`
+}
+
+// Generate schema from struct
+schema, err := gollem.ToSchema(UserProfile{})
+if err != nil {
+	panic(err)
+}
+schema.Title = "UserProfile"
+schema.Description = "Structured user profile information"
+
+// Use with session as before
+session, err := client.NewSession(ctx,
+	gollem.WithSessionContentType(gollem.ContentTypeJSON),
+	gollem.WithSessionResponseSchema(schema),
+)
+```
+
+**Supported struct tags:**
+- `json:"field_name"` - Field name (use `json:"-"` to ignore)
+- `description:"text"` - Field description
+- `enum:"value1,value2,value3"` - Enum values
+- `min:"0"`, `max:"100"` - Numeric constraints
+- `minLength:"1"`, `maxLength:"255"` - String length
+- `pattern:"^[a-z]+$"` - Regex pattern
+- `minItems:"1"`, `maxItems:"10"` - Array constraints
+- `required:"true"` - Required field
+
+See [examples/json_schema](examples/json_schema) for a complete working example.
 
 ### Middleware System
 

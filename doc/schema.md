@@ -15,29 +15,27 @@ By defining a JSON Schema, you can:
 ### 1. Define a Response Schema
 
 ```go
-schema := &gollem.ResponseSchema{
-	Name:        "UserProfile",
+schema := &gollem.Parameter{
+	Title:       "UserProfile",
 	Description: "Structured user profile information",
-	Schema: &gollem.Parameter{
-		Type: gollem.TypeObject,
-		Properties: map[string]*gollem.Parameter{
-			"name": {
-				Type:        gollem.TypeString,
-				Description: "Full name of the user",
-			},
-			"age": {
-				Type:        gollem.TypeInteger,
-				Description: "Age in years",
-				Minimum:     Ptr(0.0),
-				Maximum:     Ptr(150.0),
-			},
-			"email": {
-				Type:        gollem.TypeString,
-				Description: "Email address",
-			},
+	Type:        gollem.TypeObject,
+	Properties: map[string]*gollem.Parameter{
+		"name": {
+			Type:        gollem.TypeString,
+			Description: "Full name of the user",
 		},
-		Required: []string{"name", "email"},
+		"age": {
+			Type:        gollem.TypeInteger,
+			Description: "Age in years",
+			Minimum:     Ptr(0.0),
+			Maximum:     Ptr(150.0),
+		},
+		"email": {
+			Type:        gollem.TypeString,
+			Description: "Email address",
+		},
 	},
+	Required: []string{"name", "email"},
 }
 ```
 
@@ -256,6 +254,84 @@ schema := &gollem.ResponseSchema{
 	},
 }
 ```
+
+## Creating Schemas from Go Structs
+
+### ToSchema
+
+Instead of manually constructing `gollem.Parameter` objects, you can automatically generate schemas from Go struct types using struct field tags:
+
+```go
+type UserProfile struct {
+	Name     string  `json:"name" description:"User's full name" required:"true"`
+	Email    string  `json:"email" description:"Email address" pattern:"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$" required:"true"`
+	Age      int     `json:"age" description:"Age in years" min:"0" max:"150"`
+	Role     string  `json:"role" description:"User role" enum:"admin,user,guest"`
+	Username string  `json:"username" description:"Unique username" minLength:"3" maxLength:"20" pattern:"^[a-z0-9]+$" required:"true"`
+	Bio      string  `json:"bio" description:"User biography" maxLength:"500"`
+	Address  Address `json:"address" description:"User's address"`
+	Tags     []string `json:"tags" description:"User tags" minItems:"1" maxItems:"10"`
+}
+
+type Address struct {
+	Street  string `json:"street" required:"true"`
+	City    string `json:"city" required:"true"`
+	Country string `json:"country" required:"true"`
+	ZipCode string `json:"zip_code" pattern:"^[0-9]{5}$"`
+}
+
+// Convert struct to Parameter
+param, err := gollem.ToSchema(UserProfile{})
+if err != nil {
+	return err
+}
+
+// Set Title and Description
+param.Title = "UserProfile"
+param.Description = "Structured user profile information"
+
+// Use with LLM
+session, err := client.NewSession(ctx,
+	gollem.WithSessionContentType(gollem.ContentTypeJSON),
+	gollem.WithSessionResponseSchema(param),
+)
+```
+
+### Supported Struct Tags
+
+All tags are optional except `json` for field naming:
+
+- **`json:"field_name"`** - Field name in JSON (standard Go tag)
+  - Use `json:"-"` to ignore fields
+- **`description:"text"`** - Field description
+- **`enum:"value1,value2,value3"`** - Enum values (comma-separated)
+- **`min:"0"`** - Minimum value (for numbers)
+- **`max:"100"`** - Maximum value (for numbers)
+- **`minLength:"1"`** - Minimum string length
+- **`maxLength:"255"`** - Maximum string length
+- **`pattern:"^[a-z]+$"`** - Regex pattern for string validation
+- **`minItems:"1"`** - Minimum array length
+- **`maxItems:"10"`** - Maximum array length
+- **`required:"true"`** - Mark field as required
+
+### Supported Types
+
+- **Basic types**: `string`, `int`, `int8`, `int16`, `int32`, `int64`, `uint`, `uint8`, `uint16`, `uint32`, `uint64`, `float32`, `float64`, `bool`
+- **Complex types**: `[]T` (arrays/slices), nested structs, `map[string]T`
+- **Pointer types**: Automatically unwrapped to base type
+
+### MustToSchema
+
+For static initializations where errors should be caught at development time:
+
+```go
+var userSchema = gollem.MustToSchema(UserProfile{})
+// Panics if conversion fails
+```
+
+### Complete Example
+
+See [examples/json_schema](../examples/json_schema) for a complete working example.
 
 ## Helper Functions
 
