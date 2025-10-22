@@ -702,6 +702,63 @@ agent := gollem.New(client,
 )
 ```
 
+#### Built-in Middleware
+
+**Automatic History Compaction (`compacter`)**
+
+The compacter middleware automatically handles token limit errors by compressing conversation history using LLM summarization. When a token limit error is detected, it summarizes the oldest messages (default 70%) and retries the request.
+
+```go
+import "github.com/m-mizutani/gollem/middleware/compacter"
+
+agent := gollem.New(client,
+	gollem.WithContentBlockMiddleware(
+		compacter.NewContentBlockMiddleware(
+			client,
+			compacter.WithCompactRatio(0.7),     // Compress oldest 70% of history (default)
+			compacter.WithMaxRetries(3),         // Max retry attempts (default)
+			compacter.WithCompactionHook(func(ctx context.Context, event *compacter.CompactionEvent) {
+				// Observability: track compaction events
+				log.Printf("Compacted: %d -> %d chars, tokens: in=%d out=%d",
+					event.OriginalDataSize,
+					event.CompactedDataSize,
+					event.InputTokens,
+					event.OutputTokens,
+				)
+			}),
+		),
+	),
+	gollem.WithContentStreamMiddleware(
+		compacter.NewContentStreamMiddleware(client),
+	),
+)
+```
+
+**Features:**
+- **Automatic Recovery**: Detects `ErrTagTokenExceeded` and automatically compacts history
+- **LLM-based Summarization**: Uses the same LLM client to generate high-quality summaries that preserve important context
+- **Character-based Compression**: Compacts based on character count (default 70% of oldest messages)
+- **Configurable**: Customize compression ratio, max retries, and summary prompt
+- **Observability**: Hook for monitoring compaction events with metrics:
+  - `OriginalDataSize` / `CompactedDataSize`: Character counts before/after
+  - `InputTokens` / `OutputTokens`: Actual LLM token usage for summarization
+  - `Summary`: Generated summary text
+  - `Attempt`: Retry attempt number
+
+**Example with Custom Settings:**
+```go
+middleware := compacter.NewContentBlockMiddleware(
+	client,
+	compacter.WithCompactRatio(0.8),  // Compress 80% of history
+	compacter.WithMaxRetries(5),       // Allow up to 5 retries
+	compacter.WithSummaryPrompt(`Summarize the conversation concisely, preserving:
+- Key decisions and conclusions
+- Important facts and context
+- Action items and next steps`),
+	compacter.WithLogger(logger),      // Custom logger
+)
+```
+
 ### Strategy Pattern for Agent Behavior
 
 gollem uses the Strategy pattern to customize how agents process tasks and make decisions. Strategies control the core execution logic, from simple request-response to complex planning workflows.
