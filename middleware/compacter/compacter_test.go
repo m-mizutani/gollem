@@ -431,9 +431,9 @@ func TestContentBlockMiddleware_SummaryRoleAlternation(t *testing.T) {
 	ctx := context.Background()
 
 	testCases := []struct {
-		name                 string
-		remainingFirstRole   gollem.MessageRole
-		expectedSummaryRole  gollem.MessageRole
+		name                string
+		remainingFirstRole  gollem.MessageRole
+		expectedSummaryRole gollem.MessageRole
 	}{
 		{
 			name:                "remaining starts with assistant, summary should be user",

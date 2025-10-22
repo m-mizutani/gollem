@@ -99,9 +99,8 @@ func WithCompactionHook(hook CompactionHook) Option {
 	}
 }
 
-// NewContentBlockMiddleware creates a middleware that automatically compacts history
-// using LLM when ErrTagTokenExceeded is detected
-func NewContentBlockMiddleware(llmClient gollem.LLMClient, options ...Option) gollem.ContentBlockMiddleware {
+// newConfig creates a new config with default values
+func newConfig(llmClient gollem.LLMClient, options ...Option) *config {
 	cfg := &config{
 		llmClient:     llmClient,
 		compactRatio:  defaultCompactRatio,
@@ -114,52 +113,78 @@ func NewContentBlockMiddleware(llmClient gollem.LLMClient, options ...Option) go
 		opt(cfg)
 	}
 
+	return cfg
+}
+
+// retryWithCompaction attempts to compact history and retry the request
+// Returns the last error if all retries fail
+func retryWithCompaction(
+	ctx context.Context,
+	req *gollem.ContentRequest,
+	cfg *config,
+	initialErr error,
+	retry func(context.Context, *gollem.ContentRequest) error,
+) error {
+	cfg.logger.Info("token limit exceeded, attempting compaction")
+
+	lastErr := initialErr
+	for attempt := 1; attempt <= cfg.maxRetries; attempt++ {
+		cfg.logger.Info("compaction attempt", "attempt", attempt, "max_retries", cfg.maxRetries)
+
+		// Compact the history
+		if req.History == nil || len(req.History.Messages) == 0 {
+			cfg.logger.Warn("no history to compact")
+			return lastErr
+		}
+
+		compactedHistory, compactErr := compactHistory(
+			ctx,
+			req.History,
+			cfg,
+			attempt,
+		)
+		if compactErr != nil {
+			cfg.logger.Error("compaction failed", "error", compactErr)
+			return goerr.Wrap(compactErr, "failed to compact history")
+		}
+
+		// Update request history
+		req.History = compactedHistory
+
+		// Retry the request
+		cfg.logger.Info("retrying after compaction", "attempt", attempt)
+		lastErr = retry(ctx, req)
+
+		// If successful or different error, return
+		if lastErr == nil || !goerr.HasTag(lastErr, gollem.ErrTagTokenExceeded) {
+			return lastErr
+		}
+
+		cfg.logger.Info("still token limit exceeded after compaction", "attempt", attempt)
+	}
+
+	cfg.logger.Warn("max retries reached", "max_retries", cfg.maxRetries)
+	return lastErr
+}
+
+// NewContentBlockMiddleware creates a middleware that automatically compacts history
+// using LLM when ErrTagTokenExceeded is detected
+func NewContentBlockMiddleware(llmClient gollem.LLMClient, options ...Option) gollem.ContentBlockMiddleware {
+	cfg := newConfig(llmClient, options...)
+
 	return func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
 		return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
 			resp, err := next(ctx, req)
 
 			// Check if error has ErrTagTokenExceeded tag
 			if err != nil && goerr.HasTag(err, gollem.ErrTagTokenExceeded) {
-				cfg.logger.Info("token limit exceeded, attempting compaction")
-
-				// Retry with compaction
-				for attempt := 1; attempt <= cfg.maxRetries; attempt++ {
-					cfg.logger.Info("compaction attempt", "attempt", attempt, "max_retries", cfg.maxRetries)
-
-					// Compact the history
-					if req.History == nil || len(req.History.Messages) == 0 {
-						cfg.logger.Warn("no history to compact")
-						return nil, err
-					}
-
-					compactedHistory, compactErr := compactHistory(
-						ctx,
-						req.History,
-						cfg,
-						attempt,
-					)
-					if compactErr != nil {
-						cfg.logger.Error("compaction failed", "error", compactErr)
-						return nil, goerr.Wrap(compactErr, "failed to compact history")
-					}
-
-					// Update request history
-					req.History = compactedHistory
-
-					// Retry the request
-					cfg.logger.Info("retrying after compaction", "attempt", attempt)
-					resp, err = next(ctx, req)
-
-					// If successful or different error, return
-					if err == nil || !goerr.HasTag(err, gollem.ErrTagTokenExceeded) {
-						return resp, err
-					}
-
-					cfg.logger.Info("still token limit exceeded after compaction", "attempt", attempt)
-				}
-
-				cfg.logger.Warn("max retries reached", "max_retries", cfg.maxRetries)
-				return nil, err
+				var retryResp *gollem.ContentResponse
+				retryErr := retryWithCompaction(ctx, req, cfg, err, func(ctx context.Context, req *gollem.ContentRequest) error {
+					var innerErr error
+					retryResp, innerErr = next(ctx, req)
+					return innerErr
+				})
+				return retryResp, retryErr
 			}
 
 			return resp, err
@@ -170,17 +195,7 @@ func NewContentBlockMiddleware(llmClient gollem.LLMClient, options ...Option) go
 // NewContentStreamMiddleware creates a streaming middleware that automatically compacts history
 // using LLM when ErrTagTokenExceeded is detected
 func NewContentStreamMiddleware(llmClient gollem.LLMClient, options ...Option) gollem.ContentStreamMiddleware {
-	cfg := &config{
-		llmClient:     llmClient,
-		compactRatio:  defaultCompactRatio,
-		summaryPrompt: DefaultSummaryPrompt,
-		maxRetries:    defaultMaxRetries,
-		logger:        slog.New(slog.DiscardHandler),
-	}
-
-	for _, opt := range options {
-		opt(cfg)
-	}
+	cfg := newConfig(llmClient, options...)
 
 	return func(next gollem.ContentStreamHandler) gollem.ContentStreamHandler {
 		return func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
@@ -188,46 +203,13 @@ func NewContentStreamMiddleware(llmClient gollem.LLMClient, options ...Option) g
 
 			// Check if error has ErrTagTokenExceeded tag
 			if err != nil && goerr.HasTag(err, gollem.ErrTagTokenExceeded) {
-				cfg.logger.Info("token limit exceeded in stream, attempting compaction")
-
-				// Retry with compaction
-				for attempt := 1; attempt <= cfg.maxRetries; attempt++ {
-					cfg.logger.Info("compaction attempt", "attempt", attempt, "max_retries", cfg.maxRetries)
-
-					// Compact the history
-					if req.History == nil || len(req.History.Messages) == 0 {
-						cfg.logger.Warn("no history to compact")
-						return nil, err
-					}
-
-					compactedHistory, compactErr := compactHistory(
-						ctx,
-						req.History,
-						cfg,
-						attempt,
-					)
-					if compactErr != nil {
-						cfg.logger.Error("compaction failed", "error", compactErr)
-						return nil, goerr.Wrap(compactErr, "failed to compact history")
-					}
-
-					// Update request history
-					req.History = compactedHistory
-
-					// Retry the request
-					cfg.logger.Info("retrying stream after compaction", "attempt", attempt)
-					respChan, err = next(ctx, req)
-
-					// If successful or different error, return
-					if err == nil || !goerr.HasTag(err, gollem.ErrTagTokenExceeded) {
-						return respChan, err
-					}
-
-					cfg.logger.Info("still token limit exceeded after compaction", "attempt", attempt)
-				}
-
-				cfg.logger.Warn("max retries reached", "max_retries", cfg.maxRetries)
-				return nil, err
+				var retryChan <-chan *gollem.ContentResponse
+				retryErr := retryWithCompaction(ctx, req, cfg, err, func(ctx context.Context, req *gollem.ContentRequest) error {
+					var innerErr error
+					retryChan, innerErr = next(ctx, req)
+					return innerErr
+				})
+				return retryChan, retryErr
 			}
 
 			return respChan, err
