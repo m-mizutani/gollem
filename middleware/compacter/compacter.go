@@ -331,14 +331,14 @@ func countMessageChars(messages []gollem.Message) int {
 	for _, msg := range messages {
 		for _, content := range msg.Contents {
 			// Unmarshal content data to get text
-			var textData map[string]any
+			var textData struct {
+				Text string `json:"text"`
+			}
 			if err := json.Unmarshal(content.Data, &textData); err != nil {
 				continue
 			}
 
-			if text, ok := textData["text"].(string); ok {
-				totalChars += len(text)
-			}
+			totalChars += len(textData.Text)
 		}
 	}
 	return totalChars
@@ -357,14 +357,14 @@ func extractMessagesToCompact(messages []gollem.Message, targetChars int) ([]gol
 	for i, msg := range messages {
 		msgChars := 0
 		for _, content := range msg.Contents {
-			var textData map[string]any
+			var textData struct {
+				Text string `json:"text"`
+			}
 			if err := json.Unmarshal(content.Data, &textData); err != nil {
 				continue
 			}
 
-			if text, ok := textData["text"].(string); ok {
-				msgChars += len(text)
-			}
+			msgChars += len(textData.Text)
 		}
 
 		currentChars += msgChars
