@@ -427,6 +427,109 @@ func TestContentBlockMiddleware_CompactionHook(t *testing.T) {
 	gt.V(t, len(capturedEvent.Summary) > 0)
 }
 
+func TestContentBlockMiddleware_SummaryRoleAlternation(t *testing.T) {
+	ctx := context.Background()
+
+	testCases := []struct {
+		name                 string
+		remainingFirstRole   gollem.MessageRole
+		expectedSummaryRole  gollem.MessageRole
+	}{
+		{
+			name:                "remaining starts with assistant, summary should be user",
+			remainingFirstRole:  gollem.RoleAssistant,
+			expectedSummaryRole: gollem.RoleUser,
+		},
+		{
+			name:                "remaining starts with user, summary should be assistant",
+			remainingFirstRole:  gollem.RoleUser,
+			expectedSummaryRole: gollem.RoleAssistant,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var compactedHistory *gollem.History
+
+			// Create mock LLM client
+			mockClient := &mock.LLMClientMock{
+				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+					return &mock.SessionMock{
+						GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+							return &gollem.Response{
+								Texts:       []string{"Summary of conversation"},
+								InputToken:  50,
+								OutputToken: 10,
+							}, nil
+						},
+					}, nil
+				},
+			}
+
+			// Create middleware with high compact ratio to compact most messages
+			middleware := compacter.NewContentBlockMiddleware(
+				mockClient,
+				compacter.WithCompactRatio(0.9), // Compact 90% to leave only last message
+			)
+
+			// Create handler that captures the compacted history
+			callCount := 0
+			handler := func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+				callCount++
+				if callCount == 1 {
+					// First call: return token exceeded error
+					return nil, goerr.Wrap(
+						goerr.New("token limit exceeded"),
+						"API error",
+						goerr.Tag(gollem.ErrTagTokenExceeded),
+					)
+				}
+				// Second call after compaction: capture and return success
+				compactedHistory = req.History
+				return &gollem.ContentResponse{
+					Texts: []string{"Success"},
+				}, nil
+			}
+
+			wrappedHandler := middleware(handler)
+
+			// Create history with messages that will be compacted
+			history := &gollem.History{
+				LLType:  gollem.LLMTypeClaude,
+				Version: gollem.HistoryVersion,
+				Messages: []gollem.Message{
+					createMessage(gollem.RoleUser, "First message to be compacted"),
+					createMessage(gollem.RoleAssistant, "First response to be compacted"),
+					createMessage(gollem.RoleUser, "Second message to be compacted"),
+					createMessage(gollem.RoleAssistant, "Second response to be compacted"),
+					createMessage(tc.remainingFirstRole, "Remaining message"),
+				},
+			}
+
+			req := &gollem.ContentRequest{
+				Inputs:  []gollem.Input{gollem.Text("New input")},
+				History: history,
+			}
+
+			// Execute
+			_, err := wrappedHandler(ctx, req)
+			gt.NoError(t, err)
+
+			// Verify compacted history structure
+			gt.NotNil(t, compactedHistory)
+			gt.V(t, len(compactedHistory.Messages) >= 2) // Summary + at least one remaining
+
+			// Verify summary role maintains alternation
+			summaryMessage := compactedHistory.Messages[0]
+			gt.Equal(t, tc.expectedSummaryRole, summaryMessage.Role)
+
+			// Verify alternation pattern
+			nextMessage := compactedHistory.Messages[1]
+			gt.NotEqual(t, summaryMessage.Role, nextMessage.Role)
+		})
+	}
+}
+
 func createMessage(role gollem.MessageRole, text string) gollem.Message {
 	content, _ := gollem.NewTextContent(text)
 	return gollem.Message{

@@ -318,8 +318,16 @@ func compactHistory(
 		return nil, goerr.Wrap(err, "failed to create summary content")
 	}
 
+	// Determine summary role to maintain user/assistant alternation
+	// If next message is from assistant, summary should be from user, and vice-versa
+	// Default to assistant since the LLM generated the summary
+	summaryRole := gollem.RoleAssistant
+	if len(remainingMessages) > 0 && remainingMessages[0].Role == gollem.RoleAssistant {
+		summaryRole = gollem.RoleUser
+	}
+
 	summaryMessage := gollem.Message{
-		Role:     gollem.RoleUser,
+		Role:     summaryRole,
 		Contents: []gollem.MessageContent{summaryContent},
 	}
 
