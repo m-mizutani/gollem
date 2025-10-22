@@ -46,7 +46,7 @@ func TestCountMessageChars(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			actual := countMessageChars(tc.messages)
+			actual := compacter.CountMessageChars(tc.messages)
 			gt.Equal(t, tc.expected, actual)
 		})
 	}
@@ -101,7 +101,7 @@ func TestExtractMessagesToCompact(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			compact, remaining := extractMessagesToCompact(tc.messages, tc.targetChars)
+			compact, remaining := compacter.ExtractMessagesToCompact(tc.messages, tc.targetChars)
 			gt.Equal(t, tc.expectedCompactLen, len(compact))
 			gt.Equal(t, tc.expectedRemainingLen, len(remaining))
 		})
@@ -537,12 +537,6 @@ func createMessage(role gollem.MessageRole, text string) gollem.Message {
 		Contents: []gollem.MessageContent{content},
 	}
 }
-
-// Export internal functions for testing
-var (
-	countMessageChars        = compacter.CountMessageChars
-	extractMessagesToCompact = compacter.ExtractMessagesToCompact
-)
 
 // Integration tests with real LLM clients
 func TestCompactionWithRealLLM(t *testing.T) {
