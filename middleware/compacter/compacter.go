@@ -5,7 +5,6 @@ package compacter
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -108,7 +107,7 @@ func NewContentBlockMiddleware(llmClient gollem.LLMClient, options ...Option) go
 		compactRatio:  defaultCompactRatio,
 		summaryPrompt: DefaultSummaryPrompt,
 		maxRetries:    defaultMaxRetries,
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:        slog.New(slog.DiscardHandler),
 	}
 
 	for _, opt := range options {
@@ -176,7 +175,7 @@ func NewContentStreamMiddleware(llmClient gollem.LLMClient, options ...Option) g
 		compactRatio:  defaultCompactRatio,
 		summaryPrompt: DefaultSummaryPrompt,
 		maxRetries:    defaultMaxRetries,
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:        slog.New(slog.DiscardHandler),
 	}
 
 	for _, opt := range options {
