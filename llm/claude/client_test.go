@@ -234,6 +234,40 @@ func TestTokenLimitErrorOptions(t *testing.T) {
 		return err
 	}
 
+	create413Error := func() *anthropic.Error {
+		rawJSON := map[string]any{
+			"type": "error",
+			"error": map[string]any{
+				"type":    "invalid_request_error",
+				"message": "Prompt is too long",
+			},
+		}
+		rawJSONBytes, _ := json.Marshal(rawJSON)
+
+		err := &anthropic.Error{
+			StatusCode: 413,
+		}
+		_ = err.UnmarshalJSON(rawJSONBytes)
+		return err
+	}
+
+	createCapitalizedMessageError := func() *anthropic.Error {
+		rawJSON := map[string]any{
+			"type": "error",
+			"error": map[string]any{
+				"type":    "invalid_request_error",
+				"message": "Prompt is too long: 150000 tokens > 100000 maximum",
+			},
+		}
+		rawJSONBytes, _ := json.Marshal(rawJSON)
+
+		err := &anthropic.Error{
+			StatusCode: 400,
+		}
+		_ = err.UnmarshalJSON(rawJSONBytes)
+		return err
+	}
+
 	t.Run("token exceeded error", runTest(testCase{
 		name:   "prompt is too long",
 		err:    createTokenExceededError(),
@@ -256,6 +290,18 @@ func TestTokenLimitErrorOptions(t *testing.T) {
 		name:   "status 500",
 		err:    createDifferentStatusError(),
 		hasTag: false,
+	}))
+
+	t.Run("413 status code with capitalized message", runTest(testCase{
+		name:   "413 Request Entity Too Large",
+		err:    create413Error(),
+		hasTag: true,
+	}))
+
+	t.Run("capitalized message with 400 status", runTest(testCase{
+		name:   "Prompt is too long (capitalized)",
+		err:    createCapitalizedMessageError(),
+		hasTag: true,
 	}))
 
 	t.Run("nil error", runTest(testCase{

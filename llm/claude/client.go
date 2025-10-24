@@ -1075,17 +1075,17 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 //
 // Detection logic:
 // - Error must be *anthropic.Error
-// - StatusCode must be 400
+// - StatusCode must be 400 or 413 (Request Entity Too Large)
 // - Parse RawJSON() to get error structure
 // - error.type must be "invalid_request_error"
-// - error.message must have prefix "prompt is too long:"
+// - error.message must contain "prompt is too long" (case-insensitive)
 func tokenLimitErrorOptions(err error) []goerr.Option {
 	var apiErr *anthropic.Error
 	if !errors.As(err, &apiErr) {
 		return nil
 	}
 
-	if apiErr.StatusCode != 400 {
+	if apiErr.StatusCode != 400 && apiErr.StatusCode != 413 {
 		return nil
 	}
 
@@ -1107,7 +1107,9 @@ func tokenLimitErrorOptions(err error) []goerr.Option {
 		return nil
 	}
 
-	if strings.HasPrefix(wrapper.Error.Message, "prompt is too long:") {
+	// Check for token limit error message (case-insensitive)
+	lowerMessage := strings.ToLower(wrapper.Error.Message)
+	if strings.Contains(lowerMessage, "prompt is too long") {
 		return []goerr.Option{goerr.Tag(gollem.ErrTagTokenExceeded)}
 	}
 
