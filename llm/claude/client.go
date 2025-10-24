@@ -693,8 +693,8 @@ func processResponseWithContentType(ctx context.Context, resp *anthropic.Message
 			text := textBlock.Text
 
 			// Apply JSON extraction for Claude when ContentTypeJSON is specified
-			// but skip if ResponseSchema is used (as prefill already ensures proper JSON format)
-			if contentType == gollem.ContentTypeJSON && !hasResponseSchema {
+			// Even with ResponseSchema and prefill, Claude may still wrap JSON in markdown code blocks
+			if contentType == gollem.ContentTypeJSON {
 				text = extractJSON(ctx, text)
 			}
 
