@@ -63,6 +63,10 @@ type gollemConfig struct {
 	history      *History
 	strategy     Strategy
 
+	// Content type and response schema for agent-level configuration
+	contentType    ContentType
+	responseSchema *Parameter
+
 	// Middleware for content generation
 	contentBlockMiddlewares  []ContentBlockMiddleware
 	contentStreamMiddlewares []ContentStreamMiddleware
@@ -84,6 +88,9 @@ func (c *gollemConfig) Clone() *gollemConfig {
 
 		history:  c.history,
 		strategy: c.strategy,
+
+		contentType:    c.contentType,
+		responseSchema: c.responseSchema,
 
 		contentBlockMiddlewares:  c.contentBlockMiddlewares[:],
 		contentStreamMiddlewares: c.contentStreamMiddlewares[:],
@@ -204,6 +211,23 @@ func WithStrategy(strategy Strategy) Option {
 	}
 }
 
+// WithContentType sets the content type for the agent.
+// This will be applied to all sessions created by this agent.
+func WithContentType(contentType ContentType) Option {
+	return func(s *gollemConfig) {
+		s.contentType = contentType
+	}
+}
+
+// WithResponseSchema sets the response schema for the agent.
+// This will be applied to all sessions created by this agent.
+// This option should be used with WithContentType(ContentTypeJSON).
+func WithResponseSchema(schema *Parameter) Option {
+	return func(s *gollemConfig) {
+		s.responseSchema = schema
+	}
+}
+
 func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool, error) {
 	allTools := cfg.tools[:]
 
@@ -269,6 +293,16 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, 
 	if g.currentSession == nil {
 		sessionOptions := []SessionOption{
 			WithSessionSystemPrompt(cfg.systemPrompt),
+		}
+
+		// Add ContentType if specified
+		if cfg.contentType != "" {
+			sessionOptions = append(sessionOptions, WithSessionContentType(cfg.contentType))
+		}
+
+		// Add ResponseSchema if specified
+		if cfg.responseSchema != nil {
+			sessionOptions = append(sessionOptions, WithSessionResponseSchema(cfg.responseSchema))
 		}
 
 		if cfg.history != nil {

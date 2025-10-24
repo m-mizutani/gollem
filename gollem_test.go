@@ -658,6 +658,117 @@ func TestGollemWithOptions(t *testing.T) {
 		// Middleware configuration verification - agent accepts tool middleware
 		_ = middlewareExecuted // Reserved for future execution testing
 	})
+
+	t.Run("WithContentType", func(t *testing.T) {
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				cfg := gollem.NewSessionConfig(options...)
+				// Verify that ContentType was passed to the session
+				gt.Equal(t, gollem.ContentTypeJSON, cfg.ContentType())
+
+				mockSession := &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						return &gollem.Response{
+							Texts: []string{`{"result": "success"}`},
+						}, nil
+					},
+				}
+				return mockSession, nil
+			},
+		}
+
+		s := gollem.New(mockClient,
+			gollem.WithContentType(gollem.ContentTypeJSON),
+			gollem.WithLoopLimit(5),
+		)
+		_, err := s.Execute(t.Context(), gollem.Text("test message"))
+		gt.NoError(t, err)
+	})
+
+	t.Run("WithResponseSchema", func(t *testing.T) {
+		schema := &gollem.Parameter{
+			Type:        gollem.TypeObject,
+			Description: "Test response schema",
+			Properties: map[string]*gollem.Parameter{
+				"result": {
+					Type:        gollem.TypeString,
+					Description: "Result field",
+				},
+			},
+			Required: []string{"result"},
+		}
+
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				cfg := gollem.NewSessionConfig(options...)
+				// Verify that ResponseSchema was passed to the session
+				gt.NotNil(t, cfg.ResponseSchema())
+				gt.Equal(t, "Test response schema", cfg.ResponseSchema().Description)
+				gt.Equal(t, gollem.TypeObject, cfg.ResponseSchema().Type)
+
+				mockSession := &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						return &gollem.Response{
+							Texts: []string{`{"result": "success"}`},
+						}, nil
+					},
+				}
+				return mockSession, nil
+			},
+		}
+
+		s := gollem.New(mockClient,
+			gollem.WithResponseSchema(schema),
+			gollem.WithLoopLimit(5),
+		)
+		_, err := s.Execute(t.Context(), gollem.Text("test message"))
+		gt.NoError(t, err)
+	})
+
+	t.Run("WithContentTypeAndResponseSchema", func(t *testing.T) {
+		schema := &gollem.Parameter{
+			Type:        gollem.TypeObject,
+			Description: "Combined test schema",
+			Properties: map[string]*gollem.Parameter{
+				"status": {
+					Type:        gollem.TypeString,
+					Description: "Status field",
+				},
+				"message": {
+					Type:        gollem.TypeString,
+					Description: "Message field",
+				},
+			},
+			Required: []string{"status"},
+		}
+
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				cfg := gollem.NewSessionConfig(options...)
+				// Verify both ContentType and ResponseSchema were passed
+				gt.Equal(t, gollem.ContentTypeJSON, cfg.ContentType())
+				gt.NotNil(t, cfg.ResponseSchema())
+				gt.Equal(t, "Combined test schema", cfg.ResponseSchema().Description)
+
+				mockSession := &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						return &gollem.Response{
+							Texts: []string{`{"status": "ok", "message": "test"}`},
+						}, nil
+					},
+				}
+				return mockSession, nil
+			},
+		}
+
+		s := gollem.New(mockClient,
+			gollem.WithContentType(gollem.ContentTypeJSON),
+			gollem.WithResponseSchema(schema),
+			gollem.WithLoopLimit(5),
+		)
+		_, err := s.Execute(t.Context(), gollem.Text("test message"))
+		gt.NoError(t, err)
+	})
 }
 
 // mockToolSet is a mock implementation of gollem.ToolSet
