@@ -419,13 +419,10 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
-	var historyCopy *gollem.History
-	if len(s.historyContents) > 0 {
-		var err error
-		historyCopy, err = NewHistory(s.historyContents)
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to convert history from Gemini format")
-		}
+	// Always create history (even if empty) to maintain consistency with middleware
+	historyCopy, err := NewHistory(s.historyContents)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to convert history from Gemini format")
 	}
 
 	contentReq := &gollem.ContentRequest{
@@ -435,7 +432,8 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 
 	// Create the base handler that performs the actual API call
 	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
-		// Always update history from middleware (even if same address, content may have changed)
+		// Update history from middleware if it was modified
+		// We need to respect middleware's changes, including when it clears the history
 		if req.History != nil {
 			var err error
 			s.historyContents, err = ToContents(req.History)
@@ -621,13 +619,10 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
-	var historyCopy *gollem.History
-	if len(s.historyContents) > 0 {
-		var err error
-		historyCopy, err = NewHistory(s.historyContents)
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to convert history from Gemini format")
-		}
+	// Always create history (even if empty) to maintain consistency with middleware
+	historyCopy, err := NewHistory(s.historyContents)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to convert history from Gemini format")
 	}
 
 	contentReq := &gollem.ContentRequest{
@@ -637,7 +632,8 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 
 	// Create the base handler that performs the actual API call
 	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
-		// Always update history from middleware (even if same address, content may have changed)
+		// Update history from middleware if it was modified
+		// We need to respect middleware's changes, including when it clears the history
 		if req.History != nil {
 			var err error
 			s.historyContents, err = ToContents(req.History)

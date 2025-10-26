@@ -43,3 +43,23 @@ func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model s
 		cfg:             cfg,
 	}, nil
 }
+
+// SetSessionAPIClient sets the API client for testing
+func SetSessionAPIClient(s *Session, client apiClient) {
+	s.apiClient = client
+}
+
+// SetSessionModel sets the model for testing
+func SetSessionModel(s *Session, model string) {
+	s.model = model
+}
+
+// SetSessionConfig sets the config for testing
+func SetSessionConfig(s *Session, config *genai.GenerateContentConfig) {
+	s.config = config
+}
+
+// SetSessionCfg sets the cfg for testing
+func SetSessionCfg(s *Session, cfg gollem.SessionConfig) {
+	s.cfg = cfg
+}
