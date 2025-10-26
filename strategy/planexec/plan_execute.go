@@ -59,7 +59,7 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 
 		// Analyze and create plan using LLM
 		// Pass system prompt and history so they can be embedded into the Plan structure
-		plan, planHistory, err := analyzeAndPlan(ctx, s.client, state.InitInput, state.Tools, s.middleware, state.SystemPrompt, state.History)
+		plan, err := analyzeAndPlan(ctx, s.client, state.InitInput, state.Tools, s.middleware, state.SystemPrompt, state.History)
 		if err != nil {
 			return nil, nil, goerr.Wrap(err, "failed to analyze and plan")
 		}
@@ -72,11 +72,11 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 			}
 		}
 
-		// No plan needed - return direct response with history
+		// No plan needed - return direct response
+		// Planning phase is internal analysis - no history preservation needed
 		if len(plan.Tasks) == 0 {
 			return nil, &gollem.ExecuteResponse{
-				Texts:             []string{plan.DirectResponse},
-				AdditionalHistory: planHistory,
+				Texts: []string{plan.DirectResponse},
 			}, nil
 		}
 		// Proceed to phase 3 to select first task
@@ -111,7 +111,7 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 		}
 
 		// Perform reflection only if enabled
-		reflectionResult, _, err := reflect(ctx, s.client, s.plan, s.currentTask, state.Tools, s.middleware, s.taskIterationCount, s.maxIterations, state.History)
+		reflectionResult, err := reflect(ctx, s.client, s.plan, s.currentTask, state.Tools, s.middleware, s.taskIterationCount, s.maxIterations, state.History)
 		if err != nil {
 			return nil, nil, goerr.Wrap(err, "reflection failed")
 		}

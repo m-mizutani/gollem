@@ -12,8 +12,8 @@ import (
 
 // analyzeAndPlan analyzes user input and creates a plan using LLM
 // It uses system prompt and history to embed necessary context into the Plan's goal
-// Returns the plan and the session history (including the planning conversation)
-func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []gollem.Input, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, systemPrompt string, history *gollem.History) (*Plan, *gollem.History, error) {
+// This is an internal analysis process - the conversation history is not preserved
+func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []gollem.Input, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, systemPrompt string, history *gollem.History) (*Plan, error) {
 	logger := ctxlog.From(ctx)
 	logger.Debug("analyzing and planning", "has_system_prompt", systemPrompt != "", "has_history", history != nil)
 
@@ -45,7 +45,7 @@ func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []golle
 
 	session, err := client.NewSession(ctx, sessionOpts...)
 	if err != nil {
-		return nil, nil, goerr.Wrap(err, "failed to create session")
+		return nil, goerr.Wrap(err, "failed to create session")
 	}
 
 	// Build planning prompt
@@ -54,23 +54,17 @@ func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []golle
 	// Generate plan using LLM
 	response, err := session.GenerateContent(ctx, planPrompt...)
 	if err != nil {
-		return nil, nil, goerr.Wrap(err, "failed to generate plan")
+		return nil, goerr.Wrap(err, "failed to generate plan")
 	}
 
 	// Parse the response to extract plan
 	plan, err := parsePlanFromResponse(ctx, response)
 	if err != nil {
-		return nil, nil, goerr.Wrap(err, "failed to parse plan from response")
-	}
-
-	// Get session history after planning
-	sessionHistory, err := session.History()
-	if err != nil {
-		return nil, nil, goerr.Wrap(err, "failed to get session history")
+		return nil, goerr.Wrap(err, "failed to parse plan from response")
 	}
 
 	logger.Debug("plan created", "goal", plan.Goal, "tasks", len(plan.Tasks))
-	return plan, sessionHistory, nil
+	return plan, nil
 }
 
 // parsePlanFromResponse extracts plan from LLM response
