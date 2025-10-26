@@ -4,8 +4,15 @@ import "strings"
 
 // ExecuteResponse represents the final response from Execute method
 type ExecuteResponse struct {
-	Texts   []string // Response texts array
-	History *History // Optional history to append to the main session
+	// Texts contains the final response texts to be returned to the user.
+	// These will be automatically added to session history as assistant messages.
+	Texts []string
+
+	// AdditionalHistory contains conversation history from internal LLM calls
+	// made by the strategy (e.g., planning, reflection phases in plan-execute).
+	// This should NOT include the final response texts - those are handled separately via Texts field.
+	// Use this to preserve context from intermediate LLM interactions.
+	AdditionalHistory *History
 }
 
 // NewExecuteResponse creates a new ExecuteResponse with given texts

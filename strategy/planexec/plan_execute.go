@@ -75,8 +75,8 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 		// No plan needed - return direct response with history
 		if len(plan.Tasks) == 0 {
 			return nil, &gollem.ExecuteResponse{
-				Texts:   []string{plan.DirectResponse},
-				History: planHistory,
+				Texts:             []string{plan.DirectResponse},
+				AdditionalHistory: planHistory,
 			}, nil
 		}
 		// Proceed to phase 3 to select first task

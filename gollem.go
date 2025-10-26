@@ -361,14 +361,16 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, 
 					"texts_count", len(executeResponse.Texts))
 			}
 
-			// Append history to session if provided
-			if executeResponse.History != nil {
-				if err := g.currentSession.AppendHistory(executeResponse.History); err != nil {
-					return nil, goerr.Wrap(err, "failed to append history to session")
+			// Append additional history from strategy's internal LLM calls (if provided)
+			// This contains context from intermediate steps like planning or reflection
+			if executeResponse.AdditionalHistory != nil {
+				if err := g.currentSession.AppendHistory(executeResponse.AdditionalHistory); err != nil {
+					return nil, goerr.Wrap(err, "failed to append additional history to session")
 				}
 			}
 
-			// Append texts to session history if provided
+			// Append final response texts to session history as assistant message
+			// This is done separately from AdditionalHistory to avoid duplication
 			if len(executeResponse.Texts) > 0 {
 				// Combine all texts into a single message
 				var combinedText string

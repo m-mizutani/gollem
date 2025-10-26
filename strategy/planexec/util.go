@@ -108,8 +108,8 @@ IMPORTANT: You should now provide a text summary of what was accomplished. Do NO
 	}
 
 	return &gollem.ExecuteResponse{
-		Texts:   response.Texts,
-		History: sessionHistory,
+		Texts:             response.Texts,
+		AdditionalHistory: sessionHistory,
 	}, nil
 }
 
