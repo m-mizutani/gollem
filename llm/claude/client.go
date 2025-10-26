@@ -229,6 +229,18 @@ func (s *Session) History() (*gollem.History, error) {
 	return NewHistory(s.historyMessages)
 }
 
+func (s *Session) AppendHistory(h *gollem.History) error {
+	if h == nil {
+		return nil
+	}
+	messages, err := ToMessages(h)
+	if err != nil {
+		return goerr.Wrap(err, "failed to convert history to Claude format")
+	}
+	s.historyMessages = append(s.historyMessages, messages...)
+	return nil
+}
+
 // convertInputs converts gollem.Input to Claude messages and tool results
 func (s *Session) convertInputs(ctx context.Context, input ...gollem.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
 	return convertGollemInputsToClaude(ctx, input...)
@@ -758,16 +770,6 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		apiMessages = append(apiMessages, s.historyMessages...)
 		apiMessages = append(apiMessages, messages...)
 
-		// Add prefill for JSON schema responses
-		usePrefill := s.cfg.ContentType() == gollem.ContentTypeJSON && s.cfg.ResponseSchema() != nil
-		if usePrefill {
-			// Add an assistant message with just "{" to prefill the response
-			prefillMessage := anthropic.NewAssistantMessage(
-				anthropic.NewTextBlock("{"),
-			)
-			apiMessages = append(apiMessages, prefillMessage)
-		}
-
 		// Create the request and call the API
 		systemPrompt, err := createSystemPrompt(ctx, s.cfg)
 		if err != nil {
@@ -838,39 +840,13 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		// Process response and extract content
 		processedResp := processResponseWithContentType(ctx, resp, s.cfg.ContentType(), s.cfg.ResponseSchema() != nil)
 
-		// If we used prefill, prepend "{" to the first text response AND to the history
-		if usePrefill && len(processedResp.Texts) > 0 {
-			processedResp.Texts[0] = "{" + processedResp.Texts[0]
+		// Update history with new messages (already in Claude format)
+		s.historyMessages = append(s.historyMessages, messages...)
 
-			// Also update the response parameter for history
-			respParam := resp.ToParam()
-			if len(respParam.Content) > 0 {
-				// Update the first text content block in the response
-				for i, content := range respParam.Content {
-					if textContent := content.OfText; textContent != nil {
-						updatedText := "{" + textContent.Text
-						respParam.Content[i] = anthropic.NewTextBlock(updatedText)
-						break
-					}
-				}
-			}
-
-			// Update history with new messages (already in Claude format)
-			s.historyMessages = append(s.historyMessages, messages...)
-
-			// Add updated response to history
-			if len(respParam.Content) > 0 {
-				s.historyMessages = append(s.historyMessages, respParam)
-			}
-		} else {
-			// Update history with new messages (already in Claude format)
-			s.historyMessages = append(s.historyMessages, messages...)
-
-			// Only add response to history if it has content
-			respParam := resp.ToParam()
-			if len(respParam.Content) > 0 {
-				s.historyMessages = append(s.historyMessages, respParam)
-			}
+		// Only add response to history if it has content
+		respParam := resp.ToParam()
+		if len(respParam.Content) > 0 {
+			s.historyMessages = append(s.historyMessages, respParam)
 		}
 
 		return &gollem.ContentResponse{

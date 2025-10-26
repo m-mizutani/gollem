@@ -73,9 +73,11 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 		}
 
 		// No plan needed - return direct response
+		// Planning phase is internal analysis - no history preservation needed
 		if len(plan.Tasks) == 0 {
 			return nil, &gollem.ExecuteResponse{
-				Texts: []string{plan.DirectResponse},
+				UserInputs: state.InitInput,
+				Texts:      []string{plan.DirectResponse},
 			}, nil
 		}
 		// Proceed to phase 3 to select first task

@@ -42,6 +42,7 @@ func allTasksCompleted(ctx context.Context, plan *Plan) bool {
 }
 
 // getFinalConclusion asks LLM to generate final conclusion based on completed tasks
+// Returns ExecuteResponse with texts and session history
 func getFinalConclusion(ctx context.Context, client gollem.LLMClient, plan *Plan, middleware []gollem.ContentBlockMiddleware) (*gollem.ExecuteResponse, error) {
 	logger := ctxlog.From(ctx)
 	logger.Debug("generating final conclusion")
@@ -100,6 +101,8 @@ IMPORTANT: You should now provide a text summary of what was accomplished. Do NO
 		return nil, goerr.Wrap(err, "failed to generate conclusion")
 	}
 
+	// Return only the texts - the main session will automatically add them to history
+	// No need to include AdditionalHistory as this is the final response, not an internal analysis
 	return &gollem.ExecuteResponse{
 		Texts: response.Texts,
 	}, nil

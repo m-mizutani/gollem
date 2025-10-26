@@ -151,6 +151,18 @@ func (s *VertexAnthropicSession) History() (*gollem.History, error) {
 	return NewHistory(s.messages)
 }
 
+func (s *VertexAnthropicSession) AppendHistory(h *gollem.History) error {
+	if h == nil {
+		return nil
+	}
+	messages, err := ToMessages(h)
+	if err != nil {
+		return goerr.Wrap(err, "failed to convert history to Claude format")
+	}
+	s.messages = append(s.messages, messages...)
+	return nil
+}
+
 // convertInputs converts gollem.Input to Claude messages and tool results
 func (s *VertexAnthropicSession) convertInputs(ctx context.Context, input ...gollem.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
 	return convertGollemInputsToClaude(ctx, input...)

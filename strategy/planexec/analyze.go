@@ -12,6 +12,7 @@ import (
 
 // analyzeAndPlan analyzes user input and creates a plan using LLM
 // It uses system prompt and history to embed necessary context into the Plan's goal
+// This is an internal analysis process - the conversation history is not preserved
 func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []gollem.Input, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, systemPrompt string, history *gollem.History) (*Plan, error) {
 	logger := ctxlog.From(ctx)
 	logger.Debug("analyzing and planning", "has_system_prompt", systemPrompt != "", "has_history", history != nil)

@@ -92,7 +92,12 @@ func TestCustomStrategies(t *testing.T) {
 			},
 		}
 
-		agent := gollem.New(&mock.LLMClientMock{}, gollem.WithStrategy(strategy))
+		llmClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{}, nil
+			},
+		}
+		agent := gollem.New(llmClient, gollem.WithStrategy(strategy))
 		result, err := agent.Execute(context.Background(), gollem.Text("test"))
 
 		gt.NoError(t, err)
@@ -143,7 +148,12 @@ func TestCustomStrategies(t *testing.T) {
 			},
 		}
 
-		agent := gollem.New(&mock.LLMClientMock{}, gollem.WithStrategy(strategy))
+		llmClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{}, nil
+			},
+		}
+		agent := gollem.New(llmClient, gollem.WithStrategy(strategy))
 		result, err := agent.Execute(context.Background(), gollem.Text("test"))
 
 		gt.NoError(t, err)

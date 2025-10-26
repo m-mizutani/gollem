@@ -320,6 +320,18 @@ func (s *Session) History() (*gollem.History, error) {
 	return NewHistory(s.historyContents)
 }
 
+func (s *Session) AppendHistory(h *gollem.History) error {
+	if h == nil {
+		return nil
+	}
+	contents, err := ToContents(h)
+	if err != nil {
+		return goerr.Wrap(err, "failed to convert history to Gemini format")
+	}
+	s.historyContents = append(s.historyContents, contents...)
+	return nil
+}
+
 // convertInputs converts gollem.Input to Gemini parts
 func (s *Session) convertInputs(input ...gollem.Input) ([]*genai.Part, error) {
 	parts := make([]*genai.Part, 0, len(input))
@@ -432,8 +444,7 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 
 	// Create the base handler that performs the actual API call
 	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
-		// Update history from middleware if it was modified
-		// We need to respect middleware's changes, including when it clears the history
+		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
 			var err error
 			s.historyContents, err = ToContents(req.History)
@@ -632,8 +643,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 
 	// Create the base handler that performs the actual API call
 	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
-		// Update history from middleware if it was modified
-		// We need to respect middleware's changes, including when it clears the history
+		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
 			var err error
 			s.historyContents, err = ToContents(req.History)
