@@ -8,11 +8,11 @@ type ExecuteResponse struct {
 	// These will be automatically added to session history as assistant messages.
 	Texts []string
 
-	// AdditionalHistory contains conversation history from internal LLM calls
-	// made by the strategy (e.g., planning, reflection phases in plan-execute).
-	// This should NOT include the final response texts - those are handled separately via Texts field.
-	// Use this to preserve context from intermediate LLM interactions.
-	AdditionalHistory *History
+	// UserInputs contains the user inputs that this response corresponds to.
+	// When a strategy returns ExecuteResponse without going through GenerateContent,
+	// these inputs need to be added to session history before the response texts.
+	// This prevents user input from being lost when strategies return direct responses.
+	UserInputs []Input
 }
 
 // NewExecuteResponse creates a new ExecuteResponse with given texts

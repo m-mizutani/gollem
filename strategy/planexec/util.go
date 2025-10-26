@@ -101,15 +101,10 @@ IMPORTANT: You should now provide a text summary of what was accomplished. Do NO
 		return nil, goerr.Wrap(err, "failed to generate conclusion")
 	}
 
-	// Get session history after conclusion
-	sessionHistory, err := session.History()
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get session history")
-	}
-
+	// Return only the texts - the main session will automatically add them to history
+	// No need to include AdditionalHistory as this is the final response, not an internal analysis
 	return &gollem.ExecuteResponse{
-		Texts:             response.Texts,
-		AdditionalHistory: sessionHistory,
+		Texts: response.Texts,
 	}, nil
 }
 

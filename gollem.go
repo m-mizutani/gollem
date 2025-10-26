@@ -361,16 +361,21 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, 
 					"texts_count", len(executeResponse.Texts))
 			}
 
-			// Append additional history from strategy's internal LLM calls (if provided)
-			// This contains context from intermediate steps like planning or reflection
-			if executeResponse.AdditionalHistory != nil {
-				if err := g.currentSession.AppendHistory(executeResponse.AdditionalHistory); err != nil {
-					return nil, goerr.Wrap(err, "failed to append additional history to session")
+			// Append user inputs to session history first
+			// This is necessary when strategy returns ExecuteResponse without calling GenerateContent
+			if len(executeResponse.UserInputs) > 0 {
+				userHistory, err := convertInputsToHistory(executeResponse.UserInputs)
+				if err != nil {
+					return nil, goerr.Wrap(err, "failed to convert user inputs to history")
+				}
+				if userHistory != nil {
+					if err := g.currentSession.AppendHistory(userHistory); err != nil {
+						return nil, goerr.Wrap(err, "failed to append user inputs to session history")
+					}
 				}
 			}
 
 			// Append final response texts to session history as assistant message
-			// This is done separately from AdditionalHistory to avoid duplication
 			if len(executeResponse.Texts) > 0 {
 				// Combine all texts into a single message
 				var combinedText string
@@ -601,4 +606,62 @@ func buildToolMap(ctx context.Context, tools []Tool, toolSets []ToolSet) (map[st
 	}
 
 	return toolMap, nil
+}
+
+// convertInputsToHistory converts a slice of Input to History with user role
+func convertInputsToHistory(inputs []Input) (*History, error) {
+	if len(inputs) == 0 {
+		return nil, nil
+	}
+
+	var contents []MessageContent
+
+	for _, input := range inputs {
+		switch v := input.(type) {
+		case Text:
+			textData, err := json.Marshal(map[string]string{"text": string(v)})
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to marshal text content")
+			}
+			contents = append(contents, MessageContent{
+				Type: MessageContentTypeText,
+				Data: textData,
+			})
+
+		case Image:
+			imageData, err := json.Marshal(map[string]string{
+				"data":      v.Base64(),
+				"mime_type": v.MimeType(),
+			})
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to marshal image content")
+			}
+			contents = append(contents, MessageContent{
+				Type: MessageContentTypeImage,
+				Data: imageData,
+			})
+
+		case FunctionResponse:
+			// FunctionResponse is not user input, skip it
+			// It should be handled separately in the normal flow
+			continue
+
+		default:
+			return nil, goerr.New("unsupported input type for user history")
+		}
+	}
+
+	if len(contents) == 0 {
+		return nil, nil
+	}
+
+	return &History{
+		Version: HistoryVersion,
+		Messages: []Message{
+			{
+				Role:     RoleUser,
+				Contents: contents,
+			},
+		},
+	}, nil
 }
