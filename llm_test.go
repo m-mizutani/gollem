@@ -23,13 +23,26 @@ func TestToolExecution(t *testing.T) {
 		client, err := newClient(t)
 		gt.NoError(t, err)
 
-		s := gollem.New(client,
+		agent := gollem.New(client,
 			gollem.WithTools(&RandomNumberTool{}),
 			gollem.WithLoopLimit(5),
 		)
 
-		_, err = s.Execute(t.Context(), gollem.Text("Generate a random number between 1 and 100."))
+		fmt.Printf("[TEST] Agent created: agent=%p\n", agent)
+
+		_, err = agent.Execute(t.Context(), gollem.Text("Generate a random number between 1 and 100."))
 		gt.NoError(t, err)
+
+		// Verify Agent.Session().History() works correctly
+		session := agent.Session()
+		fmt.Printf("[TEST] Session after Execute: session=%p, type=%T\n", session, session)
+		gt.NotNil(t, session)
+
+		history, err := session.History()
+		gt.NoError(t, err)
+		gt.NotNil(t, history)
+		fmt.Printf("[TEST] History after Execute: messages=%d\n", len(history.Messages))
+		gt.True(t, len(history.Messages) >= 2)
 	}
 
 	t.Run("OpenAI", func(t *testing.T) {

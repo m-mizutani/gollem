@@ -432,9 +432,9 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 
 	// Create the base handler that performs the actual API call
 	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
-		// Update history from middleware if it was modified
-		// We need to respect middleware's changes, including when it clears the history
-		if req.History != nil {
+		// Update history from middleware ONLY if it was actually modified
+		// Check if the middleware returned a different History object
+		if req.History != historyCopy {
 			var err error
 			s.historyContents, err = ToContents(req.History)
 			if err != nil {
@@ -632,9 +632,9 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 
 	// Create the base handler that performs the actual API call
 	baseHandler := func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
-		// Update history from middleware if it was modified
-		// We need to respect middleware's changes, including when it clears the history
-		if req.History != nil {
+		// Update history from middleware ONLY if it was actually modified
+		// Check if the middleware returned a different History object
+		if req.History != historyCopy {
 			var err error
 			s.historyContents, err = ToContents(req.History)
 			if err != nil {
