@@ -324,6 +324,9 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, 
 		if err != nil {
 			return nil, err
 		}
+		if ssn == nil {
+			return nil, goerr.New("LLMClient.NewSession returned nil session")
+		}
 		g.currentSession = ssn
 	}
 
@@ -356,6 +359,49 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, 
 				logger.Warn("Strategy returned both ExecuteResponse and Input - Input will be ignored",
 					"inputs_count", len(strategyInputs),
 					"texts_count", len(executeResponse.Texts))
+			}
+
+			// Append history to session if provided
+			if executeResponse.History != nil {
+				if err := g.currentSession.AppendHistory(executeResponse.History); err != nil {
+					return nil, goerr.Wrap(err, "failed to append history to session")
+				}
+			}
+
+			// Append texts to session history if provided
+			if len(executeResponse.Texts) > 0 {
+				// Combine all texts into a single message
+				var combinedText string
+				for i, text := range executeResponse.Texts {
+					if i > 0 {
+						combinedText += "\n"
+					}
+					combinedText += text
+				}
+
+				textData, err := json.Marshal(map[string]string{"text": combinedText})
+				if err != nil {
+					return nil, goerr.Wrap(err, "failed to marshal text content")
+				}
+
+				// Create a history entry for the texts (as assistant message)
+				textHistory := &History{
+					Version: HistoryVersion,
+					Messages: []Message{
+						{
+							Role: RoleAssistant,
+							Contents: []MessageContent{
+								{
+									Type: MessageContentTypeText,
+									Data: textData,
+								},
+							},
+						},
+					},
+				}
+				if err := g.currentSession.AppendHistory(textHistory); err != nil {
+					return nil, goerr.Wrap(err, "failed to append texts to session history")
+				}
 			}
 
 			// Return strategy's response immediately

@@ -147,6 +147,9 @@ func (mock *LLMClientMock) NewSessionCalls() []struct {
 //
 //		// make and configure a mocked gollem.Session
 //		mockedSession := &SessionMock{
+//			AppendHistoryFunc: func(history *gollem.History) error {
+//				panic("mock out the AppendHistory method")
+//			},
 //			GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 //				panic("mock out the GenerateContent method")
 //			},
@@ -163,6 +166,9 @@ func (mock *LLMClientMock) NewSessionCalls() []struct {
 //
 //	}
 type SessionMock struct {
+	// AppendHistoryFunc mocks the AppendHistory method.
+	AppendHistoryFunc func(history *gollem.History) error
+
 	// GenerateContentFunc mocks the GenerateContent method.
 	GenerateContentFunc func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error)
 
@@ -174,6 +180,11 @@ type SessionMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// AppendHistory holds details about calls to the AppendHistory method.
+		AppendHistory []struct {
+			// History is the history argument value.
+			History *gollem.History
+		}
 		// GenerateContent holds details about calls to the GenerateContent method.
 		GenerateContent []struct {
 			// Ctx is the ctx argument value.
@@ -192,9 +203,45 @@ type SessionMock struct {
 		History []struct {
 		}
 	}
+	lockAppendHistory   sync.RWMutex
 	lockGenerateContent sync.RWMutex
 	lockGenerateStream  sync.RWMutex
 	lockHistory         sync.RWMutex
+}
+
+// AppendHistory calls AppendHistoryFunc.
+func (mock *SessionMock) AppendHistory(history *gollem.History) error {
+	callInfo := struct {
+		History *gollem.History
+	}{
+		History: history,
+	}
+	mock.lockAppendHistory.Lock()
+	mock.calls.AppendHistory = append(mock.calls.AppendHistory, callInfo)
+	mock.lockAppendHistory.Unlock()
+	if mock.AppendHistoryFunc == nil {
+		var (
+			errOut error
+		)
+		return errOut
+	}
+	return mock.AppendHistoryFunc(history)
+}
+
+// AppendHistoryCalls gets all the calls that were made to AppendHistory.
+// Check the length with:
+//
+//	len(mockedSession.AppendHistoryCalls())
+func (mock *SessionMock) AppendHistoryCalls() []struct {
+	History *gollem.History
+} {
+	var calls []struct {
+		History *gollem.History
+	}
+	mock.lockAppendHistory.RLock()
+	calls = mock.calls.AppendHistory
+	mock.lockAppendHistory.RUnlock()
+	return calls
 }
 
 // GenerateContent calls GenerateContentFunc.

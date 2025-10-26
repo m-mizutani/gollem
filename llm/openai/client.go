@@ -258,6 +258,18 @@ func (s *Session) History() (*gollem.History, error) {
 	return NewHistory(s.historyMessages)
 }
 
+func (s *Session) AppendHistory(h *gollem.History) error {
+	if h == nil {
+		return nil
+	}
+	messages, err := ToMessages(h)
+	if err != nil {
+		return goerr.Wrap(err, "failed to convert history to OpenAI format")
+	}
+	s.historyMessages = append(s.historyMessages, messages...)
+	return nil
+}
+
 // getMessages returns history messages (already in OpenAI format)
 func (s *Session) getMessages() ([]openai.ChatCompletionMessage, error) {
 	if len(s.historyMessages) == 0 {

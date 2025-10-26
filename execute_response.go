@@ -4,7 +4,8 @@ import "strings"
 
 // ExecuteResponse represents the final response from Execute method
 type ExecuteResponse struct {
-	Texts []string // Response texts array
+	Texts   []string // Response texts array
+	History *History // Optional history to append to the main session
 }
 
 // NewExecuteResponse creates a new ExecuteResponse with given texts

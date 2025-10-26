@@ -18,7 +18,8 @@ type reflectionResult struct {
 
 // reflect performs reflection after task completion to update or add tasks
 // It evaluates task results against the Plan, which contains all necessary context and constraints.
-func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completedTask *Task, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, currentIteration, maxIterations int, history *gollem.History) (*reflectionResult, error) {
+// Returns the reflection result and the session history (including the reflection conversation)
+func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completedTask *Task, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, currentIteration, maxIterations int, history *gollem.History) (*reflectionResult, *gollem.History, error) {
 	logger := ctxlog.From(ctx)
 	logger.Debug("performing reflection", "goal", plan.Goal)
 
@@ -40,7 +41,7 @@ func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completed
 
 	session, err := client.NewSession(ctx, sessionOpts...)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create session for reflection")
+		return nil, nil, goerr.Wrap(err, "failed to create session for reflection")
 	}
 
 	// Build reflection prompt
@@ -49,17 +50,23 @@ func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completed
 	// Generate reflection using LLM
 	response, err := session.GenerateContent(ctx, reflectPrompt...)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to generate reflection")
+		return nil, nil, goerr.Wrap(err, "failed to generate reflection")
 	}
 
 	// Parse the reflection response
 	result, err := parseReflectionFromResponse(ctx, response, plan)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to parse reflection response")
+		return nil, nil, goerr.Wrap(err, "failed to parse reflection response")
+	}
+
+	// Get session history after reflection
+	sessionHistory, err := session.History()
+	if err != nil {
+		return nil, nil, goerr.Wrap(err, "failed to get session history")
 	}
 
 	logger.Debug("reflection completed", "new_tasks", len(result.NewTasks), "updated_tasks", len(result.UpdatedTasks))
-	return result, nil
+	return result, sessionHistory, nil
 }
 
 // parseReflectionFromResponse extracts reflection results from LLM response
