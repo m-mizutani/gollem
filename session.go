@@ -8,6 +8,7 @@ type Session interface {
 	GenerateStream(ctx context.Context, input ...Input) (<-chan *Response, error)
 	History() (*History, error)
 	AppendHistory(*History) error
+	CountToken(ctx context.Context, input ...Input) (int, error)
 }
 
 // SessionConfig is the configuration for the new session. This is required for only LLM client implementations.

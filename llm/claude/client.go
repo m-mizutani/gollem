@@ -1045,6 +1045,87 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	return responseChan, nil
 }
 
+// countTokensWithParams is a helper function that builds the count tokens parameters
+// and calls the API.
+func countTokensWithParams(
+	ctx context.Context,
+	model string,
+	historyMessages []anthropic.MessageParam,
+	newMessages []anthropic.MessageParam,
+	systemPrompt string,
+	tools []anthropic.ToolUnionParam,
+	apiClient apiClient,
+) (int, error) {
+	// Build complete messages list: history + new inputs
+	apiMessages := make([]anthropic.MessageParam, 0, len(historyMessages)+len(newMessages))
+	apiMessages = append(apiMessages, historyMessages...)
+	apiMessages = append(apiMessages, newMessages...)
+
+	// Prepare count tokens parameters
+	params := anthropic.MessageCountTokensParams{
+		Model:    anthropic.Model(model),
+		Messages: apiMessages,
+	}
+
+	// Add system prompt if available
+	if systemPrompt != "" {
+		params.System = anthropic.MessageCountTokensParamsSystemUnion{
+			OfString: anthropic.String(systemPrompt),
+		}
+	}
+
+	// Add tools if available
+	if len(tools) > 0 {
+		// Convert ToolUnionParam to MessageCountTokensToolUnionParam
+		countTools := make([]anthropic.MessageCountTokensToolUnionParam, 0, len(tools))
+		for _, tool := range tools {
+			if tool.OfTool != nil {
+				countTools = append(countTools, anthropic.MessageCountTokensToolUnionParam{
+					OfTool: tool.OfTool,
+				})
+			}
+		}
+		params.Tools = countTools
+	}
+
+	// Call the CountTokens API
+	result, err := apiClient.MessagesCountTokens(ctx, params)
+	if err != nil {
+		return 0, goerr.Wrap(err, "failed to count tokens")
+	}
+
+	return int(result.InputTokens), nil
+}
+
+// CountToken calculates the total number of tokens for the given inputs,
+// including system prompt, history messages, and new inputs.
+// This uses Anthropic's Messages Count Tokens API.
+func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, error) {
+	// Convert inputs to Claude messages
+	messages, _, err := s.convertInputs(ctx, input...)
+	if err != nil {
+		return 0, goerr.Wrap(err, "failed to convert inputs for token counting")
+	}
+
+	// Create copies of historyMessages and tools to avoid race conditions
+	// This ensures thread safety when reading session state
+	historyMessagesCopy := make([]anthropic.MessageParam, len(s.historyMessages))
+	copy(historyMessagesCopy, s.historyMessages)
+
+	toolsCopy := make([]anthropic.ToolUnionParam, len(s.tools))
+	copy(toolsCopy, s.tools)
+
+	return countTokensWithParams(
+		ctx,
+		s.defaultModel,
+		historyMessagesCopy,
+		messages,
+		s.cfg.SystemPrompt(),
+		toolsCopy,
+		s.apiClient,
+	)
+}
+
 // tokenLimitErrorOptions checks if the error is a token limit exceeded error
 // and returns goerr.Option to tag the error with ErrTagTokenExceeded.
 // Returns nil if the error is not a token limit exceeded error.

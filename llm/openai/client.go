@@ -12,6 +12,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/internal/schema"
+	"github.com/pkoukk/tiktoken-go"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -297,8 +298,9 @@ func (s *Session) updateHistoryWithResponse(assistantMessage openai.ChatCompleti
 }
 
 // convertInputs converts gollem.Input to OpenAI messages and updates currentHistory
-func (s *Session) convertInputs(input ...gollem.Input) error {
-	// Work with a local messages array that we'll integrate into history at the end
+// convertInputsToMessages converts gollem.Input to OpenAI messages without modifying session state.
+// This is a pure function used for read-only operations like CountToken.
+func (s *Session) convertInputsToMessages(input ...gollem.Input) ([]openai.ChatCompletionMessage, error) {
 	var newMessages []openai.ChatCompletionMessage
 
 	// Accumulate consecutive user content (Text/Image) into a single message
@@ -333,15 +335,12 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 			}
 			data, err := json.Marshal(v.Data)
 			if err != nil {
-				return goerr.Wrap(err, "failed to marshal function response")
+				return nil, goerr.Wrap(err, "failed to marshal function response")
 			}
 			response := string(data)
 			if v.Error != nil {
 				response = fmt.Sprintf(`Error message: %+v`, v.Error)
 			}
-
-			// DEBUG: Log tool result creation for OpenAI
-			// Note: Debug logging can be enabled here for troubleshooting tool_call_id issues
 
 			newMessages = append(newMessages, openai.ChatCompletionMessage{
 				Role:       openai.ChatMessageRoleTool,
@@ -349,7 +348,7 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 				ToolCallID: v.ID,
 			})
 		default:
-			return goerr.Wrap(gollem.ErrInvalidParameter, "invalid input")
+			return nil, goerr.Wrap(gollem.ErrInvalidParameter, "invalid input")
 		}
 	}
 
@@ -359,6 +358,16 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 			Role:         openai.ChatMessageRoleUser,
 			MultiContent: userContentParts,
 		})
+	}
+
+	return newMessages, nil
+}
+
+func (s *Session) convertInputs(input ...gollem.Input) error {
+	// Convert inputs to messages using the pure function
+	newMessages, err := s.convertInputsToMessages(input...)
+	if err != nil {
+		return err
 	}
 
 	// Update currentHistory with new messages
@@ -1011,6 +1020,104 @@ func convertParameterToJSONSchemaWithStrict(param *gollem.Parameter, strict bool
 	}
 
 	return result
+}
+
+// CountToken calculates the total number of tokens for the given inputs,
+// including system prompt, history messages, and new inputs.
+// This uses tiktoken library for local token counting without API calls.
+func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, error) {
+	// Get tiktoken encoding for the model
+	// If model is not found, try to use a compatible encoding
+	encoding, err := tiktoken.EncodingForModel(s.defaultModel)
+	if err != nil {
+		// Fallback to cl100k_base encoding (used by gpt-4, gpt-3.5-turbo, gpt-4o, gpt-5, etc.)
+		encoding, err = tiktoken.GetEncoding("cl100k_base")
+		if err != nil {
+			return 0, goerr.Wrap(err, "failed to get encoding")
+		}
+	}
+
+	// Convert inputs to messages without modifying session state
+	newMessages, err := s.convertInputsToMessages(input...)
+	if err != nil {
+		return 0, goerr.Wrap(err, "failed to convert inputs for token counting")
+	}
+
+	// Create a copy of history messages to avoid race conditions
+	// This ensures thread safety when reading historyMessages
+	historyMessagesCopy := make([]openai.ChatCompletionMessage, len(s.historyMessages))
+	copy(historyMessagesCopy, s.historyMessages)
+
+	// Combine history copy with new inputs for counting
+	messages := append(historyMessagesCopy, newMessages...)
+
+	// Count tokens for all messages
+	totalTokens := 0
+
+	// Add tokens for system prompt if present
+	if s.cfg.SystemPrompt() != "" {
+		totalTokens += len(encoding.Encode(s.cfg.SystemPrompt(), nil, nil))
+		totalTokens += 3 // System message formatting tokens
+	}
+
+	// Count tokens per message based on model
+	// Different models have different token overhead per message
+	tokensPerMessage := 3
+	tokensPerName := 1
+
+	// Adjust for specific model families
+	switch {
+	case s.defaultModel == "gpt-3.5-turbo-0301":
+		tokensPerMessage = 4
+		tokensPerName = -1
+	}
+
+	for _, message := range messages {
+		totalTokens += tokensPerMessage
+		if message.Content != "" {
+			totalTokens += len(encoding.Encode(message.Content, nil, nil))
+		}
+		totalTokens += len(encoding.Encode(message.Role, nil, nil))
+		if message.Name != "" {
+			totalTokens += len(encoding.Encode(message.Name, nil, nil))
+			totalTokens += tokensPerName
+		}
+		// Count tool calls
+		if message.ToolCalls != nil {
+			for _, toolCall := range message.ToolCalls {
+				totalTokens += len(encoding.Encode(toolCall.Function.Name, nil, nil))
+				totalTokens += len(encoding.Encode(toolCall.Function.Arguments, nil, nil))
+			}
+		}
+		// Count multi-content parts
+		if message.MultiContent != nil {
+			for _, part := range message.MultiContent {
+				if part.Type == openai.ChatMessagePartTypeText {
+					totalTokens += len(encoding.Encode(part.Text, nil, nil))
+				}
+			}
+		}
+	}
+
+	// Add tokens for tools if present
+	// Create a copy of tools to avoid race conditions
+	toolsCopy := make([]openai.Tool, len(s.tools))
+	copy(toolsCopy, s.tools)
+
+	if len(toolsCopy) > 0 {
+		for _, tool := range toolsCopy {
+			toolJSON, err := json.Marshal(tool)
+			if err != nil {
+				return 0, goerr.Wrap(err, "failed to marshal tool for token counting")
+			}
+			totalTokens += len(encoding.Encode(string(toolJSON), nil, nil))
+		}
+	}
+
+	// Add reply priming tokens
+	totalTokens += 3
+
+	return totalTokens, nil
 }
 
 // tokenLimitErrorOptions checks if the error is a token limit exceeded error

@@ -16,6 +16,9 @@ import (
 //
 //		// make and configure a mocked claude.apiClient
 //		mockedapiClient := &apiClientMock{
+//			MessagesCountTokensFunc: func(ctx context.Context, params anthropic.MessageCountTokensParams) (*anthropic.MessageTokensCount, error) {
+//				panic("mock out the MessagesCountTokens method")
+//			},
 //			MessagesNewFunc: func(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
 //				panic("mock out the MessagesNew method")
 //			},
@@ -29,6 +32,9 @@ import (
 //
 //	}
 type apiClientMock struct {
+	// MessagesCountTokensFunc mocks the MessagesCountTokens method.
+	MessagesCountTokensFunc func(ctx context.Context, params anthropic.MessageCountTokensParams) (*anthropic.MessageTokensCount, error)
+
 	// MessagesNewFunc mocks the MessagesNew method.
 	MessagesNewFunc func(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error)
 
@@ -37,6 +43,13 @@ type apiClientMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// MessagesCountTokens holds details about calls to the MessagesCountTokens method.
+		MessagesCountTokens []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Params is the params argument value.
+			Params anthropic.MessageCountTokensParams
+		}
 		// MessagesNew holds details about calls to the MessagesNew method.
 		MessagesNew []struct {
 			// Ctx is the ctx argument value.
@@ -52,8 +65,45 @@ type apiClientMock struct {
 			Params anthropic.MessageNewParams
 		}
 	}
+	lockMessagesCountTokens  sync.RWMutex
 	lockMessagesNew          sync.RWMutex
 	lockMessagesNewStreaming sync.RWMutex
+}
+
+// MessagesCountTokens calls MessagesCountTokensFunc.
+func (mock *apiClientMock) MessagesCountTokens(ctx context.Context, params anthropic.MessageCountTokensParams) (*anthropic.MessageTokensCount, error) {
+	if mock.MessagesCountTokensFunc == nil {
+		panic("apiClientMock.MessagesCountTokensFunc: method is nil but apiClient.MessagesCountTokens was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		Params anthropic.MessageCountTokensParams
+	}{
+		Ctx:    ctx,
+		Params: params,
+	}
+	mock.lockMessagesCountTokens.Lock()
+	mock.calls.MessagesCountTokens = append(mock.calls.MessagesCountTokens, callInfo)
+	mock.lockMessagesCountTokens.Unlock()
+	return mock.MessagesCountTokensFunc(ctx, params)
+}
+
+// MessagesCountTokensCalls gets all the calls that were made to MessagesCountTokens.
+// Check the length with:
+//
+//	len(mockedapiClient.MessagesCountTokensCalls())
+func (mock *apiClientMock) MessagesCountTokensCalls() []struct {
+	Ctx    context.Context
+	Params anthropic.MessageCountTokensParams
+} {
+	var calls []struct {
+		Ctx    context.Context
+		Params anthropic.MessageCountTokensParams
+	}
+	mock.lockMessagesCountTokens.RLock()
+	calls = mock.calls.MessagesCountTokens
+	mock.lockMessagesCountTokens.RUnlock()
+	return calls
 }
 
 // MessagesNew calls MessagesNewFunc.

@@ -244,6 +244,43 @@ func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...go
 	)
 }
 
+// CountToken calculates the total number of tokens for the given inputs,
+// including system prompt, history messages, and new inputs.
+// This uses Anthropic's Messages Count Tokens API via Vertex AI.
+func (s *VertexAnthropicSession) CountToken(ctx context.Context, input ...gollem.Input) (int, error) {
+	// Convert inputs to Claude messages
+	messages, _, err := s.convertInputs(ctx, input...)
+	if err != nil {
+		return 0, goerr.Wrap(err, "failed to convert inputs for token counting")
+	}
+
+	// Create a copy of messages to avoid race conditions
+	// This ensures thread safety when reading session state
+	messagesCopy := make([]anthropic.MessageParam, len(s.messages))
+	copy(messagesCopy, s.messages)
+
+	// Convert tools from gollem.Tool to anthropic.ToolUnionParam
+	var tools []anthropic.ToolUnionParam
+	if len(s.cfg.Tools()) > 0 {
+		tools = make([]anthropic.ToolUnionParam, 0, len(s.cfg.Tools()))
+		for _, tool := range s.cfg.Tools() {
+			tools = append(tools, convertTool(tool))
+		}
+	}
+
+	// Use the shared helper function with a wrapper for the Vertex client
+	apiClient := &realAPIClient{client: s.client}
+	return countTokensWithParams(
+		ctx,
+		s.defaultModel,
+		messagesCopy,
+		messages,
+		s.cfg.SystemPrompt(),
+		tools,
+		apiClient,
+	)
+}
+
 // GenerateEmbedding generates embeddings for the given input texts.
 func (c *VertexClient) GenerateEmbedding(ctx context.Context, dimension int, input []string) ([][]float64, error) {
 	return nil, goerr.New("embedding generation not supported for Claude models via Vertex AI")

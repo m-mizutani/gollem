@@ -11,6 +11,7 @@ import (
 type apiClient interface {
 	MessagesNew(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error)
 	MessagesNewStreaming(ctx context.Context, params anthropic.MessageNewParams) *ssestream.Stream[anthropic.MessageStreamEventUnion]
+	MessagesCountTokens(ctx context.Context, params anthropic.MessageCountTokensParams) (*anthropic.MessageTokensCount, error)
 }
 
 // realAPIClient wraps the actual Claude client
@@ -24,4 +25,8 @@ func (r *realAPIClient) MessagesNew(ctx context.Context, params anthropic.Messag
 
 func (r *realAPIClient) MessagesNewStreaming(ctx context.Context, params anthropic.MessageNewParams) *ssestream.Stream[anthropic.MessageStreamEventUnion] {
 	return r.client.Messages.NewStreaming(ctx, params)
+}
+
+func (r *realAPIClient) MessagesCountTokens(ctx context.Context, params anthropic.MessageCountTokensParams) (*anthropic.MessageTokensCount, error) {
+	return r.client.Messages.CountTokens(ctx, params)
 }
