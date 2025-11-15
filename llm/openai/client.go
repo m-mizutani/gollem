@@ -12,6 +12,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/internal/schema"
+	"github.com/pkoukk/tiktoken-go"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -1011,6 +1012,97 @@ func convertParameterToJSONSchemaWithStrict(param *gollem.Parameter, strict bool
 	}
 
 	return result
+}
+
+// CountToken calculates the total number of tokens for the given inputs,
+// including system prompt, history messages, and new inputs.
+// This uses tiktoken library for local token counting without API calls.
+func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, error) {
+	// Get tiktoken encoding for the model
+	// If model is not found, try to use a compatible encoding
+	encoding, err := tiktoken.EncodingForModel(s.defaultModel)
+	if err != nil {
+		// Fallback to cl100k_base encoding (used by gpt-4, gpt-3.5-turbo, gpt-4o, gpt-5, etc.)
+		encoding, err = tiktoken.GetEncoding("cl100k_base")
+		if err != nil {
+			return 0, goerr.Wrap(err, "failed to get encoding")
+		}
+	}
+
+	// Convert inputs to messages
+	if err := s.convertInputs(input...); err != nil {
+		return 0, goerr.Wrap(err, "failed to convert inputs for token counting")
+	}
+
+	// Get all messages (history + new inputs)
+	messages, err := s.getMessages()
+	if err != nil {
+		return 0, goerr.Wrap(err, "failed to get messages for token counting")
+	}
+
+	// Count tokens for all messages
+	totalTokens := 0
+
+	// Add tokens for system prompt if present
+	if s.cfg.SystemPrompt() != "" {
+		totalTokens += len(encoding.Encode(s.cfg.SystemPrompt(), nil, nil))
+		totalTokens += 3 // System message formatting tokens
+	}
+
+	// Count tokens per message based on model
+	// Different models have different token overhead per message
+	tokensPerMessage := 3
+	tokensPerName := 1
+
+	// Adjust for specific model families
+	switch {
+	case s.defaultModel == "gpt-3.5-turbo-0301":
+		tokensPerMessage = 4
+		tokensPerName = -1
+	}
+
+	for _, message := range messages {
+		totalTokens += tokensPerMessage
+		if message.Content != "" {
+			totalTokens += len(encoding.Encode(message.Content, nil, nil))
+		}
+		totalTokens += len(encoding.Encode(message.Role, nil, nil))
+		if message.Name != "" {
+			totalTokens += len(encoding.Encode(message.Name, nil, nil))
+			totalTokens += tokensPerName
+		}
+		// Count tool calls
+		if message.ToolCalls != nil {
+			for _, toolCall := range message.ToolCalls {
+				totalTokens += len(encoding.Encode(toolCall.Function.Name, nil, nil))
+				totalTokens += len(encoding.Encode(toolCall.Function.Arguments, nil, nil))
+			}
+		}
+		// Count multi-content parts
+		if message.MultiContent != nil {
+			for _, part := range message.MultiContent {
+				if part.Type == openai.ChatMessagePartTypeText {
+					totalTokens += len(encoding.Encode(part.Text, nil, nil))
+				}
+			}
+		}
+	}
+
+	// Add tokens for tools if present
+	if len(s.tools) > 0 {
+		for _, tool := range s.tools {
+			toolJSON, err := json.Marshal(tool)
+			if err != nil {
+				return 0, goerr.Wrap(err, "failed to marshal tool for token counting")
+			}
+			totalTokens += len(encoding.Encode(string(toolJSON), nil, nil))
+		}
+	}
+
+	// Add reply priming tokens
+	totalTokens += 3
+
+	return totalTokens, nil
 }
 
 // tokenLimitErrorOptions checks if the error is a token limit exceeded error

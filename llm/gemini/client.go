@@ -1016,6 +1016,48 @@ func convertResponseSchemaToGenai(param *gollem.Parameter) (*genai.Schema, error
 	return schema, nil
 }
 
+// CountToken calculates the total number of tokens for the given inputs,
+// including system prompt, history messages, and new inputs.
+// This is useful for estimating API costs and checking token limits before making actual API calls.
+func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, error) {
+	// Build complete content list from history and inputs
+	var contents []*genai.Content
+
+	// Add history to contents if available
+	if len(s.historyContents) > 0 {
+		contents = append(contents, s.historyContents...)
+	}
+
+	// Convert current inputs to parts
+	parts, err := s.convertInputs(input...)
+	if err != nil {
+		return 0, goerr.Wrap(err, "failed to convert inputs for token counting")
+	}
+
+	// Add current input as a new user message
+	if len(parts) > 0 {
+		userContent := &genai.Content{
+			Role:  "user",
+			Parts: parts,
+		}
+		contents = append(contents, userContent)
+	}
+
+	// Create CountTokensConfig from GenerateContentConfig
+	countConfig := &genai.CountTokensConfig{
+		SystemInstruction: s.config.SystemInstruction,
+		Tools:             s.config.Tools,
+	}
+
+	// Call the CountTokens API
+	result, err := s.apiClient.CountTokens(ctx, s.model, contents, countConfig)
+	if err != nil {
+		return 0, goerr.Wrap(err, "failed to count tokens")
+	}
+
+	return int(result.TotalTokens), nil
+}
+
 // tokenLimitErrorOptions checks if the error is a token limit exceeded error
 // and returns goerr.Option to tag the error with ErrTagTokenExceeded.
 // Returns nil if the error is not a token limit exceeded error.

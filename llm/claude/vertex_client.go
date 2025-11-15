@@ -244,6 +244,61 @@ func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...go
 	)
 }
 
+// CountToken calculates the total number of tokens for the given inputs,
+// including system prompt, history messages, and new inputs.
+// This uses Anthropic's Messages Count Tokens API via Vertex AI.
+func (s *VertexAnthropicSession) CountToken(ctx context.Context, input ...gollem.Input) (int, error) {
+	// Convert inputs to Claude messages
+	messages, _, err := s.convertInputs(ctx, input...)
+	if err != nil {
+		return 0, goerr.Wrap(err, "failed to convert inputs for token counting")
+	}
+
+	// Build complete messages list: history + new inputs
+	apiMessages := make([]anthropic.MessageParam, 0, len(s.messages)+len(messages))
+	apiMessages = append(apiMessages, s.messages...)
+	apiMessages = append(apiMessages, messages...)
+
+	// Prepare count tokens parameters
+	params := anthropic.MessageCountTokensParams{
+		Model:    anthropic.Model(s.defaultModel),
+		Messages: apiMessages,
+	}
+
+	// Add system prompt if available
+	if s.cfg.SystemPrompt() != "" {
+		params.System = anthropic.MessageCountTokensParamsSystemUnion{
+			OfString: anthropic.String(s.cfg.SystemPrompt()),
+		}
+	}
+
+	// Add tools if available
+	if len(s.cfg.Tools()) > 0 {
+		tools := make([]anthropic.ToolUnionParam, len(s.cfg.Tools()))
+		for i, tool := range s.cfg.Tools() {
+			tools[i] = convertTool(tool)
+		}
+		// Convert ToolUnionParam to MessageCountTokensToolUnionParam
+		countTools := make([]anthropic.MessageCountTokensToolUnionParam, len(tools))
+		for i, tool := range tools {
+			if tool.OfTool != nil {
+				countTools[i] = anthropic.MessageCountTokensToolUnionParam{
+					OfTool: tool.OfTool,
+				}
+			}
+		}
+		params.Tools = countTools
+	}
+
+	// Call the CountTokens API
+	result, err := s.client.Messages.CountTokens(ctx, params)
+	if err != nil {
+		return 0, goerr.Wrap(err, "failed to count tokens")
+	}
+
+	return int(result.InputTokens), nil
+}
+
 // GenerateEmbedding generates embeddings for the given input texts.
 func (c *VertexClient) GenerateEmbedding(ctx context.Context, dimension int, input []string) ([][]float64, error) {
 	return nil, goerr.New("embedding generation not supported for Claude models via Vertex AI")

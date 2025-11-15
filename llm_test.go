@@ -373,3 +373,69 @@ func TestStreamMiddleware(t *testing.T) {
 		})
 	})
 }
+
+// TestCountToken tests token counting functionality with real LLM clients
+func TestCountToken(t *testing.T) {
+	t.Parallel()
+
+	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		client, err := newClient(t)
+		gt.NoError(t, err)
+
+		session, err := client.NewSession(context.Background(),
+			gollem.WithSessionSystemPrompt("You are a helpful assistant."),
+			gollem.WithSessionTools(&RandomNumberTool{}),
+		)
+		gt.NoError(t, err)
+
+		// Basic token count
+		count, err := session.CountToken(t.Context(), gollem.Text("Hello, world!"))
+		gt.NoError(t, err)
+		gt.N(t, count).Greater(0)
+
+		// Generate content to add history
+		_, err = session.GenerateContent(t.Context(), gollem.Text("Hi!"))
+		gt.NoError(t, err)
+
+		// Count tokens with history
+		count, err = session.CountToken(t.Context(), gollem.Text("What is 2+2?"))
+		gt.NoError(t, err)
+		gt.N(t, count).Greater(0)
+	}
+
+	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
+		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
+		if !ok {
+			t.Skip("TEST_OPENAI_API_KEY is not set")
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return openai.New(context.Background(), apiKey)
+		})
+	})
+
+	t.Run("Claude", func(t *testing.T) {
+		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
+		if !ok {
+			t.Skip("TEST_CLAUDE_API_KEY is not set")
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return claude.New(context.Background(), apiKey)
+		})
+	})
+
+	t.Run("Gemini", func(t *testing.T) {
+		t.Parallel()
+		projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+		if !ok {
+			t.Skip("TEST_GCP_PROJECT_ID is not set")
+		}
+		location, ok := os.LookupEnv("TEST_GCP_LOCATION")
+		if !ok {
+			t.Skip("TEST_GCP_LOCATION is not set")
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return gemini.New(context.Background(), projectID, location)
+		})
+	})
+}

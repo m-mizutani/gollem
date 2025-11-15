@@ -13,6 +13,8 @@ type apiClient interface {
 	GenerateContent(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error)
 	// GenerateContentStream generates content stream without maintaining chat state
 	GenerateContentStream(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) <-chan StreamResponse
+	// CountTokens counts the number of tokens in the given contents
+	CountTokens(ctx context.Context, model string, contents []*genai.Content, config *genai.CountTokensConfig) (*genai.CountTokensResponse, error)
 }
 
 // StreamResponse wraps the response and error from streaming
@@ -39,4 +41,8 @@ func (r *realAPIClient) GenerateContentStream(ctx context.Context, model string,
 		}
 	}()
 	return ch
+}
+
+func (r *realAPIClient) CountTokens(ctx context.Context, model string, contents []*genai.Content, config *genai.CountTokensConfig) (*genai.CountTokensResponse, error) {
+	return r.client.Models.CountTokens(ctx, model, contents, config)
 }

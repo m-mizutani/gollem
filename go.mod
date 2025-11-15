@@ -11,6 +11,7 @@ require (
 	github.com/m-mizutani/goerr/v2 v2.0.0
 	github.com/m-mizutani/gt v0.1.1
 	github.com/m-mizutani/jsonex v0.0.1
+	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/sashabaranov/go-openai v1.41.2
 	google.golang.org/api v0.251.0
 	google.golang.org/genai v1.28.0
@@ -18,6 +19,7 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/dlclark/regexp2 v1.10.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect

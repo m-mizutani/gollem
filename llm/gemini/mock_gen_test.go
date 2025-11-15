@@ -16,6 +16,9 @@ import (
 //
 //		// make and configure a mocked gemini.apiClient
 //		mockedapiClient := &apiClientMock{
+//			CountTokensFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.CountTokensConfig) (*genai.CountTokensResponse, error) {
+//				panic("mock out the CountTokens method")
+//			},
 //			GenerateContentFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
 //				panic("mock out the GenerateContent method")
 //			},
@@ -29,6 +32,9 @@ import (
 //
 //	}
 type apiClientMock struct {
+	// CountTokensFunc mocks the CountTokens method.
+	CountTokensFunc func(ctx context.Context, model string, contents []*genai.Content, config *genai.CountTokensConfig) (*genai.CountTokensResponse, error)
+
 	// GenerateContentFunc mocks the GenerateContent method.
 	GenerateContentFunc func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error)
 
@@ -37,6 +43,17 @@ type apiClientMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// CountTokens holds details about calls to the CountTokens method.
+		CountTokens []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Model is the model argument value.
+			Model string
+			// Contents is the contents argument value.
+			Contents []*genai.Content
+			// Config is the config argument value.
+			Config *genai.CountTokensConfig
+		}
 		// GenerateContent holds details about calls to the GenerateContent method.
 		GenerateContent []struct {
 			// Ctx is the ctx argument value.
@@ -60,8 +77,53 @@ type apiClientMock struct {
 			Config *genai.GenerateContentConfig
 		}
 	}
+	lockCountTokens           sync.RWMutex
 	lockGenerateContent       sync.RWMutex
 	lockGenerateContentStream sync.RWMutex
+}
+
+// CountTokens calls CountTokensFunc.
+func (mock *apiClientMock) CountTokens(ctx context.Context, model string, contents []*genai.Content, config *genai.CountTokensConfig) (*genai.CountTokensResponse, error) {
+	if mock.CountTokensFunc == nil {
+		panic("apiClientMock.CountTokensFunc: method is nil but apiClient.CountTokens was just called")
+	}
+	callInfo := struct {
+		Ctx      context.Context
+		Model    string
+		Contents []*genai.Content
+		Config   *genai.CountTokensConfig
+	}{
+		Ctx:      ctx,
+		Model:    model,
+		Contents: contents,
+		Config:   config,
+	}
+	mock.lockCountTokens.Lock()
+	mock.calls.CountTokens = append(mock.calls.CountTokens, callInfo)
+	mock.lockCountTokens.Unlock()
+	return mock.CountTokensFunc(ctx, model, contents, config)
+}
+
+// CountTokensCalls gets all the calls that were made to CountTokens.
+// Check the length with:
+//
+//	len(mockedapiClient.CountTokensCalls())
+func (mock *apiClientMock) CountTokensCalls() []struct {
+	Ctx      context.Context
+	Model    string
+	Contents []*genai.Content
+	Config   *genai.CountTokensConfig
+} {
+	var calls []struct {
+		Ctx      context.Context
+		Model    string
+		Contents []*genai.Content
+		Config   *genai.CountTokensConfig
+	}
+	mock.lockCountTokens.RLock()
+	calls = mock.calls.CountTokens
+	mock.lockCountTokens.RUnlock()
+	return calls
 }
 
 // GenerateContent calls GenerateContentFunc.
