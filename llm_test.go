@@ -388,19 +388,37 @@ func TestCountToken(t *testing.T) {
 		)
 		gt.NoError(t, err)
 
-		// Basic token count
+		// Get initial history (should be empty)
+		initialHistory, err := session.History()
+		gt.NoError(t, err)
+
+		// Basic token count - verify it doesn't modify history
 		count, err := session.CountToken(t.Context(), gollem.Text("Hello, world!"))
 		gt.NoError(t, err)
 		gt.N(t, count).Greater(0)
+
+		// Verify history is unchanged after CountToken
+		historyAfterCount, err := session.History()
+		gt.NoError(t, err)
+		gt.V(t, historyAfterCount).Equal(initialHistory)
 
 		// Generate content to add history
 		_, err = session.GenerateContent(t.Context(), gollem.Text("Hi!"))
 		gt.NoError(t, err)
 
-		// Count tokens with history
+		// Get history after GenerateContent
+		historyAfterGenerate, err := session.History()
+		gt.NoError(t, err)
+
+		// Count tokens with history - verify it doesn't modify history
 		count, err = session.CountToken(t.Context(), gollem.Text("What is 2+2?"))
 		gt.NoError(t, err)
 		gt.N(t, count).Greater(0)
+
+		// Verify history is unchanged after CountToken (should still match historyAfterGenerate)
+		historyAfterSecondCount, err := session.History()
+		gt.NoError(t, err)
+		gt.V(t, historyAfterSecondCount).Equal(historyAfterGenerate)
 	}
 
 	t.Run("OpenAI", func(t *testing.T) {
