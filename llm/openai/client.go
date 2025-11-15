@@ -298,8 +298,9 @@ func (s *Session) updateHistoryWithResponse(assistantMessage openai.ChatCompleti
 }
 
 // convertInputs converts gollem.Input to OpenAI messages and updates currentHistory
-func (s *Session) convertInputs(input ...gollem.Input) error {
-	// Work with a local messages array that we'll integrate into history at the end
+// convertInputsToMessages converts gollem.Input to OpenAI messages without modifying session state.
+// This is a pure function used for read-only operations like CountToken.
+func (s *Session) convertInputsToMessages(input ...gollem.Input) ([]openai.ChatCompletionMessage, error) {
 	var newMessages []openai.ChatCompletionMessage
 
 	// Accumulate consecutive user content (Text/Image) into a single message
@@ -334,15 +335,12 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 			}
 			data, err := json.Marshal(v.Data)
 			if err != nil {
-				return goerr.Wrap(err, "failed to marshal function response")
+				return nil, goerr.Wrap(err, "failed to marshal function response")
 			}
 			response := string(data)
 			if v.Error != nil {
 				response = fmt.Sprintf(`Error message: %+v`, v.Error)
 			}
-
-			// DEBUG: Log tool result creation for OpenAI
-			// Note: Debug logging can be enabled here for troubleshooting tool_call_id issues
 
 			newMessages = append(newMessages, openai.ChatCompletionMessage{
 				Role:       openai.ChatMessageRoleTool,
@@ -350,7 +348,7 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 				ToolCallID: v.ID,
 			})
 		default:
-			return goerr.Wrap(gollem.ErrInvalidParameter, "invalid input")
+			return nil, goerr.Wrap(gollem.ErrInvalidParameter, "invalid input")
 		}
 	}
 
@@ -360,6 +358,16 @@ func (s *Session) convertInputs(input ...gollem.Input) error {
 			Role:         openai.ChatMessageRoleUser,
 			MultiContent: userContentParts,
 		})
+	}
+
+	return newMessages, nil
+}
+
+func (s *Session) convertInputs(input ...gollem.Input) error {
+	// Convert inputs to messages using the pure function
+	newMessages, err := s.convertInputsToMessages(input...)
+	if err != nil {
+		return err
 	}
 
 	// Update currentHistory with new messages
@@ -1029,16 +1037,19 @@ func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, e
 		}
 	}
 
-	// Convert inputs to messages
-	if err := s.convertInputs(input...); err != nil {
+	// Convert inputs to messages without modifying session state
+	newMessages, err := s.convertInputsToMessages(input...)
+	if err != nil {
 		return 0, goerr.Wrap(err, "failed to convert inputs for token counting")
 	}
 
-	// Get all messages (history + new inputs)
-	messages, err := s.getMessages()
-	if err != nil {
-		return 0, goerr.Wrap(err, "failed to get messages for token counting")
-	}
+	// Create a copy of history messages to avoid race conditions
+	// This ensures thread safety when reading historyMessages
+	historyMessagesCopy := make([]openai.ChatCompletionMessage, len(s.historyMessages))
+	copy(historyMessagesCopy, s.historyMessages)
+
+	// Combine history copy with new inputs for counting
+	messages := append(historyMessagesCopy, newMessages...)
 
 	// Count tokens for all messages
 	totalTokens := 0
@@ -1089,8 +1100,12 @@ func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, e
 	}
 
 	// Add tokens for tools if present
-	if len(s.tools) > 0 {
-		for _, tool := range s.tools {
+	// Create a copy of tools to avoid race conditions
+	toolsCopy := make([]openai.Tool, len(s.tools))
+	copy(toolsCopy, s.tools)
+
+	if len(toolsCopy) > 0 {
+		for _, tool := range toolsCopy {
 			toolJSON, err := json.Marshal(tool)
 			if err != nil {
 				return 0, goerr.Wrap(err, "failed to marshal tool for token counting")

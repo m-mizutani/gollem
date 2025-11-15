@@ -1023,9 +1023,12 @@ func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, e
 	// Build complete content list from history and inputs
 	var contents []*genai.Content
 
-	// Add history to contents if available
+	// Create a copy of history contents to avoid race conditions
+	// This ensures thread safety when reading historyContents
 	if len(s.historyContents) > 0 {
-		contents = append(contents, s.historyContents...)
+		historyContentsCopy := make([]*genai.Content, len(s.historyContents))
+		copy(historyContentsCopy, s.historyContents)
+		contents = append(contents, historyContentsCopy...)
 	}
 
 	// Convert current inputs to parts
@@ -1044,6 +1047,7 @@ func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, e
 	}
 
 	// Create CountTokensConfig from GenerateContentConfig
+	// Note: config fields are read-only after session creation, so no deep copy needed
 	countConfig := &genai.CountTokensConfig{
 		SystemInstruction: s.config.SystemInstruction,
 		Tools:             s.config.Tools,

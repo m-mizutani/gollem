@@ -254,49 +254,31 @@ func (s *VertexAnthropicSession) CountToken(ctx context.Context, input ...gollem
 		return 0, goerr.Wrap(err, "failed to convert inputs for token counting")
 	}
 
-	// Build complete messages list: history + new inputs
-	apiMessages := make([]anthropic.MessageParam, 0, len(s.messages)+len(messages))
-	apiMessages = append(apiMessages, s.messages...)
-	apiMessages = append(apiMessages, messages...)
+	// Create a copy of messages to avoid race conditions
+	// This ensures thread safety when reading session state
+	messagesCopy := make([]anthropic.MessageParam, len(s.messages))
+	copy(messagesCopy, s.messages)
 
-	// Prepare count tokens parameters
-	params := anthropic.MessageCountTokensParams{
-		Model:    anthropic.Model(s.defaultModel),
-		Messages: apiMessages,
-	}
-
-	// Add system prompt if available
-	if s.cfg.SystemPrompt() != "" {
-		params.System = anthropic.MessageCountTokensParamsSystemUnion{
-			OfString: anthropic.String(s.cfg.SystemPrompt()),
-		}
-	}
-
-	// Add tools if available
+	// Convert tools from gollem.Tool to anthropic.ToolUnionParam
+	var tools []anthropic.ToolUnionParam
 	if len(s.cfg.Tools()) > 0 {
-		tools := make([]anthropic.ToolUnionParam, len(s.cfg.Tools()))
-		for i, tool := range s.cfg.Tools() {
-			tools[i] = convertTool(tool)
+		tools = make([]anthropic.ToolUnionParam, 0, len(s.cfg.Tools()))
+		for _, tool := range s.cfg.Tools() {
+			tools = append(tools, convertTool(tool))
 		}
-		// Convert ToolUnionParam to MessageCountTokensToolUnionParam
-		countTools := make([]anthropic.MessageCountTokensToolUnionParam, len(tools))
-		for i, tool := range tools {
-			if tool.OfTool != nil {
-				countTools[i] = anthropic.MessageCountTokensToolUnionParam{
-					OfTool: tool.OfTool,
-				}
-			}
-		}
-		params.Tools = countTools
 	}
 
-	// Call the CountTokens API
-	result, err := s.client.Messages.CountTokens(ctx, params)
-	if err != nil {
-		return 0, goerr.Wrap(err, "failed to count tokens")
-	}
-
-	return int(result.InputTokens), nil
+	// Use the shared helper function with a wrapper for the Vertex client
+	apiClient := &realAPIClient{client: s.client}
+	return countTokensWithParams(
+		ctx,
+		s.defaultModel,
+		messagesCopy,
+		messages,
+		s.cfg.SystemPrompt(),
+		tools,
+		apiClient,
+	)
 }
 
 // GenerateEmbedding generates embeddings for the given input texts.
