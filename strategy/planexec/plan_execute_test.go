@@ -595,3 +595,194 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 		testWithAgent(client, "Gemini")(t)
 	})
 }
+
+func TestUserQuestionExtraction(t *testing.T) {
+	ctx := context.Background()
+
+	runTest := func(tc struct {
+		name             string
+		inputs           []gollem.Input
+		expectedQuestion string
+	}) func(t *testing.T) {
+		return func(t *testing.T) {
+			// Create mock client
+			mockClient := &mock.LLMClientMock{
+				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+					return &mock.SessionMock{
+						GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+							// Return direct response (no tasks needed)
+							return &gollem.Response{
+								Texts: []string{`{
+									"needs_plan": false,
+									"direct_response": "Test response"
+								}`},
+							}, nil
+						},
+						HistoryFunc: func() (*gollem.History, error) {
+							return &gollem.History{}, nil
+						},
+					}, nil
+				},
+			}
+
+			// Track the created plan
+			var createdPlan *planexec.Plan
+			hooks := &testHooks{
+				onPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
+					createdPlan = plan
+					return nil
+				},
+			}
+
+			// Create strategy with hooks
+			strategy := planexec.New(mockClient, planexec.WithHooks(hooks))
+
+			// Create agent and execute
+			agent := gollem.New(mockClient, gollem.WithStrategy(strategy))
+			_, err := agent.Execute(ctx, tc.inputs...)
+			gt.NoError(t, err)
+
+			// Verify user question was extracted
+			gt.V(t, createdPlan).NotNil()
+			gt.V(t, createdPlan.UserQuestion).Equal(tc.expectedQuestion)
+		}
+	}
+
+	t.Run("single text input", runTest(struct {
+		name             string
+		inputs           []gollem.Input
+		expectedQuestion string
+	}{
+		name:             "single text input",
+		inputs:           []gollem.Input{gollem.Text("What is the weather in Tokyo?")},
+		expectedQuestion: "What is the weather in Tokyo?",
+	}))
+
+	t.Run("multiple text inputs", runTest(struct {
+		name             string
+		inputs           []gollem.Input
+		expectedQuestion string
+	}{
+		name: "multiple text inputs",
+		inputs: []gollem.Input{
+			gollem.Text("First question"),
+			gollem.Text("Second question"),
+		},
+		expectedQuestion: "First question Second question", // Should combine all text inputs
+	}))
+
+	t.Run("empty inputs", runTest(struct {
+		name             string
+		inputs           []gollem.Input
+		expectedQuestion string
+	}{
+		name:             "empty inputs",
+		inputs:           []gollem.Input{},
+		expectedQuestion: "", // Should be empty
+	}))
+}
+
+func TestEnhancedConclusion(t *testing.T) {
+	ctx := context.Background()
+
+	runTest := func(tc struct {
+		name                 string
+		userQuestion         string
+		expectedPromptPhrase string
+	}) func(t *testing.T) {
+		return func(t *testing.T) {
+			var capturedPrompt string
+
+			// Create mock client that captures the final conclusion prompt
+			callCount := 0
+			mockClient := &mock.LLMClientMock{
+				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+					return &mock.SessionMock{
+						GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+							callCount++
+							if callCount == 1 {
+								// First call: return a plan with one task
+								return &gollem.Response{
+									Texts: []string{`{
+										"needs_plan": true,
+										"goal": "Test goal",
+										"tasks": [{"description": "Test task"}]
+									}`},
+								}, nil
+							} else if callCount == 2 {
+								// Second call: task execution
+								return &gollem.Response{
+									Texts: []string{"Task completed"},
+								}, nil
+							} else if callCount == 3 {
+								// Third call: reflection
+								return &gollem.Response{
+									Texts: []string{`{
+										"new_tasks": [],
+										"updated_tasks": [],
+										"reason": "All done"
+									}`},
+								}, nil
+							} else {
+								// Fourth call: final conclusion - capture the prompt
+								for _, inp := range input {
+									if text, ok := inp.(gollem.Text); ok {
+										capturedPrompt = string(text)
+									}
+								}
+								return &gollem.Response{
+									Texts: []string{"Final conclusion"},
+								}, nil
+							}
+						},
+						HistoryFunc: func() (*gollem.History, error) {
+							return &gollem.History{}, nil
+						},
+					}, nil
+				},
+			}
+
+			// The user question will be automatically extracted by analyzeAndPlan()
+			// when agent.Execute() is called
+			strategy := planexec.New(mockClient)
+
+			// Create agent and execute
+			agent := gollem.New(mockClient, gollem.WithStrategy(strategy))
+			_, err := agent.Execute(ctx, gollem.Text(tc.userQuestion))
+			gt.NoError(t, err)
+
+			// Verify the conclusion prompt contains expected phrase
+			gt.S(t, capturedPrompt).Contains(tc.expectedPromptPhrase)
+		}
+	}
+
+	t.Run("with user question", runTest(struct {
+		name                 string
+		userQuestion         string
+		expectedPromptPhrase string
+	}{
+		name:                 "with user question",
+		userQuestion:         "Are there any malicious packages?",
+		expectedPromptPhrase: "## User's Question", // Should include user question section
+	}))
+
+	t.Run("without user question", runTest(struct {
+		name                 string
+		userQuestion         string
+		expectedPromptPhrase string
+	}{
+		name:                 "without user question",
+		userQuestion:         "",
+		expectedPromptPhrase: "FINDINGS and RESULTS", // Fallback prompt should still emphasize findings
+	}))
+
+	t.Run("prompt includes direct answer instruction", runTest(struct {
+		name                 string
+		userQuestion         string
+		expectedPromptPhrase string
+	}{
+		name:                 "prompt includes direct answer instruction",
+		userQuestion:         "Did you find the file?",
+		expectedPromptPhrase: "DIRECT answer", // Should instruct for direct answer
+	}))
+}

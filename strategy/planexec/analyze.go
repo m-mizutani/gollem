@@ -3,6 +3,7 @@ package planexec
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/m-mizutani/ctxlog"
@@ -61,6 +62,19 @@ func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []golle
 	plan, err := parsePlanFromResponse(ctx, response)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to parse plan from response")
+	}
+
+	// Extract user's original question from inputs
+	// This is used in the final conclusion to provide a direct answer to the user
+	// Combine all text inputs to match the behavior of buildPlanPrompt
+	var userTexts []string
+	for _, input := range inputs {
+		if text, ok := input.(gollem.Text); ok {
+			userTexts = append(userTexts, string(text))
+		}
+	}
+	if len(userTexts) > 0 {
+		plan.UserQuestion = strings.Join(userTexts, " ")
 	}
 
 	logger.Debug("plan created", "goal", plan.Goal, "tasks", len(plan.Tasks))
