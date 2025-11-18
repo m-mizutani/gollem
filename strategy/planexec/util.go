@@ -73,10 +73,7 @@ func getFinalConclusion(ctx context.Context, client gollem.LLMClient, plan *Plan
 	}
 
 	// Create conclusion prompt using template
-	conclusionPrompt, err := buildConclusionPrompt(plan, taskSummaries)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to build conclusion prompt")
-	}
+	conclusionPrompt := buildConclusionPrompt(plan, taskSummaries)
 
 	// Create new session for conclusion
 	sessionOpts := []gollem.SessionOption{}

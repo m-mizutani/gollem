@@ -24,6 +24,14 @@ var reflectPromptTemplate string
 //go:embed prompts/conclusion.md
 var conclusionPromptTemplate string
 
+// Pre-parsed templates for better performance
+var (
+	planTemplate       = template.Must(template.New("plan").Parse(planPromptTemplate))
+	executeTemplate    = template.Must(template.New("execute").Parse(executePromptTemplate))
+	reflectTemplate    = template.Must(template.New("reflect").Parse(reflectPromptTemplate))
+	conclusionTemplate = template.Must(template.New("conclusion").Parse(conclusionPromptTemplate))
+)
+
 // buildPlanPrompt creates a prompt for analyzing and planning
 func buildPlanPrompt(_ context.Context, inputs []gollem.Input, tools []gollem.Tool) []gollem.Input {
 	// Combine all input texts
@@ -39,13 +47,8 @@ func buildPlanPrompt(_ context.Context, inputs []gollem.Input, tools []gollem.To
 	// Build tool list
 	toolList := buildToolList(tools)
 
-	tmpl, err := template.New("plan").Parse(planPromptTemplate)
-	if err != nil {
-		panic(goerr.Wrap(err, "failed to parse plan template"))
-	}
-
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, map[string]interface{}{
+	if err := planTemplate.Execute(&buf, map[string]interface{}{
 		"UserRequest": userRequest,
 		"ToolList":    toolList,
 	}); err != nil {
@@ -77,13 +80,8 @@ func buildExecutePrompt(ctx context.Context, task *Task, plan *Plan, currentIter
 
 	remainingIterations := maxIterations - currentIteration
 
-	tmpl, err := template.New("execute").Parse(executePromptTemplate)
-	if err != nil {
-		panic(goerr.Wrap(err, "failed to parse execute template"))
-	}
-
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, map[string]interface{}{
+	if err := executeTemplate.Execute(&buf, map[string]interface{}{
 		"Goal":                plan.Goal,
 		"ContextSummary":      plan.ContextSummary,
 		"Constraints":         plan.Constraints,
@@ -134,13 +132,8 @@ func buildReflectPrompt(ctx context.Context, plan *Plan, latestResult string, to
 	// Build tool list
 	toolList := buildToolList(tools)
 
-	tmpl, err := template.New("reflect").Parse(reflectPromptTemplate)
-	if err != nil {
-		panic(goerr.Wrap(err, "failed to parse reflect template"))
-	}
-
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, map[string]interface{}{
+	if err := reflectTemplate.Execute(&buf, map[string]interface{}{
 		"Goal":                plan.Goal,
 		"ContextSummary":      plan.ContextSummary, // Embedded context from planning phase
 		"Constraints":         plan.Constraints,    // Embedded constraints from planning phase
@@ -188,20 +181,15 @@ func buildToolList(tools []gollem.Tool) string {
 }
 
 // buildConclusionPrompt creates a prompt for generating the final conclusion
-func buildConclusionPrompt(plan *Plan, taskSummaries []string) (string, error) {
-	tmpl, err := template.New("conclusion").Parse(conclusionPromptTemplate)
-	if err != nil {
-		return "", goerr.Wrap(err, "failed to parse conclusion template")
-	}
-
+func buildConclusionPrompt(plan *Plan, taskSummaries []string) string {
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, map[string]interface{}{
-		"UserQuestion":    plan.UserQuestion,
-		"Goal":            plan.Goal,
-		"CompletedTasks":  strings.Join(taskSummaries, "\n"),
+	if err := conclusionTemplate.Execute(&buf, map[string]interface{}{
+		"UserQuestion":   plan.UserQuestion,
+		"Goal":           plan.Goal,
+		"CompletedTasks": strings.Join(taskSummaries, "\n"),
 	}); err != nil {
-		return "", goerr.Wrap(err, "failed to execute conclusion template")
+		panic(goerr.Wrap(err, "failed to execute conclusion template"))
 	}
 
-	return buf.String(), nil
+	return buf.String()
 }

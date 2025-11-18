@@ -742,18 +742,9 @@ func TestEnhancedConclusion(t *testing.T) {
 				},
 			}
 
-			// Manually set up the plan with user question
-			var createdPlan *planexec.Plan
-			hooks := &testHooks{
-				onPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
-					createdPlan = plan
-					// Manually set user question for this test
-					createdPlan.UserQuestion = tc.userQuestion
-					return nil
-				},
-			}
-
-			strategy := planexec.New(mockClient, planexec.WithHooks(hooks))
+			// The user question will be automatically extracted by analyzeAndPlan()
+			// when agent.Execute() is called
+			strategy := planexec.New(mockClient)
 
 			// Create agent and execute
 			agent := gollem.New(mockClient, gollem.WithStrategy(strategy))
