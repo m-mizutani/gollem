@@ -30,6 +30,7 @@ type Task struct {
 // Plan represents the execution plan with tasks
 type Plan struct {
 	Goal           string
+	UserQuestion   string // User's original input question, used for generating focused final conclusion
 	Tasks          []Task
 	DirectResponse string // Used when no plan is needed
 

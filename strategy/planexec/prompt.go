@@ -21,6 +21,9 @@ var executePromptTemplate string
 //go:embed prompts/reflect.md
 var reflectPromptTemplate string
 
+//go:embed prompts/conclusion.md
+var conclusionPromptTemplate string
+
 // buildPlanPrompt creates a prompt for analyzing and planning
 func buildPlanPrompt(_ context.Context, inputs []gollem.Input, tools []gollem.Tool) []gollem.Input {
 	// Combine all input texts
@@ -182,4 +185,23 @@ func buildToolList(tools []gollem.Tool) string {
 	}
 
 	return strings.Join(toolDescriptions, "\n")
+}
+
+// buildConclusionPrompt creates a prompt for generating the final conclusion
+func buildConclusionPrompt(plan *Plan, taskSummaries []string) (string, error) {
+	tmpl, err := template.New("conclusion").Parse(conclusionPromptTemplate)
+	if err != nil {
+		return "", goerr.Wrap(err, "failed to parse conclusion template")
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, map[string]interface{}{
+		"UserQuestion":    plan.UserQuestion,
+		"Goal":            plan.Goal,
+		"CompletedTasks":  strings.Join(taskSummaries, "\n"),
+	}); err != nil {
+		return "", goerr.Wrap(err, "failed to execute conclusion template")
+	}
+
+	return buf.String(), nil
 }

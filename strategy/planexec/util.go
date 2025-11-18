@@ -72,17 +72,11 @@ func getFinalConclusion(ctx context.Context, client gollem.LLMClient, plan *Plan
 		}
 	}
 
-	// Create conclusion prompt
-	conclusionPrompt := fmt.Sprintf(`All tasks have been completed. Please provide a final summary.
-
-Goal: %s
-
-Completed Tasks:
-%s
-
-IMPORTANT: You should now provide a text summary of what was accomplished. Do NOT use function calls for this response. Simply summarize the results in natural language.`,
-		plan.Goal,
-		strings.Join(taskSummaries, "\n"))
+	// Create conclusion prompt using template
+	conclusionPrompt, err := buildConclusionPrompt(plan, taskSummaries)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to build conclusion prompt")
+	}
 
 	// Create new session for conclusion
 	sessionOpts := []gollem.SessionOption{}
