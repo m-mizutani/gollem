@@ -2,6 +2,7 @@ package mcp_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,7 +28,11 @@ func TestMCPLocalDryRun(t *testing.T) {
 	if err != nil {
 		t.Skip("Could not create MCP filesystem client (requires npx and @modelcontextprotocol/server-filesystem):", err)
 	}
-	defer mcpClient.Close()
+	defer func() {
+		if err := mcpClient.Close(); err != nil {
+			t.Logf("failed to close MCP client: %v", err)
+		}
+	}()
 
 	// Test Specs method - get available tools
 	specs, err := mcpClient.Specs(ctx)
@@ -311,24 +316,45 @@ func TestWithOfficialSDKServer(t *testing.T) {
 		Name string `json:"name"`
 	}
 
-	// Create a test tool handler with correct type signature
-	toolHandler := func(ctx context.Context, session *officialmcp.ServerSession, params *officialmcp.CallToolParamsFor[GreetInput]) (*officialmcp.CallToolResultFor[any], error) {
-		name := params.Arguments.Name
+	// Create a test tool handler with v1.1.0 signature
+	toolHandler := func(ctx context.Context, req *officialmcp.CallToolRequest) (*officialmcp.CallToolResult, error) {
+		var input GreetInput
+		if len(req.Params.Arguments) > 0 {
+			if err := json.Unmarshal(req.Params.Arguments, &input); err != nil {
+				return nil, err
+			}
+		}
+		name := input.Name
 		if name == "" {
 			name = "world"
 		}
-		return &officialmcp.CallToolResultFor[any]{
+		return &officialmcp.CallToolResult{
 			Content: []officialmcp.Content{&officialmcp.TextContent{Text: "Hello, " + name + "!"}},
 		}, nil
 	}
 
-	// Create server with official SDK
-	server := officialmcp.NewServer("test-server", "1.0.0", nil)
-	server.AddTools(
-		officialmcp.NewServerTool("greet", "say hello", toolHandler, officialmcp.Input(
-			officialmcp.Property("name", officialmcp.Description("the name of the person to greet")),
-		)),
-	)
+	// Create server with official SDK using Implementation struct
+	impl := &officialmcp.Implementation{
+		Name:    "test-server",
+		Version: "1.0.0",
+	}
+	server := officialmcp.NewServer(impl, nil)
+
+	// Add tool using v1.1.0 API
+	tool := &officialmcp.Tool{
+		Name:        "greet",
+		Description: "say hello",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name": map[string]any{
+					"type":        "string",
+					"description": "the name of the person to greet",
+				},
+			},
+		},
+	}
+	server.AddTool(tool, toolHandler)
 
 	// Test with StreamableHTTP transport
 	t.Run("Test gollem mcp with StreamableHTTP transport", func(t *testing.T) {
@@ -345,7 +371,11 @@ func TestWithOfficialSDKServer(t *testing.T) {
 		mcpClient, err := mcp.NewStreamableHTTP(ctx, httpServer.URL,
 			mcp.WithStreamableHTTPClientInfo("gollem-test-client", "1.0.0"))
 		gt.NoError(t, err)
-		defer mcpClient.Close()
+		defer func() {
+			if err := mcpClient.Close(); err != nil {
+				t.Logf("failed to close MCP client: %v", err)
+			}
+		}()
 
 		// Test Specs method
 		specs, err := mcpClient.Specs(ctx)
@@ -369,10 +399,10 @@ func TestWithOfficialSDKServer(t *testing.T) {
 
 	// Test with SSE transport (deprecated but still functional)
 	t.Run("Test gollem mcp with SSE transport (deprecated)", func(t *testing.T) {
-		// Create HTTP handler for SSE
+		// Create HTTP handler for SSE with v1.1.0 API
 		sseHandler := officialmcp.NewSSEHandler(func(r *http.Request) *officialmcp.Server {
 			return server
-		})
+		}, nil)
 
 		// Start test HTTP server
 		httpServer := httptest.NewServer(sseHandler)
@@ -382,7 +412,11 @@ func TestWithOfficialSDKServer(t *testing.T) {
 		mcpClient, err := mcp.NewSSE(ctx, httpServer.URL,
 			mcp.WithSSEClientInfo("gollem-test-sse-client", "1.0.0"))
 		gt.NoError(t, err)
-		defer mcpClient.Close()
+		defer func() {
+			if err := mcpClient.Close(); err != nil {
+				t.Logf("failed to close MCP client: %v", err)
+			}
+		}()
 
 		// Test Specs method
 		specs, err := mcpClient.Specs(ctx)
@@ -460,7 +494,11 @@ func TestExistingFunctionalityNotAffected(t *testing.T) {
 		if err != nil {
 			t.Skip("Could not create stdio client:", err)
 		}
-		defer client.Close()
+		defer func() {
+			if err := client.Close(); err != nil {
+				t.Logf("failed to close client: %v", err)
+			}
+		}()
 
 		// Verify it works
 		specs, err := client.Specs(t.Context())
