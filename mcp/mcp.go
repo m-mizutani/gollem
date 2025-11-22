@@ -126,7 +126,7 @@ func NewStdio(ctx context.Context, path string, args []string, options ...StdioO
 	}
 
 	// Create transport
-	transport := mcp.NewStdioTransport()
+	transport := &mcp.StdioTransport{}
 	client.transport = transport
 
 	if err := client.init(ctx, cmd); err != nil {
@@ -238,13 +238,19 @@ func (c *Client) init(ctx context.Context, cmd *exec.Cmd) error {
 		return nil
 	}
 
-	// Create client with official SDK
-	c.mcpClient = mcp.NewClient(c.name, c.version, nil)
+	// Create client with official SDK using Implementation struct
+	impl := &mcp.Implementation{
+		Name:    c.name,
+		Version: c.version,
+	}
+	c.mcpClient = mcp.NewClient(impl, nil)
 
 	// Connect using stdio transport with command
 	if cmd != nil {
-		transport := mcp.NewCommandTransport(cmd)
-		session, err := c.mcpClient.Connect(ctx, transport)
+		transport := &mcp.CommandTransport{
+			Command: cmd,
+		}
+		session, err := c.mcpClient.Connect(ctx, transport, nil)
 		if err != nil {
 			return goerr.Wrap(err, "failed to connect to MCP server")
 		}
@@ -267,19 +273,21 @@ func (c *Client) initStreamableHTTP(ctx context.Context) error {
 		return nil
 	}
 
-	// Create client with official SDK
-	c.mcpClient = mcp.NewClient(c.name, c.version, nil)
+	// Create client with official SDK using Implementation struct
+	impl := &mcp.Implementation{
+		Name:    c.name,
+		Version: c.version,
+	}
+	c.mcpClient = mcp.NewClient(impl, nil)
 
-	// Create StreamableHTTP transport options
-	opts := &mcp.StreamableClientTransportOptions{
+	// Create StreamableHTTP transport
+	transport := &mcp.StreamableClientTransport{
+		Endpoint:   c.baseURL,
 		HTTPClient: c.httpClient,
 	}
 
-	// Create StreamableHTTP transport
-	transport := mcp.NewStreamableClientTransport(c.baseURL, opts)
-
 	// Connect using StreamableHTTP transport
-	session, err := c.mcpClient.Connect(ctx, transport)
+	session, err := c.mcpClient.Connect(ctx, transport, nil)
 	if err != nil {
 		return goerr.Wrap(err, "failed to connect to StreamableHTTP MCP server")
 	}
@@ -301,19 +309,21 @@ func (c *Client) initSSE(ctx context.Context) error {
 		return nil
 	}
 
-	// Create client with official SDK
-	c.mcpClient = mcp.NewClient(c.name, c.version, nil)
+	// Create client with official SDK using Implementation struct
+	impl := &mcp.Implementation{
+		Name:    c.name,
+		Version: c.version,
+	}
+	c.mcpClient = mcp.NewClient(impl, nil)
 
-	// Create SSE transport options
-	opts := &mcp.SSEClientTransportOptions{
+	// Create SSE transport
+	transport := &mcp.SSEClientTransport{
+		Endpoint:   c.baseURL,
 		HTTPClient: c.httpClient,
 	}
 
-	// Create SSE transport
-	transport := mcp.NewSSEClientTransport(c.baseURL, opts)
-
 	// Connect using SSE transport
-	session, err := c.mcpClient.Connect(ctx, transport)
+	session, err := c.mcpClient.Connect(ctx, transport, nil)
 	if err != nil {
 		return goerr.Wrap(err, "failed to connect to SSE MCP server")
 	}
