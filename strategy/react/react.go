@@ -1,310 +1,222 @@
+// Package react implements the ReAct (Reasoning and Acting) strategy for gollem.
+//
+// ReAct is a framework that combines reasoning and acting in language models.
+// It alternates between thought (reasoning), action (tool use), and observation (results)
+// to solve complex problems step by step.
+//
+// Basic usage:
+//
+//	strategy := react.New(llmClient,
+//	    react.WithMaxIterations(20),
+//	    react.WithMaxRepeatedActions(3),
+//	)
+//
+//	agent := gollem.New(llmClient, gollem.WithStrategy(strategy))
+//	response, err := agent.Execute(ctx, gollem.Text("What is the weather in Tokyo?"))
 package react
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 )
 
-// reactStrategy implements the Strategy interface for ReAct strategy
-type reactStrategy struct {
-	llm              gollem.LLMClient
-	thoughtPrompt    string
-	reflectionPrompt string
-	finishPrompt     string
+const (
+	// DefaultMaxIterations is the default maximum number of iterations
+	DefaultMaxIterations = 20
+	// DefaultMaxRepeatedActions is the default maximum number of repeated actions
+	DefaultMaxRepeatedActions = 3
+	// MaxConsecutiveErrors is the maximum number of consecutive errors before giving up
+	MaxConsecutiveErrors = 3
+)
 
-	// Internal state to track conversation with structured data
-	conversationEntries []ConversationEntry // Store structured conversation history
-}
-
-// New creates a ReAct (Reasoning + Acting) strategy
-// This strategy encourages the LLM to think step-by-step before taking actions
-func New(client gollem.LLMClient, options ...Option) *reactStrategy {
-	strategy := &reactStrategy{
-		llm:                 client,
-		thoughtPrompt:       defaultThoughtPrompt,
-		reflectionPrompt:    defaultReflectionPrompt,
-		finishPrompt:        defaultFinishCheckPrompt,
-		conversationEntries: []ConversationEntry{}, // Initialize structured conversation log
+// New creates a new ReAct strategy instance
+func New(client gollem.LLMClient, options ...Option) *Strategy {
+	s := &Strategy{
+		llm:                client,
+		maxIterations:      DefaultMaxIterations,
+		maxRepeatedActions: DefaultMaxRepeatedActions,
+		trace:              make([]TAOEntry, 0),
+		actionHistory:      make([]string, 0),
+		repeatedCount:      make(map[string]int),
 	}
 
 	for _, opt := range options {
-		opt(strategy)
+		opt(s)
 	}
 
-	return strategy
+	return s
 }
 
-func (s *reactStrategy) Init(ctx context.Context, inputs []gollem.Input) error {
-	// ReAct strategy can use initial inputs for setup if needed
-	s.recordInitialInput(inputs)
+// Init initializes the strategy with initial inputs
+func (s *Strategy) Init(ctx context.Context, inputs []gollem.Input) error {
+	// Reset all state
+	s.trace = make([]TAOEntry, 0)
+	s.currentEntry = nil
+	s.actionHistory = make([]string, 0)
+	s.repeatedCount = make(map[string]int)
+	s.consecutiveErrors = 0
+	s.startTime = time.Now()
+	s.endTime = time.Time{}
+
 	return nil
 }
 
-func (s *reactStrategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
-	// First iteration: Add thought prompt
-	if state.Iteration == 0 {
-		thought := gollem.Text(s.thoughtPrompt)
-		return append([]gollem.Input{thought}, state.InitInput...), nil, nil
-	}
-
-	// Update conversation log with latest response and tool results
-	s.updateConversationLog(state)
-
-	// Process tool results with reflection
-	if toolInput := s.processToolResults(state.NextInput); toolInput != nil {
-		return toolInput, nil, nil
-	}
-
-	// ReAct core: Always evaluate next step when no tools are pending
-	// This is the essence of ReAct - continuous reasoning about what to do next
-	if len(state.NextInput) == 0 && state.LastResponse != nil {
-		return s.evaluateNextStep(ctx, state)
-	}
-
-	// Continue with pending input
-	return state.NextInput, nil, nil
-}
-
-func (s *reactStrategy) Tools(ctx context.Context) ([]gollem.Tool, error) {
-	// ReAct strategy provides no additional tools
+// Tools returns the tools provided by this strategy (none for ReAct)
+func (s *Strategy) Tools(ctx context.Context) ([]gollem.Tool, error) {
 	return []gollem.Tool{}, nil
 }
 
-const (
-	defaultThoughtPrompt = `Let me approach this step-by-step:
-1. First, I need to understand what's being asked
-2. Then determine the best approach
-3. Execute the necessary steps with reasoning
-
-Thought: `
-
-	defaultReflectionPrompt = `Based on the previous result, let me think about what to do next.
-
-Observation: The tool returned %s
-Thought: `
-
-	defaultFinishCheckPrompt = `Analyze the conversation and determine task completion status. 
-Respond with a JSON object with the following structure:
-{
-  "is_complete": boolean,
-  "reason": "string explaining the decision",
-  "next_action": "string describing what to do next (only if not complete)"
-}`
-)
-
-func (s *reactStrategy) recordInitialInput(inputs []gollem.Input) {
-	for _, input := range inputs {
-		entry := ConversationEntry{
-			Type:    EntryTypeUser,
-			Content: input.String(),
-		}
-		s.conversationEntries = append(s.conversationEntries, entry)
+// Handle implements the ReAct loop logic
+func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+	// Phase 0: Initialize on first iteration
+	if state.Iteration == 0 {
+		return s.handleInitialization(state)
 	}
-}
 
-func (s *reactStrategy) updateConversationLog(state *gollem.StrategyState) {
-	// Record last LLM response
+	// Safety check: max iterations
+	if state.Iteration >= s.maxIterations {
+		s.endTime = time.Now()
+		return nil, &gollem.ExecuteResponse{
+			Texts: []string{fmt.Sprintf("Maximum iterations (%d) reached without completion", s.maxIterations)},
+		}, nil
+	}
+
+	// Phase 1-2: Process LLM response (Thought + Action)
 	if state.LastResponse != nil {
-		if len(state.LastResponse.Texts) > 0 {
-			entry := ConversationEntry{
-				Type:    EntryTypeAssistant,
-				Content: strings.Join(state.LastResponse.Texts, " "),
-			}
-			s.conversationEntries = append(s.conversationEntries, entry)
+		return s.handleThoughtAndAction(ctx, state)
+	}
+
+	// Phase 3: Process tool results (Observation)
+	if len(state.NextInput) > 0 {
+		return s.handleObservation(ctx, state)
+	}
+
+	// Fallback: continue
+	return state.NextInput, nil, nil
+}
+
+// handleInitialization handles the first iteration (Phase 0)
+func (s *Strategy) handleInitialization(state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+	// Create initial TAO entry
+	s.addTAOEntry(0)
+
+	// Build inputs with system prompt and thought prompt
+	systemPrompt := s.systemPrompt
+	if systemPrompt == "" {
+		systemPrompt = DefaultSystemPrompt
+	}
+
+	inputs := []gollem.Input{
+		gollem.Text(systemPrompt + "\n\n" + s.buildThoughtPrompt()),
+	}
+	inputs = append(inputs, state.InitInput...)
+
+	return inputs, nil, nil
+}
+
+// handleThoughtAndAction handles Thought and Action phases
+func (s *Strategy) handleThoughtAndAction(_ context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+	resp := state.LastResponse
+
+	// Record thought
+	if len(resp.Texts) > 0 {
+		s.recordThought(strings.Join(resp.Texts, " "))
+	}
+
+	// Check if this is a final response (no tool calls)
+	if len(resp.FunctionCalls) == 0 {
+		// Record action as respond
+		s.recordAction(ActionTypeRespond, nil, strings.Join(resp.Texts, " "))
+		// Mark observation as complete (no tools executed)
+		s.recordObservation(nil, true, nil)
+
+		s.endTime = time.Now()
+		return nil, &gollem.ExecuteResponse{
+			Texts: resp.Texts,
+		}, nil
+	}
+
+	// Record action as tool calls
+	s.recordAction(ActionTypeToolCall, resp.FunctionCalls, "")
+
+	// Check for loops
+	actionKey := s.generateActionKey(resp.FunctionCalls)
+	if s.detectLoop(actionKey) {
+		s.endTime = time.Now()
+		return nil, &gollem.ExecuteResponse{
+			Texts: []string{fmt.Sprintf("Loop detected: same action repeated %d times", s.maxRepeatedActions)},
+		}, nil
+	}
+
+	// Continue to observation phase (tool execution handled by gollem core)
+	return state.NextInput, nil, nil
+}
+
+// handleObservation handles the Observation phase
+func (s *Strategy) handleObservation(_ context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+	// Convert function responses to tool results
+	toolResults := convertFunctionResponsesToToolResults(state.NextInput)
+
+	// Check for errors
+	hasError := false
+	var err error
+	for _, result := range toolResults {
+		if !result.Success {
+			hasError = true
+			err = goerr.Wrap(fmt.Errorf("tool execution failed: %s", result.Error), fmt.Sprintf("tool %s error", result.ToolName))
+			break
 		}
+	}
 
-		// Record tool calls
-		for _, fc := range state.LastResponse.FunctionCalls {
-			entry := ConversationEntry{
-				Type:     EntryTypeToolCall,
-				Content:  fmt.Sprintf("Calling %s", fc.Name),
-				ToolName: fc.Name,
-			}
-			s.conversationEntries = append(s.conversationEntries, entry)
+	// Record observation
+	s.recordObservation(toolResults, !hasError, err)
+
+	// Track consecutive errors
+	if hasError {
+		s.consecutiveErrors++
+		if s.consecutiveErrors >= MaxConsecutiveErrors {
+			s.endTime = time.Now()
+			return nil, &gollem.ExecuteResponse{
+				Texts: []string{fmt.Sprintf("Maximum consecutive errors (%d) reached", MaxConsecutiveErrors)},
+			}, nil
 		}
+	} else {
+		s.consecutiveErrors = 0
 	}
 
-	// Record tool results
-	for _, input := range state.NextInput {
-		if fr, ok := input.(gollem.FunctionResponse); ok {
-			success := fr.Error == nil
-			entry := ConversationEntry{
-				Type:     EntryTypeToolResult,
-				ToolName: fr.Name,
-				Success:  &success,
-			}
+	// Build observation prompt
+	observationPrompt := gollem.Text(s.buildObservationPrompt(toolResults))
 
-			if fr.Error != nil {
-				entry.Content = fmt.Sprintf("Tool %s failed", fr.Name)
-				entry.Error = fr.Error.Error()
-			} else {
-				entry.Content = fmt.Sprintf("Tool %s succeeded", fr.Name)
-			}
+	// Create new TAO entry for next iteration
+	s.addTAOEntry(state.Iteration + 1)
 
-			s.conversationEntries = append(s.conversationEntries, entry)
-		}
-	}
+	// Return only observation prompt (state.NextInput contains raw FunctionResponse objects
+	// which would duplicate the information already formatted in observationPrompt)
+	return []gollem.Input{observationPrompt}, nil, nil
 }
 
-func (s *reactStrategy) processToolResults(inputs []gollem.Input) []gollem.Input {
-	var toolSummaries []string
-	hasToolResponse := false
-
-	for _, input := range inputs {
-		if fr, ok := input.(gollem.FunctionResponse); ok {
-			hasToolResponse = true
-			if fr.Error != nil {
-				toolSummaries = append(toolSummaries, fmt.Sprintf("error from %s", fr.Name))
-			} else {
-				toolSummaries = append(toolSummaries, fmt.Sprintf("result from %s", fr.Name))
-			}
-		}
+// generateActionKey generates a unique key for an action (for loop detection)
+func (s *Strategy) generateActionKey(calls []*gollem.FunctionCall) string {
+	if len(calls) == 0 {
+		return "no_action"
 	}
 
-	if !hasToolResponse {
-		return nil
+	var parts []string
+	for _, call := range calls {
+		parts = append(parts, call.Name)
 	}
-
-	// Create reflection prompt
-	summary := toolSummaries[0]
-	if len(toolSummaries) > 1 {
-		summary = fmt.Sprintf("%d tool results", len(toolSummaries))
-	}
-	reflection := gollem.Text(fmt.Sprintf(s.reflectionPrompt, summary))
-	return append([]gollem.Input{reflection}, inputs...)
+	return strings.Join(parts, ",")
 }
 
-func (s *reactStrategy) evaluateNextStep(ctx context.Context, _ *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
-	session, err := s.llm.NewSession(ctx,
-		gollem.WithSessionSystemPrompt("You are a task completion analyzer. Analyze if a task is complete based on the conversation history and respond in JSON format."),
-		gollem.WithSessionContentType(gollem.ContentTypeJSON))
-	if err != nil {
-		return nil, nil, err
-	}
+// detectLoop detects if the same action is being repeated
+func (s *Strategy) detectLoop(actionKey string) bool {
+	s.actionHistory = append(s.actionHistory, actionKey)
+	s.repeatedCount[actionKey]++
 
-	contextPrompt := s.buildCompletionPrompt()
-	response, err := session.GenerateContent(ctx, gollem.Text(contextPrompt))
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return s.parseCompletionResponse(response)
-}
-
-func (s *reactStrategy) buildCompletionPrompt() string {
-	var prompt strings.Builder
-	prompt.WriteString("Conversation history:\n")
-
-	// Include recent conversation (last 5 entries)
-	start := 0
-	if len(s.conversationEntries) > 5 {
-		start = len(s.conversationEntries) - 5
-	}
-
-	for i := start; i < len(s.conversationEntries); i++ {
-		entry := s.conversationEntries[i]
-		prompt.WriteString(fmt.Sprintf("%s: %s\n", entry.Type, entry.Content))
-	}
-
-	prompt.WriteString("\n")
-	prompt.WriteString(s.finishPrompt)
-
-	return prompt.String()
-}
-
-func (s *reactStrategy) parseCompletionResponse(response *gollem.Response) ([]gollem.Input, *gollem.ExecuteResponse, error) {
-	if len(response.Texts) == 0 {
-		// No response, continue by default
-		return []gollem.Input{gollem.Text("Continuing...")}, nil, nil
-	}
-
-	type CompletionCheck struct {
-		IsComplete bool   `json:"is_complete"`
-		Reason     string `json:"reason"`
-		NextAction string `json:"next_action,omitempty"`
-	}
-
-	var result CompletionCheck
-	if err := json.Unmarshal([]byte(response.Texts[0]), &result); err != nil {
-		// JSON parsing failed - continue task without assumptions
-		return []gollem.Input{gollem.Text("Continuing with task...")}, nil, nil
-	}
-
-	if result.IsComplete {
-		// Record completion in structured format
-		completionEntry := ConversationEntry{
-			Type:    EntryTypeCompletion,
-			Content: result.Reason,
-		}
-		s.conversationEntries = append(s.conversationEntries, completionEntry)
-
-		// Generate conclusion based on reason and conversation
-		conclusionText := fmt.Sprintf("Task completed: %s", result.Reason)
-		executeResponse := &gollem.ExecuteResponse{
-			Texts: []string{conclusionText},
-		}
-		return nil, executeResponse, nil
-	}
-
-	if result.NextAction != "" {
-		// Record guidance in structured format
-		guidanceEntry := ConversationEntry{
-			Type:    EntryTypeGuidance,
-			Content: result.NextAction,
-		}
-		s.conversationEntries = append(s.conversationEntries, guidanceEntry)
-		return []gollem.Input{gollem.Text("Next: " + result.NextAction)}, nil, nil
-	}
-
-	return []gollem.Input{gollem.Text("Continuing...")}, nil, nil
-}
-
-// ConversationEntryType represents the type of conversation entry
-type ConversationEntryType string
-
-const (
-	EntryTypeUser       ConversationEntryType = "USER"
-	EntryTypeAssistant  ConversationEntryType = "ASSISTANT"
-	EntryTypeToolCall   ConversationEntryType = "TOOL_CALL"
-	EntryTypeToolResult ConversationEntryType = "TOOL_RESULT"
-	EntryTypeCompletion ConversationEntryType = "COMPLETION"
-	EntryTypeGuidance   ConversationEntryType = "GUIDANCE"
-)
-
-// ConversationEntry represents a structured conversation log entry
-type ConversationEntry struct {
-	Type     ConversationEntryType `json:"type"`
-	Content  string                `json:"content"`
-	ToolName string                `json:"tool_name,omitempty"`
-	Success  *bool                 `json:"success,omitempty"`
-	Error    string                `json:"error,omitempty"`
-}
-
-// Option is an option for configuring the ReAct strategy
-type Option func(*reactStrategy)
-
-// WithThoughtPrompt sets a custom thought prompt for the ReAct strategy
-func WithThoughtPrompt(prompt string) Option {
-	return func(strategy *reactStrategy) {
-		strategy.thoughtPrompt = prompt
-	}
-}
-
-// WithReflectionPrompt sets a custom reflection prompt for the ReAct strategy
-// The prompt should contain one %s placeholder for the tool result summary
-func WithReflectionPrompt(prompt string) Option {
-	return func(strategy *reactStrategy) {
-		strategy.reflectionPrompt = prompt
-	}
-}
-
-// WithFinishPrompt sets a custom prompt for checking task completion
-func WithFinishPrompt(prompt string) Option {
-	return func(strategy *reactStrategy) {
-		strategy.finishPrompt = prompt
-	}
+	return s.repeatedCount[actionKey] >= s.maxRepeatedActions
 }
