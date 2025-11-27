@@ -550,23 +550,23 @@ func NewFileSystemTool() *FileSystemTool {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// Random values that create dependencies between steps
-	keyNumber := r.Intn(3) + 1                                                                       // 1, 2, or 3
-	targetFile := fmt.Sprintf("secret%d.txt", keyNumber)                                             // secret1.txt, secret2.txt, or secret3.txt
+	keyNumber := r.Intn(3) + 1                                                                    // 1, 2, or 3
+	targetFile := fmt.Sprintf("secret%d.txt", keyNumber)                                          // secret1.txt, secret2.txt, or secret3.txt
 	finalAnswer := fmt.Sprintf("%d%d%d", r.Intn(9000)+1000, r.Intn(9000)+1000, r.Intn(9000)+1000) // Random 12-digit number
 
 	return &FileSystemTool{
 		data: map[string]string{
-			"/":                 "step1,step2,step3",
-			"/step1":            "instructions.txt",
-			"/step2":            "key.txt,secret1.txt,secret2.txt,secret3.txt",
-			"/step3":            "readme.md",
-			"/step1/instructions.txt": "To find the answer, first read /step2/key.txt to discover which secret file contains the answer.",
-			"/step2/key.txt":          fmt.Sprintf(`The answer is in the file: %s`, targetFile),
-			"/step2/secret1.txt":      "This is a decoy file.",
-			"/step2/secret2.txt":      "This is also a decoy.",
-			"/step2/secret3.txt":      "Another decoy file.",
+			"/":                                  "step1,step2,step3",
+			"/step1":                             "instructions.txt",
+			"/step2":                             "key.txt,secret1.txt,secret2.txt,secret3.txt",
+			"/step3":                             "readme.md",
+			"/step1/instructions.txt":            "To find the answer, first read /step2/key.txt to discover which secret file contains the answer.",
+			"/step2/key.txt":                     fmt.Sprintf(`The answer is in the file: %s`, targetFile),
+			"/step2/secret1.txt":                 "This is a decoy file.",
+			"/step2/secret2.txt":                 "This is also a decoy.",
+			"/step2/secret3.txt":                 "Another decoy file.",
 			fmt.Sprintf("/step2/%s", targetFile): fmt.Sprintf(`ANSWER: %s`, finalAnswer),
-			"/step3/readme.md": "This directory is empty, just a distraction.",
+			"/step3/readme.md":                   "This directory is empty, just a distraction.",
 		},
 	}
 }

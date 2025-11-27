@@ -34,10 +34,6 @@ CRITICAL RULES:
 Thought:`
 )
 
-// These functions are planned for future use (Few-shot learning support)
-// TODO: Implement buildSystemPrompt when adding system prompt customization
-// TODO: Implement formatFewShotExamples when adding few-shot learning support
-
 // buildThoughtPrompt returns the thought prompt
 func (s *Strategy) buildThoughtPrompt() string {
 	if s.thoughtPrompt != "" {
