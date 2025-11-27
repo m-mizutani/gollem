@@ -39,7 +39,10 @@ func main() {
     ctx := context.Background()
 
     // Create LLM client
-    llmClient := openai.New(openai.WithAPIKey("your-api-key"))
+    llmClient, err := openai.New(ctx, "your-api-key")
+    if err != nil {
+        panic(err)
+    }
 
     // Create ReAct strategy
     strategy := react.New(llmClient,
@@ -147,9 +150,19 @@ for _, entry := range trace.Entries {
     }
     if entry.Action != nil {
         fmt.Printf("Action: %s\n", entry.Action.Type)
+        if entry.Action.Type == react.ActionTypeToolCall {
+            for _, call := range entry.Action.ToolCalls {
+                fmt.Printf("  - Tool Call: %s with args %v\n", call.Name, call.Arguments)
+            }
+        } else if entry.Action.Type == react.ActionTypeRespond {
+            fmt.Printf("  - Response: %s\n", entry.Action.Response)
+        }
     }
     if entry.Observation != nil {
         fmt.Printf("Observation: success=%v\n", entry.Observation.Success)
+        if !entry.Observation.Success {
+            fmt.Printf("  - Error: %s\n", entry.Observation.Error)
+        }
     }
 }
 
