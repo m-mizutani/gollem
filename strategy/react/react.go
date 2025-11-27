@@ -195,8 +195,9 @@ func (s *Strategy) handleObservation(_ context.Context, state *gollem.StrategySt
 	// Create new TAO entry for next iteration
 	s.addTAOEntry(state.Iteration + 1)
 
-	// Return observation prompt + tool results
-	return append([]gollem.Input{observationPrompt}, state.NextInput...), nil, nil
+	// Return only observation prompt (state.NextInput contains raw FunctionResponse objects
+	// which would duplicate the information already formatted in observationPrompt)
+	return []gollem.Input{observationPrompt}, nil, nil
 }
 
 // generateActionKey generates a unique key for an action (for loop detection)
