@@ -51,7 +51,9 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer mcpLocal.Close()
+	defer func() {
+		_ = mcpLocal.Close()
+	}()
 
 	// Create MCP client with remote server (HTTP transport)
 	// StreamableHTTP is now implemented with the official SDK
@@ -62,7 +64,9 @@ func main() {
 		mcpRemote = nil
 	}
 	if mcpRemote != nil {
-		defer mcpRemote.Close()
+		defer func() {
+			_ = mcpRemote.Close()
+		}()
 	}
 
 	// Create MCP client with remote server (SSE transport)
@@ -74,7 +78,9 @@ func main() {
 		mcpSSE = nil
 	}
 	if mcpSSE != nil {
-		defer mcpSSE.Close()
+		defer func() {
+			_ = mcpSSE.Close()
+		}()
 	}
 
 	// Create gollem agent with automatic session management
