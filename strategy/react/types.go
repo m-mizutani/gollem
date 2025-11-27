@@ -42,7 +42,7 @@ type ActionData struct {
 type ObservationData struct {
 	ToolResults []ToolResult `json:"tool_results"`
 	Success     bool         `json:"success"`
-	Error       error        `json:"error,omitempty"`
+	Error       string       `json:"error,omitempty"`
 }
 
 // ToolResult represents the result of a single tool execution

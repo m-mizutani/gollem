@@ -44,10 +44,16 @@ func (s *Strategy) recordObservation(toolResults []ToolResult, success bool, err
 	if s.currentEntry == nil {
 		return
 	}
+
+	var errStr string
+	if err != nil {
+		errStr = err.Error()
+	}
+
 	s.currentEntry.Observation = &ObservationData{
 		ToolResults: toolResults,
 		Success:     success,
-		Error:       err,
+		Error:       errStr,
 	}
 
 	// Finalize this entry and add to trace
