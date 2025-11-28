@@ -35,5 +35,9 @@ All tasks have been completed. Based on the results, please provide a comprehens
 
 Answer what the user wants to know now:
 {{else}}
-**IMPORTANT**: Provide a clear conclusion or answer based on the task results. Focus on **FINDINGS and RESULTS** (what was discovered), not on the process (what tasks were done). Synthesize the information rather than listing tasks.
+**IMPORTANT**:
+1. First, provide a **DIRECT answer** to the user's original question if available, or a summary of findings.
+2. Then provide supporting details from the task results.
+3. Focus on **FINDINGS and RESULTS** (what was discovered), not on the process (what tasks were done).
+4. Synthesize information across all tasks - don't just list them.
 {{end}}
