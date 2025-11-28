@@ -106,6 +106,7 @@ func TestBasicPlanExecution(t *testing.T) {
 							return &gollem.Response{
 								Texts: []string{`{
 									"needs_plan": true,
+									"user_intent": "Want to know the result of 10 + 5",
 									"goal": "Calculate 10 + 5",
 									"tasks": [{"description": "Add 10 and 5", "state": "pending"}]
 								}`},
@@ -279,6 +280,7 @@ func TestBasicPlanExecution(t *testing.T) {
 							return &gollem.Response{
 								Texts: []string{`{
 									"needs_plan": true,
+									"user_intent": "Want to know the data processing results",
 									"goal": "Process data",
 									"tasks": [
 										{"description": "Load data"},
@@ -705,6 +707,7 @@ func TestEnhancedConclusion(t *testing.T) {
 								return &gollem.Response{
 									Texts: []string{`{
 										"needs_plan": true,
+										"user_intent": "Want to know the test results",
 										"goal": "Test goal",
 										"tasks": [{"description": "Test task"}]
 									}`},
@@ -763,7 +766,7 @@ func TestEnhancedConclusion(t *testing.T) {
 	}{
 		name:                 "with user question",
 		userQuestion:         "Are there any malicious packages?",
-		expectedPromptPhrase: "## User's Question", // Should include user question section
+		expectedPromptPhrase: "## User's Original Question", // Should include user question section
 	}))
 
 	t.Run("without user question", runTest(struct {

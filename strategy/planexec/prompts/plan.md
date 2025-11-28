@@ -51,13 +51,32 @@ The bad plan explores broadly. The good plan targets exactly what's needed.
 
 {{.UserRequest}}
 
+## Understanding User Intent
+
+Before creating a plan, understand what the user truly wants to know:
+
+**Process-oriented requests** (what to do):
+- "Investigate X" → User wants to know: "What did you find about X?"
+- "Check if Y exists" → User wants to know: "Does Y exist? (Yes/No + details)"
+- "Search for Z" → User wants to know: "What is Z? Where is Z?"
+
+**Result-oriented intent** (what to learn):
+Transform the request into what information the user seeks, not what action to perform.
+
 ## Plan Structure
 
 Plans are executed later without access to this conversation. Include context that will be needed:
 
+**user_intent**: What the user wants to know (result-oriented)
+- Good: "Want to know what the investigation found"
+- Good: "Want to know if authentication exists and where"
+- Bad: "Investigate the code"
+- Bad: "Check the implementation"
+
 **goal**: The specific question to answer or problem to solve
 - Be concrete: "Find where password validation happens"
 - Not vague: "Understand authentication"
+- This should align with fulfilling the user_intent
 
 **context_summary** (optional): Relevant background from system prompt or conversation
 - Only include if there's important context
@@ -87,7 +106,8 @@ Respond in valid JSON only.
 ```json
 {
   "needs_plan": true,
-  "goal": "Find password validation function",
+  "user_intent": "Want to know how password validation works",
+  "goal": "Find password validation function and understand its implementation",
   "context_summary": "Security audit context (omit if none)",
   "constraints": "Requirements (omit if none)",
   "tasks": [
@@ -100,5 +120,7 @@ Respond in valid JSON only.
   ]
 }
 ```
+
+**IMPORTANT**: Always include `user_intent` field when creating a plan. It must describe what the user wants to know, not what to do.
 
 Each task describes one tool call and what information it will provide.
