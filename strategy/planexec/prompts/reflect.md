@@ -18,6 +18,11 @@ Default to finishing. Adding tasks is expensive - only do it when absolutely nec
 
 ## Context
 
+### User Intent
+{{.UserIntent}}
+
+This is what the user wants to know. All tasks should contribute to answering this intent.
+
 ### Overall Goal
 {{.Goal}}
 
@@ -47,6 +52,7 @@ Default to finishing. Adding tasks is expensive - only do it when absolutely nec
 ## What You Know
 
 This reflection has no access to the original system prompt. Use only:
+- User Intent (what the user wants to know - THE PRIMARY OBJECTIVE)
 - Overall Goal (what needs to be accomplished)
 - Context Summary (background information from planning)
 - Constraints (requirements from planning)
@@ -57,11 +63,13 @@ This reflection has no access to the original system prompt. Use only:
 
 Ask yourself these questions in order:
 
-1. **Can I answer the goal with current information?**
+1. **Can I answer the user's intent with current information?**
+   - Do I have the information the user wants to know?
    - If yes, you're done - mark remaining tasks as skipped
    - If no, continue to next question
 
-2. **Are remaining tasks sufficient to answer the goal?**
+2. **Are remaining tasks sufficient to fulfill the user's intent?**
+   - Will they provide the information the user wants to know?
    - If yes, you're done - no updates needed
    - If no, continue to next question
 
@@ -73,24 +81,26 @@ Ask yourself these questions in order:
    - If yes, update it to retry with corrections
    - If no, continue to next question
 
-5. **Is there one specific missing piece preventing completion?**
+5. **Is there one specific missing piece preventing us from fulfilling the user's intent?**
+   - What information do we still need to answer what the user wants to know?
    - Add only that specific task
    - Be concrete about what tool to call and why
 
-If you reach this point without updates, the remaining tasks are sufficient.
+If you reach this point without updates, the remaining tasks are sufficient to fulfill the user's intent.
 
 ## What Makes a Good Update
 
-Good updates are minimal:
+Good updates are minimal and focused on the user's intent:
+- Skip tasks that don't help answer what the user wants to know
 - Skip tasks that are redundant or unnecessary
 - Retry tasks that failed with specific corrections
-- Add missing tasks only when you can't answer without them
+- Add missing tasks only when you can't fulfill the user's intent without them
 
-Bad updates expand scope:
-- Exploring related topics
-- Improving quality beyond requirements
-- Adding "nice to have" information
-- Checking edge cases not mentioned in goal
+Bad updates expand scope beyond the user's intent:
+- Exploring related topics not asked about
+- Improving quality beyond what the user wants to know
+- Adding "nice to have" information not requested
+- Checking edge cases not mentioned in the user's intent
 
 ## Response Format
 

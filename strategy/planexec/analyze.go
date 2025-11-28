@@ -94,6 +94,7 @@ func parsePlanFromResponse(ctx context.Context, response *gollem.Response) (*Pla
 	var planResponse struct {
 		NeedsPlan      bool   `json:"needs_plan"`
 		DirectResponse string `json:"direct_response"`
+		UserIntent     string `json:"user_intent"`
 		Goal           string `json:"goal"`
 		ContextSummary string `json:"context_summary"`
 		Constraints    string `json:"constraints"`
@@ -119,6 +120,7 @@ func parsePlanFromResponse(ctx context.Context, response *gollem.Response) (*Pla
 
 	// Convert to Plan with Tasks
 	plan := &Plan{
+		UserIntent:     planResponse.UserIntent,
 		Goal:           planResponse.Goal,
 		ContextSummary: planResponse.ContextSummary,
 		Constraints:    planResponse.Constraints,

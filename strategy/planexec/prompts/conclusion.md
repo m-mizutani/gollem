@@ -3,8 +3,15 @@
 All tasks have been completed. Based on the results, please provide a comprehensive answer.
 
 {{if .UserQuestion}}
-## User's Question
+## User's Original Question
 {{.UserQuestion}}
+{{end}}
+
+{{if .UserIntent}}
+## What the User Wants to Know
+{{.UserIntent}}
+
+**THIS IS YOUR PRIMARY OBJECTIVE** - Answer this intent directly.
 {{end}}
 
 ## Goal
@@ -15,14 +22,22 @@ All tasks have been completed. Based on the results, please provide a comprehens
 
 ## Instructions
 
-{{if .UserQuestion}}
-**IMPORTANT**:
-1. First, provide a **DIRECT answer** to the user's question (e.g., "Yes, found X" or "No, not found")
-2. Then provide supporting details from the task results
-3. Focus on **FINDINGS and RESULTS**, not on what tasks were executed
-4. Do **NOT** just list completed tasks - synthesize the information to answer the question
+{{if .UserIntent}}
+**CRITICAL INSTRUCTIONS**:
+1. **FIRST**: Provide a **DIRECT answer** to what the user wants to know (the User Intent)
+   - If they want to know "what you found", state what you found
+   - If they want to know "if X exists", answer Yes/No with location/details
+   - If they want to know "how X works", explain how it works
+2. **THEN**: Provide supporting details and evidence from the task results
+3. Focus on **FINDINGS and RESULTS** (what was discovered), not the process (what you did)
+4. Do **NOT** say things like "I completed the tasks" or "I investigated" - just present the findings
+5. Synthesize information across all tasks - don't just list them
 
-Answer the user's question now:
+Answer what the user wants to know now:
 {{else}}
-**IMPORTANT**: Provide a clear conclusion or answer based on the task results. Focus on **FINDINGS and RESULTS** (what was discovered), not on the process (what tasks were done). Synthesize the information rather than listing tasks.
+**IMPORTANT**:
+1. First, provide a **DIRECT answer** to the user's original question if available, or a summary of findings.
+2. Then provide supporting details from the task results.
+3. Focus on **FINDINGS and RESULTS** (what was discovered), not on the process (what tasks were done).
+4. Synthesize information across all tasks - don't just list them.
 {{end}}

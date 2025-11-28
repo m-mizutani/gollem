@@ -29,8 +29,16 @@ type Task struct {
 
 // Plan represents the execution plan with tasks
 type Plan struct {
-	Goal           string
-	UserQuestion   string // User's original input question, used for generating focused final conclusion
+	// User's original input question (e.g., "調査せよ", "Investigate X")
+	UserQuestion string
+
+	// User's true intent - what they want to know (e.g., "調査結果を知りたい", "Want to know the investigation result")
+	// This is result-oriented, not process-oriented
+	UserIntent string
+
+	// Specific goal to accomplish the intent (e.g., "Find where authentication happens")
+	Goal string
+
 	Tasks          []Task
 	DirectResponse string // Used when no plan is needed
 

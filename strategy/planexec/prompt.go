@@ -134,6 +134,7 @@ func buildReflectPrompt(ctx context.Context, plan *Plan, latestResult string, to
 
 	var buf bytes.Buffer
 	if err := reflectTemplate.Execute(&buf, map[string]interface{}{
+		"UserIntent":          plan.UserIntent,
 		"Goal":                plan.Goal,
 		"ContextSummary":      plan.ContextSummary, // Embedded context from planning phase
 		"Constraints":         plan.Constraints,    // Embedded constraints from planning phase
@@ -185,6 +186,7 @@ func buildConclusionPrompt(plan *Plan, taskSummaries []string) string {
 	var buf bytes.Buffer
 	if err := conclusionTemplate.Execute(&buf, map[string]interface{}{
 		"UserQuestion":   plan.UserQuestion,
+		"UserIntent":     plan.UserIntent,
 		"Goal":           plan.Goal,
 		"CompletedTasks": strings.Join(taskSummaries, "\n"),
 	}); err != nil {
