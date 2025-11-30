@@ -73,19 +73,25 @@ func formatMessageContents(contents []gollem.MessageContent) string {
 		case gollem.MessageContentTypeText:
 			// Unmarshal text content
 			var tc gollem.TextContent
-			if err := json.Unmarshal(content.Data, &tc); err == nil {
+			if err := json.Unmarshal(content.Data, &tc); err != nil {
+				parts = append(parts, fmt.Sprintf("[unmarshal error: %v]", err))
+			} else {
 				parts = append(parts, tc.Text)
 			}
 		case gollem.MessageContentTypeToolCall:
 			// Unmarshal tool call
 			var tc gollem.ToolCallContent
-			if err := json.Unmarshal(content.Data, &tc); err == nil {
+			if err := json.Unmarshal(content.Data, &tc); err != nil {
+				parts = append(parts, fmt.Sprintf("[unmarshal error: %v]", err))
+			} else {
 				parts = append(parts, fmt.Sprintf("[Tool Call: %s]", tc.Name))
 			}
 		case gollem.MessageContentTypeToolResponse:
 			// Unmarshal tool response
 			var tr gollem.ToolResponseContent
-			if err := json.Unmarshal(content.Data, &tr); err == nil {
+			if err := json.Unmarshal(content.Data, &tr); err != nil {
+				parts = append(parts, fmt.Sprintf("[unmarshal error: %v]", err))
+			} else {
 				parts = append(parts, fmt.Sprintf("[Tool Response: %s]", tr.ToolCallID))
 			}
 		}

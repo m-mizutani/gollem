@@ -34,7 +34,10 @@ import (
 )
 
 // Create LLM client
-client, _ := openai.New(ctx, apiKey)
+client, err := openai.New(ctx, apiKey)
+if err != nil {
+    // Handle error
+}
 
 // Create Reflexion strategy with default LLM evaluator
 strategy := reflexion.New(client,
@@ -47,6 +50,9 @@ agent := gollem.New(client, gollem.WithStrategy(strategy))
 
 // Execute task
 response, err := agent.Execute(ctx, gollem.Text("Your task here..."))
+if err != nil {
+    // Handle error
+}
 ```
 
 ### Custom Evaluator
