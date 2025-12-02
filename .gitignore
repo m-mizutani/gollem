@@ -32,3 +32,6 @@ go.work.sum
 /.task
 /.cckiro
 
+.project
+.claude/settings.local.json
+.knot

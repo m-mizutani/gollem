@@ -348,3 +348,33 @@ func TestClaudeTokenLimitErrorIntegration(t *testing.T) {
 	// Verify the error has the token exceeded tag
 	gt.True(t, goerr.HasTag(err, gollem.ErrTagTokenExceeded))
 }
+
+// TestWithBaseURL tests the WithBaseURL option functionality
+func TestWithBaseURL(t *testing.T) {
+	t.Run("default baseURL", func(t *testing.T) {
+		client, err := claude.New(context.Background(), "test-key", claude.WithBaseURL(""))
+		gt.NoError(t, err)
+		gt.Equal(t, "", claude.GetBaseURL(client))
+	})
+
+	t.Run("custom baseURL", func(t *testing.T) {
+		customURL := "https://custom.anthropic.com"
+		client, err := claude.New(context.Background(), "test-key", claude.WithBaseURL(customURL))
+		gt.NoError(t, err)
+		gt.Equal(t, customURL, claude.GetBaseURL(client))
+	})
+
+	t.Run("empty baseURL after custom", func(t *testing.T) {
+		// Test that empty baseURL overrides previous setting
+		client1, err1 := claude.New(context.Background(), "test-key", claude.WithBaseURL("https://first.com"))
+		gt.NoError(t, err1)
+		gt.Equal(t, "https://first.com", claude.GetBaseURL(client1))
+
+		// Apply empty baseURL after custom one
+		client2, err2 := claude.New(context.Background(), "test-key",
+			claude.WithBaseURL("https://first.com"),
+			claude.WithBaseURL(""))
+		gt.NoError(t, err2)
+		gt.Equal(t, "", claude.GetBaseURL(client2)) // Should be empty, not first URL
+	})
+}

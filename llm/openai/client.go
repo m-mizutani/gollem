@@ -66,6 +66,10 @@ type Client struct {
 	// It can be overridden using WithEmbeddingModel option.
 	embeddingModel string
 
+	// baseURL is the custom base URL for the OpenAI API.
+	// If empty, uses the default OpenAI API endpoints.
+	baseURL string
+
 	// generation parameters
 	params generationParameters
 
@@ -175,12 +179,23 @@ func WithContentType(contentType gollem.ContentType) Option {
 	}
 }
 
+// WithBaseURL sets the custom base URL for the OpenAI API.
+// Allows usage with compatible endpoints, proxies, or self-hosted instances.
+// If empty, uses the default OpenAI API endpoints.
+// Reference: Brain Memory c4705651-435d-4cca-95eb-d39d1ea69a9c
+func WithBaseURL(url string) Option {
+	return func(c *Client) {
+		c.baseURL = url
+	}
+}
+
 // New creates a new client for the OpenAI API.
 // It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
 	client := &Client{
 		defaultModel:   DefaultModel,
 		embeddingModel: DefaultEmbeddingModel,
+		baseURL:        "", // Default empty, will be set by options
 		params: generationParameters{
 			ReasoningEffort: "minimal",
 			Verbosity:       "low",
@@ -192,7 +207,14 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 		option(client)
 	}
 
-	openaiClient := openai.NewClient(apiKey)
+	config := openai.DefaultConfig(apiKey)
+
+	// Add BaseURL if specified
+	if client.baseURL != "" {
+		config.BaseURL = client.baseURL
+	}
+
+	openaiClient := openai.NewClientWithConfig(config)
 	client.client = openaiClient
 
 	return client, nil
