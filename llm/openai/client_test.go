@@ -147,3 +147,34 @@ func TestOpenAITokenLimitErrorIntegration(t *testing.T) {
 	// Verify the error has the token exceeded tag
 	gt.True(t, goerr.HasTag(err, gollem.ErrTagTokenExceeded))
 }
+
+// TestWithBaseURL tests the WithBaseURL option functionality for OpenAI
+// Reference: Brain Memory c4705651-435d-4cca-95eb-d39d1ea69a9c
+func TestWithBaseURL(t *testing.T) {
+	t.Run("default baseURL", func(t *testing.T) {
+		client, err := openai.New(context.Background(), "test-key", openai.WithBaseURL(""))
+		gt.NoError(t, err)
+		gt.Equal(t, "", openai.GetBaseURL(client))
+	})
+
+	t.Run("custom baseURL", func(t *testing.T) {
+		customURL := "https://api.custom-openai.com"
+		client, err := openai.New(context.Background(), "test-key", openai.WithBaseURL(customURL))
+		gt.NoError(t, err)
+		gt.Equal(t, customURL, openai.GetBaseURL(client))
+	})
+
+	t.Run("empty baseURL after custom", func(t *testing.T) {
+		// Test that empty baseURL overrides previous setting
+		client1, err1 := openai.New(context.Background(), "test-key", openai.WithBaseURL("https://first.com"))
+		gt.NoError(t, err1)
+		gt.Equal(t, "https://first.com", openai.GetBaseURL(client1))
+
+		// Apply empty baseURL after custom one
+		client2, err2 := openai.New(context.Background(), "test-key",
+			openai.WithBaseURL("https://first.com"),
+			openai.WithBaseURL(""))
+		gt.NoError(t, err2)
+		gt.Equal(t, "", openai.GetBaseURL(client2)) // Should be empty, not first URL
+	})
+}

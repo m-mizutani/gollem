@@ -45,3 +45,8 @@ func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model s
 		cfg:             cfg,
 	}, nil
 }
+
+// GetBaseURL returns the base URL from a Claude client for testing
+func GetBaseURL(client *Client) string {
+	return client.baseURL
+}

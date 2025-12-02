@@ -71,6 +71,10 @@ type Client struct {
 	// apiKey is the API key for authentication.
 	apiKey string
 
+	// baseURL is the custom base URL for the Claude API.
+	// If empty, uses the default Anthropic API endpoints.
+	baseURL string
+
 	// generation parameters
 	params generationParameters
 
@@ -135,12 +139,23 @@ func WithSystemPrompt(prompt string) Option {
 	}
 }
 
+// WithBaseURL sets the custom base URL for the Claude API.
+// Allows usage with compatible endpoints, proxies, or self-hosted instances.
+// If empty, uses the default Anthropic API endpoints.
+// Reference: Brain Memory c4705651-435d-4cca-95eb-d39d1ea69a9c
+func WithBaseURL(url string) Option {
+	return func(c *Client) {
+		c.baseURL = url
+	}
+}
+
 // New creates a new client for the Claude API.
 // It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
 	client := &Client{
 		defaultModel: "claude-sonnet-4-5-20250929",
 		apiKey:       apiKey,
+		baseURL:      "", // Default empty, will be set by options
 		params: generationParameters{
 			Temperature: -1.0, // -1 indicates not set (0.0 is valid)
 			TopP:        -1.0, // -1 indicates not set (0.0 is valid)
@@ -155,6 +170,11 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 
 	clientOptions := []option.RequestOption{
 		option.WithAPIKey(apiKey),
+	}
+
+	// Add BaseURL if specified
+	if client.baseURL != "" {
+		clientOptions = append(clientOptions, option.WithBaseURL(client.baseURL))
 	}
 
 	// Add timeout if specified
