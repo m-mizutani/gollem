@@ -37,7 +37,7 @@ All tasks have been completed. Based on the results, please provide a comprehens
 Present your response now:
 {{else}}
 **IMPORTANT**:
-1. Present the key findings, results, or outcomes from the completed tasks
+1. Address the User's Original Question (if provided) by presenting the key findings, results, or outcomes from the completed tasks
 2. Provide supporting details and context as needed
 3. Focus on **FINDINGS and RESULTS** (what was discovered or accomplished), not on the process (what tasks were done)
 4. Synthesize information across all tasks - don't just list them
