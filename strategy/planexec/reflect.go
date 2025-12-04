@@ -19,18 +19,21 @@ type reflectionResult struct {
 // reflect performs reflection after task completion to update or add tasks
 // It evaluates task results against the Plan, which contains all necessary context and constraints.
 // This is an internal analysis process - the conversation history is not preserved
-func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completedTask *Task, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, currentIteration, maxIterations int, history *gollem.History) (*reflectionResult, error) {
+func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completedTask *Task, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, currentIteration, maxIterations int, history *gollem.History, systemPrompt string) (*reflectionResult, error) {
 	logger := ctxlog.From(ctx)
 	logger.Debug("performing reflection", "goal", plan.Goal)
 
 	// Create a new session for reflection with JSON content type
-	// NOTE: Do NOT pass tools or system prompt to reflection session.
+	// NOTE: Do NOT pass tools to reflection session.
 	// - Tools: When provided, some LLM providers (like Gemini) prioritize function calls
 	//   over JSON text responses, which breaks the reflection phase
-	// - System prompt: Not needed - Plan contains necessary context
+	// - System prompt: Provided if available - helps with domain-specific reflection
 	// - History: MUST be provided so reflection can detect already-executed tools
 	sessionOpts := []gollem.SessionOption{
 		gollem.WithSessionContentType(gollem.ContentTypeJSON),
+	}
+	if systemPrompt != "" {
+		sessionOpts = append(sessionOpts, gollem.WithSessionSystemPrompt(systemPrompt))
 	}
 	if history != nil {
 		sessionOpts = append(sessionOpts, gollem.WithSessionHistory(history))

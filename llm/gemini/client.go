@@ -438,8 +438,9 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	}
 
 	contentReq := &gollem.ContentRequest{
-		Inputs:  input,
-		History: historyCopy,
+		Inputs:       input,
+		History:      historyCopy,
+		SystemPrompt: s.cfg.SystemPrompt(),
 	}
 
 	// Create the base handler that performs the actual API call
@@ -637,8 +638,9 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 	}
 
 	contentReq := &gollem.ContentRequest{
-		Inputs:  input,
-		History: historyCopy,
+		Inputs:       input,
+		History:      historyCopy,
+		SystemPrompt: s.cfg.SystemPrompt(),
 	}
 
 	// Create the base handler that performs the actual API call

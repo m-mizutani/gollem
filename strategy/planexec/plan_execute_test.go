@@ -789,3 +789,189 @@ func TestEnhancedConclusion(t *testing.T) {
 		expectedPromptPhrase: "DIRECT answer", // Should instruct for direct answer
 	}))
 }
+
+func TestSystemPromptInReflectionAndConclusion(t *testing.T) {
+	const systemPrompt = "You are a test assistant with special instructions"
+
+	t.Run("reflection receives system prompt", func(t *testing.T) {
+		sessionCallCount := 0
+		var reflectionSystemPrompt string
+
+		// Create mock client that captures system prompt during reflection
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				cfg := gollem.NewSessionConfig(options...)
+				sessionCallCount++
+
+				// Capture system prompt for reflection session (2nd JSON session)
+				if cfg.ContentType() == gollem.ContentTypeJSON && sessionCallCount == 2 {
+					reflectionSystemPrompt = cfg.SystemPrompt()
+				}
+
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						// Planning phase returns plan with one task
+						if sessionCallCount == 1 {
+							return &gollem.Response{
+								Texts: []string{`{
+									"needs_plan": true,
+									"user_intent": "Test user intent",
+									"goal": "Test goal",
+									"context_summary": "Test context",
+									"constraints": "Test constraints",
+									"tasks": [
+										{"description": "Task 1"}
+									]
+								}`},
+							}, nil
+						}
+						// Reflection phase returns no updates
+						if sessionCallCount == 2 {
+							return &gollem.Response{
+								Texts: []string{`{
+									"new_tasks": [],
+									"updated_tasks": [],
+									"reason": "All tasks completed"
+								}`},
+							}, nil
+						}
+						// Conclusion phase
+						return &gollem.Response{
+							Texts: []string{"Final conclusion"},
+						}, nil
+					},
+					HistoryFunc: func() (*gollem.History, error) {
+						return &gollem.History{}, nil
+					},
+				}, nil
+			},
+		}
+
+		// Create strategy
+		strategy := planexec.New(mockClient)
+		ctx := context.Background()
+
+		// Initialize strategy
+		err := strategy.Init(ctx, []gollem.Input{gollem.Text("Test input")})
+		gt.NoError(t, err)
+
+		// Iteration 0: Planning
+		state := &gollem.StrategyState{
+			InitInput:    []gollem.Input{gollem.Text("Test input")},
+			Iteration:    0,
+			Tools:        []gollem.Tool{},
+			SystemPrompt: systemPrompt,
+		}
+		inputs, resp, err := strategy.Handle(ctx, state)
+		gt.NoError(t, err)
+		gt.Nil(t, resp)
+		gt.NotNil(t, inputs) // Should return task execution prompt
+
+		// Iteration 1: Execute task (return empty to proceed)
+		state.Iteration = 1
+		state.NextInput = inputs
+		state.LastResponse = nil
+		_, _, err = strategy.Handle(ctx, state)
+		gt.NoError(t, err)
+
+		// Iteration 2: Task completed, trigger reflection
+		state.Iteration = 2
+		state.NextInput = nil
+		state.LastResponse = &gollem.Response{Texts: []string{"Task 1 result"}}
+		_, _, err = strategy.Handle(ctx, state)
+		gt.NoError(t, err)
+
+		// Verify reflection was called with system prompt
+		gt.Equal(t, systemPrompt, reflectionSystemPrompt)
+	})
+
+	t.Run("conclusion receives system prompt", func(t *testing.T) {
+		sessionCallCount := 0
+		var conclusionSystemPrompt string
+
+		// Create mock client that captures system prompt during conclusion
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				cfg := gollem.NewSessionConfig(options...)
+				sessionCallCount++
+
+				// Capture system prompt for conclusion session (non-JSON, should be 3rd call)
+				if cfg.ContentType() != gollem.ContentTypeJSON {
+					conclusionSystemPrompt = cfg.SystemPrompt()
+				}
+
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						// Planning phase (1st call)
+						if sessionCallCount == 1 {
+							return &gollem.Response{
+								Texts: []string{`{
+									"needs_plan": true,
+									"user_intent": "Test intent",
+									"goal": "Test goal",
+									"context_summary": "Context",
+									"constraints": "Constraints",
+									"tasks": [
+										{"description": "Task 1"}
+									]
+								}`},
+							}, nil
+						}
+						// Reflection phase (2nd call)
+						if sessionCallCount == 2 {
+							return &gollem.Response{
+								Texts: []string{`{
+									"new_tasks": [],
+									"updated_tasks": [],
+									"reason": "Done"
+								}`},
+							}, nil
+						}
+						// Conclusion phase (3rd call)
+						return &gollem.Response{
+							Texts: []string{"Final answer"},
+						}, nil
+					},
+					HistoryFunc: func() (*gollem.History, error) {
+						return &gollem.History{}, nil
+					},
+				}, nil
+			},
+		}
+
+		// Create strategy
+		strategy := planexec.New(mockClient)
+		ctx := context.Background()
+
+		// Initialize
+		err := strategy.Init(ctx, []gollem.Input{gollem.Text("Test")})
+		gt.NoError(t, err)
+
+		// Iteration 0: Planning
+		state := &gollem.StrategyState{
+			InitInput:    []gollem.Input{gollem.Text("Test")},
+			Iteration:    0,
+			Tools:        []gollem.Tool{},
+			SystemPrompt: systemPrompt,
+		}
+		inputs, resp, err := strategy.Handle(ctx, state)
+		gt.NoError(t, err)
+		gt.Nil(t, resp)
+
+		// Iteration 1: Execute task
+		state.Iteration = 1
+		state.NextInput = inputs
+		_, _, err = strategy.Handle(ctx, state)
+		gt.NoError(t, err)
+
+		// Iteration 2: Complete task (trigger reflection and conclusion)
+		state.Iteration = 2
+		state.NextInput = nil
+		state.LastResponse = &gollem.Response{Texts: []string{"Result"}}
+		_, resp, err = strategy.Handle(ctx, state)
+		gt.NoError(t, err)
+
+		// Verify conclusion was called with system prompt
+		gt.Equal(t, systemPrompt, conclusionSystemPrompt)
+	})
+}
