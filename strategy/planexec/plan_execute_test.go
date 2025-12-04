@@ -968,7 +968,7 @@ func TestSystemPromptInReflectionAndConclusion(t *testing.T) {
 		state.Iteration = 2
 		state.NextInput = nil
 		state.LastResponse = &gollem.Response{Texts: []string{"Result"}}
-		_, resp, err = strategy.Handle(ctx, state)
+		_, _, err = strategy.Handle(ctx, state)
 		gt.NoError(t, err)
 
 		// Verify conclusion was called with system prompt
