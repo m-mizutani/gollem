@@ -103,7 +103,7 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 
 		// Check max iteration limit (safety net against infinite loops)
 		if s.taskIterationCount >= s.maxIterations {
-			finalResponse, err := getFinalConclusion(ctx, s.client, s.plan, s.middleware)
+			finalResponse, err := getFinalConclusion(ctx, s.client, s.plan, s.middleware, state.SystemPrompt)
 			if err != nil {
 				logger.Debug("failed to generate conclusion, using simple summary", "error", err.Error())
 				return nil, generateFinalResponse(ctx, s.plan), nil
@@ -112,7 +112,7 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 		}
 
 		// Perform reflection only if enabled
-		reflectionResult, err := reflect(ctx, s.client, s.plan, s.currentTask, state.Tools, s.middleware, s.taskIterationCount, s.maxIterations, state.History)
+		reflectionResult, err := reflect(ctx, s.client, s.plan, s.currentTask, state.Tools, s.middleware, s.taskIterationCount, s.maxIterations, state.History, state.SystemPrompt)
 		if err != nil {
 			return nil, nil, goerr.Wrap(err, "reflection failed")
 		}
@@ -156,7 +156,7 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 
 		// All tasks completed - get final conclusion from LLM
 		if s.currentTask == nil {
-			finalResponse, err := getFinalConclusion(ctx, s.client, s.plan, s.middleware)
+			finalResponse, err := getFinalConclusion(ctx, s.client, s.plan, s.middleware, state.SystemPrompt)
 			if err != nil {
 				// If conclusion generation fails, fall back to simple summary
 				logger.Debug("failed to generate conclusion, using simple summary", "error", err.Error())

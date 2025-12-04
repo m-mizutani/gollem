@@ -43,7 +43,7 @@ func allTasksCompleted(ctx context.Context, plan *Plan) bool {
 
 // getFinalConclusion asks LLM to generate final conclusion based on completed tasks
 // Returns ExecuteResponse with texts and session history
-func getFinalConclusion(ctx context.Context, client gollem.LLMClient, plan *Plan, middleware []gollem.ContentBlockMiddleware) (*gollem.ExecuteResponse, error) {
+func getFinalConclusion(ctx context.Context, client gollem.LLMClient, plan *Plan, middleware []gollem.ContentBlockMiddleware, systemPrompt string) (*gollem.ExecuteResponse, error) {
 	logger := ctxlog.From(ctx)
 	logger.Debug("generating final conclusion")
 
@@ -77,6 +77,9 @@ func getFinalConclusion(ctx context.Context, client gollem.LLMClient, plan *Plan
 
 	// Create new session for conclusion
 	sessionOpts := []gollem.SessionOption{}
+	if systemPrompt != "" {
+		sessionOpts = append(sessionOpts, gollem.WithSessionSystemPrompt(systemPrompt))
+	}
 	for _, mw := range middleware {
 		sessionOpts = append(sessionOpts, gollem.WithSessionContentBlockMiddleware(mw))
 	}

@@ -221,3 +221,110 @@ func TestMiddlewareSameAddressModifiedContent(t *testing.T) {
 
 	t.Run("history accumulation across calls", testHistoryAccumulation)
 }
+
+func TestMiddlewareSystemPromptAccess(t *testing.T) {
+	testSystemPromptInMiddleware := func(t *testing.T) {
+		const expectedSystemPrompt = "You are a helpful assistant for testing"
+		var receivedSystemPrompt string
+
+		// Create a mock API client that returns a simple response
+		mockClient := &apiClientMock{
+			MessagesNewFunc: func(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
+				return &anthropic.Message{
+					Content: []anthropic.ContentBlockUnion{
+						{
+							Type: "text",
+							Text: "Response from API",
+						},
+					},
+					Role: "assistant",
+				}, nil
+			},
+			MessagesNewStreamingFunc: func(ctx context.Context, params anthropic.MessageNewParams) *ssestream.Stream[anthropic.MessageStreamEventUnion] {
+				return nil
+			},
+		}
+
+		// Create middleware that captures system prompt
+		systemPromptMiddleware := func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+			return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+				// Capture system prompt from ContentRequest
+				receivedSystemPrompt = req.SystemPrompt
+
+				// Call the next handler
+				return next(ctx, req)
+			}
+		}
+
+		// Create session config with system prompt and middleware
+		cfg := gollem.NewSessionConfig(
+			gollem.WithSessionSystemPrompt(expectedSystemPrompt),
+			gollem.WithSessionContentBlockMiddleware(systemPromptMiddleware),
+		)
+
+		// Create session with mock client
+		session, _ := claude.NewSessionWithAPIClient(mockClient, cfg, "claude-3-opus-20240229")
+
+		// Generate content
+		ctx := context.Background()
+		resp, err := session.GenerateContent(ctx, gollem.Text("test input"))
+		gt.NoError(t, err)
+		gt.NotNil(t, resp)
+
+		// Verify middleware received system prompt
+		gt.Equal(t, expectedSystemPrompt, receivedSystemPrompt)
+	}
+
+	testEmptySystemPromptInMiddleware := func(t *testing.T) {
+		var receivedSystemPrompt string
+		systemPromptSet := false
+
+		// Create a mock API client
+		mockClient := &apiClientMock{
+			MessagesNewFunc: func(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
+				return &anthropic.Message{
+					Content: []anthropic.ContentBlockUnion{
+						{
+							Type: "text",
+							Text: "Response",
+						},
+					},
+					Role: "assistant",
+				}, nil
+			},
+			MessagesNewStreamingFunc: func(ctx context.Context, params anthropic.MessageNewParams) *ssestream.Stream[anthropic.MessageStreamEventUnion] {
+				return nil
+			},
+		}
+
+		// Create middleware that verifies empty system prompt
+		middleware := func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+			return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+				receivedSystemPrompt = req.SystemPrompt
+				systemPromptSet = true
+				return next(ctx, req)
+			}
+		}
+
+		// Create session config without system prompt
+		cfg := gollem.NewSessionConfig(
+			gollem.WithSessionContentBlockMiddleware(middleware),
+		)
+
+		// Create session with mock client
+		session, _ := claude.NewSessionWithAPIClient(mockClient, cfg, "claude-3-opus-20240229")
+
+		// Generate content
+		ctx := context.Background()
+		_, err := session.GenerateContent(ctx, gollem.Text("test"))
+		gt.NoError(t, err)
+
+		// Verify middleware was called and system prompt is empty
+		gt.True(t, systemPromptSet)
+		gt.Equal(t, "", receivedSystemPrompt)
+	}
+
+	t.Run("system prompt accessible in middleware", testSystemPromptInMiddleware)
+	t.Run("empty system prompt in middleware", testEmptySystemPromptInMiddleware)
+}
+
