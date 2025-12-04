@@ -327,4 +327,3 @@ func TestMiddlewareSystemPromptAccess(t *testing.T) {
 	t.Run("system prompt accessible in middleware", testSystemPromptInMiddleware)
 	t.Run("empty system prompt in middleware", testEmptySystemPromptInMiddleware)
 }
-
