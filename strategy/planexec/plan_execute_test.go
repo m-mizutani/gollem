@@ -779,14 +779,14 @@ func TestEnhancedConclusion(t *testing.T) {
 		expectedPromptPhrase: "FINDINGS and RESULTS", // Fallback prompt should still emphasize findings
 	}))
 
-	t.Run("prompt includes direct answer instruction", runTest(struct {
+	t.Run("prompt includes clear response instruction", runTest(struct {
 		name                 string
 		userQuestion         string
 		expectedPromptPhrase string
 	}{
-		name:                 "prompt includes direct answer instruction",
+		name:                 "prompt includes clear response instruction",
 		userQuestion:         "Did you find the file?",
-		expectedPromptPhrase: "DIRECT answer", // Should instruct for direct answer
+		expectedPromptPhrase: "Address what the user wants", // Should instruct to address user intent clearly
 	}))
 }
 
