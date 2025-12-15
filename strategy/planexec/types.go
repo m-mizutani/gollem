@@ -29,10 +29,10 @@ type Task struct {
 
 // Plan represents the execution plan with tasks
 type Plan struct {
-	// User's original input question (e.g., "調査せよ", "Investigate X")
+	// User's original input question (e.g., "Investigate X", "Analyze the data")
 	UserQuestion string
 
-	// User's true intent - what they want to know (e.g., "調査結果を知りたい", "Want to know the investigation result")
+	// User's true intent - what they want to know (e.g., "Want to know the investigation result", "Understand the data patterns")
 	// This is result-oriented, not process-oriented
 	UserIntent string
 
