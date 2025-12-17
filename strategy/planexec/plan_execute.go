@@ -25,7 +25,11 @@ func New(client gollem.LLMClient, opts ...Option) *Strategy {
 // Init initializes the strategy with initial inputs
 func (s *Strategy) Init(ctx context.Context, inputs []gollem.Input) error {
 	// Initialize strategy state
-	s.plan = nil
+	// Only reset plan if it wasn't provided by user via WithPlan option
+	if !s.planProvidedByUser {
+		s.plan = nil
+	}
+	s.planCreatedHookRan = false
 	s.currentTask = nil
 	s.waitingForTask = false
 	s.taskIterationCount = 0
@@ -53,31 +57,36 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 
 	// ========== Phase 1: Initialization and Planning ==========
 	if state.Iteration == 0 {
-		if s.client == nil {
-			return nil, nil, goerr.New("LLM client is not set")
+		// Check if plan was already provided via WithPlan option
+		if s.plan == nil {
+			// No plan provided - generate one using LLM
+			if s.client == nil {
+				return nil, nil, goerr.New("LLM client is not set")
+			}
+
+			// Analyze and create plan using LLM
+			// Pass system prompt and history so they can be embedded into the Plan structure
+			plan, err := generatePlanInternal(ctx, s.client, state.InitInput, state.Tools, s.middleware, state.SystemPrompt, state.History)
+			if err != nil {
+				return nil, nil, goerr.Wrap(err, "failed to analyze and plan")
+			}
+			s.plan = plan
 		}
 
-		// Analyze and create plan using LLM
-		// Pass system prompt and history so they can be embedded into the Plan structure
-		plan, err := analyzeAndPlan(ctx, s.client, state.InitInput, state.Tools, s.middleware, state.SystemPrompt, state.History)
-		if err != nil {
-			return nil, nil, goerr.Wrap(err, "failed to analyze and plan")
-		}
-		s.plan = plan
-
-		// Hook: plan created (always call after plan is created)
-		if s.hooks != nil {
-			if err := s.hooks.OnPlanCreated(ctx, plan); err != nil {
+		// Hook: plan created (call once if not already called)
+		if !s.planCreatedHookRan && s.hooks != nil {
+			if err := s.hooks.OnPlanCreated(ctx, s.plan); err != nil {
 				return nil, nil, goerr.Wrap(err, "hook OnPlanCreated failed")
 			}
+			s.planCreatedHookRan = true
 		}
 
 		// No plan needed - return direct response
 		// Planning phase is internal analysis - no history preservation needed
-		if len(plan.Tasks) == 0 {
+		if len(s.plan.Tasks) == 0 {
 			return nil, &gollem.ExecuteResponse{
 				UserInputs: state.InitInput,
-				Texts:      []string{plan.DirectResponse},
+				Texts:      []string{s.plan.DirectResponse},
 			}, nil
 		}
 		// Proceed to phase 3 to select first task
@@ -203,5 +212,13 @@ func WithHooks(hooks PlanExecuteHooks) Option {
 func WithMaxIterations(max int) Option {
 	return func(s *Strategy) {
 		s.maxIterations = max
+	}
+}
+
+// WithPlan sets a pre-generated plan to use (skips planning phase)
+func WithPlan(plan *Plan) Option {
+	return func(s *Strategy) {
+		s.plan = plan
+		s.planProvidedByUser = true
 	}
 }

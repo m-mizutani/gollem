@@ -598,6 +598,230 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 	})
 }
 
+func TestExternalPlanGeneration(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("GeneratePlan with basic parameters", func(t *testing.T) {
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						return &gollem.Response{
+							Texts: []string{`{
+								"needs_plan": true,
+								"user_intent": "Calculate sum",
+								"goal": "Add two numbers",
+								"tasks": [{"description": "Perform addition"}]
+							}`},
+						}, nil
+					},
+					HistoryFunc: func() (*gollem.History, error) {
+						return &gollem.History{}, nil
+					},
+				}, nil
+			},
+		}
+
+		plan, err := planexec.GeneratePlan(ctx, mockClient, []gollem.Input{gollem.Text("Calculate 10 + 5")}, nil, "", nil)
+		gt.NoError(t, err)
+		gt.V(t, plan).NotNil()
+		gt.V(t, plan.Goal).Equal("Add two numbers")
+		gt.V(t, len(plan.Tasks)).Equal(1)
+		gt.V(t, plan.Tasks[0].Description).Equal("Perform addition")
+	})
+
+	t.Run("GeneratePlan with tools and system prompt", func(t *testing.T) {
+		tool := &testTool{
+			name:        "test_tool",
+			description: "A test tool",
+			runFunc:     func(ctx context.Context, args map[string]any) (map[string]any, error) { return nil, nil },
+		}
+
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						return &gollem.Response{
+							Texts: []string{`{
+								"needs_plan": true,
+								"user_intent": "Test intent",
+								"goal": "Test goal",
+								"tasks": [{"description": "Test task"}]
+							}`},
+						}, nil
+					},
+					HistoryFunc: func() (*gollem.History, error) {
+						return &gollem.History{}, nil
+					},
+				}, nil
+			},
+		}
+
+		plan, err := planexec.GeneratePlan(
+			ctx,
+			mockClient,
+			[]gollem.Input{gollem.Text("Test")},
+			[]gollem.Tool{tool},
+			"You are a test assistant",
+			nil,
+		)
+		gt.NoError(t, err)
+		gt.V(t, plan).NotNil()
+		gt.V(t, plan.Goal).Equal("Test goal")
+	})
+
+	t.Run("GeneratePlan error cases", func(t *testing.T) {
+		mockClient := &mock.LLMClientMock{}
+
+		// Nil client
+		_, err := planexec.GeneratePlan(ctx, nil, []gollem.Input{gollem.Text("Test")}, nil, "", nil)
+		gt.Error(t, err)
+		gt.S(t, err.Error()).Contains("client is required")
+
+		// Empty inputs
+		_, err = planexec.GeneratePlan(ctx, mockClient, []gollem.Input{}, nil, "", nil)
+		gt.Error(t, err)
+		gt.S(t, err.Error()).Contains("inputs are required")
+	})
+}
+
+func TestWithPlanOption(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Strategy with pre-generated plan", func(t *testing.T) {
+		// Create a pre-generated plan
+		prePlan := &planexec.Plan{
+			UserQuestion: "What is 2 + 2?",
+			UserIntent:   "Get calculation result",
+			Goal:         "Calculate 2 + 2",
+			Tasks: []planexec.Task{
+				{
+					ID:          "task-1",
+					Description: "Add 2 and 2",
+					State:       planexec.TaskStatePending,
+				},
+			},
+		}
+
+		// Track hook calls
+		var planCreatedCalled int32
+		var taskDoneCalled int32
+		hooks := &testHooks{
+			onPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
+				atomic.AddInt32(&planCreatedCalled, 1)
+				// Verify it's our pre-generated plan
+				gt.V(t, plan.Goal).Equal("Calculate 2 + 2")
+				return nil
+			},
+			onTaskDone: func(ctx context.Context, plan *planexec.Plan, task *planexec.Task) error {
+				atomic.AddInt32(&taskDoneCalled, 1)
+				return nil
+			},
+		}
+
+		// Create mock client (should not be called for planning)
+		callCount := 0
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						callCount++
+						switch callCount {
+						case 1:
+							// First call: task execution (planning should be skipped)
+							return &gollem.Response{
+								Texts: []string{"The result is 4"},
+							}, nil
+						case 2:
+							// Second call: reflection
+							return &gollem.Response{
+								Texts: []string{`{
+									"new_tasks": [],
+									"updated_tasks": [],
+									"reason": "Task completed"
+								}`},
+							}, nil
+						default:
+							// Third call: conclusion
+							return &gollem.Response{
+								Texts: []string{"Calculation complete. The answer is 4."},
+							}, nil
+						}
+					},
+					HistoryFunc: func() (*gollem.History, error) {
+						return &gollem.History{}, nil
+					},
+				}, nil
+			},
+		}
+
+		// Create strategy with pre-generated plan
+		strategy := planexec.New(mockClient,
+			planexec.WithPlan(prePlan),
+			planexec.WithHooks(hooks),
+		)
+
+		// Create agent and execute
+		agent := gollem.New(mockClient, gollem.WithStrategy(strategy))
+		resp, err := agent.Execute(ctx, gollem.Text("Calculate 2 + 2"))
+		gt.NoError(t, err)
+		gt.V(t, resp).NotNil()
+
+		// Verify OnPlanCreated was called exactly once
+		gt.V(t, atomic.LoadInt32(&planCreatedCalled)).Equal(int32(1))
+
+		// Verify OnTaskDone was called
+		gt.V(t, atomic.LoadInt32(&taskDoneCalled)).Equal(int32(1))
+
+		// Verify planning session was NOT created (only 3 calls: execute, reflect, conclude)
+		gt.V(t, callCount).Equal(3)
+	})
+
+	t.Run("Strategy with pre-generated plan - direct response", func(t *testing.T) {
+		// Create a plan with no tasks (direct response)
+		prePlan := &planexec.Plan{
+			DirectResponse: "The answer is 42",
+			Tasks:          []planexec.Task{},
+		}
+
+		var planCreatedCalled int32
+		hooks := &testHooks{
+			onPlanCreated: func(ctx context.Context, plan *planexec.Plan) error {
+				atomic.AddInt32(&planCreatedCalled, 1)
+				return nil
+			},
+		}
+
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						t.Fatal("LLM should not be called when using direct response plan")
+						return nil, nil
+					},
+					HistoryFunc: func() (*gollem.History, error) {
+						return &gollem.History{}, nil
+					},
+				}, nil
+			},
+		}
+
+		strategy := planexec.New(mockClient,
+			planexec.WithPlan(prePlan),
+			planexec.WithHooks(hooks),
+		)
+
+		agent := gollem.New(mockClient, gollem.WithStrategy(strategy))
+		resp, err := agent.Execute(ctx, gollem.Text("Test"))
+		gt.NoError(t, err)
+		gt.V(t, resp).NotNil()
+		gt.V(t, resp.Texts[0]).Equal("The answer is 42")
+
+		// Verify OnPlanCreated was called
+		gt.V(t, atomic.LoadInt32(&planCreatedCalled)).Equal(int32(1))
+	})
+}
+
 func TestUserQuestionExtraction(t *testing.T) {
 	ctx := context.Background()
 
