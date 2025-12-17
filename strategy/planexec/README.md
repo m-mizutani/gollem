@@ -427,11 +427,22 @@ if approved {
 
 ### Plan creates too many/few tasks
 
-Adjust system prompt to guide task granularity:
+Adjust system prompt to guide task granularity when generating the plan:
 
 ```go
-planexec.WithPlanSystemPrompt(`Break down the goal into 3-5 concrete, actionable tasks.
-Each task should be completable with available tools.`)
+// When using GeneratePlan directly
+plan, err := planexec.GeneratePlan(ctx, client, inputs, tools,
+    `Break down the goal into 3-5 concrete, actionable tasks.
+Each task should be completable with available tools.`,
+    history,
+)
+
+// When using strategy with agent
+agent := gollem.New(client,
+    gollem.WithStrategy(planexec.New(client)),
+    gollem.WithSystemPrompt(`Break down the goal into 3-5 concrete, actionable tasks.
+Each task should be completable with available tools.`),
+)
 ```
 
 ### Reflection adds unnecessary tasks
@@ -439,7 +450,10 @@ Each task should be completable with available tools.`)
 The reflection is too aggressive. This is usually because the goal or constraints are unclear. Improve the system prompt:
 
 ```go
-gollem.WithSystemPrompt(`Focus on the core goal. Only add tasks if absolutely necessary to achieve the objective.`)
+agent := gollem.New(client,
+    gollem.WithStrategy(planexec.New(client)),
+    gollem.WithSystemPrompt(`Focus on the core goal. Only add tasks if absolutely necessary to achieve the objective.`),
+)
 ```
 
 ### Tasks hit iteration limit
