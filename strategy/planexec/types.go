@@ -65,6 +65,8 @@ type Strategy struct {
 
 	// Runtime state
 	plan               *Plan
+	planProvidedByUser bool // true if plan was provided via WithPlan option
+	planCreatedHookRan bool // true if OnPlanCreated hook has been called
 	currentTask        *Task
 	waitingForTask     bool
 	taskIterationCount int // Counts completed tasks

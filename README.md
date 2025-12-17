@@ -802,6 +802,37 @@ The Plan & Execute strategy uses a three-phase approach with context embedding:
 - **Execution**: Executes tasks sequentially using the main session with full context (system prompt and history).
 - **Reflection**: After each task completion, evaluates results using ONLY the Plan's embedded information (goal, context summary, constraints) without accessing the original system prompt or history. This ensures consistent evaluation criteria and enables stateless reflection.
 
+**External Plan Generation**: You can generate and reuse plans separately from execution:
+```go
+import "github.com/m-mizutani/gollem/strategy/planexec"
+
+// Generate a plan separately
+plan, err := planexec.GeneratePlan(ctx, client,
+	[]gollem.Input{gollem.Text("Analyze security logs")},
+	tools,                       // Available tools
+	"Focus on OWASP Top 10",    // System prompt
+	nil,                         // History (optional)
+)
+
+// Save plan for later or review
+planData, _ := json.Marshal(plan)
+savePlan(planData)
+
+// Later: load and execute with pre-generated plan
+var savedPlan *planexec.Plan
+json.Unmarshal(planData, &savedPlan)
+
+strategy := planexec.New(client, planexec.WithPlan(savedPlan))
+agent := gollem.New(client, gollem.WithStrategy(strategy), gollem.WithTools(tools...))
+resp, err := agent.Execute(ctx, gollem.Text("Analyze security logs"))
+```
+
+This enables use cases like:
+- **Plan Review**: Generate plan, review tasks, then execute
+- **Plan Caching**: Reuse plans for similar requests
+- **Plan Modification**: Adjust tasks before execution
+- **Parallel Planning**: Generate plans with one model, execute with another
+
 #### Custom Strategy Implementation
 
 Implement the `Strategy` interface for custom agent behavior:

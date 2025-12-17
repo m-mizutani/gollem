@@ -11,10 +11,25 @@ import (
 	"github.com/m-mizutani/gollem"
 )
 
-// analyzeAndPlan analyzes user input and creates a plan using LLM
+// GeneratePlan analyzes user input and creates an execution plan
+// This can be called independently before creating an agent
+// tools parameter specifies available tools for the agent to use during planning
+// systemPrompt and history provide context that will be embedded into the plan
+func GeneratePlan(ctx context.Context, client gollem.LLMClient, inputs []gollem.Input, tools []gollem.Tool, systemPrompt string, history *gollem.History) (*Plan, error) {
+	if client == nil {
+		return nil, goerr.New("client is required")
+	}
+	if len(inputs) == 0 {
+		return nil, goerr.New("inputs are required")
+	}
+
+	return generatePlanInternal(ctx, client, inputs, tools, nil, systemPrompt, history)
+}
+
+// generatePlanInternal analyzes user input and creates a plan using LLM
 // It uses system prompt and history to embed necessary context into the Plan's goal
 // This is an internal analysis process - the conversation history is not preserved
-func analyzeAndPlan(ctx context.Context, client gollem.LLMClient, inputs []gollem.Input, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, systemPrompt string, history *gollem.History) (*Plan, error) {
+func generatePlanInternal(ctx context.Context, client gollem.LLMClient, inputs []gollem.Input, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, systemPrompt string, history *gollem.History) (*Plan, error) {
 	logger := ctxlog.From(ctx)
 	logger.Debug("analyzing and planning", "has_system_prompt", systemPrompt != "", "has_history", history != nil)
 
