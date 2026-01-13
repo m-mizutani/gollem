@@ -70,6 +70,10 @@ type Strategy struct {
 	currentTask        *Task
 	waitingForTask     bool
 	taskIterationCount int // Counts completed tasks
+
+	// Temporary storage for tool execution results
+	// When NextInput contains tool results, save them here before passing to LLM
+	pendingToolResults []gollem.Input
 }
 
 // Option is a functional option for configuring Strategy

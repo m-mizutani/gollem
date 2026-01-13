@@ -1,14 +1,32 @@
 package planexec
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/m-mizutani/gollem"
 )
 
-// parseTaskResult extracts the task execution result from LLM response
-func parseTaskResult(response *gollem.Response) string {
+// formatToolResult formats tool execution result as a JSON string
+func formatToolResult(result map[string]any) string {
+	// Empty result
+	if len(result) == 0 {
+		return ""
+	}
+
+	// Try to format as indented JSON
+	jsonBytes, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		// Fallback: use Go's default formatting
+		return fmt.Sprintf("Tool Result: %v", result)
+	}
+
+	return fmt.Sprintf("Tool Result:\n%s", string(jsonBytes))
+}
+
+// parseTaskResult extracts the task execution result from LLM response and tool results
+func parseTaskResult(response *gollem.Response, nextInput []gollem.Input) string {
 	if response == nil {
 		return ""
 	}
@@ -36,5 +54,17 @@ func parseTaskResult(response *gollem.Response) string {
 		}
 	}
 
-	return strings.Join(results, "\n")
+	// Extract tool execution results from nextInput
+	for _, input := range nextInput {
+		if funcResp, ok := input.(gollem.FunctionResponse); ok {
+			if funcResp.Data != nil {
+				formatted := formatToolResult(funcResp.Data)
+				if formatted != "" {
+					results = append(results, formatted)
+				}
+			}
+		}
+	}
+
+	return strings.Join(results, "\n\n")
 }
