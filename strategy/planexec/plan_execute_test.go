@@ -1014,6 +1014,128 @@ func TestEnhancedConclusion(t *testing.T) {
 	}))
 }
 
+func TestPlanExec_TaskResultPreservation(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("tool result is preserved in Task.Result", func(t *testing.T) {
+		var taskDoneResult string
+		var taskDoneCalled int32
+
+		// Create test tool that returns structured data
+		queryTool := &testTool{
+			name:        "query_database",
+			description: "Query database for records",
+			parameters: map[string]*gollem.Parameter{
+				"query": {
+					Type:        gollem.TypeString,
+					Description: "Query string",
+				},
+			},
+			required: []string{"query"},
+			runFunc: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+				return map[string]any{
+					"records": []map[string]any{
+						{"id": "1", "name": "Alice"},
+						{"id": "2", "name": "Bob"},
+					},
+					"count": 2,
+				}, nil
+			},
+		}
+
+		// Create mock client
+		callCount := 0
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						callCount++
+						switch callCount {
+						case 1:
+							// Planning phase: return plan with one task
+							return &gollem.Response{
+								Texts: []string{`{
+									"needs_plan": true,
+									"user_intent": "Get database records",
+									"goal": "Query database",
+									"tasks": [{"description": "Query the database"}]
+								}`},
+							}, nil
+						case 2:
+							// Task execution: call the tool
+							return &gollem.Response{
+								FunctionCalls: []*gollem.FunctionCall{
+									{
+										ID:        "call_1",
+										Name:      "query_database",
+										Arguments: map[string]any{"query": "SELECT * FROM users"},
+									},
+								},
+							}, nil
+						case 3:
+							// After tool execution: LLM responds
+							return &gollem.Response{
+								Texts: []string{"Query executed successfully"},
+							}, nil
+						case 4:
+							// Reflection phase: all done
+							return &gollem.Response{
+								Texts: []string{`{
+									"new_tasks": [],
+									"updated_tasks": [],
+									"reason": "Task completed"
+								}`},
+							}, nil
+						default:
+							// Final conclusion
+							return &gollem.Response{
+								Texts: []string{"Database query completed"},
+							}, nil
+						}
+					},
+					HistoryFunc: func() (*gollem.History, error) {
+						return &gollem.History{}, nil
+					},
+				}, nil
+			},
+		}
+
+		// Create hooks to capture task result
+		hooks := &testHooks{
+			onTaskDone: func(ctx context.Context, plan *planexec.Plan, task *planexec.Task) error {
+				atomic.AddInt32(&taskDoneCalled, 1)
+				taskDoneResult = task.Result
+				t.Logf("OnTaskDone called, Task.Result = %s", task.Result)
+				return nil
+			},
+		}
+
+		// Create strategy
+		strategy := planexec.New(mockClient, planexec.WithHooks(hooks))
+
+		// Create agent with tool
+		agent := gollem.New(mockClient,
+			gollem.WithStrategy(strategy),
+			gollem.WithTools(queryTool),
+		)
+
+		// Execute
+		resp, err := agent.Execute(ctx, gollem.Text("Query the database for users"))
+		gt.NoError(t, err)
+		gt.V(t, resp).NotNil()
+
+		// Verify OnTaskDone was called
+		gt.V(t, atomic.LoadInt32(&taskDoneCalled)).Equal(int32(1))
+
+		// CRITICAL TEST: Verify Task.Result contains tool execution result
+		gt.V(t, taskDoneResult).NotEqual("")
+		gt.S(t, taskDoneResult).Contains("records")
+		gt.S(t, taskDoneResult).Contains("Alice")
+		gt.S(t, taskDoneResult).Contains("Bob")
+		gt.S(t, taskDoneResult).Contains("count")
+	})
+}
+
 func TestSystemPromptInReflectionAndConclusion(t *testing.T) {
 	const systemPrompt = "You are a test assistant with special instructions"
 

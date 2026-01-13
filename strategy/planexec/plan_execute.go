@@ -52,6 +52,8 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 	// IMPORTANT: Don't pass through on iteration 0 - that's the initial input for planning
 	if state.Iteration > 0 && len(state.NextInput) > 0 {
 		logger.Debug("passing through NextInput", "count", len(state.NextInput))
+		// Save tool results for later use in Phase 2
+		s.pendingToolResults = state.NextInput
 		return state.NextInput, nil, nil
 	}
 
@@ -98,10 +100,13 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 		if s.currentTask == nil {
 			return nil, nil, goerr.New("unexpected state: waiting for task but no current task is set")
 		}
-		s.currentTask.Result = parseTaskResult(state.LastResponse)
+		// Use pendingToolResults which were saved in Phase 0
+		s.currentTask.Result = parseTaskResult(state.LastResponse, s.pendingToolResults)
 		s.currentTask.State = TaskStateCompleted
 		s.waitingForTask = false
 		s.taskIterationCount++
+		// Clear pending tool results after use
+		s.pendingToolResults = nil
 
 		// Hook: task done
 		if s.hooks != nil {
