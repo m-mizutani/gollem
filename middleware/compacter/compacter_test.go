@@ -667,6 +667,21 @@ func TestCompactionWithRealLLM(t *testing.T) {
 			return gemini.New(context.Background(), projectID, location)
 		})
 	})
+
+	t.Run("Vertex AI Claude", func(t *testing.T) {
+		t.Parallel()
+		projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+		if !ok {
+			t.Skip("TEST_GCP_PROJECT_ID is not set")
+		}
+		location, ok := os.LookupEnv("TEST_GCP_LOCATION")
+		if !ok {
+			t.Skip("TEST_GCP_LOCATION is not set")
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return claude.NewWithVertex(context.Background(), location, projectID)
+		})
+	})
 }
 
 func containsIgnoreCase(s, substr string) bool {
