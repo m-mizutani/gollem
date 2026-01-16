@@ -497,7 +497,8 @@ func generateClaudeContent(
 	resp, err := client.Messages.New(ctx, msgParams)
 	if err != nil {
 		logger.Debug(apiName+" API request failed", "error", err)
-		return nil, goerr.Wrap(err, "failed to create message via "+apiName)
+		opts := tokenLimitErrorOptions(err)
+		return nil, goerr.Wrap(err, "failed to create message via "+apiName, opts...)
 	}
 
 	logger.Debug(apiName+" API response received",
