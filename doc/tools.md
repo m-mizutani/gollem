@@ -152,7 +152,7 @@ agent := gollem.New(client,
         }
     }),
 )
-
+```
 
 
 ## SubAgents
