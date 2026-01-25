@@ -53,8 +53,7 @@ func NewPromptTemplate(tmpl string, params map[string]*Parameter) (*PromptTempla
 // DefaultPromptTemplate returns the default prompt template that accepts a single "query" parameter.
 // This is equivalent to the default behavior when no prompt template is specified.
 func DefaultPromptTemplate() *PromptTemplate {
-	// This template is simple and cannot fail to parse
-	parsed, _ := template.New("prompt").Option("missingkey=error").Parse("{{.query}}")
+	parsed := template.Must(template.New("prompt").Option("missingkey=error").Parse("{{.query}}"))
 	return &PromptTemplate{
 		parsedTemplate: parsed,
 		parameters: map[string]*Parameter{
