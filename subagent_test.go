@@ -42,7 +42,7 @@ func TestNewSubAgent(t *testing.T) {
 	t.Run("create subagent with template mode", func(t *testing.T) {
 		childAgent := newMockAgent("test response")
 
-		prompt, err := gollem.NewSubAgentPrompt(
+		prompt, err := gollem.NewPromptTemplate(
 			"Analyze {{.code}} with focus on {{.focus}}",
 			map[string]*gollem.Parameter{
 				"code":  {Type: gollem.TypeString, Description: "Code to analyze", Required: true},
@@ -55,7 +55,7 @@ func TestNewSubAgent(t *testing.T) {
 			"analyzer",
 			"Analyzes code",
 			childAgent,
-			gollem.WithSubAgentPrompt(prompt),
+			gollem.WithPromptTemplate(prompt),
 		)
 
 		gt.NotNil(t, subagent)
@@ -86,7 +86,7 @@ func TestSubAgentSpec_DefaultMode(t *testing.T) {
 func TestSubAgentSpec_TemplateMode(t *testing.T) {
 	childAgent := newMockAgent("response")
 
-	prompt, err := gollem.NewSubAgentPrompt(
+	prompt, err := gollem.NewPromptTemplate(
 		"Analyze the following code focusing on {{.focus}}:\n\n{{.code}}",
 		map[string]*gollem.Parameter{
 			"code":  {Type: gollem.TypeString, Description: "Code to analyze", Required: true},
@@ -101,7 +101,7 @@ func TestSubAgentSpec_TemplateMode(t *testing.T) {
 		"code_analyzer",
 		"Analyzes code with specified focus area",
 		childAgent,
-		gollem.WithSubAgentPrompt(prompt),
+		gollem.WithPromptTemplate(prompt),
 	)
 
 	spec := subagent.Spec()
@@ -168,16 +168,37 @@ func TestSubAgentRun_DefaultMode(t *testing.T) {
 		gt.Nil(t, result)
 	})
 
-	t.Run("invalid query parameter type", func(t *testing.T) {
-		childAgent := newMockAgent("response")
+	t.Run("non-string query parameter is converted to string", func(t *testing.T) {
+		var capturedInput gollem.Input
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						if len(input) > 0 {
+							capturedInput = input[0]
+						}
+						return &gollem.Response{
+							Texts: []string{"Processed"},
+						}, nil
+					},
+				}, nil
+			},
+		}
+		childAgent := gollem.New(mockClient)
 		subagent := gollem.NewSubAgent("processor", "Processes queries", childAgent)
 
+		// Template converts any value to string representation
 		result, err := subagent.Run(context.Background(), map[string]any{
-			"query": 12345, // not a string
+			"query": 12345,
 		})
 
-		gt.Error(t, err)
-		gt.Nil(t, result)
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+
+		// Verify the number was converted to string
+		text, ok := capturedInput.(gollem.Text)
+		gt.True(t, ok)
+		gt.Equal(t, gollem.Text("12345"), text)
 	})
 }
 
@@ -200,7 +221,7 @@ func TestSubAgentRun_TemplateMode(t *testing.T) {
 		}
 		childAgent := gollem.New(mockClient)
 
-		prompt, err := gollem.NewSubAgentPrompt(
+		prompt, err := gollem.NewPromptTemplate(
 			"Analyze: {{.code}}, Focus: {{.focus}}",
 			map[string]*gollem.Parameter{
 				"code":  {Type: gollem.TypeString, Description: "Code"},
@@ -213,7 +234,7 @@ func TestSubAgentRun_TemplateMode(t *testing.T) {
 			"analyzer",
 			"Code analyzer",
 			childAgent,
-			gollem.WithSubAgentPrompt(prompt),
+			gollem.WithPromptTemplate(prompt),
 		)
 
 		result, err := subagent.Run(context.Background(), map[string]any{
@@ -235,7 +256,7 @@ func TestSubAgentRun_TemplateMode(t *testing.T) {
 	t.Run("template with missing variable returns error", func(t *testing.T) {
 		childAgent := newMockAgent("done")
 
-		prompt, err := gollem.NewSubAgentPrompt(
+		prompt, err := gollem.NewPromptTemplate(
 			"Value: {{.optional}}",
 			map[string]*gollem.Parameter{
 				"optional": {Type: gollem.TypeString, Description: "Optional value"},
@@ -247,7 +268,7 @@ func TestSubAgentRun_TemplateMode(t *testing.T) {
 			"test",
 			"Test",
 			childAgent,
-			gollem.WithSubAgentPrompt(prompt),
+			gollem.WithPromptTemplate(prompt),
 		)
 
 		result, err := subagent.Run(context.Background(), map[string]any{})
@@ -277,7 +298,7 @@ func TestSubAgentTemplateRendering(t *testing.T) {
 		}
 		childAgent := gollem.New(mockClient)
 
-		prompt, err := gollem.NewSubAgentPrompt(
+		prompt, err := gollem.NewPromptTemplate(
 			`Review the code:
 File: {{.filename}}
 Language: {{.language}}
@@ -298,7 +319,7 @@ Focus on: {{.focus}}`,
 			"reviewer",
 			"Code reviewer",
 			childAgent,
-			gollem.WithSubAgentPrompt(prompt),
+			gollem.WithPromptTemplate(prompt),
 		)
 
 		result, err := subagent.Run(context.Background(), map[string]any{
@@ -325,8 +346,8 @@ Focus on: best practices`
 	})
 
 	t.Run("invalid template syntax returns error", func(t *testing.T) {
-		// Invalid template syntax returns error from NewSubAgentPrompt
-		_, err := gollem.NewSubAgentPrompt(
+		// Invalid template syntax returns error from NewPromptTemplate
+		_, err := gollem.NewPromptTemplate(
 			"{{.invalid}", // invalid syntax
 			map[string]*gollem.Parameter{
 				"value": {Type: gollem.TypeString, Description: "Value"},
@@ -606,5 +627,98 @@ func TestWithSubAgentsOption(t *testing.T) {
 		)
 		_, err := parentAgent.Execute(context.Background(), gollem.Text("test"))
 		gt.NoError(t, err)
+	})
+}
+
+func TestPromptTemplateRender(t *testing.T) {
+	t.Run("render simple template", func(t *testing.T) {
+		pt, err := gollem.NewPromptTemplate(
+			"Hello, {{.name}}!",
+			map[string]*gollem.Parameter{
+				"name": {Type: gollem.TypeString, Description: "Name"},
+			},
+		)
+		gt.NoError(t, err)
+
+		result, err := pt.Render(map[string]any{"name": "World"})
+		gt.NoError(t, err)
+		gt.Equal(t, "Hello, World!", result)
+	})
+
+	t.Run("render complex template", func(t *testing.T) {
+		pt, err := gollem.NewPromptTemplate(
+			"Analyze {{.code}} with focus on {{.focus}}",
+			map[string]*gollem.Parameter{
+				"code":  {Type: gollem.TypeString, Description: "Code"},
+				"focus": {Type: gollem.TypeString, Description: "Focus"},
+			},
+		)
+		gt.NoError(t, err)
+
+		result, err := pt.Render(map[string]any{
+			"code":  "func main() {}",
+			"focus": "security",
+		})
+		gt.NoError(t, err)
+		gt.Equal(t, "Analyze func main() {} with focus on security", result)
+	})
+
+	t.Run("render with missing variable returns error", func(t *testing.T) {
+		pt, err := gollem.NewPromptTemplate(
+			"Hello, {{.name}}!",
+			map[string]*gollem.Parameter{
+				"name": {Type: gollem.TypeString, Description: "Name"},
+			},
+		)
+		gt.NoError(t, err)
+
+		_, err = pt.Render(map[string]any{})
+		gt.Error(t, err)
+	})
+}
+
+func TestPromptTemplateParameters(t *testing.T) {
+	params := map[string]*gollem.Parameter{
+		"code":  {Type: gollem.TypeString, Description: "Code to analyze", Required: true},
+		"focus": {Type: gollem.TypeString, Description: "Focus area"},
+	}
+
+	pt, err := gollem.NewPromptTemplate("{{.code}} {{.focus}}", params)
+	gt.NoError(t, err)
+
+	got := pt.Parameters()
+	gt.Equal(t, 2, len(got))
+	gt.Equal(t, "Code to analyze", got["code"].Description)
+	gt.True(t, got["code"].Required)
+	gt.Equal(t, "Focus area", got["focus"].Description)
+}
+
+func TestDefaultPromptTemplate(t *testing.T) {
+	t.Run("returns valid template", func(t *testing.T) {
+		pt := gollem.DefaultPromptTemplate()
+		gt.NotNil(t, pt)
+
+		params := pt.Parameters()
+		gt.Equal(t, 1, len(params))
+
+		queryParam, exists := params["query"]
+		gt.True(t, exists)
+		gt.Equal(t, gollem.TypeString, queryParam.Type)
+		gt.True(t, queryParam.Required)
+	})
+
+	t.Run("render with query", func(t *testing.T) {
+		pt := gollem.DefaultPromptTemplate()
+
+		result, err := pt.Render(map[string]any{"query": "Hello, World!"})
+		gt.NoError(t, err)
+		gt.Equal(t, "Hello, World!", result)
+	})
+
+	t.Run("render without query returns error", func(t *testing.T) {
+		pt := gollem.DefaultPromptTemplate()
+
+		_, err := pt.Render(map[string]any{})
+		gt.Error(t, err)
 	})
 }

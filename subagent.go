@@ -24,14 +24,14 @@ type SubAgent struct {
 // SubAgentOption is the type for options when creating a SubAgent.
 type SubAgentOption func(*SubAgent)
 
-// SubAgentPrompt holds the parsed template and parameter schema for template mode.
-// Use NewSubAgentPrompt to create an instance with proper error handling.
-type SubAgentPrompt struct {
+// PromptTemplate holds the parsed template and parameter schema for template mode.
+// Use NewPromptTemplate to create an instance with proper error handling.
+type PromptTemplate struct {
 	parsedTemplate *template.Template
 	parameters     map[string]*Parameter
 }
 
-// NewSubAgentPrompt creates a new SubAgentPrompt with the given template and parameters.
+// NewPromptTemplate creates a new PromptTemplate with the given template and parameters.
 // tmpl: Go text/template string to generate the prompt
 // params: Parameter schema for LLM (key is parameter name)
 //
@@ -39,22 +39,55 @@ type SubAgentPrompt struct {
 // when the template is executed.
 //
 // Returns an error if the template string is invalid.
-func NewSubAgentPrompt(tmpl string, params map[string]*Parameter) (*SubAgentPrompt, error) {
-	parsed, err := template.New("subagent").Option("missingkey=error").Parse(tmpl)
+func NewPromptTemplate(tmpl string, params map[string]*Parameter) (*PromptTemplate, error) {
+	parsed, err := template.New("prompt").Option("missingkey=error").Parse(tmpl)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to parse template")
 	}
-	return &SubAgentPrompt{
+	return &PromptTemplate{
 		parsedTemplate: parsed,
 		parameters:     params,
 	}, nil
 }
 
-// WithSubAgentPrompt sets a pre-configured prompt template for the subagent.
+// DefaultPromptTemplate returns the default prompt template that accepts a single "query" parameter.
+// This is equivalent to the default behavior when no prompt template is specified.
+func DefaultPromptTemplate() *PromptTemplate {
+	// This template is simple and cannot fail to parse
+	parsed, _ := template.New("prompt").Option("missingkey=error").Parse("{{.query}}")
+	return &PromptTemplate{
+		parsedTemplate: parsed,
+		parameters: map[string]*Parameter{
+			"query": {
+				Type:        TypeString,
+				Description: "Natural language query to send to the subagent",
+				Required:    true,
+			},
+		},
+	}
+}
+
+// Render renders the template with the given arguments and returns the resulting prompt string.
+// This method is useful for testing templates independently from the SubAgent.
+func (p *PromptTemplate) Render(args map[string]any) (string, error) {
+	var buf bytes.Buffer
+	if err := p.parsedTemplate.Execute(&buf, args); err != nil {
+		return "", goerr.Wrap(err, "failed to execute template")
+	}
+	return buf.String(), nil
+}
+
+// Parameters returns the parameter schema for this template.
+// This is useful for inspecting the expected parameters.
+func (p *PromptTemplate) Parameters() map[string]*Parameter {
+	return p.parameters
+}
+
+// WithPromptTemplate sets a pre-configured prompt template for the subagent.
 // This option replaces the default "query" parameter behavior.
 // When this option is used, the template is rendered with the provided parameters
 // and the result is passed to agent.Execute().
-func WithSubAgentPrompt(prompt *SubAgentPrompt) SubAgentOption {
+func WithPromptTemplate(prompt *PromptTemplate) SubAgentOption {
 	return func(s *SubAgent) {
 		s.parsedTemplate = prompt.parsedTemplate
 		s.parameters = prompt.parameters
@@ -107,32 +140,24 @@ func (s *SubAgent) Spec() ToolSpec {
 }
 
 // Run executes the SubAgent with the given arguments.
-// In default mode, it extracts the "query" parameter and passes it to the agent.
+// In default mode, it uses the default prompt template with a "query" parameter.
 // In template mode, it renders the template with the arguments and passes the result to the agent.
 func (s *SubAgent) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	var prompt string
-
+	var pt *PromptTemplate
 	if s.parsedTemplate == nil {
-		// Default mode: extract query parameter
-		queryVal, ok := args["query"]
-		if !ok {
-			return nil, goerr.Wrap(ErrInvalidParameter, "query parameter is required")
-		}
-
-		query, ok := queryVal.(string)
-		if !ok {
-			return nil, goerr.Wrap(ErrInvalidParameter, "query parameter must be a string")
-		}
-
-		prompt = query
+		// Default mode: use default prompt template
+		pt = DefaultPromptTemplate()
 	} else {
-		// Template mode: render template with arguments
-		var buf bytes.Buffer
-		if err := s.parsedTemplate.Execute(&buf, args); err != nil {
-			return nil, goerr.Wrap(err, "failed to execute template")
+		// Template mode: use custom template
+		pt = &PromptTemplate{
+			parsedTemplate: s.parsedTemplate,
+			parameters:     s.parameters,
 		}
+	}
 
-		prompt = buf.String()
+	prompt, err := pt.Render(args)
+	if err != nil {
+		return nil, err
 	}
 
 	// Execute the child agent
