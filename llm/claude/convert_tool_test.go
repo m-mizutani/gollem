@@ -84,6 +84,7 @@ func TestConvertTool(t *testing.T) {
 	gt.Equal(t, nameProps.Type, "string")
 	gt.Equal(t, nameProps.Description, "User's name")
 	// Check that required array is generated from properties with Required=true
+	gt.A(t, user.Required).Length(1)
 	gt.Array(t, user.Required).Has("name")
 
 	addressProps := userProps["address"].Properties

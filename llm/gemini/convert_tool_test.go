@@ -76,6 +76,7 @@ func TestConvertTool(t *testing.T) {
 	params := genaiTool.Parameters
 	gt.Value(t, params.Type).Equal(genai.TypeObject)
 	// Check that required array is generated from properties with Required=true
+	gt.A(t, params.Required).Length(2)
 	gt.Array(t, params.Required).Has("user")
 	gt.Array(t, params.Required).Has("items")
 
@@ -84,6 +85,7 @@ func TestConvertTool(t *testing.T) {
 	gt.Value(t, user.Type).Equal(genai.TypeObject)
 	gt.Value(t, user.Properties["name"].Type).Equal(genai.TypeString)
 	gt.Value(t, user.Properties["name"].Description).Equal("User's name")
+	gt.A(t, user.Required).Length(1)
 	gt.Array(t, user.Required).Has("name")
 
 	// Check address object
@@ -152,12 +154,14 @@ func TestComplexSchemaValidation(t *testing.T) {
 	// Check root parameters
 	rootParams := converted.Parameters
 	gt.Value(t, rootParams.Type).Equal(genai.TypeObject)
+	gt.A(t, rootParams.Required).Length(1)
 	gt.Array(t, rootParams.Required).Has("config")
 
 	// Check config object
 	config := rootParams.Properties["config"]
 	gt.Value(t, config).NotEqual(nil)
 	gt.Value(t, config.Type).Equal(genai.TypeObject)
+	gt.A(t, config.Required).Length(1)
 	gt.Array(t, config.Required).Has("required_field")
 
 	// Check nested object without explicit Required field

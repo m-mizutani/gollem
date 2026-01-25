@@ -80,6 +80,7 @@ func TestConvertTool(t *testing.T) {
 	gt.Value(t, user["properties"].(map[string]interface{})["name"].(map[string]interface{})["type"]).Equal("string")
 	gt.Value(t, user["properties"].(map[string]interface{})["name"].(map[string]interface{})["description"]).Equal("User's name")
 	// Check that required array is generated from properties with Required=true
+	gt.A(t, user["required"].([]string)).Length(1)
 	gt.Array(t, user["required"].([]string)).Has("name")
 
 	// Check address object
