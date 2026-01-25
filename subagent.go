@@ -24,24 +24,40 @@ type SubAgent struct {
 // SubAgentOption is the type for options when creating a SubAgent.
 type SubAgentOption func(*SubAgent)
 
-// WithPromptTemplate sets custom parameters and template for prompt generation.
-// template: Go text/template string to generate the prompt
+// SubAgentPrompt holds the parsed template and parameter schema for template mode.
+// Use NewSubAgentPrompt to create an instance with proper error handling.
+type SubAgentPrompt struct {
+	parsedTemplate *template.Template
+	parameters     map[string]*Parameter
+}
+
+// NewSubAgentPrompt creates a new SubAgentPrompt with the given template and parameters.
+// tmpl: Go text/template string to generate the prompt
 // params: Parameter schema for LLM (key is parameter name)
 //
+// The template uses missingkey=error option, so all referenced variables must be provided
+// when the template is executed.
+//
+// Returns an error if the template string is invalid.
+func NewSubAgentPrompt(tmpl string, params map[string]*Parameter) (*SubAgentPrompt, error) {
+	parsed, err := template.New("subagent").Option("missingkey=error").Parse(tmpl)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to parse template")
+	}
+	return &SubAgentPrompt{
+		parsedTemplate: parsed,
+		parameters:     params,
+	}, nil
+}
+
+// WithSubAgentPrompt sets a pre-configured prompt template for the subagent.
 // This option replaces the default "query" parameter behavior.
 // When this option is used, the template is rendered with the provided parameters
 // and the result is passed to agent.Execute().
-//
-// The template uses missingkey=error option, so all referenced variables must be provided.
-// If the template string is invalid, it will panic during SubAgent creation.
-func WithPromptTemplate(tmpl string, params map[string]*Parameter) SubAgentOption {
+func WithSubAgentPrompt(prompt *SubAgentPrompt) SubAgentOption {
 	return func(s *SubAgent) {
-		parsed, err := template.New("subagent").Option("missingkey=error").Parse(tmpl)
-		if err != nil {
-			panic("failed to parse template: " + err.Error())
-		}
-		s.parsedTemplate = parsed
-		s.parameters = params
+		s.parsedTemplate = prompt.parsedTemplate
+		s.parameters = prompt.parameters
 	}
 }
 

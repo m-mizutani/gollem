@@ -41,17 +41,21 @@ func TestNewSubAgent(t *testing.T) {
 
 	t.Run("create subagent with template mode", func(t *testing.T) {
 		childAgent := newMockAgent("test response")
+
+		prompt, err := gollem.NewSubAgentPrompt(
+			"Analyze {{.code}} with focus on {{.focus}}",
+			map[string]*gollem.Parameter{
+				"code":  {Type: gollem.TypeString, Description: "Code to analyze", Required: true},
+				"focus": {Type: gollem.TypeString, Description: "Focus area", Required: true},
+			},
+		)
+		gt.NoError(t, err)
+
 		subagent := gollem.NewSubAgent(
 			"analyzer",
 			"Analyzes code",
 			childAgent,
-			gollem.WithPromptTemplate(
-				"Analyze {{.code}} with focus on {{.focus}}",
-				map[string]*gollem.Parameter{
-					"code":  {Type: gollem.TypeString, Description: "Code to analyze", Required: true},
-					"focus": {Type: gollem.TypeString, Description: "Focus area", Required: true},
-				},
-			),
+			gollem.WithSubAgentPrompt(prompt),
 		)
 
 		gt.NotNil(t, subagent)
@@ -81,17 +85,23 @@ func TestSubAgentSpec_DefaultMode(t *testing.T) {
 
 func TestSubAgentSpec_TemplateMode(t *testing.T) {
 	childAgent := newMockAgent("response")
+
+	prompt, err := gollem.NewSubAgentPrompt(
+		"Analyze the following code focusing on {{.focus}}:\n\n{{.code}}",
+		map[string]*gollem.Parameter{
+			"code":  {Type: gollem.TypeString, Description: "Code to analyze", Required: true},
+			"focus": {Type: gollem.TypeString, Description: "Focus area (security, performance, etc.)", Required: true},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	subagent := gollem.NewSubAgent(
 		"code_analyzer",
 		"Analyzes code with specified focus area",
 		childAgent,
-		gollem.WithPromptTemplate(
-			"Analyze the following code focusing on {{.focus}}:\n\n{{.code}}",
-			map[string]*gollem.Parameter{
-				"code":  {Type: gollem.TypeString, Description: "Code to analyze", Required: true},
-				"focus": {Type: gollem.TypeString, Description: "Focus area (security, performance, etc.)", Required: true},
-			},
-		),
+		gollem.WithSubAgentPrompt(prompt),
 	)
 
 	spec := subagent.Spec()
@@ -190,17 +200,20 @@ func TestSubAgentRun_TemplateMode(t *testing.T) {
 		}
 		childAgent := gollem.New(mockClient)
 
+		prompt, err := gollem.NewSubAgentPrompt(
+			"Analyze: {{.code}}, Focus: {{.focus}}",
+			map[string]*gollem.Parameter{
+				"code":  {Type: gollem.TypeString, Description: "Code"},
+				"focus": {Type: gollem.TypeString, Description: "Focus"},
+			},
+		)
+		gt.NoError(t, err)
+
 		subagent := gollem.NewSubAgent(
 			"analyzer",
 			"Code analyzer",
 			childAgent,
-			gollem.WithPromptTemplate(
-				"Analyze: {{.code}}, Focus: {{.focus}}",
-				map[string]*gollem.Parameter{
-					"code":  {Type: gollem.TypeString, Description: "Code"},
-					"focus": {Type: gollem.TypeString, Description: "Focus"},
-				},
-			),
+			gollem.WithSubAgentPrompt(prompt),
 		)
 
 		result, err := subagent.Run(context.Background(), map[string]any{
@@ -222,16 +235,19 @@ func TestSubAgentRun_TemplateMode(t *testing.T) {
 	t.Run("template with missing variable returns error", func(t *testing.T) {
 		childAgent := newMockAgent("done")
 
+		prompt, err := gollem.NewSubAgentPrompt(
+			"Value: {{.optional}}",
+			map[string]*gollem.Parameter{
+				"optional": {Type: gollem.TypeString, Description: "Optional value"},
+			},
+		)
+		gt.NoError(t, err)
+
 		subagent := gollem.NewSubAgent(
 			"test",
 			"Test",
 			childAgent,
-			gollem.WithPromptTemplate(
-				"Value: {{.optional}}",
-				map[string]*gollem.Parameter{
-					"optional": {Type: gollem.TypeString, Description: "Optional value"},
-				},
-			),
+			gollem.WithSubAgentPrompt(prompt),
 		)
 
 		result, err := subagent.Run(context.Background(), map[string]any{})
@@ -261,25 +277,28 @@ func TestSubAgentTemplateRendering(t *testing.T) {
 		}
 		childAgent := gollem.New(mockClient)
 
-		subagent := gollem.NewSubAgent(
-			"reviewer",
-			"Code reviewer",
-			childAgent,
-			gollem.WithPromptTemplate(
-				`Review the code:
+		prompt, err := gollem.NewSubAgentPrompt(
+			`Review the code:
 File: {{.filename}}
 Language: {{.language}}
 
 {{.code}}
 
 Focus on: {{.focus}}`,
-				map[string]*gollem.Parameter{
-					"filename": {Type: gollem.TypeString, Description: "Filename"},
-					"language": {Type: gollem.TypeString, Description: "Programming language"},
-					"code":     {Type: gollem.TypeString, Description: "Code content"},
-					"focus":    {Type: gollem.TypeString, Description: "Review focus"},
-				},
-			),
+			map[string]*gollem.Parameter{
+				"filename": {Type: gollem.TypeString, Description: "Filename"},
+				"language": {Type: gollem.TypeString, Description: "Programming language"},
+				"code":     {Type: gollem.TypeString, Description: "Code content"},
+				"focus":    {Type: gollem.TypeString, Description: "Review focus"},
+			},
+		)
+		gt.NoError(t, err)
+
+		subagent := gollem.NewSubAgent(
+			"reviewer",
+			"Code reviewer",
+			childAgent,
+			gollem.WithSubAgentPrompt(prompt),
 		)
 
 		result, err := subagent.Run(context.Background(), map[string]any{
@@ -305,28 +324,16 @@ Focus on: best practices`
 		gt.Equal(t, gollem.Text(expected), text)
 	})
 
-	t.Run("invalid template syntax panics on creation", func(t *testing.T) {
-		childAgent := newMockAgent("response")
-
-		// Invalid template syntax causes panic during SubAgent creation
-		defer func() {
-			r := recover()
-			gt.NotNil(t, r)
-		}()
-
-		gollem.NewSubAgent(
-			"bad",
-			"Bad template",
-			childAgent,
-			gollem.WithPromptTemplate(
-				"{{.invalid}", // invalid syntax
-				map[string]*gollem.Parameter{
-					"value": {Type: gollem.TypeString, Description: "Value"},
-				},
-			),
+	t.Run("invalid template syntax returns error", func(t *testing.T) {
+		// Invalid template syntax returns error from NewSubAgentPrompt
+		_, err := gollem.NewSubAgentPrompt(
+			"{{.invalid}", // invalid syntax
+			map[string]*gollem.Parameter{
+				"value": {Type: gollem.TypeString, Description: "Value"},
+			},
 		)
 
-		t.Error("expected panic but did not occur")
+		gt.Error(t, err)
 	})
 }
 
