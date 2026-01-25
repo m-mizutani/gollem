@@ -279,6 +279,82 @@ mainAgent := gollem.New(client,
 )
 ```
 
+### SubAgent Middleware
+
+SubAgent middleware allows you to inject context or modify arguments before template rendering. This is useful for adding runtime information (timestamps, user data, environment info) that the LLM doesn't know about.
+
+```go
+// Inject context information
+subagent := gollem.NewSubAgent(
+    "context_aware_analyzer",
+    "Analyzes requests with user context",
+    analyzerAgent,
+    gollem.WithPromptTemplate(prompt),
+    gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+        return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+            // Add context that LLM doesn't provide
+            user := getUserFromContext(ctx)
+            args["current_time"] = time.Now().Format(time.RFC3339)
+            args["user_name"] = user.Name
+            args["user_role"] = user.Role
+            return next(ctx, args)
+        }
+    }),
+)
+```
+
+The injected context variables can be used in the template but are not exposed in the ToolSpec (the LLM doesn't see them as parameters):
+
+```go
+prompt, _ := gollem.NewPromptTemplate(
+    `Current time: {{.current_time}}
+User: {{.user_name}} ({{.user_role}})
+
+Analyze the following request: {{.query}}`,
+    map[string]*gollem.Parameter{
+        // Only 'query' is visible to the LLM
+        "query": {Type: gollem.TypeString, Description: "User query", Required: true},
+    },
+)
+```
+
+#### Chaining Multiple Middlewares
+
+Multiple middlewares can be chained. They execute in the order they are added:
+
+```go
+subagent := gollem.NewSubAgent(
+    "monitored_analyzer",
+    "Analyzed with logging",
+    agent,
+    gollem.WithPromptTemplate(prompt),
+    // First middleware: logging
+    gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+        return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+            log.Printf("SubAgent called with args: %v", args)
+            result, err := next(ctx, args)
+            log.Printf("SubAgent completed")
+            return result, err
+        }
+    }),
+    // Second middleware: context injection
+    gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+        return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+            args["timestamp"] = time.Now().Unix()
+            return next(ctx, args)
+        }
+    }),
+)
+```
+
+#### Use Cases
+
+- **Session information**: Inject user ID, session ID, timestamps
+- **Environment context**: Current file path, working directory, project settings
+- **External data**: Database lookups, API responses, cached data
+- **Argument transformation**: Mask sensitive data, normalize inputs
+- **Logging and monitoring**: Track invocations, measure latency
+
 ## Next Steps
 
 - Learn about [MCP server integration](mcp.md) for external tool integration

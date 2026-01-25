@@ -19,10 +19,17 @@ type SubAgent struct {
 	// Template mode fields (nil when using default query-only mode)
 	parsedTemplate *template.Template    // Parsed template (cached)
 	parameters     map[string]*Parameter // Parameter schema for LLM
+
+	// Middleware for processing arguments before template rendering
+	middleware func(SubAgentHandler) SubAgentHandler
 }
 
 // SubAgentOption is the type for options when creating a SubAgent.
 type SubAgentOption func(*SubAgent)
+
+// SubAgentHandler is a function that processes arguments for SubAgent execution.
+// It receives the context and current arguments, and returns potentially modified arguments.
+type SubAgentHandler func(ctx context.Context, args map[string]any) (map[string]any, error)
 
 // PromptTemplate holds the parsed template and parameter schema for template mode.
 // Use NewPromptTemplate to create an instance with proper error handling.
@@ -71,9 +78,10 @@ func DefaultPromptTemplate() *PromptTemplate {
 // This method is useful for testing templates independently from the SubAgent.
 // Returns an error if validation fails (missing required params, type mismatch, constraint violations).
 // Missing optional parameters are replaced with their zero value (empty string for strings).
+// Arguments not defined in parameters (e.g., injected by middleware) are also available in the template.
 func (p *PromptTemplate) Render(args map[string]any) (string, error) {
-	// Validate all parameters and build data map
-	data := make(map[string]any, len(p.parameters))
+	// Validate all defined parameters and build data map
+	data := make(map[string]any, len(args))
 	for name, param := range p.parameters {
 		value := args[name]
 		if err := param.ValidateValue(name, value); err != nil {
@@ -84,6 +92,13 @@ func (p *PromptTemplate) Render(args map[string]any) (string, error) {
 		} else {
 			// Set zero value for missing optional parameters to avoid <no value>
 			data[name] = zeroValue(param.Type)
+		}
+	}
+
+	// Add any additional args that are not in parameters (e.g., from middleware)
+	for name, value := range args {
+		if _, exists := p.parameters[name]; !exists {
+			data[name] = value
 		}
 	}
 
@@ -126,6 +141,39 @@ func WithPromptTemplate(prompt *PromptTemplate) SubAgentOption {
 	return func(s *SubAgent) {
 		s.parsedTemplate = prompt.parsedTemplate
 		s.parameters = prompt.parameters
+	}
+}
+
+// WithSubAgentMiddleware sets a middleware that can modify arguments before template rendering.
+// Multiple middlewares can be chained by calling this option multiple times.
+// The middleware follows the same pattern as WithToolMiddleware and WithContentBlockMiddleware.
+//
+// The middleware can:
+//   - Add context information (timestamps, user data, environment info)
+//   - Modify or transform arguments from the LLM
+//   - Perform logging or monitoring
+//   - Validate or filter arguments
+//
+// Example:
+//
+//	gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+//	    return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+//	        // Add context before processing
+//	        args["current_time"] = time.Now().Format(time.RFC3339)
+//	        return next(ctx, args)
+//	    }
+//	})
+func WithSubAgentMiddleware(middleware func(SubAgentHandler) SubAgentHandler) SubAgentOption {
+	return func(s *SubAgent) {
+		if s.middleware == nil {
+			s.middleware = middleware
+		} else {
+			// Chain middlewares
+			prev := s.middleware
+			s.middleware = func(next SubAgentHandler) SubAgentHandler {
+				return prev(middleware(next))
+			}
+		}
 	}
 }
 
@@ -177,38 +225,50 @@ func (s *SubAgent) Spec() ToolSpec {
 // Run executes the SubAgent with the given arguments.
 // In default mode, it uses the default prompt template with a "query" parameter.
 // In template mode, it renders the template with the arguments and passes the result to the agent.
+// If middleware is set, it is applied to the arguments before template rendering.
 func (s *SubAgent) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	var pt *PromptTemplate
-	if s.parsedTemplate == nil {
-		// Default mode: use default prompt template
-		pt = DefaultPromptTemplate()
-	} else {
-		// Template mode: use custom template
-		pt = &PromptTemplate{
-			parsedTemplate: s.parsedTemplate,
-			parameters:     s.parameters,
+	// Define the core handler that renders template and executes agent
+	coreHandler := func(ctx context.Context, args map[string]any) (map[string]any, error) {
+		var pt *PromptTemplate
+		if s.parsedTemplate == nil {
+			// Default mode: use default prompt template
+			pt = DefaultPromptTemplate()
+		} else {
+			// Template mode: use custom template
+			pt = &PromptTemplate{
+				parsedTemplate: s.parsedTemplate,
+				parameters:     s.parameters,
+			}
 		}
+
+		prompt, err := pt.Render(args)
+		if err != nil {
+			return nil, err
+		}
+
+		// Execute the child agent
+		resp, err := s.agent.Execute(ctx, Text(prompt))
+		if err != nil {
+			return nil, goerr.Wrap(err, "subagent execution failed")
+		}
+
+		// Build response text from ExecuteResponse
+		var responseText string
+		if resp != nil && len(resp.Texts) > 0 {
+			responseText = strings.Join(resp.Texts, "\n")
+		}
+
+		return map[string]any{
+			"response": responseText,
+			"status":   "success",
+		}, nil
 	}
 
-	prompt, err := pt.Render(args)
-	if err != nil {
-		return nil, err
+	// Apply middleware if set
+	if s.middleware != nil {
+		handler := s.middleware(coreHandler)
+		return handler(ctx, args)
 	}
 
-	// Execute the child agent
-	resp, err := s.agent.Execute(ctx, Text(prompt))
-	if err != nil {
-		return nil, goerr.Wrap(err, "subagent execution failed")
-	}
-
-	// Build response text from ExecuteResponse
-	var responseText string
-	if resp != nil && len(resp.Texts) > 0 {
-		responseText = strings.Join(resp.Texts, "\n")
-	}
-
-	return map[string]any{
-		"response": responseText,
-		"status":   "success",
-	}, nil
+	return coreHandler(ctx, args)
 }
