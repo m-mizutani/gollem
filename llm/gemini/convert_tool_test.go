@@ -16,15 +16,15 @@ func (t *complexTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name:        "complex_tool",
 		Description: "A tool with complex parameter structure",
-		Required:    []string{"user", "items"},
 		Parameters: map[string]*gollem.Parameter{
 			"user": {
 				Type:     gollem.TypeObject,
-				Required: []string{"name"},
+				Required: true,
 				Properties: map[string]*gollem.Parameter{
 					"name": {
 						Type:        gollem.TypeString,
 						Description: "User's name",
+						Required:    true,
 					},
 					"address": {
 						Type: gollem.TypeObject,
@@ -42,7 +42,8 @@ func (t *complexTool) Spec() gollem.ToolSpec {
 				},
 			},
 			"items": {
-				Type: gollem.TypeArray,
+				Type:     gollem.TypeArray,
+				Required: true,
 				Items: &gollem.Parameter{
 					Type: gollem.TypeObject,
 					Properties: map[string]*gollem.Parameter{
@@ -74,14 +75,16 @@ func TestConvertTool(t *testing.T) {
 
 	params := genaiTool.Parameters
 	gt.Value(t, params.Type).Equal(genai.TypeObject)
-	gt.Value(t, params.Required).Equal([]string{"user", "items"})
+	// Check that required array is generated from properties with Required=true
+	gt.Array(t, params.Required).Has("user")
+	gt.Array(t, params.Required).Has("items")
 
 	// Check user object
 	user := params.Properties["user"]
 	gt.Value(t, user.Type).Equal(genai.TypeObject)
 	gt.Value(t, user.Properties["name"].Type).Equal(genai.TypeString)
 	gt.Value(t, user.Properties["name"].Description).Equal("User's name")
-	gt.Value(t, user.Required).Equal([]string{"name"})
+	gt.Array(t, user.Required).Has("name")
 
 	// Check address object
 	address := user.Properties["address"]
@@ -149,13 +152,13 @@ func TestComplexSchemaValidation(t *testing.T) {
 	// Check root parameters
 	rootParams := converted.Parameters
 	gt.Value(t, rootParams.Type).Equal(genai.TypeObject)
-	gt.Value(t, rootParams.Required).Equal([]string{"config"})
+	gt.Array(t, rootParams.Required).Has("config")
 
 	// Check config object
 	config := rootParams.Properties["config"]
 	gt.Value(t, config).NotEqual(nil)
 	gt.Value(t, config.Type).Equal(genai.TypeObject)
-	gt.Value(t, config.Required).Equal([]string{"required_field"})
+	gt.Array(t, config.Required).Has("required_field")
 
 	// Check nested object without explicit Required field
 	optionalNested := config.Properties["optional_nested"]
@@ -270,16 +273,16 @@ func (t *complexSchemaTestTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name:        "complex_schema_test",
 		Description: "Tool to test complex schema structures that might cause Gemini validation issues",
-		Required:    []string{"config"},
 		Parameters: map[string]*gollem.Parameter{
 			"config": {
 				Type:        gollem.TypeObject,
 				Description: "Complex configuration object",
-				Required:    []string{"required_field"},
+				Required:    true,
 				Properties: map[string]*gollem.Parameter{
 					"required_field": {
 						Type:        gollem.TypeString,
 						Description: "A required field in the config",
+						Required:    true,
 					},
 					"optional_nested": {
 						Type:        gollem.TypeObject,
@@ -290,7 +293,7 @@ func (t *complexSchemaTestTool) Spec() gollem.ToolSpec {
 								Description: "A deep nested field",
 							},
 						},
-						// No Required field set - this should default to empty slice
+						// No Required=true set - should result in empty required slice
 					},
 					"array_field": {
 						Type:        gollem.TypeArray,
@@ -307,7 +310,7 @@ func (t *complexSchemaTestTool) Spec() gollem.ToolSpec {
 									Description: "Item value",
 								},
 							},
-							// Array items object also has no Required field
+							// Array items object also has no Required=true properties
 						},
 					},
 				},
@@ -377,7 +380,6 @@ func (t *emptyParametersTool) Spec() gollem.ToolSpec {
 		Name:        "empty_params",
 		Description: "Tool with no parameters",
 		Parameters:  map[string]*gollem.Parameter{},
-		Required:    []string{},
 	}
 }
 
@@ -414,7 +416,6 @@ func (t *parameterlessTool) Spec() gollem.ToolSpec {
 		Name:        "no_params_tool",
 		Description: "A tool with no parameters",
 		Parameters:  map[string]*gollem.Parameter{}, // Empty parameters
-		Required:    []string{},                     // Empty required
 	}
 }
 

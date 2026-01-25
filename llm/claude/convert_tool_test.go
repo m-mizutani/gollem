@@ -15,15 +15,15 @@ func (t *complexTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name:        "complex_tool",
 		Description: "A tool with complex parameter structure",
-		Required:    []string{"user"},
 		Parameters: map[string]*gollem.Parameter{
 			"user": {
 				Type:     gollem.TypeObject,
-				Required: []string{"name"},
+				Required: true,
 				Properties: map[string]*gollem.Parameter{
 					"name": {
 						Type:        gollem.TypeString,
 						Description: "User's name",
+						Required:    true,
 					},
 					"address": {
 						Type: gollem.TypeObject,
@@ -31,13 +31,13 @@ func (t *complexTool) Spec() gollem.ToolSpec {
 							"street": {
 								Type:        gollem.TypeString,
 								Description: "Street address",
+								Required:    true,
 							},
 							"city": {
 								Type:        gollem.TypeString,
 								Description: "City name",
 							},
 						},
-						Required: []string{"street"},
 					},
 				},
 			},
@@ -83,7 +83,8 @@ func TestConvertTool(t *testing.T) {
 	nameProps := userProps["name"]
 	gt.Equal(t, nameProps.Type, "string")
 	gt.Equal(t, nameProps.Description, "User's name")
-	gt.Array(t, user.Required).Equal([]string{"name"})
+	// Check that required array is generated from properties with Required=true
+	gt.Array(t, user.Required).Has("name")
 
 	addressProps := userProps["address"].Properties
 	gt.Equal(t, addressProps["street"].Type, "string")

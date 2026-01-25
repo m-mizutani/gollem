@@ -26,13 +26,14 @@ func (t *RandomNumberTool) Spec() gollem.ToolSpec {
 			"min": {
 				Type:        gollem.TypeNumber,
 				Description: "Minimum value of the range",
+				Required:    true,
 			},
 			"max": {
 				Type:        gollem.TypeNumber,
 				Description: "Maximum value of the range",
+				Required:    true,
 			},
 		},
-		Required: []string{"min", "max"},
 	}
 }
 
@@ -693,9 +694,9 @@ func TestGollemWithOptions(t *testing.T) {
 				"result": {
 					Type:        gollem.TypeString,
 					Description: "Result field",
+					Required:    true,
 				},
 			},
-			Required: []string{"result"},
 		}
 
 		mockClient := &mock.LLMClientMock{
@@ -733,13 +734,13 @@ func TestGollemWithOptions(t *testing.T) {
 				"status": {
 					Type:        gollem.TypeString,
 					Description: "Status field",
+					Required:    true,
 				},
 				"message": {
 					Type:        gollem.TypeString,
 					Description: "Message field",
 				},
 			},
-			Required: []string{"status"},
 		}
 
 		mockClient := &mock.LLMClientMock{

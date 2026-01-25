@@ -3,6 +3,7 @@ package claude
 import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/m-mizutani/gollem"
+	gollemschema "github.com/m-mizutani/gollem/internal/schema"
 )
 
 func convertTool(tool gollem.Tool) anthropic.ToolUnionParam {
@@ -42,10 +43,16 @@ func convertParametersToJSONSchema(params map[string]*gollem.Parameter) jsonSche
 		properties[name] = convertParameterToSchema(param)
 	}
 
-	return jsonSchema{
+	schema := jsonSchema{
 		Type:       "object",
 		Properties: properties,
 	}
+
+	if required := gollemschema.CollectRequiredFields(params); len(required) > 0 {
+		schema.Required = required
+	}
+
+	return schema
 }
 
 // convertParameterToSchema converts gollem.Parameter to Claude schema
@@ -70,8 +77,8 @@ func convertParameterToSchema(param *gollem.Parameter) jsonSchema {
 			properties[name] = convertParameterToSchema(prop)
 		}
 		schema.Properties = properties
-		if len(param.Required) > 0 {
-			schema.Required = param.Required
+		if required := gollemschema.CollectRequiredFields(param.Properties); len(required) > 0 {
+			schema.Required = required
 		}
 	}
 

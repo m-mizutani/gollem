@@ -136,10 +136,9 @@ func WithSessionContentStreamMiddleware(middlewares ...ContentStreamMiddleware) 
 //	    Description: "User profile information",
 //	    Type: gollem.TypeObject,
 //	    Properties: map[string]*gollem.Parameter{
-//	        "name": {Type: gollem.TypeString, Description: "User name"},
+//	        "name": {Type: gollem.TypeString, Description: "User name", Required: true},
 //	        "age": {Type: gollem.TypeInteger, Description: "User age"},
 //	    },
-//	    Required: []string{"name"},
 //	}
 //	session, err := client.NewSession(ctx,
 //	    gollem.WithSessionContentType(gollem.ContentTypeJSON),

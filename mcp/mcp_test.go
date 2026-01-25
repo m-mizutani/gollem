@@ -71,17 +71,17 @@ func TestMCPLocalDryRun(t *testing.T) {
 		testArgs = map[string]any{}
 
 		// Add required parameters if any
-		for _, reqParam := range testTool.Required {
-			if param, exists := testTool.Parameters[reqParam]; exists {
+		for paramName, param := range testTool.Parameters {
+			if param.Required {
 				switch param.Type {
 				case gollem.TypeString:
-					testArgs[reqParam] = "test"
+					testArgs[paramName] = "test"
 				case gollem.TypeInteger:
-					testArgs[reqParam] = 1
+					testArgs[paramName] = 1
 				case gollem.TypeNumber:
-					testArgs[reqParam] = 1.0
+					testArgs[paramName] = 1.0
 				case gollem.TypeBoolean:
-					testArgs[reqParam] = true
+					testArgs[paramName] = true
 				}
 			}
 		}
@@ -549,6 +549,7 @@ func TestRecursiveSchemaConversion(t *testing.T) {
 					gt.True(t, exists)
 					gt.Equal(t, actualProp.Type, expectedProp.Type)
 					gt.Equal(t, actualProp.Description, expectedProp.Description)
+					gt.Equal(t, actualProp.Required, expectedProp.Required)
 
 					// Test nested properties if they exist
 					if expectedProp.Properties != nil {
@@ -558,11 +559,10 @@ func TestRecursiveSchemaConversion(t *testing.T) {
 							gt.True(t, nestedExists)
 							gt.Equal(t, nestedActual.Type, nestedExpected.Type)
 							gt.Equal(t, nestedActual.Description, nestedExpected.Description)
+							gt.Equal(t, nestedActual.Required, nestedExpected.Required)
 						}
 					}
 				}
-
-				gt.Array(t, result.Required).Equal(tc.expected.Required)
 			}
 
 			// Test array items recursively
@@ -671,37 +671,39 @@ func TestRecursiveSchemaConversion(t *testing.T) {
 		expected: &gollem.Parameter{
 			Type:        gollem.TypeObject,
 			Description: "A nested object example",
-			Required:    []string{"user"},
 			Properties: map[string]*gollem.Parameter{
 				"user": {
 					Type:        gollem.TypeObject,
 					Description: "User information",
-					Required:    []string{"name", "age"},
+					Required:    true,
 					Properties: map[string]*gollem.Parameter{
 						"name": {
 							Type:        gollem.TypeString,
 							Description: "User name",
+							Required:    true,
 							MinLength:   &[]int{1}[0],
 							MaxLength:   &[]int{100}[0],
 						},
 						"age": {
 							Type:        gollem.TypeInteger,
 							Description: "User age",
+							Required:    true,
 							Minimum:     &[]float64{0.0}[0],
 							Maximum:     &[]float64{150.0}[0],
 						},
 						"address": {
 							Type:        gollem.TypeObject,
 							Description: "User address",
-							Required:    []string{"street", "city"},
 							Properties: map[string]*gollem.Parameter{
 								"street": {
 									Type:        gollem.TypeString,
 									Description: "Street address",
+									Required:    true,
 								},
 								"city": {
 									Type:        gollem.TypeString,
 									Description: "City name",
+									Required:    true,
 								},
 							},
 						},
@@ -763,16 +765,17 @@ func TestRecursiveSchemaConversion(t *testing.T) {
 			Items: &gollem.Parameter{
 				Type:        gollem.TypeObject,
 				Description: "Product item",
-				Required:    []string{"id", "name"},
 				Properties: map[string]*gollem.Parameter{
 					"id": {
 						Type:        gollem.TypeInteger,
 						Description: "Product ID",
+						Required:    true,
 						Minimum:     &[]float64{1.0}[0],
 					},
 					"name": {
 						Type:        gollem.TypeString,
 						Description: "Product name",
+						Required:    true,
 						Pattern:     "^[a-zA-Z0-9\\s]+$",
 					},
 					"tags": {

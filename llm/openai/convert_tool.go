@@ -2,6 +2,7 @@ package openai
 
 import (
 	"github.com/m-mizutani/gollem"
+	gollemschema "github.com/m-mizutani/gollem/internal/schema"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -18,8 +19,8 @@ func convertTool(tool gollem.Tool) openai.Tool {
 	if len(properties) > 0 {
 		parameters["type"] = "object"
 		parameters["properties"] = properties
-		if len(spec.Required) > 0 {
-			parameters["required"] = spec.Required
+		if required := gollemschema.CollectRequiredFields(spec.Parameters); len(required) > 0 {
+			parameters["required"] = required
 		}
 	}
 
@@ -51,8 +52,8 @@ func convertParameterToSchema(param *gollem.Parameter) map[string]interface{} {
 			properties[name] = convertParameterToSchema(prop)
 		}
 		schema["properties"] = properties
-		if len(param.Required) > 0 {
-			schema["required"] = param.Required
+		if required := gollemschema.CollectRequiredFields(param.Properties); len(required) > 0 {
+			schema["required"] = required
 		}
 	}
 

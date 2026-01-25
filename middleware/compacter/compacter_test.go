@@ -670,13 +670,13 @@ func TestCompactionWithRealLLM(t *testing.T) {
 
 	t.Run("Vertex AI Claude", func(t *testing.T) {
 		t.Parallel()
-		projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+		projectID, ok := os.LookupEnv("TEST_GCP_CLAUDE_PROJECT_ID")
 		if !ok {
-			t.Skip("TEST_GCP_PROJECT_ID is not set")
+			t.Skip("TEST_GCP_CLAUDE_PROJECT_ID is not set")
 		}
-		location, ok := os.LookupEnv("TEST_GCP_LOCATION")
+		location, ok := os.LookupEnv("TEST_GCP_CLAUDE_LOCATION")
 		if !ok {
-			t.Skip("TEST_GCP_LOCATION is not set")
+			t.Skip("TEST_GCP_CLAUDE_LOCATION is not set")
 		}
 		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
 			return claude.NewWithVertex(context.Background(), location, projectID)

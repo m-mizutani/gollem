@@ -389,7 +389,6 @@ func convertToolToSpec(tool *mcp.Tool) (gollem.ToolSpec, error) {
 		Name:        tool.Name,
 		Description: tool.Description,
 		Parameters:  make(map[string]*gollem.Parameter),
-		Required:    []string{},
 	}
 
 	// Convert input schema if available
@@ -399,7 +398,6 @@ func convertToolToSpec(tool *mcp.Tool) (gollem.ToolSpec, error) {
 			return spec, goerr.Wrap(err, "failed to convert input schema")
 		}
 		spec.Parameters = param.Properties
-		spec.Required = param.Required
 	}
 
 	return spec, nil
@@ -421,7 +419,6 @@ func convertInputSchemaToParameter(schema any) (*gollem.Parameter, error) {
 	param := &gollem.Parameter{
 		Type:       gollem.TypeObject,
 		Properties: make(map[string]*gollem.Parameter),
-		Required:   []string{},
 	}
 
 	// Extract properties
@@ -435,11 +432,13 @@ func convertInputSchemaToParameter(schema any) (*gollem.Parameter, error) {
 		}
 	}
 
-	// Extract required fields
+	// Extract required fields and set Required bool on each property
 	if required, ok := schemaMap["required"].([]any); ok {
 		for _, req := range required {
 			if reqStr, ok := req.(string); ok {
-				param.Required = append(param.Required, reqStr)
+				if prop, exists := param.Properties[reqStr]; exists {
+					prop.Required = true
+				}
 			}
 		}
 	}
@@ -503,11 +502,13 @@ func convertSchemaProperty(propSchema any) (*gollem.Parameter, error) {
 			}
 		}
 
-		// Extract required fields
+		// Extract required fields and set Required bool on each property
 		if required, ok := propMap["required"].([]any); ok {
 			for _, req := range required {
 				if reqStr, ok := req.(string); ok {
-					param.Required = append(param.Required, reqStr)
+					if prop, exists := param.Properties[reqStr]; exists {
+						prop.Required = true
+					}
 				}
 			}
 		}
