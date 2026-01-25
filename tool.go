@@ -3,6 +3,7 @@ package gollem
 import (
 	"context"
 	"regexp"
+	"slices"
 
 	"github.com/m-mizutani/goerr/v2"
 )
@@ -162,6 +163,136 @@ func (p *Parameter) Validate() error {
 	if p.Type == TypeArray {
 		if p.MinItems != nil && p.MaxItems != nil && *p.MinItems > *p.MaxItems {
 			return eb.Wrap(ErrInvalidParameter, "minItems must be less than or equal to maxItems")
+		}
+	}
+
+	return nil
+}
+
+// ValidateValue validates a value against this parameter's specification.
+// It checks required, type, enum, and constraint validations.
+// Returns nil if the value is valid, or an error describing the validation failure.
+func (p *Parameter) ValidateValue(name string, value any) error {
+	eb := goerr.NewBuilder(goerr.V("parameter", name))
+
+	// Check required
+	if value == nil {
+		if p.Required {
+			return eb.Wrap(ErrInvalidParameter, "required parameter missing")
+		}
+		return nil // Optional parameter with no value is valid
+	}
+
+	// Type validation
+	switch p.Type {
+	case TypeString:
+		s, ok := value.(string)
+		if !ok {
+			return eb.Wrap(ErrInvalidParameter, "expected string type", goerr.V("actual", value))
+		}
+		// Enum validation
+		if len(p.Enum) > 0 && !slices.Contains(p.Enum, s) {
+			return eb.Wrap(ErrInvalidParameter, "value not in enum", goerr.V("value", s), goerr.V("enum", p.Enum))
+		}
+		// String length validation
+		if p.MinLength != nil && len(s) < *p.MinLength {
+			return eb.Wrap(ErrInvalidParameter, "string too short", goerr.V("minLength", *p.MinLength), goerr.V("actual", len(s)))
+		}
+		if p.MaxLength != nil && len(s) > *p.MaxLength {
+			return eb.Wrap(ErrInvalidParameter, "string too long", goerr.V("maxLength", *p.MaxLength), goerr.V("actual", len(s)))
+		}
+		// Pattern validation
+		if p.Pattern != "" {
+			matched, err := regexp.MatchString(p.Pattern, s)
+			if err != nil {
+				return eb.Wrap(err, "pattern matching failed")
+			}
+			if !matched {
+				return eb.Wrap(ErrInvalidParameter, "string does not match pattern", goerr.V("pattern", p.Pattern))
+			}
+		}
+
+	case TypeNumber:
+		var n float64
+		switch v := value.(type) {
+		case float64:
+			n = v
+		case float32:
+			n = float64(v)
+		case int:
+			n = float64(v)
+		case int64:
+			n = float64(v)
+		default:
+			return eb.Wrap(ErrInvalidParameter, "expected number type", goerr.V("actual", value))
+		}
+		if p.Minimum != nil && n < *p.Minimum {
+			return eb.Wrap(ErrInvalidParameter, "number too small", goerr.V("minimum", *p.Minimum), goerr.V("actual", n))
+		}
+		if p.Maximum != nil && n > *p.Maximum {
+			return eb.Wrap(ErrInvalidParameter, "number too large", goerr.V("maximum", *p.Maximum), goerr.V("actual", n))
+		}
+
+	case TypeInteger:
+		var n int64
+		switch v := value.(type) {
+		case int:
+			n = int64(v)
+		case int64:
+			n = v
+		case float64:
+			if v != float64(int64(v)) {
+				return eb.Wrap(ErrInvalidParameter, "expected integer type, got float", goerr.V("actual", v))
+			}
+			n = int64(v)
+		default:
+			return eb.Wrap(ErrInvalidParameter, "expected integer type", goerr.V("actual", value))
+		}
+		if p.Minimum != nil && float64(n) < *p.Minimum {
+			return eb.Wrap(ErrInvalidParameter, "integer too small", goerr.V("minimum", *p.Minimum), goerr.V("actual", n))
+		}
+		if p.Maximum != nil && float64(n) > *p.Maximum {
+			return eb.Wrap(ErrInvalidParameter, "integer too large", goerr.V("maximum", *p.Maximum), goerr.V("actual", n))
+		}
+
+	case TypeBoolean:
+		if _, ok := value.(bool); !ok {
+			return eb.Wrap(ErrInvalidParameter, "expected boolean type", goerr.V("actual", value))
+		}
+
+	case TypeArray:
+		arr, ok := value.([]any)
+		if !ok {
+			return eb.Wrap(ErrInvalidParameter, "expected array type", goerr.V("actual", value))
+		}
+		if p.MinItems != nil && len(arr) < *p.MinItems {
+			return eb.Wrap(ErrInvalidParameter, "array too short", goerr.V("minItems", *p.MinItems), goerr.V("actual", len(arr)))
+		}
+		if p.MaxItems != nil && len(arr) > *p.MaxItems {
+			return eb.Wrap(ErrInvalidParameter, "array too long", goerr.V("maxItems", *p.MaxItems), goerr.V("actual", len(arr)))
+		}
+		// Validate each item if Items schema is defined
+		if p.Items != nil {
+			for i, item := range arr {
+				if err := p.Items.ValidateValue(name+"["+string(rune('0'+i))+"]", item); err != nil {
+					return err
+				}
+			}
+		}
+
+	case TypeObject:
+		obj, ok := value.(map[string]any)
+		if !ok {
+			return eb.Wrap(ErrInvalidParameter, "expected object type", goerr.V("actual", value))
+		}
+		// Validate each property if Properties schema is defined
+		if p.Properties != nil {
+			for propName, propParam := range p.Properties {
+				propValue := obj[propName]
+				if err := propParam.ValidateValue(name+"."+propName, propValue); err != nil {
+					return err
+				}
+			}
 		}
 	}
 

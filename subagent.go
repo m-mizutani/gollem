@@ -35,12 +35,13 @@ type PromptTemplate struct {
 // tmpl: Go text/template string to generate the prompt
 // params: Parameter schema for LLM (key is parameter name)
 //
-// The template uses missingkey=error option, so all referenced variables must be provided
-// when the template is executed.
+// The template uses missingkey=zero option, so missing variables are replaced with
+// their zero value (empty string for strings). This allows conditional checks like
+// {{if .optional}}...{{end}} for optional parameters.
 //
 // Returns an error if the template string is invalid.
 func NewPromptTemplate(tmpl string, params map[string]*Parameter) (*PromptTemplate, error) {
-	parsed, err := template.New("prompt").Option("missingkey=error").Parse(tmpl)
+	parsed, err := template.New("prompt").Option("missingkey=zero").Parse(tmpl)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to parse template")
 	}
@@ -53,7 +54,7 @@ func NewPromptTemplate(tmpl string, params map[string]*Parameter) (*PromptTempla
 // DefaultPromptTemplate returns the default prompt template that accepts a single "query" parameter.
 // This is equivalent to the default behavior when no prompt template is specified.
 func DefaultPromptTemplate() *PromptTemplate {
-	parsed := template.Must(template.New("prompt").Option("missingkey=error").Parse("{{.query}}"))
+	parsed := template.Must(template.New("prompt").Option("missingkey=zero").Parse("{{.query}}"))
 	return &PromptTemplate{
 		parsedTemplate: parsed,
 		parameters: map[string]*Parameter{
@@ -68,12 +69,47 @@ func DefaultPromptTemplate() *PromptTemplate {
 
 // Render renders the template with the given arguments and returns the resulting prompt string.
 // This method is useful for testing templates independently from the SubAgent.
+// Returns an error if validation fails (missing required params, type mismatch, constraint violations).
+// Missing optional parameters are replaced with their zero value (empty string for strings).
 func (p *PromptTemplate) Render(args map[string]any) (string, error) {
+	// Validate all parameters and build data map
+	data := make(map[string]any, len(p.parameters))
+	for name, param := range p.parameters {
+		value := args[name]
+		if err := param.ValidateValue(name, value); err != nil {
+			return "", err
+		}
+		if value != nil {
+			data[name] = value
+		} else {
+			// Set zero value for missing optional parameters to avoid <no value>
+			data[name] = zeroValue(param.Type)
+		}
+	}
+
 	var buf bytes.Buffer
-	if err := p.parsedTemplate.Execute(&buf, args); err != nil {
+	if err := p.parsedTemplate.Execute(&buf, data); err != nil {
 		return "", goerr.Wrap(err, "failed to execute template")
 	}
 	return buf.String(), nil
+}
+
+// zeroValue returns the zero value for a given parameter type.
+func zeroValue(t ParameterType) any {
+	switch t {
+	case TypeString:
+		return ""
+	case TypeNumber, TypeInteger:
+		return 0
+	case TypeBoolean:
+		return false
+	case TypeArray:
+		return []any{}
+	case TypeObject:
+		return map[string]any{}
+	default:
+		return ""
+	}
 }
 
 // Parameters returns the parameter schema for this template.

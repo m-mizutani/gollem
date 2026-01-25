@@ -158,25 +158,22 @@ func TestSubAgentRun_DefaultMode(t *testing.T) {
 		gt.Equal(t, gollem.Text("Process this text"), text)
 	})
 
-	t.Run("missing query parameter", func(t *testing.T) {
+	t.Run("missing required query parameter returns error", func(t *testing.T) {
 		childAgent := newMockAgent("response")
 		subagent := gollem.NewSubAgent("processor", "Processes queries", childAgent)
 
+		// query is a required parameter, so missing it returns an error
 		result, err := subagent.Run(context.Background(), map[string]any{})
 
 		gt.Error(t, err)
 		gt.Nil(t, result)
 	})
 
-	t.Run("non-string query parameter is converted to string", func(t *testing.T) {
-		var capturedInput gollem.Input
+	t.Run("non-string query parameter returns type error", func(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
 					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-						if len(input) > 0 {
-							capturedInput = input[0]
-						}
 						return &gollem.Response{
 							Texts: []string{"Processed"},
 						}, nil
@@ -187,18 +184,13 @@ func TestSubAgentRun_DefaultMode(t *testing.T) {
 		childAgent := gollem.New(mockClient)
 		subagent := gollem.NewSubAgent("processor", "Processes queries", childAgent)
 
-		// Template converts any value to string representation
+		// Non-string value for string parameter returns type error
 		result, err := subagent.Run(context.Background(), map[string]any{
 			"query": 12345,
 		})
 
-		gt.NoError(t, err)
-		gt.NotNil(t, result)
-
-		// Verify the number was converted to string
-		text, ok := capturedInput.(gollem.Text)
-		gt.True(t, ok)
-		gt.Equal(t, gollem.Text("12345"), text)
+		gt.Error(t, err)
+		gt.Nil(t, result)
 	})
 }
 
@@ -253,8 +245,23 @@ func TestSubAgentRun_TemplateMode(t *testing.T) {
 		gt.Equal(t, gollem.Text("Analyze: func main() {}, Focus: security"), text)
 	})
 
-	t.Run("template with missing variable returns error", func(t *testing.T) {
-		childAgent := newMockAgent("done")
+	t.Run("template with missing variable uses zero value", func(t *testing.T) {
+		var capturedInput gollem.Input
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						if len(input) > 0 {
+							capturedInput = input[0]
+						}
+						return &gollem.Response{
+							Texts: []string{"done"},
+						}, nil
+					},
+				}, nil
+			},
+		}
+		childAgent := gollem.New(mockClient)
 
 		prompt, err := gollem.NewPromptTemplate(
 			"Value: {{.optional}}",
@@ -273,9 +280,13 @@ func TestSubAgentRun_TemplateMode(t *testing.T) {
 
 		result, err := subagent.Run(context.Background(), map[string]any{})
 
-		// missingkey=error causes template execution to fail for missing variables
-		gt.Error(t, err)
-		gt.Nil(t, result)
+		// missingkey=zero replaces missing variables with empty string
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+
+		text, ok := capturedInput.(gollem.Text)
+		gt.True(t, ok)
+		gt.Equal(t, gollem.Text("Value: "), text)
 	})
 }
 
@@ -663,7 +674,7 @@ func TestPromptTemplateRender(t *testing.T) {
 		gt.Equal(t, "Analyze func main() {} with focus on security", result)
 	})
 
-	t.Run("render with missing variable returns error", func(t *testing.T) {
+	t.Run("render with missing variable uses zero value", func(t *testing.T) {
 		pt, err := gollem.NewPromptTemplate(
 			"Hello, {{.name}}!",
 			map[string]*gollem.Parameter{
@@ -672,8 +683,10 @@ func TestPromptTemplateRender(t *testing.T) {
 		)
 		gt.NoError(t, err)
 
-		_, err = pt.Render(map[string]any{})
-		gt.Error(t, err)
+		// missingkey=zero replaces missing variables with empty string
+		result, err := pt.Render(map[string]any{})
+		gt.NoError(t, err)
+		gt.Equal(t, "Hello, !", result)
 	})
 }
 
@@ -715,9 +728,10 @@ func TestDefaultPromptTemplate(t *testing.T) {
 		gt.Equal(t, "Hello, World!", result)
 	})
 
-	t.Run("render without query returns error", func(t *testing.T) {
+	t.Run("render without required query returns error", func(t *testing.T) {
 		pt := gollem.DefaultPromptTemplate()
 
+		// query is required, so missing it returns an error
 		_, err := pt.Render(map[string]any{})
 		gt.Error(t, err)
 	})
