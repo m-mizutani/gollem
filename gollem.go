@@ -204,6 +204,17 @@ func WithToolMiddleware(middleware ToolMiddleware) Option {
 	}
 }
 
+// WithSubAgents adds subagents to the agent.
+// Subagents are converted to tools and can be invoked by the LLM.
+// Each SubAgent implements the Tool interface, so they are added to the tools list.
+func WithSubAgents(subagents ...*SubAgent) Option {
+	return func(s *gollemConfig) {
+		for _, subagent := range subagents {
+			s.tools = append(s.tools, subagent)
+		}
+	}
+}
+
 // WithStrategy sets the strategy for execution. Default is SimpleLoop.
 func WithStrategy(strategy Strategy) Option {
 	return func(s *gollemConfig) {
