@@ -2,6 +2,7 @@ package gollem_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/m-mizutani/gollem"
@@ -734,5 +735,367 @@ func TestDefaultPromptTemplate(t *testing.T) {
 		// query is required, so missing it returns an error
 		_, err := pt.Render(map[string]any{})
 		gt.Error(t, err)
+	})
+}
+
+func TestSubAgentWithSubAgentMiddleware(t *testing.T) {
+	t.Run("middleware adds context to args", func(t *testing.T) {
+		var capturedInput gollem.Input
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						if len(input) > 0 {
+							capturedInput = input[0]
+						}
+						return &gollem.Response{
+							Texts: []string{"done"},
+						}, nil
+					},
+				}, nil
+			},
+		}
+		childAgent := gollem.New(mockClient)
+
+		prompt, err := gollem.NewPromptTemplate(
+			"Query: {{.query}}, Time: {{.current_time}}, User: {{.user_name}}",
+			map[string]*gollem.Parameter{
+				"query": {Type: gollem.TypeString, Description: "Query", Required: true},
+				// current_time and user_name are injected by middleware, not in LLM spec
+			},
+		)
+		gt.NoError(t, err)
+
+		subagent := gollem.NewSubAgent(
+			"context_aware",
+			"Context aware agent",
+			childAgent,
+			gollem.WithPromptTemplate(prompt),
+			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+					// Inject context that LLM doesn't provide
+					args["current_time"] = "2024-01-01T12:00:00Z"
+					args["user_name"] = "Alice"
+					return next(ctx, args)
+				}
+			}),
+		)
+
+		result, err := subagent.Run(context.Background(), map[string]any{
+			"query": "test query",
+		})
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.Equal(t, "success", result["status"])
+
+		// Verify the injected context was used in the prompt
+		text, ok := capturedInput.(gollem.Text)
+		gt.True(t, ok)
+		gt.Equal(t, gollem.Text("Query: test query, Time: 2024-01-01T12:00:00Z, User: Alice"), text)
+	})
+
+	t.Run("middleware can modify existing args", func(t *testing.T) {
+		var capturedInput gollem.Input
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						if len(input) > 0 {
+							capturedInput = input[0]
+						}
+						return &gollem.Response{
+							Texts: []string{"done"},
+						}, nil
+					},
+				}, nil
+			},
+		}
+		childAgent := gollem.New(mockClient)
+
+		prompt, err := gollem.NewPromptTemplate(
+			"Password: {{.password}}",
+			map[string]*gollem.Parameter{
+				"password": {Type: gollem.TypeString, Description: "Password"},
+			},
+		)
+		gt.NoError(t, err)
+
+		subagent := gollem.NewSubAgent(
+			"masked",
+			"Masks sensitive data",
+			childAgent,
+			gollem.WithPromptTemplate(prompt),
+			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+					// Mask the password
+					if _, ok := args["password"].(string); ok {
+						args["password"] = "***"
+					}
+					return next(ctx, args)
+				}
+			}),
+		)
+
+		result, err := subagent.Run(context.Background(), map[string]any{
+			"password": "secret123",
+		})
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+
+		// Verify the password was masked
+		text, ok := capturedInput.(gollem.Text)
+		gt.True(t, ok)
+		gt.Equal(t, gollem.Text("Password: ***"), text)
+	})
+}
+
+func TestSubAgentArgsMiddlewareChain(t *testing.T) {
+	t.Run("multiple middlewares execute in order", func(t *testing.T) {
+		var capturedInput gollem.Input
+		var executionOrder []string
+
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						if len(input) > 0 {
+							capturedInput = input[0]
+						}
+						return &gollem.Response{
+							Texts: []string{"done"},
+						}, nil
+					},
+				}, nil
+			},
+		}
+		childAgent := gollem.New(mockClient)
+
+		prompt, err := gollem.NewPromptTemplate(
+			"Value: {{.value}}",
+			map[string]*gollem.Parameter{
+				"value": {Type: gollem.TypeString, Description: "Value"},
+			},
+		)
+		gt.NoError(t, err)
+
+		subagent := gollem.NewSubAgent(
+			"chained",
+			"Chained middlewares",
+			childAgent,
+			gollem.WithPromptTemplate(prompt),
+			// First middleware (executes first)
+			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+					executionOrder = append(executionOrder, "middleware1-before")
+					args["value"] = args["value"].(string) + "-m1"
+					result, err := next(ctx, args)
+					executionOrder = append(executionOrder, "middleware1-after")
+					return result, err
+				}
+			}),
+			// Second middleware (executes second)
+			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+					executionOrder = append(executionOrder, "middleware2-before")
+					args["value"] = args["value"].(string) + "-m2"
+					result, err := next(ctx, args)
+					executionOrder = append(executionOrder, "middleware2-after")
+					return result, err
+				}
+			}),
+		)
+
+		result, err := subagent.Run(context.Background(), map[string]any{
+			"value": "initial",
+		})
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+
+		// Verify middleware execution order
+		gt.Equal(t, []string{
+			"middleware1-before",
+			"middleware2-before",
+			"middleware2-after",
+			"middleware1-after",
+		}, executionOrder)
+
+		// Verify both middlewares modified the value
+		text, ok := capturedInput.(gollem.Text)
+		gt.True(t, ok)
+		gt.Equal(t, gollem.Text("Value: initial-m1-m2"), text)
+	})
+}
+
+func TestSubAgentArgsMiddlewareError(t *testing.T) {
+	t.Run("middleware error stops execution", func(t *testing.T) {
+		agentCalled := false
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						agentCalled = true
+						return &gollem.Response{
+							Texts: []string{"done"},
+						}, nil
+					},
+				}, nil
+			},
+		}
+		childAgent := gollem.New(mockClient)
+
+		subagent := gollem.NewSubAgent(
+			"error_test",
+			"Tests middleware errors",
+			childAgent,
+			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+					// Return an error before calling next
+					return nil, errors.New("middleware error")
+				}
+			}),
+		)
+
+		result, err := subagent.Run(context.Background(), map[string]any{
+			"query": "test",
+		})
+
+		gt.Error(t, err)
+		gt.Nil(t, result)
+		gt.False(t, agentCalled)
+		gt.S(t, err.Error()).Contains("middleware error")
+	})
+
+	t.Run("chained middleware error stops subsequent middlewares", func(t *testing.T) {
+		middleware2Called := false
+
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						return &gollem.Response{
+							Texts: []string{"done"},
+						}, nil
+					},
+				}, nil
+			},
+		}
+		childAgent := gollem.New(mockClient)
+
+		subagent := gollem.NewSubAgent(
+			"error_chain",
+			"Tests error in chain",
+			childAgent,
+			// First middleware returns error
+			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+					return nil, errors.New("first middleware error")
+				}
+			}),
+			// Second middleware should not be called
+			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+					middleware2Called = true
+					return next(ctx, args)
+				}
+			}),
+		)
+
+		result, err := subagent.Run(context.Background(), map[string]any{
+			"query": "test",
+		})
+
+		gt.Error(t, err)
+		gt.Nil(t, result)
+		gt.False(t, middleware2Called)
+	})
+}
+
+func TestSubAgentArgsMiddlewareNil(t *testing.T) {
+	t.Run("no middleware preserves backward compatibility", func(t *testing.T) {
+		var capturedInput gollem.Input
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						if len(input) > 0 {
+							capturedInput = input[0]
+						}
+						return &gollem.Response{
+							Texts: []string{"Processed"},
+						}, nil
+					},
+				}, nil
+			},
+		}
+		childAgent := gollem.New(mockClient)
+
+		// Create subagent without middleware (backward compatible)
+		subagent := gollem.NewSubAgent("processor", "Processes queries", childAgent)
+
+		result, err := subagent.Run(context.Background(), map[string]any{
+			"query": "Process this text",
+		})
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.Equal(t, "success", result["status"])
+		gt.Equal(t, "Processed", result["response"])
+
+		// Verify the query was passed to the child agent
+		text, ok := capturedInput.(gollem.Text)
+		gt.True(t, ok)
+		gt.Equal(t, gollem.Text("Process this text"), text)
+	})
+
+	t.Run("template mode without middleware still works", func(t *testing.T) {
+		var capturedInput gollem.Input
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						if len(input) > 0 {
+							capturedInput = input[0]
+						}
+						return &gollem.Response{
+							Texts: []string{"Analysis complete"},
+						}, nil
+					},
+				}, nil
+			},
+		}
+		childAgent := gollem.New(mockClient)
+
+		prompt, err := gollem.NewPromptTemplate(
+			"Code: {{.code}}, Focus: {{.focus}}",
+			map[string]*gollem.Parameter{
+				"code":  {Type: gollem.TypeString, Description: "Code"},
+				"focus": {Type: gollem.TypeString, Description: "Focus"},
+			},
+		)
+		gt.NoError(t, err)
+
+		// Template mode without middleware
+		subagent := gollem.NewSubAgent(
+			"analyzer",
+			"Code analyzer",
+			childAgent,
+			gollem.WithPromptTemplate(prompt),
+		)
+
+		result, err := subagent.Run(context.Background(), map[string]any{
+			"code":  "func main() {}",
+			"focus": "security",
+		})
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.Equal(t, "success", result["status"])
+
+		text, ok := capturedInput.(gollem.Text)
+		gt.True(t, ok)
+		gt.Equal(t, gollem.Text("Code: func main() {}, Focus: security"), text)
 	})
 }
