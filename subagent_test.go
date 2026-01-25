@@ -155,9 +155,7 @@ func TestSubAgentRun_DefaultMode(t *testing.T) {
 		result, err := subagent.Run(context.Background(), map[string]any{})
 
 		gt.Error(t, err)
-		gt.NotNil(t, result)
-		gt.Equal(t, "error", result["status"])
-		gt.Equal(t, "", result["response"])
+		gt.Nil(t, result)
 	})
 
 	t.Run("invalid query parameter type", func(t *testing.T) {
@@ -169,8 +167,7 @@ func TestSubAgentRun_DefaultMode(t *testing.T) {
 		})
 
 		gt.Error(t, err)
-		gt.NotNil(t, result)
-		gt.Equal(t, "error", result["status"])
+		gt.Nil(t, result)
 	})
 }
 
@@ -222,23 +219,8 @@ func TestSubAgentRun_TemplateMode(t *testing.T) {
 		gt.Equal(t, gollem.Text("Analyze: func main() {}, Focus: security"), text)
 	})
 
-	t.Run("template with missing variable uses empty string", func(t *testing.T) {
-		var capturedInput gollem.Input
-		mockClient := &mock.LLMClientMock{
-			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
-				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-						if len(input) > 0 {
-							capturedInput = input[0]
-						}
-						return &gollem.Response{
-							Texts: []string{"done"},
-						}, nil
-					},
-				}, nil
-			},
-		}
-		childAgent := gollem.New(mockClient)
+	t.Run("template with missing variable returns error", func(t *testing.T) {
+		childAgent := newMockAgent("done")
 
 		subagent := gollem.NewSubAgent(
 			"test",
@@ -254,13 +236,9 @@ func TestSubAgentRun_TemplateMode(t *testing.T) {
 
 		result, err := subagent.Run(context.Background(), map[string]any{})
 
-		gt.NoError(t, err)
-		gt.Equal(t, "success", result["status"])
-
-		// Template renders with empty value for missing key
-		text, ok := capturedInput.(gollem.Text)
-		gt.True(t, ok)
-		gt.Equal(t, gollem.Text("Value: <no value>"), text)
+		// missingkey=error causes template execution to fail for missing variables
+		gt.Error(t, err)
+		gt.Nil(t, result)
 	})
 }
 
@@ -327,10 +305,16 @@ Focus on: best practices`
 		gt.Equal(t, gollem.Text(expected), text)
 	})
 
-	t.Run("invalid template syntax", func(t *testing.T) {
+	t.Run("invalid template syntax panics on creation", func(t *testing.T) {
 		childAgent := newMockAgent("response")
 
-		subagent := gollem.NewSubAgent(
+		// Invalid template syntax causes panic during SubAgent creation
+		defer func() {
+			r := recover()
+			gt.NotNil(t, r)
+		}()
+
+		gollem.NewSubAgent(
 			"bad",
 			"Bad template",
 			childAgent,
@@ -342,12 +326,7 @@ Focus on: best practices`
 			),
 		)
 
-		result, err := subagent.Run(context.Background(), map[string]any{
-			"value": "test",
-		})
-
-		gt.Error(t, err)
-		gt.Equal(t, "error", result["status"])
+		t.Error("expected panic but did not occur")
 	})
 }
 

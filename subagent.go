@@ -15,9 +15,9 @@ type SubAgent struct {
 	description string
 	agent       *Agent
 
-	// Template mode fields (nil/empty when using default query-only mode)
-	template   string                // Prompt template
-	parameters map[string]*Parameter // Parameter schema for LLM
+	// Template mode fields (nil when using default query-only mode)
+	parsedTemplate *template.Template    // Parsed template (cached)
+	parameters     map[string]*Parameter // Parameter schema for LLM
 }
 
 // SubAgentOption is the type for options when creating a SubAgent.
@@ -30,9 +30,16 @@ type SubAgentOption func(*SubAgent)
 // This option replaces the default "query" parameter behavior.
 // When this option is used, the template is rendered with the provided parameters
 // and the result is passed to agent.Execute().
+//
+// The template uses missingkey=error option, so all referenced variables must be provided.
+// If the template string is invalid, it will panic during SubAgent creation.
 func WithPromptTemplate(tmpl string, params map[string]*Parameter) SubAgentOption {
 	return func(s *SubAgent) {
-		s.template = tmpl
+		parsed, err := template.New("subagent").Option("missingkey=error").Parse(tmpl)
+		if err != nil {
+			panic("failed to parse template: " + err.Error())
+		}
+		s.parsedTemplate = parsed
 		s.parameters = params
 	}
 }
@@ -61,7 +68,7 @@ func NewSubAgent(name, description string, agent *Agent, opts ...SubAgentOption)
 func (s *SubAgent) Spec() ToolSpec {
 	var params map[string]*Parameter
 
-	if s.template == "" {
+	if s.parsedTemplate == nil {
 		// Default mode: query only
 		params = map[string]*Parameter{
 			"query": {
@@ -88,41 +95,24 @@ func (s *SubAgent) Spec() ToolSpec {
 func (s *SubAgent) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
 	var prompt string
 
-	if s.template == "" {
+	if s.parsedTemplate == nil {
 		// Default mode: extract query parameter
 		queryVal, ok := args["query"]
 		if !ok {
-			return map[string]any{
-				"response": "",
-				"status":   "error",
-			}, goerr.Wrap(ErrInvalidParameter, "query parameter is required")
+			return nil, goerr.Wrap(ErrInvalidParameter, "query parameter is required")
 		}
 
 		query, ok := queryVal.(string)
 		if !ok {
-			return map[string]any{
-				"response": "",
-				"status":   "error",
-			}, goerr.Wrap(ErrInvalidParameter, "query parameter must be a string")
+			return nil, goerr.Wrap(ErrInvalidParameter, "query parameter must be a string")
 		}
 
 		prompt = query
 	} else {
 		// Template mode: render template with arguments
-		tmpl, err := template.New("subagent").Parse(s.template)
-		if err != nil {
-			return map[string]any{
-				"response": "",
-				"status":   "error",
-			}, goerr.Wrap(err, "failed to parse template")
-		}
-
 		var buf bytes.Buffer
-		if err := tmpl.Execute(&buf, args); err != nil {
-			return map[string]any{
-				"response": "",
-				"status":   "error",
-			}, goerr.Wrap(err, "failed to execute template")
+		if err := s.parsedTemplate.Execute(&buf, args); err != nil {
+			return nil, goerr.Wrap(err, "failed to execute template")
 		}
 
 		prompt = buf.String()
@@ -131,10 +121,7 @@ func (s *SubAgent) Run(ctx context.Context, args map[string]any) (map[string]any
 	// Execute the child agent
 	resp, err := s.agent.Execute(ctx, Text(prompt))
 	if err != nil {
-		return map[string]any{
-			"response": "",
-			"status":   "error",
-		}, goerr.Wrap(err, "subagent execution failed")
+		return nil, goerr.Wrap(err, "subagent execution failed")
 	}
 
 	// Build response text from ExecuteResponse
