@@ -3,6 +3,7 @@ package gollem
 import (
 	"bytes"
 	"context"
+	"strings"
 	"text/template"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -127,12 +128,7 @@ func (s *SubAgent) Run(ctx context.Context, args map[string]any) (map[string]any
 	// Build response text from ExecuteResponse
 	var responseText string
 	if resp != nil && len(resp.Texts) > 0 {
-		for i, text := range resp.Texts {
-			if i > 0 {
-				responseText += "\n"
-			}
-			responseText += text
-		}
+		responseText = strings.Join(resp.Texts, "\n")
 	}
 
 	return map[string]any{
