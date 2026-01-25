@@ -310,15 +310,17 @@ result, err := session.GenerateContent(ctx, gollem.Text("Hello"))
 
 ### Tool Integration
 
-gollem supports two types of tools:
+gollem supports multiple types of tools:
 
 1. **Built-in Tools**: Custom Go functions you implement
 2. **MCP Tools**: External tools via Model Context Protocol servers
+3. **SubAgents**: Specialized child agents that can be invoked as tools
 
 ```go
 agent := gollem.New(client,
 	gollem.WithTools(&MyCustomTool{}),           // Built-in tools
 	gollem.WithToolSets(mcpClient),              // MCP tools
+	gollem.WithSubAgents(reviewerAgent),         // SubAgents
 	gollem.WithSystemPrompt("You are helpful."), // System instructions
 )
 ```

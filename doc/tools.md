@@ -155,6 +155,130 @@ agent := gollem.New(client,
 
 
 
+## SubAgents
+
+SubAgents allow a parent agent to delegate tasks to specialized child agents. SubAgents implement the `Tool` interface, so they can be invoked by the LLM just like regular tools.
+
+### Basic Usage (Default Mode)
+
+In default mode, the subagent accepts a single `query` parameter:
+
+```go
+// Create a specialized agent for code review
+reviewAgent := gollem.New(reviewClient,
+    gollem.WithSystemPrompt("You are an expert code reviewer."),
+)
+
+// Wrap it as a SubAgent
+reviewSubagent := gollem.NewSubAgent(
+    "code_reviewer",
+    "Reviews code for best practices and potential issues",
+    reviewAgent,
+)
+
+// Add to parent agent
+parentAgent := gollem.New(client,
+    gollem.WithSubAgents(reviewSubagent),
+)
+
+// LLM can now call: code_reviewer(query: "Review this function for security issues...")
+```
+
+### Template Mode
+
+For more structured inputs, use `PromptTemplate` to define custom parameters:
+
+```go
+// Create a prompt template with custom parameters
+template, err := gollem.NewPromptTemplate(
+    `Analyze the following code focusing on {{.focus}}:
+
+{{.code}}
+
+Provide detailed feedback.`,
+    map[string]*gollem.Parameter{
+        "code":  {Type: gollem.TypeString, Description: "Code to analyze", Required: true},
+        "focus": {Type: gollem.TypeString, Description: "Focus area (security, performance, etc.)", Required: true},
+    },
+)
+if err != nil {
+    panic(err)
+}
+
+// Create subagent with custom template
+analyzer := gollem.NewSubAgent(
+    "code_analyzer",
+    "Analyzes code with specified focus area",
+    analyzerAgent,
+    gollem.WithPromptTemplate(template),
+)
+
+// LLM can now call: code_analyzer(code: "func main()...", focus: "security")
+```
+
+### Testing Templates
+
+You can test your templates independently using the `Render` method:
+
+```go
+// Create template
+template, err := gollem.NewPromptTemplate(
+    "Hello, {{.name}}! Your task is: {{.task}}",
+    map[string]*gollem.Parameter{
+        "name": {Type: gollem.TypeString, Description: "User name", Required: true},
+        "task": {Type: gollem.TypeString, Description: "Task description", Required: true},
+    },
+)
+if err != nil {
+    panic(err)
+}
+
+// Test rendering
+result, err := template.Render(map[string]any{
+    "name": "Alice",
+    "task": "Review the code",
+})
+// result: "Hello, Alice! Your task is: Review the code"
+
+// Inspect parameters
+params := template.Parameters()
+fmt.Printf("Required: %v\n", params["name"].Required) // true
+```
+
+### Default Template
+
+Use `DefaultPromptTemplate()` to get the standard query-based template:
+
+```go
+template := gollem.DefaultPromptTemplate()
+// Equivalent to: NewPromptTemplate("{{.query}}", map[string]*Parameter{"query": {...}})
+```
+
+### Nested SubAgents
+
+SubAgents can have their own subagents for complex hierarchical workflows:
+
+```go
+// Level 3: Specialized agents
+securityAgent := gollem.New(client, gollem.WithSystemPrompt("Security expert"))
+perfAgent := gollem.New(client, gollem.WithSystemPrompt("Performance expert"))
+
+securitySubagent := gollem.NewSubAgent("security_check", "Security analysis", securityAgent)
+perfSubagent := gollem.NewSubAgent("perf_check", "Performance analysis", perfAgent)
+
+// Level 2: Code review agent with specialized subagents
+reviewAgent := gollem.New(client,
+    gollem.WithSystemPrompt("Code reviewer"),
+    gollem.WithSubAgents(securitySubagent, perfSubagent),
+)
+reviewSubagent := gollem.NewSubAgent("code_review", "Comprehensive code review", reviewAgent)
+
+// Level 1: Main agent
+mainAgent := gollem.New(client,
+    gollem.WithSubAgents(reviewSubagent),
+)
+```
+
 ## Next Steps
 
 - Learn about [MCP server integration](mcp.md) for external tool integration
