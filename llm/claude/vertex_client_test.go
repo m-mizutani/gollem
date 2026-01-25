@@ -153,19 +153,21 @@ func (c *calculatorTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name:        "calculator",
 		Description: "Perform basic arithmetic operations",
-		Required:    []string{"operation", "a", "b"},
 		Parameters: map[string]*gollem.Parameter{
 			"operation": {
 				Type:        gollem.TypeString,
 				Description: "The operation to perform (add, subtract, multiply, divide)",
+				Required:    true,
 			},
 			"a": {
 				Type:        gollem.TypeNumber,
 				Description: "First number",
+				Required:    true,
 			},
 			"b": {
 				Type:        gollem.TypeNumber,
 				Description: "Second number",
+				Required:    true,
 			},
 		},
 	}

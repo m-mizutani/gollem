@@ -7,6 +7,17 @@ import (
 	"github.com/m-mizutani/gollem"
 )
 
+// CollectRequiredFields returns a list of required property names
+func CollectRequiredFields(properties map[string]*gollem.Parameter) []string {
+	var required []string
+	for name, prop := range properties {
+		if prop.Required {
+			required = append(required, name)
+		}
+	}
+	return required
+}
+
 // ConvertParameterToJSONSchema converts gollem.Parameter to JSON Schema map
 // This is the base conversion without provider-specific modifications
 func ConvertParameterToJSONSchema(param *gollem.Parameter) map[string]any {
@@ -26,8 +37,9 @@ func ConvertParameterToJSONSchema(param *gollem.Parameter) map[string]any {
 		schema["properties"] = props
 		schema["additionalProperties"] = false
 
-		if len(param.Required) > 0 {
-			schema["required"] = param.Required
+		// Collect required fields from properties
+		if required := CollectRequiredFields(param.Properties); len(required) > 0 {
+			schema["required"] = required
 		}
 	}
 

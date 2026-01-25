@@ -197,6 +197,7 @@ func (t *validClientTool) Spec() gollem.ToolSpec {
 				Type:        gollem.TypeString,
 				Description: "Content with length constraints",
 				MaxLength:   &maxLen,
+				Required:    true,
 			},
 			"metadata": {
 				Type:        gollem.TypeObject,
@@ -208,10 +209,8 @@ func (t *validClientTool) Spec() gollem.ToolSpec {
 						MaxLength:   &maxLen,
 					},
 				},
-				Required: []string{}, // Empty slice, not nil
 			},
 		},
-		Required: []string{"content"},
 	}
 }
 
@@ -260,10 +259,10 @@ func (t *largeTextClientTool) Spec() gollem.ToolSpec {
 			"content": {
 				Type:        gollem.TypeString,
 				Description: "Large text content that might cause FinishReasonMalformedFunctionCall",
+				Required:    true,
 				// NOTE: No MaxLength constraint - this is the problematic part
 			},
 		},
-		Required: []string{"content"},
 	}
 }
 
@@ -281,6 +280,7 @@ func (t *problematicFieldClientTool) Spec() gollem.ToolSpec {
 			"type": {
 				Type:        gollem.TypeString,
 				Description: "Field named 'type' - might conflict with JSON schema",
+				Required:    true,
 			},
 			"properties": {
 				Type:        gollem.TypeString,
@@ -295,7 +295,6 @@ func (t *problematicFieldClientTool) Spec() gollem.ToolSpec {
 				Description: "Field with unicode: test characters 🚀 emoji",
 			},
 		},
-		Required: []string{"type"},
 	}
 }
 

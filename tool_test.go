@@ -148,9 +148,9 @@ func TestToolSpecValidation(t *testing.T) {
 				"param1": {
 					Type:        gollem.TypeString,
 					Description: "test parameter",
+					Required:    true,
 				},
 			},
-			Required: []string{"param1"},
 		}
 		gt.NoError(t, spec.Validate())
 	})
@@ -178,21 +178,6 @@ func TestToolSpecValidation(t *testing.T) {
 					Description: "test parameter",
 				},
 			},
-		}
-		gt.Error(t, spec.Validate())
-	})
-
-	t.Run("required parameter not found", func(t *testing.T) {
-		spec := gollem.ToolSpec{
-			Name:        "test",
-			Description: "test description",
-			Parameters: map[string]*gollem.Parameter{
-				"param1": {
-					Type:        gollem.TypeString,
-					Description: "test parameter",
-				},
-			},
-			Required: []string{"param2"},
 		}
 		gt.Error(t, spec.Validate())
 	})

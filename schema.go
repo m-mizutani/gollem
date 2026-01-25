@@ -177,7 +177,6 @@ func convertStruct(t reflect.Type, seen map[reflect.Type]bool) (*Parameter, erro
 	param := &Parameter{
 		Type:       TypeObject,
 		Properties: make(map[string]*Parameter),
-		Required:   []string{},
 	}
 
 	for i := 0; i < t.NumField(); i++ {
@@ -211,12 +210,12 @@ func convertStruct(t reflect.Type, seen map[reflect.Type]bool) (*Parameter, erro
 			return nil, goerr.Wrap(err, "failed to convert field", goerr.V("field", field.Name))
 		}
 
-		param.Properties[fieldName] = fieldParam
-
-		// Add to required list if tagged
+		// Set required flag on the parameter itself
 		if tags.required {
-			param.Required = append(param.Required, fieldName)
+			fieldParam.Required = true
 		}
+
+		param.Properties[fieldName] = fieldParam
 	}
 
 	return param, nil

@@ -460,17 +460,19 @@ func (t *CalculatorTool) Spec() gollem.ToolSpec {
 				Type:        gollem.TypeString,
 				Description: "The operation to perform: add, subtract, multiply, or divide",
 				Enum:        []string{"add", "subtract", "multiply", "divide"},
+				Required:    true,
 			},
 			"a": {
 				Type:        gollem.TypeNumber,
 				Description: "First number",
+				Required:    true,
 			},
 			"b": {
 				Type:        gollem.TypeNumber,
 				Description: "Second number",
+				Required:    true,
 			},
 		},
-		Required: []string{"operation", "a", "b"},
 	}
 }
 
@@ -512,13 +514,14 @@ func (t *RandomNumberTool) Spec() gollem.ToolSpec {
 			"min": {
 				Type:        gollem.TypeNumber,
 				Description: "Minimum value of the range",
+				Required:    true,
 			},
 			"max": {
 				Type:        gollem.TypeNumber,
 				Description: "Maximum value of the range",
+				Required:    true,
 			},
 		},
-		Required: []string{"min", "max"},
 	}
 }
 
@@ -579,9 +582,9 @@ func (t *FileSystemTool) Spec() gollem.ToolSpec {
 			"path": {
 				Type:        gollem.TypeString,
 				Description: "The directory path to list (e.g., '/', '/users', '/users/alice')",
+				Required:    true,
 			},
 		},
-		Required: []string{"path"},
 	}
 }
 
@@ -609,9 +612,9 @@ func (t *ReadFileTool) Spec() gollem.ToolSpec {
 			"path": {
 				Type:        gollem.TypeString,
 				Description: "The file path to read (e.g., '/users/alice/profile.json')",
+				Required:    true,
 			},
 		},
-		Required: []string{"path"},
 	}
 }
 

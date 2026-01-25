@@ -138,21 +138,11 @@ func TestToSchemaWithRequired(t *testing.T) {
 
 	param, err := gollem.ToSchema(User{})
 	gt.NoError(t, err)
-	gt.A(t, param.Required).Length(2)
 
-	// Check required fields
-	hasName := false
-	hasEmail := false
-	for _, req := range param.Required {
-		if req == "name" {
-			hasName = true
-		}
-		if req == "email" {
-			hasEmail = true
-		}
-	}
-	gt.True(t, hasName)
-	gt.True(t, hasEmail)
+	// Check required fields - each property has its own Required bool
+	gt.True(t, param.Properties["name"].Required)
+	gt.True(t, param.Properties["email"].Required)
+	gt.False(t, param.Properties["age"].Required)
 }
 
 func TestToSchemaNestedStruct(t *testing.T) {
@@ -170,27 +160,20 @@ func TestToSchemaNestedStruct(t *testing.T) {
 	param, err := gollem.ToSchema(User{})
 	gt.NoError(t, err)
 	gt.Equal(t, param.Type, gollem.TypeObject)
-	gt.Equal(t, len(param.Required), 2)
+
+	// Check required on top-level properties
+	gt.True(t, param.Properties["name"].Required)
+	gt.True(t, param.Properties["address"].Required)
 
 	// Check nested struct
 	address := param.Properties["address"]
 	gt.Equal(t, address.Type, gollem.TypeObject)
 	gt.Equal(t, len(address.Properties), 3)
-	gt.A(t, address.Required).Length(3)
 
-	// Check all required fields are present
-	hasStreet, hasCity, hasCountry := false, false, false
-	for _, req := range address.Required {
-		switch req {
-		case "street":
-			hasStreet = true
-		case "city":
-			hasCity = true
-		case "country":
-			hasCountry = true
-		}
-	}
-	gt.True(t, hasStreet && hasCity && hasCountry)
+	// Check all nested required fields
+	gt.True(t, address.Properties["street"].Required)
+	gt.True(t, address.Properties["city"].Required)
+	gt.True(t, address.Properties["country"].Required)
 }
 
 func TestToSchemaArrayOfStructs(t *testing.T) {
@@ -214,8 +197,8 @@ func TestToSchemaArrayOfStructs(t *testing.T) {
 	// Check array element type
 	gt.Equal(t, items.Items.Type, gollem.TypeObject)
 	gt.Equal(t, len(items.Items.Properties), 2)
-	gt.A(t, items.Items.Required).Length(1)
-	gt.Equal(t, items.Items.Required[0], "name")
+	gt.True(t, items.Items.Properties["name"].Required)
+	gt.False(t, items.Items.Properties["price"].Required)
 }
 
 func TestToSchemaIgnoredFields(t *testing.T) {
@@ -253,7 +236,9 @@ func TestToSchemaComplexExample(t *testing.T) {
 	param, err := gollem.ToSchema(SecurityAlert{})
 	gt.NoError(t, err)
 	gt.Equal(t, param.Type, gollem.TypeObject)
-	gt.Equal(t, len(param.Required), 2)
+	// Check that severity and threat_type are required
+	gt.True(t, param.Properties["severity"].Required)
+	gt.True(t, param.Properties["threat_type"].Required)
 
 	// Check enum field
 	severity := param.Properties["severity"]
@@ -324,7 +309,10 @@ func TestToSchemaWithTitleAndDescription(t *testing.T) {
 	gt.Equal(t, schema.Title, "UserProfile")
 	gt.Equal(t, schema.Description, "Structured user profile information")
 	gt.Equal(t, schema.Type, gollem.TypeObject)
-	gt.Equal(t, len(schema.Required), 2)
+
+	// Check required on properties
+	gt.True(t, schema.Properties["name"].Required)
+	gt.True(t, schema.Properties["email"].Required)
 }
 
 func TestToSchemaMapType(t *testing.T) {
@@ -462,15 +450,18 @@ func createComplexBookSchema() *gollem.Parameter {
 		Type:        gollem.TypeObject,
 		Properties: map[string]*gollem.Parameter{
 			"book": {
-				Type: gollem.TypeObject,
+				Type:     gollem.TypeObject,
+				Required: true,
 				Properties: map[string]*gollem.Parameter{
 					"title": {
 						Type:        gollem.TypeString,
 						Description: "Book title",
+						Required:    true,
 					},
 					"author": {
 						Type:        gollem.TypeString,
 						Description: "Author name",
+						Required:    true,
 					},
 					"publishedYear": {
 						Type:        gollem.TypeInteger,
@@ -484,23 +475,25 @@ func createComplexBookSchema() *gollem.Parameter {
 						Pattern:     "^[0-9-]+$",
 					},
 				},
-				Required:    []string{"title", "author"},
 				Description: "Book information",
 			},
 			"review": {
-				Type: gollem.TypeObject,
+				Type:     gollem.TypeObject,
+				Required: true,
 				Properties: map[string]*gollem.Parameter{
 					"rating": {
 						Type:        gollem.TypeNumber,
 						Description: "Rating from 1.0 to 5.0",
 						Minimum:     Ptr(1.0),
 						Maximum:     Ptr(5.0),
+						Required:    true,
 					},
 					"summary": {
 						Type:        gollem.TypeString,
 						Description: "Brief review summary",
 						MinLength:   Ptr(10),
 						MaxLength:   Ptr(500),
+						Required:    true,
 					},
 					"pros": {
 						Type: gollem.TypeArray,
@@ -518,7 +511,6 @@ func createComplexBookSchema() *gollem.Parameter {
 						Description: "Negative aspects",
 					},
 				},
-				Required:    []string{"rating", "summary"},
 				Description: "Review content",
 			},
 			"tags": {
@@ -534,9 +526,9 @@ func createComplexBookSchema() *gollem.Parameter {
 			"recommended": {
 				Type:        gollem.TypeBoolean,
 				Description: "Whether the book is recommended",
+				Required:    true,
 			},
 		},
-		Required: []string{"book", "review", "recommended"},
 	}
 }
 
@@ -674,15 +666,17 @@ func validateParameter(t *testing.T, path string, value any, param *gollem.Param
 			return
 		}
 
-		// Check required fields
-		for _, required := range param.Required {
-			if _, exists := objVal[required]; !exists {
-				t.Errorf("%s missing required field %q", path, required)
-			}
-		}
-
-		// Validate each property
+		// Check required fields by checking each property's Required flag
 		if param.Properties != nil {
+			for propName, propSchema := range param.Properties {
+				if propSchema.Required {
+					if _, exists := objVal[propName]; !exists {
+						t.Errorf("%s missing required field %q", path, propName)
+					}
+				}
+			}
+
+			// Validate each property
 			for propName, propSchema := range param.Properties {
 				propValue, exists := objVal[propName]
 				if !exists {

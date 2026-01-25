@@ -38,6 +38,7 @@ func createUserProfileSchema() *gollem.Parameter {
 			"name": {
 				Type:        gollem.TypeString,
 				Description: "Full name of the user",
+				Required:    true,
 			},
 			"age": {
 				Type:        gollem.TypeInteger,
@@ -48,6 +49,7 @@ func createUserProfileSchema() *gollem.Parameter {
 			"email": {
 				Type:        gollem.TypeString,
 				Description: "Email address",
+				Required:    true,
 			},
 			"interests": {
 				Type: gollem.TypeArray,
@@ -71,7 +73,6 @@ func createUserProfileSchema() *gollem.Parameter {
 				Description: "User's location",
 			},
 		},
-		Required: []string{"name", "email"},
 	}
 }
 

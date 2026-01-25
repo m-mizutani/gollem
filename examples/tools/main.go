@@ -79,13 +79,14 @@ func (t *AddTool) Spec() gollem.ToolSpec {
 			"a": {
 				Type:        gollem.TypeNumber,
 				Description: "First number",
+				Required:    true,
 			},
 			"b": {
 				Type:        gollem.TypeNumber,
 				Description: "Second number",
+				Required:    true,
 			},
 		},
-		Required: []string{"a", "b"},
 	}
 }
 
@@ -108,12 +109,13 @@ func (t *MultiplyTool) Spec() gollem.ToolSpec {
 			"a": {
 				Type:        gollem.TypeNumber,
 				Description: "First number",
+				Required:    true,
 			},
 			"b": {
 				Type:        gollem.TypeNumber,
 				Description: "Second number",
+				Required:    true,
 			},
 		},
-		Required: []string{"a", "b"},
 	}
 }

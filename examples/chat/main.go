@@ -21,9 +21,9 @@ func (t *WeatherTool) Spec() gollem.ToolSpec {
 			"city": {
 				Type:        gollem.TypeString,
 				Description: "City name",
+				Required:    true,
 			},
 		},
-		Required: []string{"city"},
 	}
 }
 

@@ -21,9 +21,9 @@ func (t *MyTool) Spec() gollem.ToolSpec {
 			"name": {
 				Type:        gollem.TypeString,
 				Description: "Name of the person to greet",
+				Required:    true,
 			},
 		},
-		Required: []string{"name"},
 	}
 }
 

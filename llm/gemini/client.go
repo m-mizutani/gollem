@@ -12,6 +12,7 @@ import (
 	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	gollemschema "github.com/m-mizutani/gollem/internal/schema"
 	"google.golang.org/api/option"
 	"google.golang.org/genai"
 )
@@ -889,8 +890,8 @@ func (c *Client) GenerateEmbedding(ctx context.Context, dimension int, input []s
 func convertToolToNewSDK(tool gollem.Tool) *genai.FunctionDeclaration {
 	spec := tool.Spec()
 
-	// Ensure Required is never nil - Gemini requires an empty slice, not nil
-	required := spec.Required
+	// Collect required fields from parameters
+	required := gollemschema.CollectRequiredFields(spec.Parameters)
 	if required == nil {
 		required = []string{}
 	}
@@ -929,8 +930,8 @@ func convertParameterToNewSchema(param *gollem.Parameter) *genai.Schema {
 		for name, prop := range param.Properties {
 			schema.Properties[name] = convertParameterToNewSchema(prop)
 		}
-		if len(param.Required) > 0 {
-			schema.Required = param.Required
+		if required := gollemschema.CollectRequiredFields(param.Properties); len(required) > 0 {
+			schema.Required = required
 		} else {
 			schema.Required = []string{}
 		}

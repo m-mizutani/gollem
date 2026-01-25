@@ -52,7 +52,6 @@ type testTool struct {
 	name        string
 	description string
 	parameters  map[string]*gollem.Parameter
-	required    []string
 	runFunc     func(ctx context.Context, args map[string]any) (map[string]any, error)
 }
 
@@ -61,7 +60,6 @@ func (t *testTool) Spec() gollem.ToolSpec {
 		Name:        t.name,
 		Description: t.description,
 		Parameters:  t.parameters,
-		Required:    t.required,
 	}
 }
 
@@ -384,9 +382,9 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 				"city": {
 					Type:        gollem.TypeString,
 					Description: "City name",
+					Required:    true,
 				},
 			},
-			required: []string{"city"},
 			runFunc: func(ctx context.Context, args map[string]any) (map[string]any, error) {
 				city, ok := args["city"].(string)
 				if !ok || city == "" {
@@ -408,13 +406,14 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 				"from": {
 					Type:        gollem.TypeString,
 					Description: "Starting city",
+					Required:    true,
 				},
 				"to": {
 					Type:        gollem.TypeString,
 					Description: "Destination city",
+					Required:    true,
 				},
 			},
-			required: []string{"from", "to"},
 			runFunc: func(ctx context.Context, args map[string]any) (map[string]any, error) {
 				from, ok := args["from"].(string)
 				if !ok || from == "" {
@@ -442,9 +441,9 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 				"query": {
 					Type:        gollem.TypeString,
 					Description: "Search query",
+					Required:    true,
 				},
 			},
-			required: []string{"query"},
 			runFunc: func(ctx context.Context, args map[string]any) (map[string]any, error) {
 				query, ok := args["query"].(string)
 				if !ok || query == "" {
@@ -1029,9 +1028,9 @@ func TestPlanExec_TaskResultPreservation(t *testing.T) {
 				"query": {
 					Type:        gollem.TypeString,
 					Description: "Query string",
+					Required:    true,
 				},
 			},
-			required: []string{"query"},
 			runFunc: func(ctx context.Context, args map[string]any) (map[string]any, error) {
 				return map[string]any{
 					"records": []map[string]any{
