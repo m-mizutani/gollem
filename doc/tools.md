@@ -164,16 +164,17 @@ SubAgents allow a parent agent to delegate tasks to specialized child agents. Su
 In default mode, the subagent accepts a single `query` parameter:
 
 ```go
-// Create a specialized agent for code review
-reviewAgent := gollem.New(reviewClient,
-    gollem.WithSystemPrompt("You are an expert code reviewer."),
-)
-
-// Wrap it as a SubAgent
+// Create a SubAgent with a factory function
+// The factory is called each time the SubAgent is invoked,
+// ensuring independent session state for each call
 reviewSubagent := gollem.NewSubAgent(
     "code_reviewer",
     "Reviews code for best practices and potential issues",
-    reviewAgent,
+    func() *gollem.Agent {
+        return gollem.New(reviewClient,
+            gollem.WithSystemPrompt("You are an expert code reviewer."),
+        )
+    },
 )
 
 // Add to parent agent
@@ -205,11 +206,15 @@ if err != nil {
     panic(err)
 }
 
-// Create subagent with custom template
+// Create subagent with custom template using a factory function
 analyzer := gollem.NewSubAgent(
     "code_analyzer",
     "Analyzes code with specified focus area",
-    analyzerAgent,
+    func() *gollem.Agent {
+        return gollem.New(analyzerClient,
+            gollem.WithSystemPrompt("You are a code analysis expert."),
+        )
+    },
     gollem.WithPromptTemplate(template),
 )
 
@@ -259,19 +264,34 @@ template := gollem.DefaultPromptTemplate()
 SubAgents can have their own subagents for complex hierarchical workflows:
 
 ```go
-// Level 3: Specialized agents
-securityAgent := gollem.New(client, gollem.WithSystemPrompt("Security expert"))
-perfAgent := gollem.New(client, gollem.WithSystemPrompt("Performance expert"))
+// Level 3: Specialized subagents
+securitySubagent := gollem.NewSubAgent(
+    "security_check",
+    "Security analysis",
+    func() *gollem.Agent {
+        return gollem.New(client, gollem.WithSystemPrompt("Security expert"))
+    },
+)
 
-securitySubagent := gollem.NewSubAgent("security_check", "Security analysis", securityAgent)
-perfSubagent := gollem.NewSubAgent("perf_check", "Performance analysis", perfAgent)
+perfSubagent := gollem.NewSubAgent(
+    "perf_check",
+    "Performance analysis",
+    func() *gollem.Agent {
+        return gollem.New(client, gollem.WithSystemPrompt("Performance expert"))
+    },
+)
 
 // Level 2: Code review agent with specialized subagents
-reviewAgent := gollem.New(client,
-    gollem.WithSystemPrompt("Code reviewer"),
-    gollem.WithSubAgents(securitySubagent, perfSubagent),
+reviewSubagent := gollem.NewSubAgent(
+    "code_review",
+    "Comprehensive code review",
+    func() *gollem.Agent {
+        return gollem.New(client,
+            gollem.WithSystemPrompt("Code reviewer"),
+            gollem.WithSubAgents(securitySubagent, perfSubagent),
+        )
+    },
 )
-reviewSubagent := gollem.NewSubAgent("code_review", "Comprehensive code review", reviewAgent)
 
 // Level 1: Main agent
 mainAgent := gollem.New(client,
@@ -288,7 +308,11 @@ SubAgent middleware allows you to inject context or modify arguments before temp
 subagent := gollem.NewSubAgent(
     "context_aware_analyzer",
     "Analyzes requests with user context",
-    analyzerAgent,
+    func() *gollem.Agent {
+        return gollem.New(analyzerClient,
+            gollem.WithSystemPrompt("You are an analyzer with user context awareness."),
+        )
+    },
     gollem.WithPromptTemplate(prompt),
     gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
         return func(ctx context.Context, args map[string]any) (map[string]any, error) {
@@ -326,7 +350,11 @@ Multiple middlewares can be chained. They execute in the order they are added:
 subagent := gollem.NewSubAgent(
     "monitored_analyzer",
     "Analyzed with logging",
-    agent,
+    func() *gollem.Agent {
+        return gollem.New(client,
+            gollem.WithSystemPrompt("You are an analyzer."),
+        )
+    },
     gollem.WithPromptTemplate(prompt),
     // First middleware: logging
     gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
