@@ -14,7 +14,7 @@ import (
 type SubAgent struct {
 	name         string
 	description  string
-	agentFactory func() *Agent
+	agentFactory func() (*Agent, error)
 
 	// Template mode fields (nil when using default query-only mode)
 	parsedTemplate *template.Template    // Parsed template (cached)
@@ -180,12 +180,12 @@ func WithSubAgentMiddleware(middleware func(SubAgentHandler) SubAgentHandler) Su
 // NewSubAgent creates a new SubAgent that wraps a factory function for creating Agent instances.
 // name: Tool name for the subagent (required, used by LLM to invoke)
 // description: Description of what this subagent does (required, helps LLM decide when to use)
-// agentFactory: A function that creates a new Agent instance (required)
+// agentFactory: A function that creates a new Agent instance (required). Returns error if creation fails.
 //
 // The factory function is called each time the SubAgent is invoked, ensuring that
 // each execution has an independent session state. This prevents session state
 // from being shared across multiple calls or Chat sessions.
-func NewSubAgent(name, description string, agentFactory func() *Agent, opts ...SubAgentOption) *SubAgent {
+func NewSubAgent(name, description string, agentFactory func() (*Agent, error), opts ...SubAgentOption) *SubAgent {
 	s := &SubAgent{
 		name:         name,
 		description:  description,
@@ -251,9 +251,12 @@ func (s *SubAgent) Run(ctx context.Context, args map[string]any) (map[string]any
 		}
 
 		// Create a new agent instance for this execution
-		agent := s.agentFactory()
+		agent, err := s.agentFactory()
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create agent from factory").Wrap(ErrSubAgentFactory)
+		}
 		if agent == nil {
-			return nil, goerr.New("agent factory returned nil")
+			return nil, goerr.New("agent factory returned nil").Wrap(ErrSubAgentFactory)
 		}
 
 		// Execute the child agent

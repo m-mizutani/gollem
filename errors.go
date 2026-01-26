@@ -55,6 +55,9 @@ var (
 	// ErrProhibitedContent is returned when the content violates policy
 	ErrProhibitedContent = errors.New("prohibited content")
 
+	// ErrSubAgentFactory is returned when the subagent factory fails to create an agent.
+	ErrSubAgentFactory = errors.New("subagent factory failed")
+
 	// ErrTagTokenExceeded is a tag for errors caused by token limit exceeded
 	ErrTagTokenExceeded = goerr.NewTag("token_exceeded")
 )

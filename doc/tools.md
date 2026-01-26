@@ -167,13 +167,14 @@ In default mode, the subagent accepts a single `query` parameter:
 // Create a SubAgent with a factory function
 // The factory is called each time the SubAgent is invoked,
 // ensuring independent session state for each call
+// The factory returns (*Agent, error) to handle creation failures
 reviewSubagent := gollem.NewSubAgent(
     "code_reviewer",
     "Reviews code for best practices and potential issues",
-    func() *gollem.Agent {
+    func() (*gollem.Agent, error) {
         return gollem.New(reviewClient,
             gollem.WithSystemPrompt("You are an expert code reviewer."),
-        )
+        ), nil
     },
 )
 
@@ -210,10 +211,10 @@ if err != nil {
 analyzer := gollem.NewSubAgent(
     "code_analyzer",
     "Analyzes code with specified focus area",
-    func() *gollem.Agent {
+    func() (*gollem.Agent, error) {
         return gollem.New(analyzerClient,
             gollem.WithSystemPrompt("You are a code analysis expert."),
-        )
+        ), nil
     },
     gollem.WithPromptTemplate(template),
 )
@@ -268,16 +269,16 @@ SubAgents can have their own subagents for complex hierarchical workflows:
 securitySubagent := gollem.NewSubAgent(
     "security_check",
     "Security analysis",
-    func() *gollem.Agent {
-        return gollem.New(client, gollem.WithSystemPrompt("Security expert"))
+    func() (*gollem.Agent, error) {
+        return gollem.New(client, gollem.WithSystemPrompt("Security expert")), nil
     },
 )
 
 perfSubagent := gollem.NewSubAgent(
     "perf_check",
     "Performance analysis",
-    func() *gollem.Agent {
-        return gollem.New(client, gollem.WithSystemPrompt("Performance expert"))
+    func() (*gollem.Agent, error) {
+        return gollem.New(client, gollem.WithSystemPrompt("Performance expert")), nil
     },
 )
 
@@ -285,11 +286,11 @@ perfSubagent := gollem.NewSubAgent(
 reviewSubagent := gollem.NewSubAgent(
     "code_review",
     "Comprehensive code review",
-    func() *gollem.Agent {
+    func() (*gollem.Agent, error) {
         return gollem.New(client,
             gollem.WithSystemPrompt("Code reviewer"),
             gollem.WithSubAgents(securitySubagent, perfSubagent),
-        )
+        ), nil
     },
 )
 
@@ -308,10 +309,10 @@ SubAgent middleware allows you to inject context or modify arguments before temp
 subagent := gollem.NewSubAgent(
     "context_aware_analyzer",
     "Analyzes requests with user context",
-    func() *gollem.Agent {
+    func() (*gollem.Agent, error) {
         return gollem.New(analyzerClient,
             gollem.WithSystemPrompt("You are an analyzer with user context awareness."),
-        )
+        ), nil
     },
     gollem.WithPromptTemplate(prompt),
     gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
@@ -350,10 +351,10 @@ Multiple middlewares can be chained. They execute in the order they are added:
 subagent := gollem.NewSubAgent(
     "monitored_analyzer",
     "Analyzed with logging",
-    func() *gollem.Agent {
+    func() (*gollem.Agent, error) {
         return gollem.New(client,
             gollem.WithSystemPrompt("You are an analyzer."),
-        )
+        ), nil
     },
     gollem.WithPromptTemplate(prompt),
     // First middleware: logging
@@ -382,6 +383,94 @@ subagent := gollem.NewSubAgent(
 - **External data**: Database lookups, API responses, cached data
 - **Argument transformation**: Mask sensitive data, normalize inputs
 - **Logging and monitoring**: Track invocations, measure latency
+
+### Error Handling
+
+SubAgent factory functions now return `(*Agent, error)` to handle creation failures gracefully. This allows proper error propagation and recovery strategies.
+
+#### Factory Error Handling
+
+```go
+subagent := gollem.NewSubAgent(
+    "configurable_agent",
+    "Agent that requires valid configuration",
+    func() (*gollem.Agent, error) {
+        config, err := loadConfig()
+        if err != nil {
+            return nil, fmt.Errorf("failed to load config: %w", err)
+        }
+
+        client, err := createClient(config)
+        if err != nil {
+            return nil, fmt.Errorf("failed to create client: %w", err)
+        }
+
+        return gollem.New(client,
+            gollem.WithSystemPrompt(config.SystemPrompt),
+        ), nil
+    },
+)
+```
+
+#### Detecting Factory Errors with Middleware
+
+Middlewares can detect and handle factory errors using `errors.Is()` with `gollem.ErrSubAgentFactory`:
+
+```go
+subagent := gollem.NewSubAgent(
+    "resilient_agent",
+    "Agent with error recovery",
+    func() (*gollem.Agent, error) {
+        return createAgent() // May fail
+    },
+    gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+        return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+            result, err := next(ctx, args)
+            if err != nil && errors.Is(err, gollem.ErrSubAgentFactory) {
+                // Factory error detected - provide fallback
+                log.Error("Factory failed", "error", err)
+                return map[string]any{
+                    "response": "Service temporarily unavailable, using fallback",
+                    "status":   "fallback",
+                }, nil
+            }
+            return result, err
+        }
+    }),
+)
+```
+
+#### Retry Pattern
+
+Middlewares can implement retry logic for transient failures:
+
+```go
+subagent := gollem.NewSubAgent(
+    "retry_agent",
+    "Agent with automatic retry",
+    func() (*gollem.Agent, error) {
+        return createAgentWithRetry() // May fail transiently
+    },
+    gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+        return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+            result, err := next(ctx, args)
+            if err != nil && errors.Is(err, gollem.ErrSubAgentFactory) {
+                // Retry once on factory error
+                log.Info("Retrying after factory error")
+                return next(ctx, args)
+            }
+            return result, err
+        }
+    }),
+)
+```
+
+#### Error Types
+
+- **`gollem.ErrSubAgentFactory`**: Sentinel error wrapping all factory-related failures
+  - Factory function returned an error
+  - Factory function returned `nil` agent
+  - Use `errors.Is(err, gollem.ErrSubAgentFactory)` to detect
 
 ## Next Steps
 
