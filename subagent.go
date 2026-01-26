@@ -12,9 +12,9 @@ import (
 // SubAgent represents an agent that can be invoked as a tool by parent agent.
 // SubAgent implements the Tool interface, allowing it to be added to an agent's tool list.
 type SubAgent struct {
-	name        string
-	description string
-	agent       *Agent
+	name         string
+	description  string
+	agentFactory func() *Agent
 
 	// Template mode fields (nil when using default query-only mode)
 	parsedTemplate *template.Template    // Parsed template (cached)
@@ -177,15 +177,19 @@ func WithSubAgentMiddleware(middleware func(SubAgentHandler) SubAgentHandler) Su
 	}
 }
 
-// NewSubAgent creates a new SubAgent that wraps an existing Agent.
+// NewSubAgent creates a new SubAgent that wraps a factory function for creating Agent instances.
 // name: Tool name for the subagent (required, used by LLM to invoke)
 // description: Description of what this subagent does (required, helps LLM decide when to use)
-// agent: The Agent instance to execute (required)
-func NewSubAgent(name, description string, agent *Agent, opts ...SubAgentOption) *SubAgent {
+// agentFactory: A function that creates a new Agent instance (required)
+//
+// The factory function is called each time the SubAgent is invoked, ensuring that
+// each execution has an independent session state. This prevents session state
+// from being shared across multiple calls or Chat sessions.
+func NewSubAgent(name, description string, agentFactory func() *Agent, opts ...SubAgentOption) *SubAgent {
 	s := &SubAgent{
-		name:        name,
-		description: description,
-		agent:       agent,
+		name:         name,
+		description:  description,
+		agentFactory: agentFactory,
 	}
 
 	for _, opt := range opts {
@@ -246,8 +250,14 @@ func (s *SubAgent) Run(ctx context.Context, args map[string]any) (map[string]any
 			return nil, err
 		}
 
+		// Create a new agent instance for this execution
+		agent := s.agentFactory()
+		if agent == nil {
+			return nil, goerr.New("agent factory returned nil")
+		}
+
 		// Execute the child agent
-		resp, err := s.agent.Execute(ctx, Text(prompt))
+		resp, err := agent.Execute(ctx, Text(prompt))
 		if err != nil {
 			return nil, goerr.Wrap(err, "subagent execution failed")
 		}
