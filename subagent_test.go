@@ -786,7 +786,7 @@ func TestSubAgentWithSubAgentMiddleware(t *testing.T) {
 			},
 			gollem.WithPromptTemplate(prompt),
 			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
-				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+				return func(ctx context.Context, args map[string]any) (gollem.SubAgentResult, error) {
 					// Inject context that LLM doesn't provide
 					args["current_time"] = "2024-01-01T12:00:00Z"
 					args["user_name"] = "Alice"
@@ -842,7 +842,7 @@ func TestSubAgentWithSubAgentMiddleware(t *testing.T) {
 			},
 			gollem.WithPromptTemplate(prompt),
 			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
-				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+				return func(ctx context.Context, args map[string]any) (gollem.SubAgentResult, error) {
 					// Mask the password
 					if _, ok := args["password"].(string); ok {
 						args["password"] = "***"
@@ -903,7 +903,7 @@ func TestSubAgentArgsMiddlewareChain(t *testing.T) {
 			gollem.WithPromptTemplate(prompt),
 			// First middleware (executes first)
 			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
-				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+				return func(ctx context.Context, args map[string]any) (gollem.SubAgentResult, error) {
 					executionOrder = append(executionOrder, "middleware1-before")
 					args["value"] = args["value"].(string) + "-m1"
 					result, err := next(ctx, args)
@@ -913,7 +913,7 @@ func TestSubAgentArgsMiddlewareChain(t *testing.T) {
 			}),
 			// Second middleware (executes second)
 			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
-				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+				return func(ctx context.Context, args map[string]any) (gollem.SubAgentResult, error) {
 					executionOrder = append(executionOrder, "middleware2-before")
 					args["value"] = args["value"].(string) + "-m2"
 					result, err := next(ctx, args)
@@ -968,9 +968,9 @@ func TestSubAgentArgsMiddlewareError(t *testing.T) {
 				return gollem.New(mockClient), nil
 			},
 			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
-				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+				return func(ctx context.Context, args map[string]any) (gollem.SubAgentResult, error) {
 					// Return an error before calling next
-					return nil, errors.New("middleware error")
+					return gollem.SubAgentResult{}, errors.New("middleware error")
 				}
 			}),
 		)
@@ -1008,13 +1008,13 @@ func TestSubAgentArgsMiddlewareError(t *testing.T) {
 			},
 			// First middleware returns error
 			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
-				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
-					return nil, errors.New("first middleware error")
+				return func(ctx context.Context, args map[string]any) (gollem.SubAgentResult, error) {
+					return gollem.SubAgentResult{}, errors.New("first middleware error")
 				}
 			}),
 			// Second middleware should not be called
 			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
-				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+				return func(ctx context.Context, args map[string]any) (gollem.SubAgentResult, error) {
 					middleware2Called = true
 					return next(ctx, args)
 				}
@@ -1224,7 +1224,7 @@ func TestSubAgentMiddlewareFactoryError(t *testing.T) {
 				return nil, factoryErr
 			},
 			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
-				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+				return func(ctx context.Context, args map[string]any) (gollem.SubAgentResult, error) {
 					result, err := next(ctx, args)
 					if err != nil {
 						middlewareCalled = true
@@ -1232,9 +1232,11 @@ func TestSubAgentMiddlewareFactoryError(t *testing.T) {
 						// Check if it's a factory error
 						if errors.Is(err, gollem.ErrSubAgentFactory) {
 							// Return a fallback response
-							return map[string]any{
-								"response": "fallback response",
-								"status":   "fallback",
+							return gollem.SubAgentResult{
+								Data: map[string]any{
+									"response": "fallback response",
+									"status":   "fallback",
+								},
 							}, nil
 						}
 					}
@@ -1279,7 +1281,7 @@ func TestSubAgentMiddlewareFactoryError(t *testing.T) {
 				return gollem.New(mockClient), nil
 			},
 			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
-				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+				return func(ctx context.Context, args map[string]any) (gollem.SubAgentResult, error) {
 					result, err := next(ctx, args)
 					if err != nil && errors.Is(err, gollem.ErrSubAgentFactory) {
 						// Retry once
@@ -1296,5 +1298,233 @@ func TestSubAgentMiddlewareFactoryError(t *testing.T) {
 		gt.NotNil(t, result)
 		gt.Equal(t, "success", result["status"])
 		gt.Equal(t, 2, attemptCount)
+	})
+}
+
+func TestSubAgentMiddlewareWithSessionAccess(t *testing.T) {
+	t.Run("middleware can access session history", func(t *testing.T) {
+		var sessionHistoryAccessed bool
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						return &gollem.Response{
+							Texts: []string{"agent response"},
+						}, nil
+					},
+					HistoryFunc: func() (*gollem.History, error) {
+						// Return a mock history
+						return &gollem.History{}, nil
+					},
+				}, nil
+			},
+		}
+
+		subagent := gollem.NewSubAgent(
+			"session_aware",
+			"Session aware agent",
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient), nil
+			},
+			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+				return func(ctx context.Context, args map[string]any) (gollem.SubAgentResult, error) {
+					// Execute
+					result, err := next(ctx, args)
+					if err != nil {
+						return gollem.SubAgentResult{}, err
+					}
+
+					// Post-execution: Access session history
+					history, err := result.Session.History()
+					if err == nil && history != nil {
+						sessionHistoryAccessed = true
+						// Add history info to result
+						result.Data["history_accessed"] = true
+					}
+
+					return result, nil
+				}
+			}),
+		)
+
+		result, err := subagent.Run(context.Background(), map[string]any{
+			"query": "test query",
+		})
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.Equal(t, "success", result["status"])
+		gt.True(t, sessionHistoryAccessed)
+		gt.Equal(t, true, result["history_accessed"])
+	})
+
+	t.Run("middleware can modify result data based on session", func(t *testing.T) {
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						return &gollem.Response{
+							Texts: []string{"agent response"},
+						}, nil
+					},
+					HistoryFunc: func() (*gollem.History, error) {
+						// Return a mock history with messages
+						return &gollem.History{
+							Messages: []gollem.Message{
+								{Role: gollem.RoleUser},
+								{Role: gollem.RoleAssistant},
+								{Role: gollem.RoleUser},
+							},
+						}, nil
+					},
+				}, nil
+			},
+		}
+
+		subagent := gollem.NewSubAgent(
+			"counter",
+			"Counts messages",
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient), nil
+			},
+			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+				return func(ctx context.Context, args map[string]any) (gollem.SubAgentResult, error) {
+					// Execute
+					result, err := next(ctx, args)
+					if err != nil {
+						return gollem.SubAgentResult{}, err
+					}
+
+					// Post-execution: Count messages in history
+					history, err := result.Session.History()
+					if err == nil && history != nil {
+						result.Data["message_count"] = len(history.Messages)
+					}
+
+					return result, nil
+				}
+			}),
+		)
+
+		result, err := subagent.Run(context.Background(), map[string]any{
+			"query": "test query",
+		})
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.Equal(t, "success", result["status"])
+		gt.Equal(t, 3, result["message_count"])
+	})
+
+	t.Run("middleware handles session history error gracefully", func(t *testing.T) {
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						return &gollem.Response{
+							Texts: []string{"agent response"},
+						}, nil
+					},
+					HistoryFunc: func() (*gollem.History, error) {
+						// Return an error when accessing history
+						return nil, errors.New("history access failed")
+					},
+				}, nil
+			},
+		}
+
+		subagent := gollem.NewSubAgent(
+			"resilient",
+			"Handles errors gracefully",
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient), nil
+			},
+			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+				return func(ctx context.Context, args map[string]any) (gollem.SubAgentResult, error) {
+					// Execute
+					result, err := next(ctx, args)
+					if err != nil {
+						return gollem.SubAgentResult{}, err
+					}
+
+					// Post-execution: Try to access history, but handle error gracefully
+					history, err := result.Session.History()
+					if err != nil {
+						// Log error but don't fail
+						result.Data["history_error"] = true
+					} else if history != nil {
+						result.Data["history_success"] = true
+					}
+
+					return result, nil
+				}
+			}),
+		)
+
+		result, err := subagent.Run(context.Background(), map[string]any{
+			"query": "test query",
+		})
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.Equal(t, "success", result["status"])
+		gt.Equal(t, true, result["history_error"])
+	})
+
+	t.Run("middleware pre and post execution with session", func(t *testing.T) {
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						return &gollem.Response{
+							Texts: []string{"agent response"},
+						}, nil
+					},
+					HistoryFunc: func() (*gollem.History, error) {
+						return &gollem.History{}, nil
+					},
+				}, nil
+			},
+		}
+
+		subagent := gollem.NewSubAgent(
+			"full_cycle",
+			"Pre and post execution",
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient), nil
+			},
+			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+				return func(ctx context.Context, args map[string]any) (gollem.SubAgentResult, error) {
+					// Pre-execution: Modify args
+					args["_injected"] = "context"
+
+					// Execute
+					result, err := next(ctx, args)
+					if err != nil {
+						return gollem.SubAgentResult{}, err
+					}
+
+					// Post-execution: Access session and modify result
+					_, err = result.Session.History()
+					if err == nil {
+						result.Data["post_processing"] = "completed"
+					}
+
+					// Cleanup temporary args
+					delete(args, "_injected")
+
+					return result, nil
+				}
+			}),
+		)
+
+		result, err := subagent.Run(context.Background(), map[string]any{
+			"query": "test query",
+		})
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.Equal(t, "success", result["status"])
+		gt.Equal(t, "completed", result["post_processing"])
 	})
 }
