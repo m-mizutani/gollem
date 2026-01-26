@@ -11,7 +11,7 @@ import (
 )
 
 // Helper to create a mock agent that returns a specific response
-func newMockAgent(response string) *gollem.Agent {
+func newMockAgent(response string) (*gollem.Agent, error) {
 	callCount := 0
 	mockClient := &mock.LLMClientMock{
 		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
@@ -25,12 +25,12 @@ func newMockAgent(response string) *gollem.Agent {
 			}, nil
 		},
 	}
-	return gollem.New(mockClient)
+	return gollem.New(mockClient), nil
 }
 
 func TestNewSubAgent(t *testing.T) {
 	t.Run("create subagent with default mode", func(t *testing.T) {
-		subagent := gollem.NewSubAgent("test_agent", "A test subagent", func() *gollem.Agent {
+		subagent := gollem.NewSubAgent("test_agent", "A test subagent", func() (*gollem.Agent, error) {
 			return newMockAgent("test response")
 		})
 
@@ -54,7 +54,7 @@ func TestNewSubAgent(t *testing.T) {
 		subagent := gollem.NewSubAgent(
 			"analyzer",
 			"Analyzes code",
-			func() *gollem.Agent {
+			func() (*gollem.Agent, error) {
 				return newMockAgent("test response")
 			},
 			gollem.WithPromptTemplate(prompt),
@@ -69,7 +69,7 @@ func TestNewSubAgent(t *testing.T) {
 }
 
 func TestSubAgentSpec_DefaultMode(t *testing.T) {
-	subagent := gollem.NewSubAgent("my_agent", "My description", func() *gollem.Agent {
+	subagent := gollem.NewSubAgent("my_agent", "My description", func() (*gollem.Agent, error) {
 		return newMockAgent("response")
 	})
 
@@ -101,7 +101,7 @@ func TestSubAgentSpec_TemplateMode(t *testing.T) {
 	subagent := gollem.NewSubAgent(
 		"code_analyzer",
 		"Analyzes code with specified focus area",
-		func() *gollem.Agent {
+		func() (*gollem.Agent, error) {
 			return newMockAgent("response")
 		},
 		gollem.WithPromptTemplate(prompt),
@@ -143,8 +143,8 @@ func TestSubAgentRun_DefaultMode(t *testing.T) {
 				}, nil
 			},
 		}
-		subagent := gollem.NewSubAgent("processor", "Processes queries", func() *gollem.Agent {
-			return gollem.New(mockClient)
+		subagent := gollem.NewSubAgent("processor", "Processes queries", func() (*gollem.Agent, error) {
+			return gollem.New(mockClient), nil
 		})
 
 		result, err := subagent.Run(context.Background(), map[string]any{
@@ -163,7 +163,7 @@ func TestSubAgentRun_DefaultMode(t *testing.T) {
 	})
 
 	t.Run("missing required query parameter returns error", func(t *testing.T) {
-		subagent := gollem.NewSubAgent("processor", "Processes queries", func() *gollem.Agent {
+		subagent := gollem.NewSubAgent("processor", "Processes queries", func() (*gollem.Agent, error) {
 			return newMockAgent("response")
 		})
 
@@ -186,8 +186,8 @@ func TestSubAgentRun_DefaultMode(t *testing.T) {
 				}, nil
 			},
 		}
-		subagent := gollem.NewSubAgent("processor", "Processes queries", func() *gollem.Agent {
-			return gollem.New(mockClient)
+		subagent := gollem.NewSubAgent("processor", "Processes queries", func() (*gollem.Agent, error) {
+			return gollem.New(mockClient), nil
 		})
 
 		// Non-string value for string parameter returns type error
@@ -230,8 +230,8 @@ func TestSubAgentRun_TemplateMode(t *testing.T) {
 		subagent := gollem.NewSubAgent(
 			"analyzer",
 			"Code analyzer",
-			func() *gollem.Agent {
-				return gollem.New(mockClient)
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient), nil
 			},
 			gollem.WithPromptTemplate(prompt),
 		)
@@ -280,8 +280,8 @@ func TestSubAgentRun_TemplateMode(t *testing.T) {
 		subagent := gollem.NewSubAgent(
 			"test",
 			"Test",
-			func() *gollem.Agent {
-				return gollem.New(mockClient)
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient), nil
 			},
 			gollem.WithPromptTemplate(prompt),
 		)
@@ -336,8 +336,8 @@ Focus on: {{.focus}}`,
 		subagent := gollem.NewSubAgent(
 			"reviewer",
 			"Code reviewer",
-			func() *gollem.Agent {
-				return gollem.New(mockClient)
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient), nil
 			},
 			gollem.WithPromptTemplate(prompt),
 		)
@@ -394,8 +394,8 @@ func TestAgentWithSubAgent(t *testing.T) {
 		}
 
 		// Create subagent
-		subagent := gollem.NewSubAgent("helper", "A helper subagent", func() *gollem.Agent {
-			return gollem.New(childClient)
+		subagent := gollem.NewSubAgent("helper", "A helper subagent", func() (*gollem.Agent, error) {
+			return gollem.New(childClient), nil
 		})
 
 		// Create parent agent that will call the subagent
@@ -487,8 +487,8 @@ func TestNestedSubAgents(t *testing.T) {
 				}, nil
 			},
 		}
-		grandchildSubagent := gollem.NewSubAgent("grandchild", "Grandchild helper", func() *gollem.Agent {
-			return gollem.New(grandchildClient)
+		grandchildSubagent := gollem.NewSubAgent("grandchild", "Grandchild helper", func() (*gollem.Agent, error) {
+			return gollem.New(grandchildClient), nil
 		})
 
 		// Create child agent with grandchild as subagent
@@ -519,8 +519,8 @@ func TestNestedSubAgents(t *testing.T) {
 				}, nil
 			},
 		}
-		childSubagent := gollem.NewSubAgent("child", "Child helper", func() *gollem.Agent {
-			return gollem.New(childClient, gollem.WithSubAgents(grandchildSubagent), gollem.WithLoopLimit(5))
+		childSubagent := gollem.NewSubAgent("child", "Child helper", func() (*gollem.Agent, error) {
+			return gollem.New(childClient, gollem.WithSubAgents(grandchildSubagent), gollem.WithLoopLimit(5)), nil
 		})
 
 		// Create parent agent with child as subagent
@@ -566,10 +566,10 @@ func TestNestedSubAgents(t *testing.T) {
 
 func TestWithSubAgentsOption(t *testing.T) {
 	t.Run("multiple subagents", func(t *testing.T) {
-		subagent1 := gollem.NewSubAgent("agent1", "First agent", func() *gollem.Agent {
+		subagent1 := gollem.NewSubAgent("agent1", "First agent", func() (*gollem.Agent, error) {
 			return newMockAgent("response1")
 		})
-		subagent2 := gollem.NewSubAgent("agent2", "Second agent", func() *gollem.Agent {
+		subagent2 := gollem.NewSubAgent("agent2", "Second agent", func() (*gollem.Agent, error) {
 			return newMockAgent("response2")
 		})
 
@@ -604,7 +604,7 @@ func TestWithSubAgentsOption(t *testing.T) {
 	})
 
 	t.Run("subagent with regular tools", func(t *testing.T) {
-		subagent := gollem.NewSubAgent("helper", "Helper agent", func() *gollem.Agent {
+		subagent := gollem.NewSubAgent("helper", "Helper agent", func() (*gollem.Agent, error) {
 			return newMockAgent("child response")
 		})
 
@@ -781,8 +781,8 @@ func TestSubAgentWithSubAgentMiddleware(t *testing.T) {
 		subagent := gollem.NewSubAgent(
 			"context_aware",
 			"Context aware agent",
-			func() *gollem.Agent {
-				return gollem.New(mockClient)
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient), nil
 			},
 			gollem.WithPromptTemplate(prompt),
 			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
@@ -837,8 +837,8 @@ func TestSubAgentWithSubAgentMiddleware(t *testing.T) {
 		subagent := gollem.NewSubAgent(
 			"masked",
 			"Masks sensitive data",
-			func() *gollem.Agent {
-				return gollem.New(mockClient)
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient), nil
 			},
 			gollem.WithPromptTemplate(prompt),
 			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
@@ -897,8 +897,8 @@ func TestSubAgentArgsMiddlewareChain(t *testing.T) {
 		subagent := gollem.NewSubAgent(
 			"chained",
 			"Chained middlewares",
-			func() *gollem.Agent {
-				return gollem.New(mockClient)
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient), nil
 			},
 			gollem.WithPromptTemplate(prompt),
 			// First middleware (executes first)
@@ -964,8 +964,8 @@ func TestSubAgentArgsMiddlewareError(t *testing.T) {
 		subagent := gollem.NewSubAgent(
 			"error_test",
 			"Tests middleware errors",
-			func() *gollem.Agent {
-				return gollem.New(mockClient)
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient), nil
 			},
 			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
 				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
@@ -1003,8 +1003,8 @@ func TestSubAgentArgsMiddlewareError(t *testing.T) {
 		subagent := gollem.NewSubAgent(
 			"error_chain",
 			"Tests error in chain",
-			func() *gollem.Agent {
-				return gollem.New(mockClient)
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient), nil
 			},
 			// First middleware returns error
 			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
@@ -1050,8 +1050,8 @@ func TestSubAgentArgsMiddlewareNil(t *testing.T) {
 		}
 
 		// Create subagent without middleware (backward compatible)
-		subagent := gollem.NewSubAgent("processor", "Processes queries", func() *gollem.Agent {
-			return gollem.New(mockClient)
+		subagent := gollem.NewSubAgent("processor", "Processes queries", func() (*gollem.Agent, error) {
+			return gollem.New(mockClient), nil
 		})
 
 		result, err := subagent.Run(context.Background(), map[string]any{
@@ -1099,8 +1099,8 @@ func TestSubAgentArgsMiddlewareNil(t *testing.T) {
 		subagent := gollem.NewSubAgent(
 			"analyzer",
 			"Code analyzer",
-			func() *gollem.Agent {
-				return gollem.New(mockClient)
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient), nil
 			},
 			gollem.WithPromptTemplate(prompt),
 		)
@@ -1142,8 +1142,8 @@ func TestSubAgentSessionIsolation(t *testing.T) {
 		subagent := gollem.NewSubAgent(
 			"test",
 			"Test agent",
-			func() *gollem.Agent {
-				return gollem.New(mockClient)
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient), nil
 			},
 		)
 
@@ -1176,8 +1176,8 @@ func TestSubAgentFactoryNil(t *testing.T) {
 		subagent := gollem.NewSubAgent(
 			"test",
 			"Test agent",
-			func() *gollem.Agent {
-				return nil // Factory returns nil
+			func() (*gollem.Agent, error) {
+				return nil, nil // Factory returns nil
 			},
 		)
 
@@ -1186,5 +1186,115 @@ func TestSubAgentFactoryNil(t *testing.T) {
 		gt.Error(t, err)
 		gt.Nil(t, result)
 		gt.S(t, err.Error()).Contains("agent factory returned nil")
+		gt.True(t, errors.Is(err, gollem.ErrSubAgentFactory))
+	})
+}
+
+func TestSubAgentFactoryError(t *testing.T) {
+	t.Run("factory returning error propagates error", func(t *testing.T) {
+		expectedErr := errors.New("factory creation failed")
+		subagent := gollem.NewSubAgent(
+			"test",
+			"Test agent",
+			func() (*gollem.Agent, error) {
+				return nil, expectedErr
+			},
+		)
+
+		result, err := subagent.Run(context.Background(), map[string]any{"query": "test"})
+
+		gt.Error(t, err)
+		gt.Nil(t, result)
+		gt.S(t, err.Error()).Contains("failed to create agent from factory")
+		// The sentinel error can be checked with errors.Is()
+		gt.True(t, errors.Is(err, gollem.ErrSubAgentFactory))
+	})
+}
+
+func TestSubAgentMiddlewareFactoryError(t *testing.T) {
+	t.Run("middleware can handle factory errors", func(t *testing.T) {
+		factoryErr := errors.New("factory failed")
+		middlewareCalled := false
+		var capturedErr error
+
+		subagent := gollem.NewSubAgent(
+			"test",
+			"Test agent",
+			func() (*gollem.Agent, error) {
+				return nil, factoryErr
+			},
+			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+					result, err := next(ctx, args)
+					if err != nil {
+						middlewareCalled = true
+						capturedErr = err
+						// Check if it's a factory error
+						if errors.Is(err, gollem.ErrSubAgentFactory) {
+							// Return a fallback response
+							return map[string]any{
+								"response": "fallback response",
+								"status":   "fallback",
+							}, nil
+						}
+					}
+					return result, err
+				}
+			}),
+		)
+
+		result, err := subagent.Run(context.Background(), map[string]any{"query": "test"})
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.Equal(t, "fallback", result["status"])
+		gt.Equal(t, "fallback response", result["response"])
+		gt.True(t, middlewareCalled)
+		gt.NotNil(t, capturedErr)
+		gt.True(t, errors.Is(capturedErr, gollem.ErrSubAgentFactory))
+	})
+
+	t.Run("middleware can retry on factory error", func(t *testing.T) {
+		attemptCount := 0
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						return &gollem.Response{
+							Texts: []string{"success after retry"},
+						}, nil
+					},
+				}, nil
+			},
+		}
+
+		subagent := gollem.NewSubAgent(
+			"test",
+			"Test agent",
+			func() (*gollem.Agent, error) {
+				attemptCount++
+				if attemptCount == 1 {
+					return nil, errors.New("first attempt failed")
+				}
+				return gollem.New(mockClient), nil
+			},
+			gollem.WithSubAgentMiddleware(func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
+				return func(ctx context.Context, args map[string]any) (map[string]any, error) {
+					result, err := next(ctx, args)
+					if err != nil && errors.Is(err, gollem.ErrSubAgentFactory) {
+						// Retry once
+						return next(ctx, args)
+					}
+					return result, err
+				}
+			}),
+		)
+
+		result, err := subagent.Run(context.Background(), map[string]any{"query": "test"})
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.Equal(t, "success", result["status"])
+		gt.Equal(t, 2, attemptCount)
 	})
 }
