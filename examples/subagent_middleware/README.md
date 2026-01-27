@@ -36,8 +36,9 @@ The middleware function demonstrates both phases:
 func createMiddleware() func(gollem.SubAgentHandler) gollem.SubAgentHandler {
     return func(next gollem.SubAgentHandler) gollem.SubAgentHandler {
         return func(ctx context.Context, args map[string]any) (gollem.SubAgentResult, error) {
-            // Pre-execution: Inject context
-            args["_execution_time"] = time.Now().Format(time.RFC3339)
+            // Pre-execution: Inject context and start timer
+            startTime := time.Now()
+            args["_execution_time"] = startTime.Format(time.RFC3339)
             args["_user_context"] = "Example user"
 
             // Execute
@@ -47,11 +48,12 @@ func createMiddleware() func(gollem.SubAgentHandler) gollem.SubAgentHandler {
             }
 
             // Post-execution: Access session and extract insights
+            executionDuration := time.Since(startTime)
             history, _ := result.Session.History()
             if history != nil {
                 result.Data["metrics"] = map[string]any{
-                    "message_count": len(history.Messages),
-                    "duration": executionDuration,
+                    "message_count":      len(history.Messages),
+                    "execution_duration": executionDuration.String(),
                 }
             }
 
