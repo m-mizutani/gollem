@@ -27,9 +27,18 @@ type SubAgent struct {
 // SubAgentOption is the type for options when creating a SubAgent.
 type SubAgentOption func(*SubAgent)
 
+// SubAgentResult holds the execution result of a SubAgent handler.
+// It contains both the data returned to the caller and the session
+// for post-execution processing by middleware.
+type SubAgentResult struct {
+	Data    map[string]any // Result data to be returned to the parent agent
+	Session Session        // Session used during execution (read-only access for middleware)
+}
+
 // SubAgentHandler is a function that processes arguments for SubAgent execution.
-// It receives the context and current arguments, and returns potentially modified arguments.
-type SubAgentHandler func(ctx context.Context, args map[string]any) (map[string]any, error)
+// It receives the context and current arguments, and returns SubAgentResult containing
+// both the result data and the session for middleware post-processing.
+type SubAgentHandler func(ctx context.Context, args map[string]any) (SubAgentResult, error)
 
 // PromptTemplate holds the parsed template and parameter schema for template mode.
 // Use NewPromptTemplate to create an instance with proper error handling.
@@ -232,7 +241,7 @@ func (s *SubAgent) Spec() ToolSpec {
 // If middleware is set, it is applied to the arguments before template rendering.
 func (s *SubAgent) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
 	// Define the core handler that renders template and executes agent
-	coreHandler := func(ctx context.Context, args map[string]any) (map[string]any, error) {
+	coreHandler := func(ctx context.Context, args map[string]any) (SubAgentResult, error) {
 		var pt *PromptTemplate
 		if s.parsedTemplate == nil {
 			// Default mode: use default prompt template
@@ -247,22 +256,22 @@ func (s *SubAgent) Run(ctx context.Context, args map[string]any) (map[string]any
 
 		prompt, err := pt.Render(args)
 		if err != nil {
-			return nil, err
+			return SubAgentResult{}, err
 		}
 
 		// Create a new agent instance for this execution
 		agent, err := s.agentFactory()
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to create agent from factory").Wrap(ErrSubAgentFactory)
+			return SubAgentResult{}, goerr.Wrap(err, "failed to create agent from factory").Wrap(ErrSubAgentFactory)
 		}
 		if agent == nil {
-			return nil, goerr.New("agent factory returned nil").Wrap(ErrSubAgentFactory)
+			return SubAgentResult{}, goerr.New("agent factory returned nil").Wrap(ErrSubAgentFactory)
 		}
 
 		// Execute the child agent
 		resp, err := agent.Execute(ctx, Text(prompt))
 		if err != nil {
-			return nil, goerr.Wrap(err, "subagent execution failed")
+			return SubAgentResult{}, goerr.Wrap(err, "subagent execution failed")
 		}
 
 		// Build response text from ExecuteResponse
@@ -271,17 +280,28 @@ func (s *SubAgent) Run(ctx context.Context, args map[string]any) (map[string]any
 			responseText = strings.Join(resp.Texts, "\n")
 		}
 
-		return map[string]any{
-			"response": responseText,
-			"status":   "success",
+		// Return SubAgentResult with both data and session
+		return SubAgentResult{
+			Data: map[string]any{
+				"response": responseText,
+				"status":   "success",
+			},
+			Session: agent.Session(),
 		}, nil
 	}
 
 	// Apply middleware if set
+	handler := coreHandler
 	if s.middleware != nil {
-		handler := s.middleware(coreHandler)
-		return handler(ctx, args)
+		handler = s.middleware(coreHandler)
 	}
 
-	return coreHandler(ctx, args)
+	// Execute and extract Data from result
+	result, err := handler(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+
+	// Return only Data to parent agent (Session is not exposed)
+	return result.Data, nil
 }
