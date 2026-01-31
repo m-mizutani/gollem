@@ -27,6 +27,14 @@ func WithMetadata(meta TraceMetadata) Option {
 	}
 }
 
+// WithTraceID sets a custom trace ID.
+// If not set or set to an empty string, a UUID v7 is generated automatically.
+func WithTraceID(id string) Option {
+	return func(r *Recorder) {
+		r.traceID = id
+	}
+}
+
 // Recorder collects tracing data during agent execution into an in-memory Trace structure.
 // It implements the Handler interface and provides access to the collected Trace via Trace().
 type Recorder struct {
@@ -34,6 +42,7 @@ type Recorder struct {
 	mu       sync.Mutex
 	repo     Repository
 	metadata TraceMetadata
+	traceID  string
 }
 
 // New creates a new Recorder with the given options.
@@ -92,8 +101,13 @@ func (r *Recorder) StartAgentExecute(ctx context.Context) context.Context {
 		Status:    SpanStatusOK,
 	}
 
+	traceID := r.traceID
+	if traceID == "" {
+		traceID = uuid.Must(uuid.NewV7()).String()
+	}
+
 	r.trace = &Trace{
-		TraceID:   uuid.Must(uuid.NewV7()).String(),
+		TraceID:   traceID,
 		RootSpan:  span,
 		Metadata:  r.metadata,
 		StartedAt: now,

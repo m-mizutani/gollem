@@ -892,7 +892,7 @@ gollem provides a tracing system for observing agent execution. The `trace.Handl
 
 #### In-Memory Recorder
 
-`trace.New()` creates a built-in recorder that collects trace data into an in-memory tree structure. Useful for debugging, testing, and persistence via `Repository`.
+`trace.New()` creates a built-in recorder that collects trace data into an in-memory tree structure. Useful for debugging, testing, and persistence via `Repository`. You can also set a custom trace ID with `trace.WithTraceID(id)` to correlate with external systems.
 
 ```go
 import (

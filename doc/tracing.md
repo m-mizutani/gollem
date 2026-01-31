@@ -69,6 +69,17 @@ for _, child := range tr.RootSpan.Children {
 }
 ```
 
+#### Custom Trace ID
+
+By default, each trace is assigned a UUID v7. To correlate with external systems (e.g., HTTP request IDs, distributed trace IDs), you can specify a custom trace ID:
+
+```go
+rec := trace.New(trace.WithTraceID(requestID))
+agent := gollem.New(client, gollem.WithTrace(rec))
+```
+
+If `WithTraceID` is not set or set to an empty string, a UUID v7 is generated automatically.
+
 #### Persisting Traces with Repository
 
 Traces can be saved automatically by providing a `Repository`:
