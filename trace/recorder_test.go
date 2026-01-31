@@ -288,3 +288,29 @@ func TestRecorderConcurrentAccess(t *testing.T) {
 	rootSpan := rec.Trace().RootSpan
 	gt.Equal(t, len(rootSpan.Children), 10)
 }
+
+func TestRecorderWithCustomTraceID(t *testing.T) {
+	customID := "my-request-12345"
+	rec := trace.New(trace.WithTraceID(customID))
+	ctx := context.Background()
+
+	agentCtx := rec.StartAgentExecute(ctx)
+	rec.EndAgentExecute(agentCtx, nil)
+
+	tr := rec.Trace()
+	gt.Value(t, tr).NotNil()
+	gt.Equal(t, tr.TraceID, customID)
+}
+
+func TestRecorderWithEmptyTraceID(t *testing.T) {
+	rec := trace.New(trace.WithTraceID(""))
+	ctx := context.Background()
+
+	agentCtx := rec.StartAgentExecute(ctx)
+	rec.EndAgentExecute(agentCtx, nil)
+
+	tr := rec.Trace()
+	gt.Value(t, tr).NotNil()
+	// Empty string should fall back to auto-generated UUID
+	gt.Value(t, tr.TraceID).NotEqual("")
+}
