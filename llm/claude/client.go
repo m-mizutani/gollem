@@ -1241,7 +1241,10 @@ func buildClaudeTraceData(resp *anthropic.Message, model string, systemPrompt st
 			toolUse := content.AsToolUse()
 			var args map[string]any
 			if err := json.Unmarshal(toolUse.Input, &args); err != nil {
-				args = nil
+				args = map[string]any{
+					"__raw_arguments": string(toolUse.Input),
+					"__error":         err.Error(),
+				}
 			}
 			data.Response.FunctionCalls = append(data.Response.FunctionCalls, &trace.FunctionCall{
 				ID:        toolUse.ID,

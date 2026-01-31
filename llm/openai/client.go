@@ -1253,7 +1253,12 @@ func buildOpenAITraceData(resp openai.ChatCompletionResponse, model string, syst
 		for _, toolCall := range message.ToolCalls {
 			var args map[string]any
 			if toolCall.Function.Arguments != "" {
-				_ = json.Unmarshal([]byte(toolCall.Function.Arguments), &args)
+				if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+					args = map[string]any{
+						"__raw_arguments": toolCall.Function.Arguments,
+						"__error":         err.Error(),
+					}
+				}
 			}
 			data.Response.FunctionCalls = append(data.Response.FunctionCalls, &trace.FunctionCall{
 				ID:        toolCall.ID,
