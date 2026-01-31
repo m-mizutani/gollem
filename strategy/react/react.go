@@ -23,6 +23,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/trace"
 )
 
 const (
@@ -120,12 +121,20 @@ func (s *Strategy) handleInitialization(state *gollem.StrategyState) ([]gollem.I
 }
 
 // handleThoughtAndAction handles Thought and Action phases
-func (s *Strategy) handleThoughtAndAction(_ context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+func (s *Strategy) handleThoughtAndAction(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
 	resp := state.LastResponse
 
 	// Record thought
 	if len(resp.Texts) > 0 {
 		s.recordThought(strings.Join(resp.Texts, " "))
+
+		// Trace event: thought
+		if rec := trace.HandlerFrom(ctx); rec != nil {
+			rec.AddEvent(ctx, "thought", &ThoughtEvent{
+				Iteration: state.Iteration,
+				Content:   strings.Join(resp.Texts, " "),
+			})
+		}
 	}
 
 	// Check if this is a final response (no tool calls)
@@ -144,6 +153,19 @@ func (s *Strategy) handleThoughtAndAction(_ context.Context, state *gollem.Strat
 	// Record action as tool calls
 	s.recordAction(ActionTypeToolCall, resp.FunctionCalls, "")
 
+	// Trace event: action
+	if rec := trace.HandlerFrom(ctx); rec != nil {
+		var toolNames []string
+		for _, fc := range resp.FunctionCalls {
+			toolNames = append(toolNames, fc.Name)
+		}
+		rec.AddEvent(ctx, "action", &ActionEvent{
+			Iteration:  state.Iteration,
+			ActionType: string(ActionTypeToolCall),
+			ToolNames:  toolNames,
+		})
+	}
+
 	// Check for loops
 	actionKey := s.generateActionKey(resp.FunctionCalls)
 	if s.detectLoop(actionKey) {
@@ -158,7 +180,7 @@ func (s *Strategy) handleThoughtAndAction(_ context.Context, state *gollem.Strat
 }
 
 // handleObservation handles the Observation phase
-func (s *Strategy) handleObservation(_ context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
+func (s *Strategy) handleObservation(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
 	// Convert function responses to tool results
 	toolResults := convertFunctionResponsesToToolResults(state.NextInput)
 
@@ -175,6 +197,14 @@ func (s *Strategy) handleObservation(_ context.Context, state *gollem.StrategySt
 
 	// Record observation
 	s.recordObservation(toolResults, !hasError, err)
+
+	// Trace event: observation
+	if rec := trace.HandlerFrom(ctx); rec != nil {
+		rec.AddEvent(ctx, "observation", &ObservationEvent{
+			Iteration: state.Iteration,
+			Success:   !hasError,
+		})
+	}
 
 	// Track consecutive errors
 	if hasError {

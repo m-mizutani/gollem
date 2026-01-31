@@ -13,6 +13,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	gollemschema "github.com/m-mizutani/gollem/internal/schema"
+	"github.com/m-mizutani/gollem/trace"
 	"google.golang.org/api/option"
 	"google.golang.org/genai"
 )
@@ -513,15 +514,25 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 			)
 		}
 
+		// Start LLM call trace span
+		var geminiTraceData *trace.LLMCallData
+		var llmErr error
+		if h := trace.HandlerFrom(ctx); h != nil {
+			ctx = h.StartLLMCall(ctx)
+			defer func() { h.EndLLMCall(ctx, geminiTraceData, llmErr) }()
+		}
+
 		// Call the API
 		result, err := s.apiClient.GenerateContent(ctx, s.model, contents, s.config)
 		if err != nil {
+			llmErr = err
 			opts := tokenLimitErrorOptions(err)
 			return nil, goerr.Wrap(err, "failed to generate content", opts...)
 		}
 
 		response, err := processResponse(result)
 		if err != nil {
+			llmErr = err
 			return nil, err
 		}
 
@@ -556,6 +567,9 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 				"content", logContent,
 			)
 		}
+
+		// Set trace data for defer
+		geminiTraceData = buildGeminiTraceData(response, s.model, s.cfg.SystemPrompt())
 
 		// Update history with the response
 		// Create assistant message from response
@@ -713,12 +727,24 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 			)
 		}
 
+		// Start LLM call trace span
+		traceHandler := trace.HandlerFrom(ctx)
+		if traceHandler != nil {
+			ctx = traceHandler.StartLLMCall(ctx)
+		}
+
 		// Create streaming channel for middleware
 		streamChan := make(chan *gollem.ContentResponse)
 
 		// Start streaming in goroutine
 		go func() {
 			defer close(streamChan)
+
+			var streamTraceData *trace.LLMCallData
+			var streamErr error
+			if traceHandler != nil {
+				defer func() { traceHandler.EndLLMCall(ctx, streamTraceData, streamErr) }()
+			}
 
 			// Get the streaming response from API
 			apiStreamChan := s.apiClient.GenerateContentStream(ctx, s.model, contents, s.config)
@@ -730,6 +756,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 
 			for streamResp := range apiStreamChan {
 				if streamResp.Err != nil {
+					streamErr = streamResp.Err
 					opts := tokenLimitErrorOptions(streamResp.Err)
 					streamChan <- &gollem.ContentResponse{
 						Error: goerr.Wrap(streamResp.Err, "failed to generate content stream", opts...),
@@ -740,6 +767,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				// Process the response
 				response, err := processResponse(streamResp.Resp)
 				if err != nil {
+					streamErr = err
 					streamChan <- &gollem.ContentResponse{
 						Error: err,
 					}
@@ -800,6 +828,27 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				if len(newContents) > 0 {
 					s.historyContents = append(s.historyContents, newContents...)
 				}
+			}
+
+			// Set trace data for defer
+			streamTraceData = &trace.LLMCallData{
+				InputTokens:  totalInputTokens,
+				OutputTokens: totalOutputTokens,
+				Model:        s.model,
+				Request: &trace.LLMRequest{
+					SystemPrompt: s.cfg.SystemPrompt(),
+				},
+				Response: &trace.LLMResponse{},
+			}
+			if len(accumulatedTexts) > 0 {
+				streamTraceData.Response.Texts = accumulatedTexts
+			}
+			for _, fc := range accumulatedFunctionCalls {
+				streamTraceData.Response.FunctionCalls = append(streamTraceData.Response.FunctionCalls, &trace.FunctionCall{
+					ID:        fc.ID,
+					Name:      fc.Name,
+					Arguments: fc.Arguments,
+				})
 			}
 		}()
 
@@ -1091,4 +1140,30 @@ func tokenLimitErrorOptions(err error) []goerr.Option {
 	}
 
 	return nil
+}
+
+// buildGeminiTraceData builds trace.LLMCallData from a processed gollem.Response.
+func buildGeminiTraceData(response *gollem.Response, model string, systemPrompt string) *trace.LLMCallData {
+	data := &trace.LLMCallData{
+		InputTokens:  response.InputToken,
+		OutputTokens: response.OutputToken,
+		Model:        model,
+		Request: &trace.LLMRequest{
+			SystemPrompt: systemPrompt,
+		},
+		Response: &trace.LLMResponse{},
+	}
+
+	if len(response.Texts) > 0 {
+		data.Response.Texts = response.Texts
+	}
+	for _, fc := range response.FunctionCalls {
+		data.Response.FunctionCalls = append(data.Response.FunctionCalls, &trace.FunctionCall{
+			ID:        fc.ID,
+			Name:      fc.Name,
+			Arguments: fc.Arguments,
+		})
+	}
+
+	return data
 }

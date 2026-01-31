@@ -9,6 +9,7 @@ gollem is a Go framework for building applications with Large Language Models (L
 - [MCP Server Integration](mcp.md) - Integrating with Model Context Protocol servers
 - [History](history.md) - Managing conversation history and context
 - [Structured Output with JSON Schema](schema.md) - Define response formats and extract structured data
+- [Tracing](tracing.md) - Agent execution tracing and observability
 - [Examples](examples.md) - Practical examples and use cases
 
 ## Key Features
@@ -20,6 +21,7 @@ gollem is a Go framework for building applications with Large Language Models (L
 - **Structured Output**: Define JSON Schema to ensure LLM responses conform to specific formats
 - **Middleware System**: Monitor and control agent behavior with powerful middleware functions
 - **Streaming Support**: Real-time response streaming for better user experience
+- **Tracing**: Observe agent execution with pluggable trace backends (in-memory, OpenTelemetry)
 - **Error Handling**: Robust error handling with retry mechanisms and graceful degradation
 
 ## Quick Start

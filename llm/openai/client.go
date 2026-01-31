@@ -12,6 +12,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/internal/schema"
+	"github.com/m-mizutani/gollem/trace"
 	"github.com/pkoukk/tiktoken-go"
 	"github.com/sashabaranov/go-openai"
 )
@@ -528,13 +529,26 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		}
 		s.logPrompt(ctx)
 
+		// Start LLM call trace span
+		var openaiTraceData *trace.LLMCallData
+		var llmErr error
+		if h := trace.HandlerFrom(ctx); h != nil {
+			ctx = h.StartLLMCall(ctx)
+			defer func() { h.EndLLMCall(ctx, openaiTraceData, llmErr) }()
+		}
+
 		resp, err := s.apiClient.CreateChatCompletion(ctx, openaiReq)
 		if err != nil {
+			llmErr = err
 			opts := tokenLimitErrorOptions(err)
 			return nil, goerr.Wrap(err, "failed to create chat completion", opts...)
 		}
 
 		if len(resp.Choices) == 0 {
+			openaiTraceData = &trace.LLMCallData{
+				Model:    resp.Model,
+				Response: &trace.LLMResponse{},
+			}
 			return &gollem.ContentResponse{
 				Texts:         []string{},
 				FunctionCalls: []*gollem.FunctionCall{},
@@ -623,6 +637,9 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 			)
 		}
 
+		// Set trace data for defer
+		openaiTraceData = buildOpenAITraceData(resp, s.defaultModel, s.cfg.SystemPrompt())
+
 		// History is already updated by updateHistoryWithResponse above
 
 		return &gollem.ContentResponse{
@@ -696,12 +713,21 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 		}
 		s.logPrompt(ctx)
 
+		// Start LLM call trace span
+		traceHandler := trace.HandlerFrom(ctx)
+		if traceHandler != nil {
+			ctx = traceHandler.StartLLMCall(ctx)
+		}
+
 		// Enable stream options to get usage data
 		openaiReq.StreamOptions = &openai.StreamOptions{
 			IncludeUsage: true,
 		}
 		stream, err := s.apiClient.CreateChatCompletionStream(ctx, openaiReq)
 		if err != nil {
+			if traceHandler != nil {
+				traceHandler.EndLLMCall(ctx, nil, err)
+			}
 			opts := tokenLimitErrorOptions(err)
 			return nil, goerr.Wrap(err, "failed to create chat completion stream", opts...)
 		}
@@ -711,6 +737,12 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 		go func() {
 			defer close(responseChan)
 			defer stream.Close()
+
+			var streamTraceData *trace.LLMCallData
+			var streamErr error
+			if traceHandler != nil {
+				defer func() { traceHandler.EndLLMCall(ctx, streamTraceData, streamErr) }()
+			}
 
 			var textContent string
 			var toolCalls []openai.ToolCall
@@ -885,6 +917,33 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				},
 				"content", logContent,
 			)
+
+			// Set trace data for defer
+			streamTraceData = &trace.LLMCallData{
+				InputTokens:  totalInputTokens,
+				OutputTokens: totalOutputTokens,
+				Model:        s.defaultModel,
+				Request: &trace.LLMRequest{
+					SystemPrompt: s.cfg.SystemPrompt(),
+				},
+				Response: &trace.LLMResponse{},
+			}
+			if textContent != "" {
+				streamTraceData.Response.Texts = []string{textContent}
+			}
+			for _, tc := range toolCalls {
+				if tc.ID != "" && tc.Function.Name != "" {
+					var args map[string]any
+					if tc.Function.Arguments != "" {
+						_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+					}
+					streamTraceData.Response.FunctionCalls = append(streamTraceData.Response.FunctionCalls, &trace.FunctionCall{
+						ID:        tc.ID,
+						Name:      tc.Function.Name,
+						Arguments: args,
+					})
+				}
+			}
 
 			// Send final response with complete token usage if available
 			if totalInputTokens > 0 || totalOutputTokens > 0 {
@@ -1172,4 +1231,42 @@ func tokenLimitErrorOptions(err error) []goerr.Option {
 	}
 
 	return nil
+}
+
+// buildOpenAITraceData builds trace.LLMCallData from an OpenAI API response.
+func buildOpenAITraceData(resp openai.ChatCompletionResponse, model string, systemPrompt string) *trace.LLMCallData {
+	data := &trace.LLMCallData{
+		InputTokens:  resp.Usage.PromptTokens,
+		OutputTokens: resp.Usage.CompletionTokens,
+		Model:        resp.Model,
+		Request: &trace.LLMRequest{
+			SystemPrompt: systemPrompt,
+		},
+		Response: &trace.LLMResponse{},
+	}
+
+	if len(resp.Choices) > 0 {
+		message := resp.Choices[0].Message
+		if message.Content != "" {
+			data.Response.Texts = append(data.Response.Texts, message.Content)
+		}
+		for _, toolCall := range message.ToolCalls {
+			var args map[string]any
+			if toolCall.Function.Arguments != "" {
+				if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+					args = map[string]any{
+						"__raw_arguments": toolCall.Function.Arguments,
+						"__error":         err.Error(),
+					}
+				}
+			}
+			data.Response.FunctionCalls = append(data.Response.FunctionCalls, &trace.FunctionCall{
+				ID:        toolCall.ID,
+				Name:      toolCall.Function.Name,
+				Arguments: args,
+			})
+		}
+	}
+
+	return data
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/internal/schema"
+	"github.com/m-mizutani/gollem/trace"
 	"github.com/m-mizutani/jsonex"
 )
 
@@ -823,8 +824,17 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 			)
 		}
 
+		// Start LLM call trace span
+		var traceData *trace.LLMCallData
+		var llmErr error
+		if h := trace.HandlerFrom(ctx); h != nil {
+			ctx = h.StartLLMCall(ctx)
+			defer func() { h.EndLLMCall(ctx, traceData, llmErr) }()
+		}
+
 		resp, err := s.apiClient.MessagesNew(ctx, request)
 		if err != nil {
+			llmErr = err
 			opts := tokenLimitErrorOptions(err)
 			return nil, goerr.Wrap(err, "failed to create message", opts...)
 		}
@@ -861,6 +871,9 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 
 		// Process response and extract content
 		processedResp := processResponseWithContentType(ctx, resp, s.cfg.ContentType(), s.cfg.ResponseSchema() != nil)
+
+		// Set trace data for defer
+		traceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt())
 
 		// Update history with new messages (already in Claude format)
 		s.historyMessages = append(s.historyMessages, messages...)
@@ -995,13 +1008,25 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 			request.Tools = s.tools
 		}
 
+		// Start LLM call trace span
+		var streamTraceData *trace.LLMCallData
+		var streamErr error
+		if h := trace.HandlerFrom(ctx); h != nil {
+			ctx = h.StartLLMCall(ctx)
+			defer func() { h.EndLLMCall(ctx, streamTraceData, streamErr) }()
+		}
+
 		// Simplified streaming implementation - full implementation would be complex
 		// For now, we'll use non-streaming API and simulate streaming
 		resp, err := s.apiClient.MessagesNew(ctx, request)
 		if err != nil {
+			streamErr = err
 			opts := tokenLimitErrorOptions(err)
 			return nil, goerr.Wrap(err, "failed to create message stream", opts...)
 		}
+
+		// Set trace data for defer
+		streamTraceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt())
 
 		responseChan := make(chan *gollem.ContentResponse)
 
@@ -1194,4 +1219,40 @@ func tokenLimitErrorOptions(err error) []goerr.Option {
 	}
 
 	return nil
+}
+
+// buildClaudeTraceData builds trace.LLMCallData from a Claude API response.
+func buildClaudeTraceData(resp *anthropic.Message, model string, systemPrompt string) *trace.LLMCallData {
+	data := &trace.LLMCallData{
+		InputTokens:  int(resp.Usage.InputTokens),
+		OutputTokens: int(resp.Usage.OutputTokens),
+		Model:        string(resp.Model),
+		Request: &trace.LLMRequest{
+			SystemPrompt: systemPrompt,
+		},
+		Response: &trace.LLMResponse{},
+	}
+
+	for _, content := range resp.Content {
+		switch content.Type {
+		case "text":
+			data.Response.Texts = append(data.Response.Texts, content.AsText().Text)
+		case "tool_use":
+			toolUse := content.AsToolUse()
+			var args map[string]any
+			if err := json.Unmarshal(toolUse.Input, &args); err != nil {
+				args = map[string]any{
+					"__raw_arguments": string(toolUse.Input),
+					"__error":         err.Error(),
+				}
+			}
+			data.Response.FunctionCalls = append(data.Response.FunctionCalls, &trace.FunctionCall{
+				ID:        toolUse.ID,
+				Name:      toolUse.Name,
+				Arguments: args,
+			})
+		}
+	}
+
+	return data
 }

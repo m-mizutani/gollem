@@ -6,6 +6,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/trace"
 )
 
 // trial represents a single execution attempt (internal use only).
@@ -26,6 +27,13 @@ func (s *Strategy) startTrial(ctx context.Context, state *gollem.StrategyState) 
 		if err := s.hooks.OnTrialStart(ctx, s.currentTrial); err != nil {
 			return nil, nil, goerr.Wrap(err, "hook OnTrialStart failed")
 		}
+	}
+
+	// Trace event: trial start
+	if rec := trace.HandlerFrom(ctx); rec != nil {
+		rec.AddEvent(ctx, "trial_start", &TrialStartEvent{
+			TrialNumber: s.currentTrial,
+		})
 	}
 
 	// Build inputs with memory prompt if we have reflections
@@ -74,6 +82,14 @@ func (s *Strategy) completeTrial(ctx context.Context, state *gollem.StrategyStat
 		}
 	}
 
+	// Trace event: reflection generated
+	if rec := trace.HandlerFrom(ctx); rec != nil {
+		rec.AddEvent(ctx, "reflection_generated", &ReflectionGeneratedEvent{
+			TrialNumber: s.currentTrial,
+			Reflection:  reflection,
+		})
+	}
+
 	// Save to memory
 	s.memory.add(s.currentTrial, reflection)
 
@@ -115,6 +131,15 @@ func (s *Strategy) finalizeTrial(ctx context.Context, trajectory *Trajectory, ev
 		if err := s.hooks.OnTrialEnd(ctx, s.currentTrial, evaluation); err != nil {
 			return nil, nil, goerr.Wrap(err, "hook OnTrialEnd failed")
 		}
+	}
+
+	// Trace event: trial end
+	if rec := trace.HandlerFrom(ctx); rec != nil {
+		rec.AddEvent(ctx, "trial_end", &TrialEndEvent{
+			TrialNumber: s.currentTrial,
+			Success:     evaluation.Success,
+			Feedback:    evaluation.Feedback,
+		})
 	}
 
 	return nil, &gollem.ExecuteResponse{

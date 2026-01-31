@@ -886,6 +886,57 @@ agent := gollem.New(client,
 - **Custom Logic**: Implement your own decision-making algorithms
 - **State Management**: Full access to conversation state and history
 
+### Tracing
+
+gollem provides a tracing system for observing agent execution. The `trace.Handler` interface (inspired by `slog.Handler`) lets you plug in different backends for recording agent lifecycle events: LLM calls, tool executions, sub-agent invocations, and custom strategy events.
+
+#### In-Memory Recorder
+
+`trace.New()` creates a built-in recorder that collects trace data into an in-memory tree structure. Useful for debugging, testing, and persistence via `Repository`.
+
+```go
+import (
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/trace"
+)
+
+// Create a recorder that saves traces to files
+rec := trace.New(
+	trace.WithRepository(trace.NewFileRepository("./traces")),
+	trace.WithMetadata(trace.TraceMetadata{
+		Labels: map[string]string{"env": "production"},
+	}),
+)
+
+agent := gollem.New(client, gollem.WithTrace(rec))
+result, err := agent.Execute(ctx, gollem.Text("Hello"))
+
+// Inspect the trace programmatically
+tr := rec.Trace()
+fmt.Printf("Trace %s: %d child spans\n", tr.TraceID, len(tr.RootSpan.Children))
+```
+
+#### OpenTelemetry Integration
+
+The `trace/otel` package bridges gollem's trace events to OpenTelemetry spans, integrating with any OTel-compatible backend (Jaeger, Zipkin, OTLP, etc.).
+
+```go
+import (
+	"github.com/m-mizutani/gollem"
+	traceOtel "github.com/m-mizutani/gollem/trace/otel"
+)
+
+// Uses the global TracerProvider
+agent := gollem.New(client, gollem.WithTrace(traceOtel.New()))
+
+// Or with an explicit TracerProvider
+agent = gollem.New(client, gollem.WithTrace(
+	traceOtel.New(traceOtel.WithTracerProvider(tp)),
+))
+```
+
+For more details including combining multiple handlers with `trace.Multi()`, see the [Tracing documentation](doc/tracing.md).
+
 ## Examples
 
 See the [examples](https://github.com/m-mizutani/gollem/tree/main/examples) directory for complete working examples:
@@ -898,6 +949,7 @@ See the [examples](https://github.com/m-mizutani/gollem/tree/main/examples) dire
 - **[Tools](examples/tools)**: Custom tool development
 - **[JSON Schema](examples/json_schema)**: Structured output with JSON Schema validation
 - **[Embedding](examples/embedding)**: Text embedding generation
+- **[Tracing](examples/tracing)**: Agent execution tracing with file persistence
 
 ## Documentation
 
@@ -907,6 +959,7 @@ For detailed documentation and advanced usage:
 - **[Tool Development](doc/tools.md)**
 - **[MCP Integration](doc/mcp.md)**
 - **[Structured Output with JSON Schema](doc/schema.md)** - Define response formats and extract structured data
+- **[Tracing](doc/tracing.md)** - Agent execution tracing and observability (in-memory, OpenTelemetry)
 - **[LLM Provider Configuration](doc/llm.md)** - Detailed configuration options for each LLM provider
 - **[API Reference](https://pkg.go.dev/github.com/m-mizutani/gollem)**
 
