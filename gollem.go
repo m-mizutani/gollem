@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/m-mizutani/gollem/trace"
 )
 
 // ResponseMode is the type for the response mode of the gollem agent.
@@ -73,6 +74,9 @@ type gollemConfig struct {
 
 	// Middleware for tool execution
 	toolMiddlewares []ToolMiddleware
+
+	// Trace handler for agent execution tracing
+	traceHandler trace.Handler
 }
 
 func (c *gollemConfig) Clone() *gollemConfig {
@@ -95,6 +99,7 @@ func (c *gollemConfig) Clone() *gollemConfig {
 		contentBlockMiddlewares:  c.contentBlockMiddlewares[:],
 		contentStreamMiddlewares: c.contentStreamMiddlewares[:],
 		toolMiddlewares:          c.toolMiddlewares[:],
+		traceHandler:             c.traceHandler,
 	}
 }
 
@@ -239,6 +244,15 @@ func WithResponseSchema(schema *Parameter) Option {
 	}
 }
 
+// WithTrace sets the trace handler for the agent.
+// When set, the agent will record execution traces including LLM calls,
+// tool executions, and sub-agent invocations.
+func WithTrace(handler trace.Handler) Option {
+	return func(s *gollemConfig) {
+		s.traceHandler = handler
+	}
+}
+
 func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool, error) {
 	allTools := cfg.tools[:]
 
@@ -263,7 +277,7 @@ func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool
 // allowing for continuous conversation without manual history management.
 // Returns (*ExecuteResponse, error) where ExecuteResponse contains the final conclusion.
 // Use this method instead of Prompt for better agent-like behavior.
-func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, error) {
+func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse, err error) {
 	cfg := g.gollemConfig.Clone()
 	logger := cfg.logger.With("gollem.exec_id", uuid.New().String())
 	ctx = ctxlog.With(ctx, logger)
@@ -273,6 +287,19 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (*ExecuteResponse, 
 		"has_existing_session", g.currentSession != nil,
 	)
 	defer logger.Debug("[end] gollem execution")
+
+	// Setup trace handler if configured
+	th := cfg.traceHandler
+	if th != nil {
+		ctx = trace.WithHandler(ctx, th)
+		ctx = th.StartAgentExecute(ctx)
+		defer func() {
+			th.EndAgentExecute(ctx, err)
+			if finishErr := th.Finish(ctx); finishErr != nil {
+				logger.Warn("failed to finish trace", "error", finishErr)
+			}
+		}()
+	}
 
 	// Initialize strategy
 	if err := cfg.strategy.Init(ctx, input); err != nil {
@@ -502,76 +529,91 @@ func handleResponse(ctx context.Context, output *Response, toolMap map[string]To
 			continue
 		}
 
-		// Create base tool handler
-		baseHandler := func(ctx context.Context, req *ToolExecRequest) (*ToolExecResponse, error) {
-			start := time.Now()
-			result, err := tool.Run(ctx, req.Tool.Arguments)
-			duration := time.Since(start).Milliseconds()
-
-			return &ToolExecResponse{
-				Result:   result,
-				Error:    err,
-				Duration: duration,
-			}, nil
-		}
-
-		// Build middleware chain
-		handler := buildToolChain(toolMiddlewares, baseHandler)
-
-		// Execute tool with middleware
-		toolSpec := tool.Spec()
-		req := &ToolExecRequest{
-			Tool:     toolCall,
-			ToolSpec: &toolSpec,
-		}
-
-		resp, err := handler(ctx, req)
+		resp, err := executeToolCall(ctx, toolCall, tool, toolMiddlewares)
 		if err != nil {
-			logger.Info("gollem tool handler error", "error", err)
-			newInput = append(newInput, FunctionResponse{
-				ID:    toolCall.ID,
-				Name:  toolCall.Name,
-				Error: goerr.With(err, goerr.V("call", toolCall)),
-			})
-			continue
+			return nil, err
 		}
-
-		result := resp.Result
-		if resp.Error != nil {
-			logger.Info("gollem tool error", "error", resp.Error)
-			newInput = append(newInput, FunctionResponse{
-				ID:    toolCall.ID,
-				Name:  toolCall.Name,
-				Error: goerr.With(resp.Error, goerr.V("call", toolCall)),
-			})
-			continue
-		}
-
-		logger.Debug("gollem tool result", "tool", toolCall.Name, "result", result, "duration_ms", resp.Duration)
-
-		logger.Debug("gollem tool response", "call", toolCall, "result", result, "should_exit", err)
-
-		// Sanitize result to ensure a generic JSON-compatible structure for LLM processing.
-		if result != nil {
-			marshaled, err := json.Marshal(result)
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to marshal result", goerr.V("result", result))
-			}
-			var unmarshaled map[string]any
-			if err := json.Unmarshal(marshaled, &unmarshaled); err != nil {
-				return nil, goerr.Wrap(err, "failed to unmarshal result", goerr.V("marshaled", string(marshaled)))
-			}
-			result = unmarshaled
-		}
-
-		newInput = append(newInput, FunctionResponse{
-			ID:   toolCall.ID,
-			Name: toolCall.Name,
-			Data: result,
-		})
+		newInput = append(newInput, resp)
 	}
 
 	return newInput, nil
+}
+
+// executeToolCall executes a single tool call with trace span management via defer.
+func executeToolCall(ctx context.Context, toolCall *FunctionCall, tool Tool, toolMiddlewares []ToolMiddleware) (_ FunctionResponse, retErr error) {
+	logger := ctxlog.From(ctx)
+
+	// Start tool execution trace span
+	var toolResult map[string]any
+	if h := trace.HandlerFrom(ctx); h != nil {
+		ctx = h.StartToolExec(ctx, toolCall.Name, toolCall.Arguments)
+		defer func() { h.EndToolExec(ctx, toolResult, retErr) }()
+	}
+
+	// Create base tool handler
+	baseHandler := func(ctx context.Context, req *ToolExecRequest) (*ToolExecResponse, error) {
+		start := time.Now()
+		result, err := tool.Run(ctx, req.Tool.Arguments)
+		duration := time.Since(start).Milliseconds()
+
+		return &ToolExecResponse{
+			Result:   result,
+			Error:    err,
+			Duration: duration,
+		}, nil
+	}
+
+	// Build middleware chain
+	handler := buildToolChain(toolMiddlewares, baseHandler)
+
+	// Execute tool with middleware
+	toolSpec := tool.Spec()
+	req := &ToolExecRequest{
+		Tool:     toolCall,
+		ToolSpec: &toolSpec,
+	}
+
+	resp, err := handler(ctx, req)
+	if err != nil {
+		logger.Info("gollem tool handler error", "error", err)
+		return FunctionResponse{
+			ID:    toolCall.ID,
+			Name:  toolCall.Name,
+			Error: goerr.With(err, goerr.V("call", toolCall)),
+		}, nil
+	}
+
+	toolResult = resp.Result
+	if resp.Error != nil {
+		retErr = resp.Error
+		logger.Info("gollem tool error", "error", resp.Error)
+		return FunctionResponse{
+			ID:    toolCall.ID,
+			Name:  toolCall.Name,
+			Error: goerr.With(resp.Error, goerr.V("call", toolCall)),
+		}, nil
+	}
+
+	logger.Debug("gollem tool result", "tool", toolCall.Name, "result", toolResult, "duration_ms", resp.Duration)
+
+	// Sanitize result to ensure a generic JSON-compatible structure for LLM processing.
+	if toolResult != nil {
+		marshaled, err := json.Marshal(toolResult)
+		if err != nil {
+			return FunctionResponse{}, goerr.Wrap(err, "failed to marshal result", goerr.V("result", toolResult))
+		}
+		var unmarshaled map[string]any
+		if err := json.Unmarshal(marshaled, &unmarshaled); err != nil {
+			return FunctionResponse{}, goerr.Wrap(err, "failed to unmarshal result", goerr.V("marshaled", string(marshaled)))
+		}
+		toolResult = unmarshaled
+	}
+
+	return FunctionResponse{
+		ID:   toolCall.ID,
+		Name: toolCall.Name,
+		Data: toolResult,
+	}, nil
 }
 
 type toolWrapper struct {

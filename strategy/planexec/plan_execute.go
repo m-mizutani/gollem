@@ -6,6 +6,7 @@ import (
 	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/trace"
 )
 
 // New creates a new Strategy instance
@@ -83,6 +84,18 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 			s.planCreatedHookRan = true
 		}
 
+		// Trace event: plan created
+		if rec := trace.HandlerFrom(ctx); rec != nil {
+			tasks := make([]PlanTaskInfo, len(s.plan.Tasks))
+			for i, t := range s.plan.Tasks {
+				tasks[i] = PlanTaskInfo{ID: t.ID, Description: t.Description, State: string(t.State)}
+			}
+			rec.AddEvent(ctx, "plan_created", &PlanCreatedEvent{
+				Goal:  s.plan.Goal,
+				Tasks: tasks,
+			})
+		}
+
 		// No plan needed - return direct response
 		// Planning phase is internal analysis - no history preservation needed
 		if len(s.plan.Tasks) == 0 {
@@ -113,6 +126,15 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 			if err := s.hooks.OnTaskDone(ctx, s.plan, s.currentTask); err != nil {
 				return nil, nil, goerr.Wrap(err, "hook OnTaskDone failed")
 			}
+		}
+
+		// Trace event: task completed
+		if rec := trace.HandlerFrom(ctx); rec != nil {
+			rec.AddEvent(ctx, "task_completed", &TaskCompletedEvent{
+				TaskID:      s.currentTask.ID,
+				Description: s.currentTask.Description,
+				State:       string(s.currentTask.State),
+			})
 		}
 
 		// Check max iteration limit (safety net against infinite loops)
@@ -161,6 +183,24 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 			}
 		}
 
+		// Trace event: plan updated
+		if hasChanges {
+			if rec := trace.HandlerFrom(ctx); rec != nil {
+				var updated []PlanTaskInfo
+				for _, t := range reflectionResult.UpdatedTasks {
+					updated = append(updated, PlanTaskInfo{ID: t.ID, Description: t.Description, State: string(t.State)})
+				}
+				var newTasks []PlanTaskInfo
+				for _, t := range reflectionResult.NewTasks {
+					newTasks = append(newTasks, PlanTaskInfo{ID: t.ID, Description: t.Description, State: string(t.State)})
+				}
+				rec.AddEvent(ctx, "plan_updated", &PlanUpdatedEvent{
+					UpdatedTasks: updated,
+					NewTasks:     newTasks,
+				})
+			}
+		}
+
 		// Proceed to phase 3 to select next task
 	}
 
@@ -182,6 +222,14 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 		// Start task execution
 		s.currentTask.State = TaskStateInProgress
 		s.waitingForTask = true
+
+		// Trace event: task started
+		if rec := trace.HandlerFrom(ctx); rec != nil {
+			rec.AddEvent(ctx, "task_started", &TaskStartedEvent{
+				TaskID:      s.currentTask.ID,
+				Description: s.currentTask.Description,
+			})
+		}
 
 		// Return task execution prompt
 		return buildExecutePrompt(ctx, s.currentTask, s.plan, s.taskIterationCount, s.maxIterations), nil, nil

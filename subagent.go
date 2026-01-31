@@ -7,6 +7,7 @@ import (
 	"text/template"
 
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/m-mizutani/gollem/trace"
 )
 
 // SubAgent represents an agent that can be invoked as a tool by parent agent.
@@ -239,7 +240,13 @@ func (s *SubAgent) Spec() ToolSpec {
 // In default mode, it uses the default prompt template with a "query" parameter.
 // In template mode, it renders the template with the arguments and passes the result to the agent.
 // If middleware is set, it is applied to the arguments before template rendering.
-func (s *SubAgent) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+func (s *SubAgent) Run(ctx context.Context, args map[string]any) (_ map[string]any, retErr error) {
+	// Start sub-agent trace span
+	if h := trace.HandlerFrom(ctx); h != nil {
+		ctx = h.StartSubAgent(ctx, s.name)
+		defer func() { h.EndSubAgent(ctx, retErr) }()
+	}
+
 	// Define the core handler that renders template and executes agent
 	coreHandler := func(ctx context.Context, args map[string]any) (SubAgentResult, error) {
 		var pt *PromptTemplate
