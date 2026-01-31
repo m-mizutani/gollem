@@ -28,7 +28,10 @@ func (t *WeatherTool) Spec() gollem.ToolSpec {
 }
 
 func (t *WeatherTool) Run(_ context.Context, args map[string]any) (map[string]any, error) {
-	location, _ := args["location"].(string)
+	location, ok := args["location"].(string)
+	if !ok {
+		return nil, fmt.Errorf("location is required")
+	}
 	return map[string]any{
 		"location":    location,
 		"temperature": "22C",
