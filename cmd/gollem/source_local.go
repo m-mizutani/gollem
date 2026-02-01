@@ -56,14 +56,10 @@ func (s *localSource) List(ctx context.Context, req listRequest) (*listResponse,
 		if err != nil {
 			return nil, goerr.Wrap(err, "invalid page token")
 		}
-		for i, f := range files {
-			if f.name > lastFile {
-				startIdx = i
-				break
-			}
-		}
-		// If no file is after the token, we're past the end
-		if startIdx == 0 && len(files) > 0 && files[len(files)-1].name <= lastFile {
+		startIdx = sort.Search(len(files), func(i int) bool {
+			return files[i].name > lastFile
+		})
+		if startIdx >= len(files) {
 			return &listResponse{}, nil
 		}
 	}
