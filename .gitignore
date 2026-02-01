@@ -31,6 +31,8 @@ go.work.sum
 /.todo
 /.task
 /.cckiro
+cmd/gollem/frontend/node_modules/
+cmd/gollem/frontend/public/licenses.txt
 
 .project
 .claude/settings.local.json
