@@ -43,6 +43,10 @@ func (s *server) handleListTraces(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid page_size parameter")
 			return
 		}
+		const maxPageSize = 1000
+		if n > maxPageSize {
+			n = maxPageSize
+		}
 		pageSize = n
 	}
 
