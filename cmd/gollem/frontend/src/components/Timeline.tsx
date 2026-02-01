@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import type { Trace, Span, SpanKind } from "../api/types";
 import { formatDuration } from "../utils/format";
 
@@ -33,6 +33,7 @@ function flattenSpans(span: Span, depth: number, result: FlatSpan[]): void {
 }
 
 export default function Timeline({ trace }: TimelineProps) {
+  const svgRef = useRef<SVGSVGElement>(null);
   const [hoveredSpan, setHoveredSpan] = useState<FlatSpan | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
 
@@ -86,8 +87,9 @@ export default function Timeline({ trace }: TimelineProps) {
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<SVGElement>, fs: FlatSpan) => {
-      const svg = (e.currentTarget.closest("svg") || e.currentTarget).getBoundingClientRect();
-      setTooltipPos({ x: e.clientX - svg.left + 10, y: e.clientY - svg.top - 10 });
+      if (!svgRef.current) return;
+      const svgRect = svgRef.current.getBoundingClientRect();
+      setTooltipPos({ x: e.clientX - svgRect.left + 10, y: e.clientY - svgRect.top - 10 });
       setHoveredSpan(fs);
     },
     []
@@ -104,6 +106,7 @@ export default function Timeline({ trace }: TimelineProps) {
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-4 overflow-x-auto">
       <svg
+        ref={svgRef}
         width={chartWidth}
         height={chartHeight}
         className="font-mono text-xs"

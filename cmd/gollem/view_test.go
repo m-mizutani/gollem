@@ -33,7 +33,7 @@ func TestParseGSURI(t *testing.T) {
 		bucket, prefix, err := main.ParseGSURI("gs://my-bucket/traces")
 		gt.NoError(t, err)
 		gt.Equal(t, "my-bucket", bucket)
-		gt.Equal(t, "traces", prefix)
+		gt.Equal(t, "traces/", prefix)
 	})
 
 	t.Run("missing gs:// prefix", func(t *testing.T) {

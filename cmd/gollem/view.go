@@ -93,5 +93,9 @@ func parseGSURI(uri string) (bucket, prefix string, err error) {
 	if len(parts) > 1 {
 		prefix = parts[1]
 	}
+	// Ensure prefix ends with "/" so GCS queries match the directory
+	if prefix != "" && !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
 	return bucket, prefix, nil
 }
