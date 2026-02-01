@@ -22,6 +22,11 @@ jobs:
         with:
           # we let the report trigger content trigger a failure using the GitHub Security features.
           args: "-no-fail -fmt sarif -out results.sarif ./..."
+      - name: Run Gosec Security Scanner (cmd/gollem)
+        uses: securego/gosec@master
+        with:
+          args: "-no-fail -fmt sarif -out results-cmd.sarif ./..."
+          working-directory: cmd/gollem
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v2
         with:

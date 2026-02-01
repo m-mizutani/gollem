@@ -19,3 +19,9 @@ jobs:
         with:
           version: latest
           args: --timeout 10m ./...
+      - name: golangci-lint (cmd/gollem)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: cmd/gollem
+          args: --timeout 10m ./...
