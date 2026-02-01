@@ -71,3 +71,6 @@ func (ts *TestableSource) AsTraceSource() traceSource {
 func WithTestSource(ts *TestableSource) serverOption {
 	return withSource(ts.src)
 }
+
+// ParseGSURI is exported for testing.
+var ParseGSURI = parseGSURI
