@@ -953,7 +953,9 @@ gollem view --gs gs://my-bucket/path/to/traces/
 
 The viewer provides an interactive span tree, timeline waterfall chart, token usage charts, and Markdown-rendered message content. No Node.js required — the frontend is embedded in the Go binary.
 
-<img width="860" src="https://github.com/user-attachments/assets/6b9d77e0-d580-4c08-b7c8-3b2b6cd733eb" />
+<p align="center">
+  <img width="860" src="https://github.com/user-attachments/assets/6b9d77e0-d580-4c08-b7c8-3b2b6cd733eb" />
+</p>
 
 
 For more details including combining multiple handlers with `trace.Multi()`, see the [Tracing documentation](doc/tracing.md).
