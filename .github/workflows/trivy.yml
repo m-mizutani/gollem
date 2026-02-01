@@ -21,7 +21,7 @@ jobs:
           ref: ${{ github.head_ref }}
       - id: scan
         name: Run Trivy vulnerability scanner in repo mode
-        uses: aquasecurity/trivy-action@f3d98514b056d8c71a3552e8328c225bc7f6f353 # master
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # 0.33.1
         with:
           scan-type: "fs"
           ignore-unfixed: true
@@ -33,6 +33,6 @@ jobs:
 
       - name: Upload Trivy scan results to GitHub Security tab
         if: failure() && steps.scan.outcome == 'failure'
-        uses: github/codeql-action/upload-sarif@e8893c57a1f3a2b659b6b55564fdfdbbd2982911 # v3.24.0
+        uses: github/codeql-action/upload-sarif@439137e1b50c27ba9e2f9befc93e43091b449c34 # v3.32.0
         with:
           sarif_file: "trivy-results.sarif"
