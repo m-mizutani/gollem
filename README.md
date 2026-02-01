@@ -935,6 +935,27 @@ agent = gollem.New(client, gollem.WithTrace(
 ))
 ```
 
+#### Trace Viewer
+
+gollem includes a built-in web-based trace viewer for visually inspecting trace JSON files. Install it as a standalone CLI:
+
+```bash
+go install github.com/m-mizutani/gollem/cmd/gollem@latest
+```
+
+```bash
+# View traces from a local directory
+gollem view --dir ./traces
+
+# View traces from Google Cloud Storage
+gollem view --gs gs://my-bucket/path/to/traces/
+```
+
+The viewer provides an interactive span tree, timeline waterfall chart, token usage charts, and Markdown-rendered message content. No Node.js required — the frontend is embedded in the Go binary.
+
+<img width="860" src="https://github.com/user-attachments/assets/6b9d77e0-d580-4c08-b7c8-3b2b6cd733eb" />
+
+
 For more details including combining multiple handlers with `trace.Multi()`, see the [Tracing documentation](doc/tracing.md).
 
 ## Examples
