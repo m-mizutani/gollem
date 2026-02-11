@@ -315,19 +315,44 @@ func (p PDF) MimeType() string {
 	return "application/pdf"
 }
 
-const maxPDFSize = 32 * 1024 * 1024 // 32MB
+// DefaultMaxPDFSize is the default maximum size for PDF data (32MB)
+const DefaultMaxPDFSize = 32 * 1024 * 1024
 
 // pdfMagicBytes is the magic bytes for PDF files
 var pdfMagicBytes = []byte("%PDF-")
 
+type pdfOption struct {
+	maxSize int
+}
+
+// PDFOption is a functional option for PDF creation
+type PDFOption func(*pdfOption)
+
+// WithMaxPDFSize sets the maximum allowed size for PDF data
+func WithMaxPDFSize(size int) PDFOption {
+	return func(o *pdfOption) {
+		o.maxSize = size
+	}
+}
+
+func buildPDFOption(opts []PDFOption) pdfOption {
+	o := pdfOption{maxSize: DefaultMaxPDFSize}
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return o
+}
+
 // NewPDF creates a new PDF from byte data
-func NewPDF(data []byte) (PDF, error) {
+func NewPDF(data []byte, opts ...PDFOption) (PDF, error) {
+	o := buildPDFOption(opts)
+
 	if len(data) == 0 {
 		return PDF{}, goerr.New("PDF data is empty")
 	}
 
-	if len(data) > maxPDFSize {
-		return PDF{}, goerr.New("PDF size exceeds maximum limit", goerr.V("size", len(data)), goerr.V("max_size", maxPDFSize))
+	if len(data) > o.maxSize {
+		return PDF{}, goerr.New("PDF size exceeds maximum limit", goerr.V("size", len(data)), goerr.V("max_size", o.maxSize))
 	}
 
 	if len(data) < len(pdfMagicBytes) || !bytes.Equal(data[:len(pdfMagicBytes)], pdfMagicBytes) {
@@ -338,10 +363,14 @@ func NewPDF(data []byte) (PDF, error) {
 }
 
 // NewPDFFromReader creates a new PDF from io.Reader
-func NewPDFFromReader(r io.Reader) (PDF, error) {
-	data, err := io.ReadAll(r)
+func NewPDFFromReader(r io.Reader, opts ...PDFOption) (PDF, error) {
+	o := buildPDFOption(opts)
+
+	// Use LimitReader to prevent memory exhaustion from untrusted readers
+	limitedReader := io.LimitReader(r, int64(o.maxSize)+1)
+	data, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return PDF{}, goerr.Wrap(err, "failed to read PDF data")
 	}
-	return NewPDF(data)
+	return NewPDF(data, opts...)
 }
