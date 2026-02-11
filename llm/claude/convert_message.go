@@ -85,7 +85,7 @@ func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion) (gollem.M
 		if block.OfDocument.Source.OfBase64 != nil {
 			decodedData, err := base64.StdEncoding.DecodeString(block.OfDocument.Source.OfBase64.Data)
 			if err != nil {
-				decodedData = []byte(block.OfDocument.Source.OfBase64.Data)
+				return gollem.MessageContent{}, goerr.Wrap(err, "failed to decode base64 PDF data")
 			}
 			return gollem.NewPDFContent(decodedData, "")
 		}
