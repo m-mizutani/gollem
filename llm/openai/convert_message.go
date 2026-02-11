@@ -74,7 +74,7 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (gollem.Message, err
 						if mediaType == "application/pdf" {
 							pdfData, err := base64.StdEncoding.DecodeString(base64Data)
 							if err != nil {
-								pdfData = nil
+								return gollem.Message{}, goerr.Wrap(err, "failed to decode base64 PDF data from data URL")
 							}
 							mc, err := gollem.NewPDFContent(pdfData, "")
 							if err != nil {
@@ -87,10 +87,9 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (gollem.Message, err
 						// Image data URL
 						imageData, err := base64.StdEncoding.DecodeString(base64Data)
 						if err != nil {
-							imageData = nil
-						} else {
-							url = ""
+							return gollem.Message{}, goerr.Wrap(err, "failed to decode base64 image data from data URL")
 						}
+						url = ""
 						content, err := gollem.NewImageContent(mediaType, imageData, url, detail)
 						if err != nil {
 							return gollem.Message{}, err
