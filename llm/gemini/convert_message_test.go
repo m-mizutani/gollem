@@ -137,4 +137,21 @@ func TestGeminiMessageRoundTrip(t *testing.T) {
 			},
 		},
 	}))
+
+	t.Run("PDF inline data", runTest(testCase{
+		name: "PDF inline data",
+		contents: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{Text: "Analyze this PDF"},
+					{InlineData: &genai.Blob{MIMEType: "application/pdf", Data: []byte("%PDF-1.4 test")}},
+				},
+			},
+			{
+				Role:  "model",
+				Parts: []*genai.Part{{Text: "This PDF contains test data."}},
+			},
+		},
+	}))
 }

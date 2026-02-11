@@ -694,6 +694,13 @@ func convertInputsToHistory(inputs []Input) (*History, error) {
 				Data: imageData,
 			})
 
+		case PDF:
+			mc, err := NewPDFContent(v.Data(), "")
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to marshal PDF content")
+			}
+			contents = append(contents, mc)
+
 		case FunctionResponse:
 			// FunctionResponse is not user input, skip it
 			// It should be handled separately in the normal flow

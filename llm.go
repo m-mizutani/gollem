@@ -279,3 +279,69 @@ func NewImageFromReader(r io.Reader, opts ...ImageOption) (Image, error) {
 	}
 	return NewImage(data, opts...)
 }
+
+// PDF represents a PDF document input for LLM
+type PDF struct {
+	data []byte
+}
+
+// isInput implements Input interface
+func (p PDF) isInput() restrictedValue {
+	return restrictedValue{}
+}
+
+// LogValue returns a slog.Value for the PDF
+func (p PDF) LogValue() slog.Value {
+	return slog.StringValue(p.String())
+}
+
+// String returns a string representation of the PDF
+func (p PDF) String() string {
+	return fmt.Sprintf("pdf (%d bytes)", len(p.data))
+}
+
+// Data returns the PDF data as bytes
+func (p PDF) Data() []byte {
+	return p.data
+}
+
+// Base64 returns the base64 encoded string of the PDF data
+func (p PDF) Base64() string {
+	return base64.StdEncoding.EncodeToString(p.data)
+}
+
+// MimeType returns the MIME type of the PDF
+func (p PDF) MimeType() string {
+	return "application/pdf"
+}
+
+const maxPDFSize = 32 * 1024 * 1024 // 32MB
+
+// pdfMagicBytes is the magic bytes for PDF files
+var pdfMagicBytes = []byte("%PDF-")
+
+// NewPDF creates a new PDF from byte data
+func NewPDF(data []byte) (PDF, error) {
+	if len(data) == 0 {
+		return PDF{}, goerr.New("PDF data is empty")
+	}
+
+	if len(data) > maxPDFSize {
+		return PDF{}, goerr.New("PDF size exceeds maximum limit", goerr.V("size", len(data)), goerr.V("max_size", maxPDFSize))
+	}
+
+	if len(data) < len(pdfMagicBytes) || !bytes.Equal(data[:len(pdfMagicBytes)], pdfMagicBytes) {
+		return PDF{}, goerr.New("invalid PDF format")
+	}
+
+	return PDF{data: data}, nil
+}
+
+// NewPDFFromReader creates a new PDF from io.Reader
+func NewPDFFromReader(r io.Reader) (PDF, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return PDF{}, goerr.Wrap(err, "failed to read PDF data")
+	}
+	return NewPDF(data)
+}

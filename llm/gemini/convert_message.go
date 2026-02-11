@@ -54,8 +54,11 @@ func convertGeminiPart(part *genai.Part) (gollem.MessageContent, error) {
 		return gollem.NewTextContent(part.Text)
 	}
 
-	// Inline data (image)
+	// Inline data (image or PDF)
 	if part.InlineData != nil {
+		if part.InlineData.MIMEType == "application/pdf" {
+			return gollem.NewPDFContent(part.InlineData.Data, "")
+		}
 		return gollem.NewImageContent(
 			part.InlineData.MIMEType,
 			part.InlineData.Data,
@@ -190,6 +193,29 @@ func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) 
 			}, nil
 		}
 		return nil, goerr.Wrap(convert.ErrInvalidMessageFormat, "image has neither data nor URL")
+
+	case gollem.MessageContentTypePDF:
+		pdfContent, err := content.GetPDFContent()
+		if err != nil {
+			return nil, err
+		}
+		if len(pdfContent.Data) > 0 {
+			return &genai.Part{
+				InlineData: &genai.Blob{
+					MIMEType: "application/pdf",
+					Data:     pdfContent.Data,
+				},
+			}, nil
+		}
+		if pdfContent.URL != "" {
+			return &genai.Part{
+				FileData: &genai.FileData{
+					MIMEType: "application/pdf",
+					FileURI:  pdfContent.URL,
+				},
+			}, nil
+		}
+		return nil, goerr.Wrap(convert.ErrInvalidMessageFormat, "PDF has neither data nor URL")
 
 	case gollem.MessageContentTypeToolCall:
 		toolCall, err := content.GetToolCallContent()
