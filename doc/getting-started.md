@@ -215,6 +215,8 @@ agent := gollem.New(client,
 
 - Learn how to create and use [custom tools](tools.md)
 - Explore [MCP server integration](mcp.md)
-- Check out [practical examples](examples.md)
+- Understand [middleware](middleware.md) for monitoring and control
+- Explore [strategy patterns](strategy.md) for agent behavior
 - Understand [history management](history.md) for conversation context
+- Check out [practical examples](examples.md)
 - Review the [complete documentation](README.md)
