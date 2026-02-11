@@ -308,6 +308,26 @@ if err != nil {
 result, err := session.GenerateContent(ctx, gollem.Text("Hello"))
 ```
 
+### Multimodal Input
+
+gollem supports image and PDF inputs alongside text prompts:
+
+```go
+// Image input (auto-detects MIME type)
+img, err := gollem.NewImage(imageBytes)
+
+// PDF input (Claude and Gemini only; OpenAI does not support PDF)
+pdf, err := gollem.NewPDFFromReader(file)
+
+// Combine with text
+result, err := session.GenerateContent(ctx,
+    pdf,
+    gollem.Text("Summarize this document."),
+)
+```
+
+See [LLM Provider Configuration](doc/llm.md#pdf-input-support) for provider compatibility and options.
+
 ### Tool Integration
 
 gollem supports multiple types of tools:

@@ -269,6 +269,70 @@ client, err := openai.New(ctx, apiKey,
 - `GOLLEM_LOGGING_OPENAI_PROMPT` - Enable prompt logging
 - `GOLLEM_LOGGING_OPENAI_RESPONSE` - Enable response logging
 
+## PDF Input Support
+
+gollem supports sending PDF documents to LLMs as input, enabling document analysis, extraction, and summarization.
+
+### Creating PDF Input
+
+```go
+// From byte data
+data, err := os.ReadFile("document.pdf")
+if err != nil {
+    return err
+}
+pdf, err := gollem.NewPDF(data)
+if err != nil {
+    return err
+}
+
+// From io.Reader
+f, err := os.Open("document.pdf")
+if err != nil {
+    return err
+}
+defer f.Close()
+pdf, err := gollem.NewPDFFromReader(f)
+if err != nil {
+    return err
+}
+
+// With custom max size
+pdf, err := gollem.NewPDFFromReader(f, gollem.WithMaxPDFSize(64*1024*1024)) // 64MB
+```
+
+### Sending PDF to LLM
+
+```go
+result, err := session.GenerateContent(ctx,
+    pdf,
+    gollem.Text("What are the key findings in this document?"),
+)
+if err != nil {
+    return err
+}
+fmt.Println(result.Texts)
+```
+
+### Provider Compatibility
+
+| Provider | PDF Support | Implementation |
+|----------|------------|----------------|
+| Claude (Anthropic) | Yes | Document block with base64-encoded data |
+| Claude (Vertex AI) | Yes | Document block with base64-encoded data |
+| Gemini | Yes | Inline data with `application/pdf` MIME type |
+| OpenAI | No | OpenAI API does not accept PDF via the image_url field |
+
+### Validation and Safety
+
+- **Format validation**: PDF data must start with the `%PDF-` magic bytes
+- **Size limit**: Default maximum is 32MB (`gollem.DefaultMaxPDFSize`), configurable via `gollem.WithMaxPDFSize()`
+- **Memory protection**: `NewPDFFromReader` uses `io.LimitReader` internally to prevent reading unlimited data from untrusted sources
+
+### History Round-Trip
+
+PDF inputs are preserved during cross-provider history conversion. A PDF sent to Claude can be restored when converting history to Gemini format, and vice versa. OpenAI history uses `data:application/pdf;base64,...` data URLs for storage, though OpenAI's API does not support PDF input directly.
+
 ## Common Configuration Patterns
 
 ### Session Configuration
