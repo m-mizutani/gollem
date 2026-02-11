@@ -347,6 +347,16 @@ func (s *Session) convertInputsToMessages(input ...gollem.Input) ([]openai.ChatC
 				},
 			})
 
+		case gollem.PDF:
+			// OpenAI SDK doesn't have native PDF support; use data URL in image_url field
+			pdfURL := fmt.Sprintf("data:application/pdf;base64,%s", v.Base64())
+			userContentParts = append(userContentParts, openai.ChatMessagePart{
+				Type: openai.ChatMessagePartTypeImageURL,
+				ImageURL: &openai.ChatMessageImageURL{
+					URL: pdfURL,
+				},
+			})
+
 		case gollem.FunctionResponse:
 			// If we have accumulated user content, create a message for it
 			if len(userContentParts) > 0 {

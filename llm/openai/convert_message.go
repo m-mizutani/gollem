@@ -60,32 +60,47 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (gollem.Message, err
 				}
 				contents = append(contents, content)
 			} else if part.Type == "image_url" && part.ImageURL != nil {
-				// Extract image data from URL if it's a data URL
-				var imageData []byte
-				var mediaType string
+				// Extract data from URL if it's a data URL
 				url := part.ImageURL.URL
 				detail := string(part.ImageURL.Detail)
 
 				// Parse data URLs to extract base64 data
 				if len(url) > 5 && url[:5] == "data:" {
-					// Format: data:image/png;base64,<data>
 					if idx := strings.Index(url, ";base64,"); idx != -1 {
-						mediaType = url[5:idx]
+						mediaType := url[5:idx]
 						base64Data := url[idx+8:]
-						var err error
-						imageData, err = base64.StdEncoding.DecodeString(base64Data)
-						if err != nil {
-							// If Base64 decoding fails, keep the URL as-is
-							// This allows graceful handling of invalid data
-							imageData = nil
-						} else {
-							// Clear URL since we have the data
-							url = ""
+
+						// Check if this is a PDF data URL
+						if mediaType == "application/pdf" {
+							pdfData, err := base64.StdEncoding.DecodeString(base64Data)
+							if err != nil {
+								return gollem.Message{}, goerr.Wrap(err, "failed to decode base64 PDF data from data URL")
+							}
+							mc, err := gollem.NewPDFContent(pdfData, "")
+							if err != nil {
+								return gollem.Message{}, err
+							}
+							contents = append(contents, mc)
+							continue
 						}
+
+						// Image data URL
+						imageData, err := base64.StdEncoding.DecodeString(base64Data)
+						if err != nil {
+							return gollem.Message{}, goerr.Wrap(err, "failed to decode base64 image data from data URL")
+						}
+						url = ""
+						content, err := gollem.NewImageContent(mediaType, imageData, url, detail)
+						if err != nil {
+							return gollem.Message{}, err
+						}
+						contents = append(contents, content)
+						continue
 					}
 				}
 
-				content, err := gollem.NewImageContent(mediaType, imageData, url, detail)
+				// Non-data URL image
+				content, err := gollem.NewImageContent("", nil, url, detail)
 				if err != nil {
 					return gollem.Message{}, err
 				}
@@ -251,6 +266,27 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 					Detail: openai.ImageURLDetail(imgContent.Detail),
 				},
 			})
+
+		case gollem.MessageContentTypePDF:
+			pdfContent, err := content.GetPDFContent()
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to get PDF content")
+			}
+			// Use data URL in image_url field (OpenAI SDK workaround)
+			pdfURL := ""
+			if len(pdfContent.Data) > 0 {
+				pdfURL = "data:application/pdf;base64," + base64.StdEncoding.EncodeToString(pdfContent.Data)
+			} else if pdfContent.URL != "" {
+				pdfURL = pdfContent.URL
+			}
+			if pdfURL != "" {
+				textParts = append(textParts, openai.ChatMessagePart{
+					Type: "image_url",
+					ImageURL: &openai.ChatMessageImageURL{
+						URL: pdfURL,
+					},
+				})
+			}
 
 		case gollem.MessageContentTypeToolCall:
 			toolCall, err := content.GetToolCallContent()

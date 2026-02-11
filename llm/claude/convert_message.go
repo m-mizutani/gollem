@@ -80,6 +80,20 @@ func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion) (gollem.M
 		// Note: Claude API primarily uses base64 images
 	}
 
+	// Handle document blocks (PDF)
+	if block.OfDocument != nil {
+		if block.OfDocument.Source.OfBase64 != nil {
+			decodedData, err := base64.StdEncoding.DecodeString(block.OfDocument.Source.OfBase64.Data)
+			if err != nil {
+				return gollem.MessageContent{}, goerr.Wrap(err, "failed to decode base64 PDF data")
+			}
+			return gollem.NewPDFContent(decodedData, "")
+		}
+		if block.OfDocument.Source.OfURL != nil {
+			return gollem.NewPDFContent(nil, block.OfDocument.Source.OfURL.URL)
+		}
+	}
+
 	// Handle tool use blocks
 	if block.OfToolUse != nil {
 		// Convert input to map if it's not already
@@ -239,6 +253,23 @@ func convertContentToClaude(content gollem.MessageContent, messageRole gollem.Me
 				imageRef = fmt.Sprintf("[Image (%s): %s]", imgContent.Detail, imgContent.URL)
 			}
 			return anthropic.NewTextBlock(imageRef), nil
+		}
+		return anthropic.ContentBlockParamUnion{}, convert.ErrUnsupportedContentType
+
+	case gollem.MessageContentTypePDF:
+		pdfContent, err := content.GetPDFContent()
+		if err != nil {
+			return anthropic.ContentBlockParamUnion{}, err
+		}
+		if len(pdfContent.Data) > 0 {
+			return anthropic.NewDocumentBlock(anthropic.Base64PDFSourceParam{
+				Data: base64.StdEncoding.EncodeToString(pdfContent.Data),
+			}), nil
+		}
+		if pdfContent.URL != "" {
+			return anthropic.NewDocumentBlock(anthropic.URLPDFSourceParam{
+				URL: pdfContent.URL,
+			}), nil
 		}
 		return anthropic.ContentBlockParamUnion{}, convert.ErrUnsupportedContentType
 

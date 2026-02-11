@@ -38,6 +38,7 @@ type MessageContentType string
 const (
 	MessageContentTypeText         MessageContentType = "text"
 	MessageContentTypeImage        MessageContentType = "image"
+	MessageContentTypePDF          MessageContentType = "pdf"
 	MessageContentTypeToolCall     MessageContentType = "tool_call"
 	MessageContentTypeToolResponse MessageContentType = "tool_response"
 )
@@ -53,6 +54,12 @@ type ImageContent struct {
 	Data      []byte `json:"data,omitempty"`       // Image data (base64 encoded in JSON)
 	URL       string `json:"url,omitempty"`        // Image URL (either Data or URL should be set)
 	Detail    string `json:"detail,omitempty"`     // OpenAI: "high", "low", "auto"
+}
+
+// PDFContent represents PDF document content in a message
+type PDFContent struct {
+	Data []byte `json:"data,omitempty"` // PDF data (base64 encoded in JSON)
+	URL  string `json:"url,omitempty"`  // PDF URL (for future URL source support)
 }
 
 // ToolCallContent represents a tool/function call request
@@ -97,6 +104,21 @@ func NewImageContent(mediaType string, imageData []byte, url string, detail stri
 	}
 	return MessageContent{
 		Type: MessageContentTypeImage,
+		Data: data,
+	}, nil
+}
+
+// NewPDFContent creates a new PDF message content
+func NewPDFContent(pdfData []byte, url string) (MessageContent, error) {
+	data, err := json.Marshal(PDFContent{
+		Data: pdfData,
+		URL:  url,
+	})
+	if err != nil {
+		return MessageContent{}, err
+	}
+	return MessageContent{
+		Type: MessageContentTypePDF,
 		Data: data,
 	}, nil
 }
@@ -154,6 +176,18 @@ func (mc *MessageContent) GetImageContent() (*ImageContent, error) {
 		return nil, ErrInvalidHistoryData
 	}
 	var content ImageContent
+	if err := json.Unmarshal(mc.Data, &content); err != nil {
+		return nil, err
+	}
+	return &content, nil
+}
+
+// GetPDFContent extracts PDF content from a MessageContent
+func (mc *MessageContent) GetPDFContent() (*PDFContent, error) {
+	if mc.Type != MessageContentTypePDF {
+		return nil, ErrInvalidHistoryData
+	}
+	var content PDFContent
 	if err := json.Unmarshal(mc.Data, &content); err != nil {
 		return nil, err
 	}

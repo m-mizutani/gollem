@@ -1,6 +1,7 @@
 package gollem_test
 
 import (
+	"encoding/base64"
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -148,6 +149,34 @@ func TestOpenAIToClaudeConversion(t *testing.T) {
 				anthropic.NewTextBlock("Hello"),
 			),
 			anthropic.NewAssistantMessage(anthropic.NewTextBlock("Hi! How can I help you?")),
+		},
+	}))
+
+	t.Run("PDF content", runTest(testCase{
+		name: "PDF content",
+		messages: []openaiSDK.ChatCompletionMessage{
+			{
+				Role: "user",
+				MultiContent: []openaiSDK.ChatMessagePart{
+					{Type: "text", Text: "Analyze this PDF"},
+					{
+						Type: "image_url",
+						ImageURL: &openaiSDK.ChatMessageImageURL{
+							URL: "data:application/pdf;base64,JVBERi0xLjQgdGVzdA==",
+						},
+					},
+				},
+			},
+			{Role: "assistant", Content: "This PDF contains test data."},
+		},
+		expectedMessages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(
+				anthropic.NewTextBlock("Analyze this PDF"),
+				anthropic.NewDocumentBlock(anthropic.Base64PDFSourceParam{
+					Data: "JVBERi0xLjQgdGVzdA==",
+				}),
+			),
+			anthropic.NewAssistantMessage(anthropic.NewTextBlock("This PDF contains test data.")),
 		},
 	}))
 
@@ -306,6 +335,29 @@ func TestClaudeToGeminiConversion(t *testing.T) {
 			{Role: "model", Parts: []*genai.Part{{Text: "I couldn't find that city."}}},
 		},
 	}))
+
+	t.Run("PDF content", runTest(testCase{
+		name: "PDF content",
+		messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(
+				anthropic.NewTextBlock("Analyze this PDF"),
+				anthropic.NewDocumentBlock(anthropic.Base64PDFSourceParam{
+					Data: base64.StdEncoding.EncodeToString([]byte("%PDF-1.4 test")),
+				}),
+			),
+			anthropic.NewAssistantMessage(anthropic.NewTextBlock("This PDF contains test data.")),
+		},
+		expectedMessages: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{Text: "Analyze this PDF"},
+					{InlineData: &genai.Blob{MIMEType: "application/pdf", Data: []byte("%PDF-1.4 test")}},
+				},
+			},
+			{Role: "model", Parts: []*genai.Part{{Text: "This PDF contains test data."}}},
+		},
+	}))
 }
 
 func TestGeminiToOpenAIConversion(t *testing.T) {
@@ -434,6 +486,35 @@ func TestGeminiToOpenAIConversion(t *testing.T) {
 			},
 		},
 	}))
+
+	t.Run("PDF content", runTest(testCase{
+		name: "PDF content",
+		contents: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{Text: "Analyze this PDF"},
+					{InlineData: &genai.Blob{MIMEType: "application/pdf", Data: []byte("%PDF-1.4 test")}},
+				},
+			},
+			{Role: "model", Parts: []*genai.Part{{Text: "This PDF contains test data."}}},
+		},
+		expectedMessages: []openaiSDK.ChatCompletionMessage{
+			{
+				Role: "user",
+				MultiContent: []openaiSDK.ChatMessagePart{
+					{Type: "text", Text: "Analyze this PDF"},
+					{
+						Type: "image_url",
+						ImageURL: &openaiSDK.ChatMessageImageURL{
+							URL: "data:application/pdf;base64,JVBERi0xLjQgdGVzdA==",
+						},
+					},
+				},
+			},
+			{Role: "assistant", Content: "This PDF contains test data."},
+		},
+	}))
 }
 
 // Round-trip tests: A → B → A' should preserve A = A'
@@ -498,6 +579,25 @@ func TestOpenAIRoundTrip(t *testing.T) {
 			{Role: "assistant", Content: "It's 25°C in Tokyo."},
 		},
 	}))
+
+	t.Run("PDF content", runTest(testCase{
+		name: "PDF content",
+		messages: []openaiSDK.ChatCompletionMessage{
+			{
+				Role: "user",
+				MultiContent: []openaiSDK.ChatMessagePart{
+					{Type: "text", Text: "Analyze this PDF"},
+					{
+						Type: "image_url",
+						ImageURL: &openaiSDK.ChatMessageImageURL{
+							URL: "data:application/pdf;base64,JVBERi0xLjQgdGVzdA==",
+						},
+					},
+				},
+			},
+			{Role: "assistant", Content: "This PDF contains test data."},
+		},
+	}))
 }
 
 func TestClaudeRoundTrip(t *testing.T) {
@@ -531,6 +631,19 @@ func TestClaudeRoundTrip(t *testing.T) {
 		messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
 			anthropic.NewAssistantMessage(anthropic.NewTextBlock("Hi!")),
+		},
+	}))
+
+	t.Run("PDF content", runTest(testCase{
+		name: "PDF content",
+		messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(
+				anthropic.NewTextBlock("Analyze this PDF"),
+				anthropic.NewDocumentBlock(anthropic.Base64PDFSourceParam{
+					Data: base64.StdEncoding.EncodeToString([]byte("%PDF-1.4 test")),
+				}),
+			),
+			anthropic.NewAssistantMessage(anthropic.NewTextBlock("This PDF contains test data.")),
 		},
 	}))
 
@@ -595,6 +708,20 @@ func TestGeminiRoundTrip(t *testing.T) {
 				}},
 			},
 			{Role: "model", Parts: []*genai.Part{{Text: "Found Python tutorial."}}},
+		},
+	}))
+
+	t.Run("PDF content", runTest(testCase{
+		name: "PDF content",
+		contents: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{Text: "Analyze this PDF"},
+					{InlineData: &genai.Blob{MIMEType: "application/pdf", Data: []byte("%PDF-1.4 test")}},
+				},
+			},
+			{Role: "model", Parts: []*genai.Part{{Text: "This PDF contains test data."}}},
 		},
 	}))
 }

@@ -1,6 +1,7 @@
 package gollem_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -431,6 +432,136 @@ func TestCountToken(t *testing.T) {
 			return openai.New(context.Background(), apiKey)
 		})
 	})
+
+	t.Run("Claude", func(t *testing.T) {
+		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
+		if !ok {
+			t.Skip("TEST_CLAUDE_API_KEY is not set")
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return claude.New(context.Background(), apiKey)
+		})
+	})
+
+	t.Run("Gemini", func(t *testing.T) {
+		t.Parallel()
+		projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+		if !ok {
+			t.Skip("TEST_GCP_PROJECT_ID is not set")
+		}
+		location, ok := os.LookupEnv("TEST_GCP_LOCATION")
+		if !ok {
+			t.Skip("TEST_GCP_LOCATION is not set")
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return gemini.New(context.Background(), projectID, location)
+		})
+	})
+}
+
+// TestNewPDF tests PDF type creation and validation
+func TestNewPDF(t *testing.T) {
+	validPDF := []byte("%PDF-1.4 test content here")
+
+	t.Run("valid PDF", func(t *testing.T) {
+		pdf, err := gollem.NewPDF(validPDF)
+		gt.NoError(t, err)
+		gt.V(t, pdf.MimeType()).Equal("application/pdf")
+		gt.V(t, pdf.Data()).Equal(validPDF)
+		gt.V(t, pdf.String()).Equal(fmt.Sprintf("pdf (%d bytes)", len(validPDF)))
+		gt.V(t, len(pdf.Base64()) > 0).Equal(true)
+	})
+
+	t.Run("empty data", func(t *testing.T) {
+		_, err := gollem.NewPDF([]byte{})
+		gt.Error(t, err)
+	})
+
+	t.Run("invalid magic bytes", func(t *testing.T) {
+		_, err := gollem.NewPDF([]byte("not a pdf file"))
+		gt.Error(t, err)
+	})
+
+	t.Run("too short data", func(t *testing.T) {
+		_, err := gollem.NewPDF([]byte("%PD"))
+		gt.Error(t, err)
+	})
+
+	t.Run("from reader", func(t *testing.T) {
+		reader := bytes.NewReader(validPDF)
+		pdf, err := gollem.NewPDFFromReader(reader)
+		gt.NoError(t, err)
+		gt.V(t, pdf.Data()).Equal(validPDF)
+	})
+}
+
+// TestPDFContent tests PDFContent serialization/deserialization
+func TestPDFContent(t *testing.T) {
+	pdfData := []byte("%PDF-1.4 test content")
+
+	t.Run("round trip with data", func(t *testing.T) {
+		mc, err := gollem.NewPDFContent(pdfData, "")
+		gt.NoError(t, err)
+		gt.V(t, mc.Type).Equal(gollem.MessageContentTypePDF)
+
+		content, err := mc.GetPDFContent()
+		gt.NoError(t, err)
+		gt.V(t, content.Data).Equal(pdfData)
+		gt.V(t, content.URL).Equal("")
+	})
+
+	t.Run("round trip with URL", func(t *testing.T) {
+		mc, err := gollem.NewPDFContent(nil, "https://example.com/doc.pdf")
+		gt.NoError(t, err)
+
+		content, err := mc.GetPDFContent()
+		gt.NoError(t, err)
+		gt.V(t, len(content.Data)).Equal(0)
+		gt.V(t, content.URL).Equal("https://example.com/doc.pdf")
+	})
+
+	t.Run("wrong type returns error", func(t *testing.T) {
+		mc, err := gollem.NewTextContent("hello")
+		gt.NoError(t, err)
+
+		_, err = mc.GetPDFContent()
+		gt.Error(t, err)
+	})
+}
+
+// TestPDFInput tests PDF input with real LLM providers.
+// The test PDF contains a unique secret code "GOLLEM-PDF-7X9K2" embedded in a PDF stream.
+// The LLM must actually process the document as a PDF to extract this code;
+// simply reading the raw bytes as text would not reliably yield the correct answer.
+func TestPDFInput(t *testing.T) {
+	t.Parallel()
+
+	pdfData, err := os.ReadFile("testdata/test_document.pdf")
+	gt.NoError(t, err)
+	pdf, err := gollem.NewPDF(pdfData)
+	gt.NoError(t, err)
+
+	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		client, err := newClient(t)
+		gt.NoError(t, err).Required()
+
+		session, err := client.NewSession(context.Background())
+		gt.NoError(t, err).Required()
+
+		result, err := session.GenerateContent(t.Context(),
+			pdf,
+			gollem.Text("This PDF document contains a secret code. What is the secret code? Reply with only the code, nothing else."),
+		)
+		gt.NoError(t, err).Required()
+		gt.V(t, len(result.Texts) > 0).Equal(true)
+		// The PDF contains "The secret code is: GOLLEM-PDF-7X9K2"
+		combined := strings.Join(result.Texts, " ")
+		gt.V(t, strings.Contains(combined, "GOLLEM-PDF-7X9K2")).Equal(true)
+	}
+
+	// Note: OpenAI API does not support PDF via image_url field.
+	// The SDK workaround (data URL in image_url) is used for History conversion only.
+	// Direct PDF input to OpenAI is not supported at this time.
 
 	t.Run("Claude", func(t *testing.T) {
 		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")

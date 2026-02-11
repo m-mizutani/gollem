@@ -354,6 +354,13 @@ func (s *Session) convertInputs(input ...gollem.Input) ([]*genai.Part, error) {
 					Data:     v.Data(),
 				},
 			})
+		case gollem.PDF:
+			parts = append(parts, &genai.Part{
+				InlineData: &genai.Blob{
+					MIMEType: "application/pdf",
+					Data:     v.Data(),
+				},
+			})
 		case gollem.FunctionResponse:
 			if v.Error != nil {
 				parts = append(parts, &genai.Part{

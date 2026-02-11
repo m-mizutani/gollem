@@ -315,6 +315,13 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 			})
 			userContentBlocks = append(userContentBlocks, imageBlock)
 
+		case gollem.PDF:
+			// Create document block for Claude using Base64PDFSource
+			docBlock := anthropic.NewDocumentBlock(anthropic.Base64PDFSourceParam{
+				Data: v.Base64(),
+			})
+			userContentBlocks = append(userContentBlocks, docBlock)
+
 		case gollem.FunctionResponse:
 			// If we have accumulated user content, create a message for it
 			if len(userContentBlocks) > 0 {

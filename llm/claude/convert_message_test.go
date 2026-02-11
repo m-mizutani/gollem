@@ -1,6 +1,7 @@
 package claude_test
 
 import (
+	"encoding/base64"
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -80,6 +81,19 @@ func TestClaudeMessageRoundTrip(t *testing.T) {
 					false,
 				),
 			),
+		},
+	}))
+
+	t.Run("PDF document block", runTest(testCase{
+		name: "PDF document block",
+		messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(
+				anthropic.NewTextBlock("Analyze this PDF"),
+				anthropic.NewDocumentBlock(anthropic.Base64PDFSourceParam{
+					Data: base64.StdEncoding.EncodeToString([]byte("%PDF-1.4 test")),
+				}),
+			),
+			anthropic.NewAssistantMessage(anthropic.NewTextBlock("This PDF contains test data.")),
 		},
 	}))
 }
