@@ -379,32 +379,30 @@ if err != nil {
 
 ### Enable Logging
 
-Set environment variables to enable detailed logging:
+Use the `trace/logger` package to enable detailed logging for LLM interactions:
 
-```bash
-# Enable all prompt logging
-export GOLLEM_LOGGING_CLAUDE_PROMPT=true
-export GOLLEM_LOGGING_OPENAI_PROMPT=true
-export GOLLEM_LOGGING_GEMINI_PROMPT=true
+```go
+import tracelogger "github.com/m-mizutani/gollem/trace/logger"
 
-# Enable all response logging
-export GOLLEM_LOGGING_CLAUDE_RESPONSE=true
-export GOLLEM_LOGGING_OPENAI_RESPONSE=true
-export GOLLEM_LOGGING_GEMINI_RESPONSE=true
+// Log LLM requests and responses
+handler := tracelogger.New(
+    tracelogger.WithEvents(tracelogger.LLMRequest, tracelogger.LLMResponse),
+)
+
+agent := gollem.New(client, gollem.WithTraceHandler(handler))
 ```
+
+See [debugging.md](debugging.md) for full details on available events and configuration.
 
 ### Log Output Format
 
-Logs are structured with ctxlog scopes:
+Logs are structured via `slog`:
 
 ```json
 {
-  "level": "info",
-  "scope": "claude_response",
-  "model": "claude-3-sonnet-20240229",
-  "usage": {
-    "input_tokens": 150,
-    "output_tokens": 75
-  }
+  "level": "INFO",
+  "msg": "llm_call_end",
+  "elapsed_ms": 1234,
+  "texts": ["Generated response text"]
 }
 ```

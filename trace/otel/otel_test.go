@@ -24,7 +24,7 @@ func setupTestHandler() (trace.Handler, *tracetest.InMemoryExporter) {
 func TestOTelHandlerImplementsHandler(t *testing.T) {
 	h, _ := setupTestHandler()
 	// Verify it implements trace.Handler
-	var _ trace.Handler = h
+	_ = trace.Handler(h)
 }
 
 func TestOTelHandlerAgentExecute(t *testing.T) {

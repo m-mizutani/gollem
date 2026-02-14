@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/m-mizutani/ctxlog"
+
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 )
@@ -30,9 +30,6 @@ func GeneratePlan(ctx context.Context, client gollem.LLMClient, inputs []gollem.
 // It uses system prompt and history to embed necessary context into the Plan's goal
 // This is an internal analysis process - the conversation history is not preserved
 func generatePlanInternal(ctx context.Context, client gollem.LLMClient, inputs []gollem.Input, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, systemPrompt string, history *gollem.History) (*Plan, error) {
-	logger := ctxlog.From(ctx)
-	logger.Debug("analyzing and planning", "has_system_prompt", systemPrompt != "", "has_history", history != nil)
-
 	// Create a new session with JSON content type
 	// NOTE: Do NOT pass tools to planning session.
 	// When tools are provided, some LLM providers (like Gemini) prioritize function calls
@@ -92,7 +89,6 @@ func generatePlanInternal(ctx context.Context, client gollem.LLMClient, inputs [
 		plan.UserQuestion = strings.Join(userTexts, " ")
 	}
 
-	logger.Debug("plan created", "goal", plan.Goal, "tasks", len(plan.Tasks))
 	return plan, nil
 }
 
@@ -119,9 +115,6 @@ func parsePlanFromResponse(ctx context.Context, response *gollem.Response) (*Pla
 	}
 
 	if err := json.Unmarshal([]byte(response.Texts[0]), &planResponse); err != nil {
-		// If JSON parsing fails, log error and return
-		logger := ctxlog.From(ctx)
-		logger.Debug("failed to parse plan JSON", "error", err.Error())
 		return nil, goerr.Wrap(err, "failed to parse plan response as JSON")
 	}
 

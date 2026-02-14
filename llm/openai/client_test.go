@@ -3,12 +3,10 @@ package openai_test
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"os"
 	"strings"
 	"testing"
 
-	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/openai"
@@ -23,9 +21,6 @@ func TestOpenAIContentGenerate(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	// Create a debug logger that outputs to testing.T
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	ctx = ctxlog.With(ctx, logger)
 
 	client, err := openai.New(ctx, apiKey)
 	gt.NoError(t, err)
@@ -122,8 +117,6 @@ func TestOpenAITokenLimitErrorIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	ctx = ctxlog.With(ctx, logger)
 
 	// Use gpt-5 (default model) which has 128k context limit
 	client, err := openai.New(ctx, apiKey)

@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
@@ -24,9 +22,6 @@ func TestClaudeContentGenerate(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	// Create a debug logger that outputs to testing.T
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	ctx = ctxlog.With(ctx, logger)
 
 	client, err := claude.New(ctx, apiKey)
 	gt.NoError(t, err)
@@ -58,8 +53,6 @@ func TestCreateSystemPrompt(t *testing.T) {
 		result, err := claude.CreateSystemPrompt(ctx, cfg)
 		gt.NoError(t, err)
 
-		// Type assertion to verify it's []anthropic.TextBlockParam
-		var _ []anthropic.TextBlockParam = result
 		// Empty slice can be nil in this implementation
 		gt.Equal(t, 0, len(result))
 	})
@@ -73,9 +66,7 @@ func TestCreateSystemPrompt(t *testing.T) {
 		gt.NoError(t, err)
 
 		// At minimum, should not panic and return valid type
-		var systemPrompt []anthropic.TextBlockParam = result
-		// Check the type is correct (compilation would fail if not)
-		_ = systemPrompt
+		_ = result
 	})
 }
 
@@ -92,11 +83,8 @@ func TestSystemPromptSDKCompliance(t *testing.T) {
 		result, err := claude.CreateSystemPrompt(ctx, cfg)
 		gt.NoError(t, err)
 
-		// Should be able to use as []anthropic.TextBlockParam
-		var systemBlocks []anthropic.TextBlockParam = result
-
 		// Empty case should return empty slice
-		gt.Equal(t, 0, len(systemBlocks))
+		gt.Equal(t, 0, len(result))
 	})
 
 	t.Run("TextBlockParam structure", func(t *testing.T) {
@@ -131,9 +119,6 @@ func TestSystemPromptComment(t *testing.T) {
 		cfg := gollem.NewSessionConfig()
 		result, err := claude.CreateSystemPrompt(ctx, cfg)
 		gt.NoError(t, err)
-
-		// Should be the correct type
-		var _ []anthropic.TextBlockParam = result
 
 		// Should handle empty case correctly
 		if len(result) > 0 {
@@ -329,8 +314,6 @@ func TestClaudeTokenLimitErrorIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	ctx = ctxlog.With(ctx, logger)
 
 	client, err := claude.New(ctx, apiKey)
 	gt.NoError(t, err)

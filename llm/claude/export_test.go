@@ -41,7 +41,11 @@ func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model s
 		defaultModel:    model,
 		tools:           tools,
 		historyMessages: historyMessages,
-		params:          generationParameters{},
+		params: generationParameters{
+			Temperature: -1.0,
+			TopP:        -1.0,
+			MaxTokens:   8192,
+		},
 		cfg:             cfg,
 	}, nil
 }

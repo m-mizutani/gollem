@@ -6,23 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 
-	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/internal/schema"
 	"github.com/m-mizutani/gollem/trace"
 	"github.com/pkoukk/tiktoken-go"
 	"github.com/sashabaranov/go-openai"
-)
-
-var (
-	// openaiPromptScope is the logging scope for OpenAI prompts
-	openaiPromptScope = ctxlog.NewScope("openai_prompt", ctxlog.EnabledBy("GOLLEM_LOGGING_OPENAI_PROMPT"))
-
-	// openaiResponseScope is the logging scope for OpenAI responses
-	openaiResponseScope = ctxlog.NewScope("openai_response", ctxlog.EnabledBy("GOLLEM_LOGGING_OPENAI_RESPONSE"))
 )
 
 // generationParameters represents the parameters for text generation.
@@ -469,34 +459,6 @@ func (s *Session) createRequest(stream bool) (openai.ChatCompletionRequest, erro
 	return req, nil
 }
 
-// logPrompt logs the prompt if GOLLEM_LOGGING_OPENAI_PROMPT is enabled
-func (s *Session) logPrompt(ctx context.Context) {
-	// Log prompts if GOLLEM_LOGGING_OPENAI_PROMPT is set
-	logger := ctxlog.From(ctx, openaiPromptScope)
-	if !logger.Enabled(ctx, slog.LevelInfo) {
-		return
-	}
-
-	// Build messages for logging
-	currentMessages, err := s.getMessages()
-	if err != nil {
-		logger.Error("Failed to get messages for logging", "error", err)
-		return
-	}
-
-	var messages []map[string]string
-	for _, msg := range currentMessages {
-		messages = append(messages, map[string]string{
-			"role":    msg.Role,
-			"content": msg.Content,
-		})
-	}
-	logger.Info("OpenAI prompt",
-		"system_prompt", s.cfg.SystemPrompt(),
-		"messages", messages,
-	)
-}
-
 // GenerateContent processes the input and generates a response.
 // It handles both text messages and function responses.
 func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
@@ -537,8 +499,6 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		if err != nil {
 			return nil, err
 		}
-		s.logPrompt(ctx)
-
 		// Start LLM call trace span
 		var openaiTraceData *trace.LLMCallData
 		var llmErr error
@@ -617,36 +577,6 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 			}
 		}
 
-		// Log responses if GOLLEM_LOGGING_OPENAI_RESPONSE is set
-		responseLogger := ctxlog.From(ctx, openaiResponseScope)
-		if responseLogger.Enabled(ctx, slog.LevelInfo) {
-			var logContent []map[string]any
-			if message.Content != "" {
-				logContent = append(logContent, map[string]any{
-					"type": "text",
-					"text": message.Content,
-				})
-			}
-			for _, toolCall := range message.ToolCalls {
-				logContent = append(logContent, map[string]any{
-					"type":      "tool_use",
-					"id":        toolCall.ID,
-					"name":      toolCall.Function.Name,
-					"arguments": toolCall.Function.Arguments,
-				})
-			}
-			responseLogger.Info("OpenAI response",
-				"model", resp.Model,
-				"finish_reason", resp.Choices[0].FinishReason,
-				"usage", map[string]any{
-					"prompt_tokens":     resp.Usage.PromptTokens,
-					"completion_tokens": resp.Usage.CompletionTokens,
-					"total_tokens":      resp.Usage.TotalTokens,
-				},
-				"content", logContent,
-			)
-		}
-
 		// Set trace data for defer
 		openaiTraceData = buildOpenAITraceData(resp, s.defaultModel, s.cfg.SystemPrompt())
 
@@ -721,8 +651,6 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 		if err != nil {
 			return nil, err
 		}
-		s.logPrompt(ctx)
-
 		// Start LLM call trace span
 		traceHandler := trace.HandlerFrom(ctx)
 		if traceHandler != nil {
@@ -746,7 +674,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 
 		go func() {
 			defer close(responseChan)
-			defer stream.Close()
+			defer func() { _ = stream.Close() }()
 
 			var streamTraceData *trace.LLMCallData
 			var streamErr error
@@ -902,31 +830,6 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 					return
 				}
 			}
-
-			// Log streaming response if GOLLEM_LOGGING_OPENAI_RESPONSE is set
-			responseLogger := ctxlog.From(ctx, openaiResponseScope)
-			var logContent []map[string]any
-			if textContent != "" {
-				logContent = append(logContent, map[string]any{
-					"type": "text",
-					"text": textContent,
-				})
-			}
-			for _, toolCall := range toolCalls {
-				logContent = append(logContent, map[string]any{
-					"type":      "tool_use",
-					"id":        toolCall.ID,
-					"name":      toolCall.Function.Name,
-					"arguments": toolCall.Function.Arguments,
-				})
-			}
-			responseLogger.Info("OpenAI streaming response",
-				"usage", map[string]any{
-					"prompt_tokens":     totalInputTokens,
-					"completion_tokens": totalOutputTokens,
-				},
-				"content", logContent,
-			)
 
 			// Set trace data for defer
 			streamTraceData = &trace.LLMCallData{
@@ -1159,8 +1062,8 @@ func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, e
 	tokensPerName := 1
 
 	// Adjust for specific model families
-	switch {
-	case s.defaultModel == "gpt-3.5-turbo-0301":
+	switch s.defaultModel {
+	case "gpt-3.5-turbo-0301":
 		tokensPerMessage = 4
 		tokensPerName = -1
 	}

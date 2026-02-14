@@ -2,12 +2,10 @@ package trace
 
 import (
 	"context"
-	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/m-mizutani/ctxlog"
 )
 
 // Option is a functional option for configuring a Recorder.
@@ -291,8 +289,6 @@ func (r *Recorder) Finish(ctx context.Context) error {
 	}
 
 	if err := repo.Save(ctx, trace); err != nil {
-		logger := ctxlog.From(ctx)
-		logger.Warn("failed to save trace", slog.String("error", err.Error()))
 		return err
 	}
 

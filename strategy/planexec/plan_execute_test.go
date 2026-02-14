@@ -2,13 +2,11 @@ package planexec_test
 
 import (
 	"context"
-	"log/slog"
 	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 
-	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
@@ -463,8 +461,7 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 	// Helper function for testing with Agent.Execute
 	testWithAgent := func(client gollem.LLMClient, _ string) func(t *testing.T) {
 		return func(t *testing.T) {
-			logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-			ctx := ctxlog.With(context.Background(), logger)
+			ctx := context.Background()
 
 			// Test with multiple tool calls
 			var toolCallCount int32
@@ -925,7 +922,8 @@ func TestEnhancedConclusion(t *testing.T) {
 					return &mock.SessionMock{
 						GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
 							callCount++
-							if callCount == 1 {
+							switch callCount {
+							case 1:
 								// First call: return a plan with one task
 								return &gollem.Response{
 									Texts: []string{`{
@@ -935,12 +933,12 @@ func TestEnhancedConclusion(t *testing.T) {
 										"tasks": [{"description": "Test task"}]
 									}`},
 								}, nil
-							} else if callCount == 2 {
+							case 2:
 								// Second call: task execution
 								return &gollem.Response{
 									Texts: []string{"Task completed"},
 								}, nil
-							} else if callCount == 3 {
+							case 3:
 								// Third call: reflection
 								return &gollem.Response{
 									Texts: []string{`{
@@ -949,7 +947,7 @@ func TestEnhancedConclusion(t *testing.T) {
 										"reason": "All done"
 									}`},
 								}, nil
-							} else {
+							default:
 								// Fourth call: final conclusion - capture the prompt
 								for _, inp := range input {
 									if text, ok := inp.(gollem.Text); ok {

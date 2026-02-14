@@ -44,8 +44,6 @@ github.com/googleapis/gax-go/v2 v2.16.0 h1:iHbQmKLLZrexmb0OSsNGTeSTS0HO4YvFOG8g5
 github.com/googleapis/gax-go/v2 v2.16.0/go.mod h1:o1vfQjjNZn4+dPnRdl/4ZD7S9414Y4xA+a/6Icj6l14=
 github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
-github.com/m-mizutani/ctxlog v0.2.0 h1:9uS18pV/mb/90mc/DJp8no67pdOIlCai+L5hv/MkCso=
-github.com/m-mizutani/ctxlog v0.2.0/go.mod h1:BTVGSqZO4JJgKBUJWBNo+Yy2j2xTGCYeEQ65h2VBMXE=
 github.com/m-mizutani/goerr/v2 v2.0.0 h1:kbsQ1EuVsd/cd/bzmt4C9+Rau/s3ATPW4wjEgx/PAOs=
 github.com/m-mizutani/goerr/v2 v2.0.0/go.mod h1:Ax59zs+j3NmzB/mPLc1w3g4yIutdrwcY7cB6IRO18EU=
 github.com/m-mizutani/gt v0.2.1 h1:mOl1PPIgEHoW2rQgqkfE31OGID06dO2uly8X8kvOEVY=
