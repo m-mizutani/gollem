@@ -2,8 +2,11 @@ package gollem
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
 )
@@ -13,6 +16,54 @@ type ToolSpec struct {
 	Name        string
 	Description string
 	Parameters  map[string]*Parameter
+}
+
+// ValidateArgs validates the given arguments against the tool's parameter specifications.
+// It checks all parameters and collects all validation errors.
+// Returns nil if all arguments are valid.
+func (s *ToolSpec) ValidateArgs(args map[string]any) error {
+	// Sort parameter names for deterministic error ordering
+	names := make([]string, 0, len(s.Parameters))
+	for name := range s.Parameters {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	var errs []error
+	for _, name := range names {
+		param := s.Parameters[name]
+		if err := param.ValidateValue(name, args[name]); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return &toolArgsValidationError{
+			toolName: s.Name,
+			errs:     errs,
+		}
+	}
+	return nil
+}
+
+// toolArgsValidationError holds multiple argument validation errors for a tool.
+// It formats a structured error message that helps LLMs understand and correct invalid arguments.
+type toolArgsValidationError struct {
+	toolName string
+	errs     []error
+}
+
+func (e *toolArgsValidationError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Tool argument validation failed for %q:\n", e.toolName)
+	for _, err := range e.errs {
+		fmt.Fprintf(&b, "  - %s\n", err.Error())
+	}
+	b.WriteString("Please correct the arguments and retry the tool call.")
+	return b.String()
+}
+
+func (e *toolArgsValidationError) Unwrap() error {
+	return ErrToolArgsValidation
 }
 
 // Validate validates the tool specification.
@@ -274,7 +325,7 @@ func (p *Parameter) ValidateValue(name string, value any) error {
 		// Validate each item if Items schema is defined
 		if p.Items != nil {
 			for i, item := range arr {
-				if err := p.Items.ValidateValue(name+"["+string(rune('0'+i))+"]", item); err != nil {
+				if err := p.Items.ValidateValue(name+"["+strconv.Itoa(i)+"]", item); err != nil {
 					return err
 				}
 			}
