@@ -45,11 +45,14 @@ type Client struct {
 
 	// Connection management
 	initMutex sync.Mutex
+
+	// Logger (defaults to discard)
+	logger *slog.Logger
 }
 
 // Specs implements gollem.ToolSet interface
 func (c *Client) Specs(ctx context.Context) ([]gollem.ToolSpec, error) {
-	logger := slog.Default()
+	logger := c.logger
 
 	tools, err := c.listTools(ctx)
 	if err != nil {
@@ -80,7 +83,7 @@ func (c *Client) Specs(ctx context.Context) ([]gollem.ToolSpec, error) {
 
 // Run implements gollem.ToolSet interface
 func (c *Client) Run(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
-	logger := slog.Default()
+	logger := c.logger
 
 	logger.Debug("call MCP tool", "name", name, "args", args)
 
@@ -115,6 +118,7 @@ func NewStdio(ctx context.Context, path string, args []string, options ...StdioO
 	client := &Client{
 		name:    DefaultClientName,
 		version: DefaultClientVersion,
+		logger:  slog.New(slog.DiscardHandler),
 	}
 	for _, option := range options {
 		option(client)
@@ -145,6 +149,7 @@ func NewSSE(ctx context.Context, baseURL string, options ...SSEOption) (*Client,
 		headers:    make(map[string]string),
 		baseURL:    baseURL,
 		httpClient: http.DefaultClient,
+		logger:     slog.New(slog.DiscardHandler),
 	}
 	for _, option := range options {
 		option(client)
@@ -216,6 +221,7 @@ func NewStreamableHTTP(ctx context.Context, baseURL string, options ...Streamabl
 		headers:    make(map[string]string),
 		baseURL:    baseURL,
 		httpClient: http.DefaultClient,
+		logger:     slog.New(slog.DiscardHandler),
 	}
 	for _, option := range options {
 		option(client)
@@ -233,7 +239,7 @@ func (c *Client) init(ctx context.Context, cmd *exec.Cmd) error {
 	c.initMutex.Lock()
 	defer c.initMutex.Unlock()
 
-	logger := slog.Default()
+	logger := c.logger
 
 	if c.session != nil {
 		return nil
@@ -268,7 +274,7 @@ func (c *Client) initStreamableHTTP(ctx context.Context) error {
 	c.initMutex.Lock()
 	defer c.initMutex.Unlock()
 
-	logger := slog.Default()
+	logger := c.logger
 
 	if c.session != nil {
 		return nil
@@ -304,7 +310,7 @@ func (c *Client) initSSE(ctx context.Context) error {
 	c.initMutex.Lock()
 	defer c.initMutex.Unlock()
 
-	logger := slog.Default()
+	logger := c.logger
 
 	if c.session != nil {
 		return nil

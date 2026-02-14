@@ -19,6 +19,9 @@ import (
 	"github.com/m-mizutani/jsonex"
 )
 
+// discardLogger is the package-level logger that discards all output by default.
+var discardLogger = slog.New(slog.DiscardHandler)
+
 // generationParameters represents the parameters for text generation.
 type generationParameters struct {
 	// Temperature controls randomness in the output.
@@ -41,7 +44,7 @@ func setTemperatureAndTopP(ctx context.Context, params *anthropic.MessageNewPara
 	// Set only one, prioritizing temperature if both are set.
 	if temperature >= 0 {
 		if topP >= 0 {
-			slog.Default().Warn("Both Temperature and TopP are set for Claude; using Temperature as it is prioritized")
+			discardLogger.Warn("Both Temperature and TopP are set for Claude; using Temperature as it is prioritized")
 		}
 		params.Temperature = anthropic.Float(temperature)
 	} else if topP >= 0 {
@@ -262,7 +265,7 @@ func (s *Session) convertInputs(ctx context.Context, input ...gollem.Input) ([]a
 // IMPORTANT: Multiple consecutive Text and Image inputs are combined into a single user message with multiple content blocks,
 // as per the Anthropic API specification for multi-modal messages.
 func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
-	logger := slog.Default()
+	logger := discardLogger
 	var toolResults []anthropic.ContentBlockParamUnion
 	var messages []anthropic.MessageParam
 
@@ -374,7 +377,7 @@ func createSystemPrompt(ctx context.Context, cfg gollem.SessionConfig) ([]anthro
 		if cfg.ResponseSchema() != nil {
 			schemaText, err := schema.ConvertParameterToJSONString(cfg.ResponseSchema())
 			if err != nil {
-				slog.Default().Warn("Failed to convert response schema to JSON string for Claude prompt", "error", err)
+				discardLogger.Warn("Failed to convert response schema to JSON string for Claude prompt", "error", err)
 				return nil, goerr.Wrap(err, "failed to convert response schema to JSON string")
 			}
 			if schemaText != "" {
@@ -406,7 +409,7 @@ func extractJSON(ctx context.Context, text string) string {
 	jsonBytes, err := json.Marshal(jsonResult)
 	if err != nil {
 		// Log the error if marshalling fails after successful unmarshal
-		slog.Default().Warn("Failed to re-marshal extracted JSON, returning original text", "error", err)
+		discardLogger.Warn("Failed to re-marshal extracted JSON, returning original text", "error", err)
 		return text
 	}
 
@@ -425,7 +428,7 @@ func generateClaudeContent(
 	cfg gollem.SessionConfig,
 	apiName string,
 ) (*anthropic.Message, error) {
-	logger := slog.Default()
+	logger := discardLogger
 
 	// Prepare message parameters
 	msgParams := anthropic.MessageNewParams{

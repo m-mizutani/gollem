@@ -42,11 +42,14 @@ type Recorder struct {
 	repo     Repository
 	metadata TraceMetadata
 	traceID  string
+	logger   *slog.Logger
 }
 
 // New creates a new Recorder with the given options.
 func New(opts ...Option) *Recorder {
-	r := &Recorder{}
+	r := &Recorder{
+		logger: slog.New(slog.DiscardHandler),
+	}
 	for _, opt := range opts {
 		opt(r)
 	}
@@ -290,7 +293,7 @@ func (r *Recorder) Finish(ctx context.Context) error {
 	}
 
 	if err := repo.Save(ctx, trace); err != nil {
-		slog.Default().Warn("failed to save trace", slog.String("error", err.Error()))
+		r.logger.Warn("failed to save trace", slog.String("error", err.Error()))
 		return err
 	}
 

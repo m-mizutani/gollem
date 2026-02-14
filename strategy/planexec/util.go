@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"log/slog"
-
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 )
@@ -45,7 +43,7 @@ func allTasksCompleted(ctx context.Context, plan *Plan) bool {
 // getFinalConclusion asks LLM to generate final conclusion based on completed tasks
 // Returns ExecuteResponse with texts and session history
 func getFinalConclusion(ctx context.Context, client gollem.LLMClient, plan *Plan, middleware []gollem.ContentBlockMiddleware, systemPrompt string) (*gollem.ExecuteResponse, error) {
-	logger := slog.Default()
+	logger := discardLogger
 	logger.Debug("generating final conclusion")
 
 	if plan == nil {

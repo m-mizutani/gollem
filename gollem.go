@@ -464,7 +464,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 				return nil, err
 			}
 
-			newInput, err := handleResponse(ctx, output, toolMap, cfg.toolMiddlewares)
+			newInput, err := handleResponse(ctx, logger, output, toolMap, cfg.toolMiddlewares)
 			if err != nil {
 				return nil, err
 			}
@@ -482,7 +482,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 			var streamedResponse Response
 			for output := range stream {
 				logger.Debug("recv response", "output", output)
-				newInput, err := handleResponse(ctx, output, toolMap, cfg.toolMiddlewares)
+				newInput, err := handleResponse(ctx, logger, output, toolMap, cfg.toolMiddlewares)
 				if err != nil {
 					return nil, err
 				}
@@ -504,8 +504,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 	return nil, goerr.Wrap(ErrLoopLimitExceeded, "session stopped", goerr.V("loop_limit", cfg.loopLimit))
 }
 
-func handleResponse(ctx context.Context, output *Response, toolMap map[string]Tool, toolMiddlewares []ToolMiddleware) ([]Input, error) {
-	logger := slog.Default()
+func handleResponse(ctx context.Context, logger *slog.Logger, output *Response, toolMap map[string]Tool, toolMiddlewares []ToolMiddleware) ([]Input, error) {
 
 	newInput := make([]Input, 0)
 
@@ -527,7 +526,7 @@ func handleResponse(ctx context.Context, output *Response, toolMap map[string]To
 			continue
 		}
 
-		resp, err := executeToolCall(ctx, toolCall, tool, toolMiddlewares)
+		resp, err := executeToolCall(ctx, logger, toolCall, tool, toolMiddlewares)
 		if err != nil {
 			return nil, err
 		}
@@ -538,8 +537,7 @@ func handleResponse(ctx context.Context, output *Response, toolMap map[string]To
 }
 
 // executeToolCall executes a single tool call with trace span management via defer.
-func executeToolCall(ctx context.Context, toolCall *FunctionCall, tool Tool, toolMiddlewares []ToolMiddleware) (_ FunctionResponse, retErr error) {
-	logger := slog.Default()
+func executeToolCall(ctx context.Context, logger *slog.Logger, toolCall *FunctionCall, tool Tool, toolMiddlewares []ToolMiddleware) (_ FunctionResponse, retErr error) {
 
 	// Start tool execution trace span
 	var toolResult map[string]any

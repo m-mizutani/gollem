@@ -2,9 +2,13 @@ package planexec
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/m-mizutani/gollem"
 )
+
+// discardLogger is the package-level logger that discards all output by default.
+var discardLogger = slog.New(slog.DiscardHandler)
 
 // TaskState represents the current state of a task
 type TaskState string

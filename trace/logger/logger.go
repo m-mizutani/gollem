@@ -36,7 +36,7 @@ type config struct {
 // Option configures the logger handler.
 type Option func(*config)
 
-// WithLogger sets a custom slog.Logger. Default is slog.Default().
+// WithLogger sets a custom slog.Logger. Default is a discard logger.
 func WithLogger(l *slog.Logger) Option {
 	return func(c *config) {
 		c.logger = l
@@ -82,7 +82,7 @@ func (h *handler) logger() *slog.Logger {
 	if h.cfg.logger != nil {
 		return h.cfg.logger
 	}
-	return slog.Default()
+	return slog.New(slog.DiscardHandler)
 }
 
 func (h *handler) enabled(e Event) bool {

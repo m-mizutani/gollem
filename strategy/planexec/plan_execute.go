@@ -3,8 +3,6 @@ package planexec
 import (
 	"context"
 
-	"log/slog"
-
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/trace"
@@ -40,7 +38,7 @@ func (s *Strategy) Init(ctx context.Context, inputs []gollem.Input) error {
 
 // Handle determines the next input for the LLM based on the current state
 func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
-	logger := slog.Default()
+	logger := discardLogger
 	logger.Debug("plan-execute strategy handle",
 		"iteration", state.Iteration,
 		"next_input_len", len(state.NextInput),
