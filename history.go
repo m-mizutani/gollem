@@ -3,6 +3,8 @@ package gollem
 
 import (
 	"encoding/json"
+
+	"github.com/m-mizutani/goerr/v2"
 )
 
 // History represents a conversation history that can be used across different LLM sessions.
@@ -25,6 +27,26 @@ type History struct {
 	LLType   LLMType   `json:"type"`
 	Version  int       `json:"version"`
 	Messages []Message `json:"messages"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler with version validation.
+// Returns ErrHistoryVersionMismatch if the serialized version does not match HistoryVersion.
+func (x *History) UnmarshalJSON(data []byte) error {
+	type historyAlias History
+	var h historyAlias
+	if err := json.Unmarshal(data, &h); err != nil {
+		return err
+	}
+
+	if h.Version != HistoryVersion {
+		return goerr.Wrap(ErrHistoryVersionMismatch, "unsupported history version",
+			goerr.Value("got", h.Version),
+			goerr.Value("want", HistoryVersion),
+		)
+	}
+
+	*x = History(h)
+	return nil
 }
 
 func (x *History) ToCount() int {

@@ -46,7 +46,7 @@ func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model s
 			TopP:        -1.0,
 			MaxTokens:   8192,
 		},
-		cfg:             cfg,
+		cfg: cfg,
 	}, nil
 }
 

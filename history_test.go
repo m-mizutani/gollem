@@ -2,9 +2,13 @@ package gollem_test
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
 	"github.com/m-mizutani/gollem/llm/gemini"
 	"github.com/m-mizutani/gollem/llm/openai"
@@ -724,4 +728,62 @@ func TestGeminiRoundTrip(t *testing.T) {
 			{Role: "model", Parts: []*genai.Part{{Text: "This PDF contains test data."}}},
 		},
 	}))
+}
+
+func TestHistoryUnmarshalVersionValidation(t *testing.T) {
+	type testCase struct {
+		version   int
+		expectErr bool
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			data := fmt.Sprintf(`{"type":"OpenAI","version":%d,"messages":[]}`, tc.version)
+			var h gollem.History
+			err := json.Unmarshal([]byte(data), &h)
+
+			if tc.expectErr {
+				gt.Error(t, err)
+				gt.True(t, errors.Is(err, gollem.ErrHistoryVersionMismatch))
+			} else {
+				gt.NoError(t, err)
+				gt.Equal(t, tc.version, h.Version)
+			}
+		}
+	}
+
+	t.Run("current version", runTest(testCase{
+		version:   gollem.HistoryVersion,
+		expectErr: false,
+	}))
+
+	t.Run("old version 1", runTest(testCase{
+		version:   1,
+		expectErr: true,
+	}))
+
+	t.Run("old version 2", runTest(testCase{
+		version:   2,
+		expectErr: true,
+	}))
+
+	t.Run("future version", runTest(testCase{
+		version:   99,
+		expectErr: true,
+	}))
+
+	t.Run("zero version", runTest(testCase{
+		version:   0,
+		expectErr: true,
+	}))
+}
+
+func TestHistoryCloneWithCurrentVersion(t *testing.T) {
+	original := &gollem.History{
+		LLType:  gollem.LLMTypeOpenAI,
+		Version: gollem.HistoryVersion,
+	}
+	cloned := original.Clone()
+	gt.Equal(t, original.LLType, cloned.LLType)
+	gt.Equal(t, original.Version, cloned.Version)
 }

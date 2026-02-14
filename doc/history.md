@@ -48,12 +48,22 @@ newHistory, err = agent.Prompt(ctx, "Continue", gollem.WithHistory(history))
 
 ## Version Management
 
-History includes version information to ensure compatibility:
+History includes version information to ensure compatibility. The current version is **3**.
 
-- Current version: 1
-- Version checking is performed when converting between formats
-- Version mismatch will result in an error
-- This helps maintain compatibility when the History structure changes in future updates
+### Version History
+
+| Version | Changes |
+|---------|---------|
+| 1 | Initial format with provider-specific message dialects |
+| 2 | Introduced unified message format across providers |
+| 3 | Removed legacy function call fields and provider-specific dialects. Messages use a single canonical representation (`Message` with `MessageContent` typed data) |
+
+### Compatibility
+
+- **v1/v2 → v3 migration is not supported.** History serialized with v1 or v2 cannot be deserialized into v3; the format is a breaking change.
+- If you have persisted v1/v2 histories, discard them or re-create the conversations with the current library version.
+- Version is stored in the `"version"` JSON field of the serialized `History` struct. When deserializing, callers should verify that the version matches `gollem.HistoryVersion` before use.
+- Future versions will document migration paths when feasible.
 
 ## Session Persistence
 
