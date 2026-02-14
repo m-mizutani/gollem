@@ -12,20 +12,11 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/internal/schema"
 	"github.com/m-mizutani/gollem/trace"
 	"github.com/m-mizutani/jsonex"
-)
-
-var (
-	// claudePromptScope is the logging scope for Claude prompts
-	claudePromptScope = ctxlog.NewScope("claude_prompt", ctxlog.EnabledBy("GOLLEM_LOGGING_CLAUDE_PROMPT"))
-
-	// claudeResponseScope is the logging scope for Claude responses
-	claudeResponseScope = ctxlog.NewScope("claude_response", ctxlog.EnabledBy("GOLLEM_LOGGING_CLAUDE_RESPONSE"))
 )
 
 // generationParameters represents the parameters for text generation.
@@ -50,8 +41,7 @@ func setTemperatureAndTopP(ctx context.Context, params *anthropic.MessageNewPara
 	// Set only one, prioritizing temperature if both are set.
 	if temperature >= 0 {
 		if topP >= 0 {
-			logger := ctxlog.From(ctx)
-			logger.Warn("Both Temperature and TopP are set for Claude; using Temperature as it is prioritized")
+			slog.Default().Warn("Both Temperature and TopP are set for Claude; using Temperature as it is prioritized")
 		}
 		params.Temperature = anthropic.Float(temperature)
 	} else if topP >= 0 {
@@ -290,7 +280,7 @@ func contentBlockToString(content anthropic.ContentBlockParamUnion) string {
 // IMPORTANT: Multiple consecutive Text and Image inputs are combined into a single user message with multiple content blocks,
 // as per the Anthropic API specification for multi-modal messages.
 func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
-	logger := ctxlog.From(ctx)
+	logger := slog.Default()
 	var toolResults []anthropic.ContentBlockParamUnion
 	var messages []anthropic.MessageParam
 
@@ -402,7 +392,7 @@ func createSystemPrompt(ctx context.Context, cfg gollem.SessionConfig) ([]anthro
 		if cfg.ResponseSchema() != nil {
 			schemaText, err := schema.ConvertParameterToJSONString(cfg.ResponseSchema())
 			if err != nil {
-				ctxlog.From(ctx).Warn("Failed to convert response schema to JSON string for Claude prompt", "error", err)
+				slog.Default().Warn("Failed to convert response schema to JSON string for Claude prompt", "error", err)
 				return nil, goerr.Wrap(err, "failed to convert response schema to JSON string")
 			}
 			if schemaText != "" {
@@ -434,7 +424,7 @@ func extractJSON(ctx context.Context, text string) string {
 	jsonBytes, err := json.Marshal(jsonResult)
 	if err != nil {
 		// Log the error if marshalling fails after successful unmarshal
-		ctxlog.From(ctx).Warn("Failed to re-marshal extracted JSON, returning original text", "error", err)
+		slog.Default().Warn("Failed to re-marshal extracted JSON, returning original text", "error", err)
 		return text
 	}
 
@@ -453,7 +443,7 @@ func generateClaudeContent(
 	cfg gollem.SessionConfig,
 	apiName string,
 ) (*anthropic.Message, error) {
-	logger := ctxlog.From(ctx)
+	logger := slog.Default()
 
 	// Prepare message parameters
 	msgParams := anthropic.MessageNewParams{
@@ -483,25 +473,6 @@ func generateClaudeContent(
 		"message_count", len(messages),
 		"tools_count", len(tools))
 
-	// Log prompts if GOLLEM_LOGGING_CLAUDE_PROMPT is set
-	promptLogger := ctxlog.From(ctx, claudePromptScope)
-	// Build messages for logging
-	var logMessages []map[string]any
-	for _, msg := range messages {
-		var contents []string
-		for _, content := range msg.Content {
-			contents = append(contents, contentBlockToString(content))
-		}
-		logMessages = append(logMessages, map[string]any{
-			"role":     msg.Role,
-			"contents": contents,
-		})
-	}
-	promptLogger.Info("Claude prompt",
-		"system_prompt", cfg.SystemPrompt(),
-		"messages", logMessages,
-	)
-
 	resp, err := client.Messages.New(ctx, msgParams)
 	if err != nil {
 		logger.Debug(apiName+" API request failed", "error", err)
@@ -512,35 +483,6 @@ func generateClaudeContent(
 	logger.Debug(apiName+" API response received",
 		"content_blocks", len(resp.Content),
 		"stop_reason", resp.StopReason)
-
-	// Log responses if GOLLEM_LOGGING_CLAUDE_RESPONSE is set
-	responseLogger := ctxlog.From(ctx, claudeResponseScope)
-	var logContent []map[string]any
-	for _, content := range resp.Content {
-		switch content.Type {
-		case "text":
-			logContent = append(logContent, map[string]any{
-				"type": "text",
-				"text": content.AsText().Text,
-			})
-		case "tool_use":
-			toolUse := content.AsToolUse()
-			logContent = append(logContent, map[string]any{
-				"type":  "tool_use",
-				"name":  toolUse.Name,
-				"input": string(toolUse.Input),
-			})
-		}
-	}
-	responseLogger.Info("Claude response",
-		"model", resp.Model,
-		"stop_reason", resp.StopReason,
-		"usage", map[string]any{
-			"input_tokens":  resp.Usage.InputTokens,
-			"output_tokens": resp.Usage.OutputTokens,
-		},
-		"content", logContent,
-	)
 
 	return resp, nil
 }
@@ -612,37 +554,6 @@ func generateClaudeStream(
 					}
 					content = append(content, toolCalls...)
 					*messageHistory = append(*messageHistory, anthropic.NewAssistantMessage(content...))
-
-					// Log streaming response if GOLLEM_LOGGING_CLAUDE_RESPONSE is set
-					responseLogger := ctxlog.From(ctx, claudeResponseScope)
-					var logContent []map[string]any
-					if textContent.Len() > 0 {
-						finalText := textContent.String()
-						if cfg.ContentType() == gollem.ContentTypeJSON {
-							finalText = extractJSON(ctx, finalText)
-						}
-						logContent = append(logContent, map[string]any{
-							"type": "text",
-							"text": finalText,
-						})
-					}
-					for _, toolCall := range toolCalls {
-						if toolCall.OfToolUse != nil {
-							logContent = append(logContent, map[string]any{
-								"type":  "tool_use",
-								"id":    toolCall.OfToolUse.ID,
-								"name":  toolCall.OfToolUse.Name,
-								"input": toolCall.OfToolUse.Input,
-							})
-						}
-					}
-					responseLogger.Info("Claude streaming response",
-						"usage", map[string]any{
-							"input_tokens":  totalInputTokens,
-							"output_tokens": totalOutputTokens,
-						},
-						"content", logContent,
-					)
 				}
 				return
 			}
@@ -822,15 +733,6 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 			request.Tools = s.tools
 		}
 
-		// Log prompts if GOLLEM_LOGGING_CLAUDE_PROMPT is set
-		promptLogger := ctxlog.From(ctx, claudePromptScope)
-		if promptLogger.Enabled(ctx, slog.LevelInfo) {
-			promptLogger.Info("Claude prompt",
-				"system_prompt", systemPrompt,
-				"messages", apiMessages,
-			)
-		}
-
 		// Start LLM call trace span
 		var traceData *trace.LLMCallData
 		var llmErr error
@@ -844,36 +746,6 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 			llmErr = err
 			opts := tokenLimitErrorOptions(err)
 			return nil, goerr.Wrap(err, "failed to create message", opts...)
-		}
-
-		// Log response if GOLLEM_LOGGING_CLAUDE_RESPONSE is set
-		responseLogger := ctxlog.From(ctx, claudeResponseScope)
-		if responseLogger.Enabled(ctx, slog.LevelInfo) {
-			var logContent []map[string]any
-			for _, content := range resp.Content {
-				if content.Type == "text" {
-					logContent = append(logContent, map[string]any{
-						"type": "text",
-						"text": content.Text,
-					})
-				} else if content.Type == "tool_use" {
-					logContent = append(logContent, map[string]any{
-						"type":  "tool_use",
-						"id":    content.ID,
-						"name":  content.Name,
-						"input": content.Input,
-					})
-				}
-			}
-			responseLogger.Info("Claude response",
-				"model", resp.Model,
-				"stop_reason", resp.StopReason,
-				"usage", map[string]any{
-					"input_tokens":  resp.Usage.InputTokens,
-					"output_tokens": resp.Usage.OutputTokens,
-				},
-				"content", logContent,
-			)
 		}
 
 		// Process response and extract content

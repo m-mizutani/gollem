@@ -7,7 +7,6 @@ toolchain go1.24.3
 require (
 	github.com/anthropics/anthropic-sdk-go v1.13.0
 	github.com/google/uuid v1.6.0
-	github.com/m-mizutani/ctxlog v0.2.0
 	github.com/m-mizutani/goerr/v2 v2.0.0
 	github.com/m-mizutani/gt v0.2.1
 	github.com/m-mizutani/jsonex v0.0.1

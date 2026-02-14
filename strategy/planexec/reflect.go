@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 
 	"github.com/google/uuid"
-	"github.com/m-mizutani/ctxlog"
+	"log/slog"
+
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 )
@@ -20,7 +21,7 @@ type reflectionResult struct {
 // It evaluates task results against the Plan, which contains all necessary context and constraints.
 // This is an internal analysis process - the conversation history is not preserved
 func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completedTask *Task, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, currentIteration, maxIterations int, history *gollem.History, systemPrompt string) (*reflectionResult, error) {
-	logger := ctxlog.From(ctx)
+	logger := slog.Default()
 	logger.Debug("performing reflection", "goal", plan.Goal)
 
 	// Create a new session for reflection with JSON content type
@@ -96,7 +97,7 @@ func parseReflectionFromResponse(ctx context.Context, response *gollem.Response,
 
 	if err := json.Unmarshal([]byte(response.Texts[0]), &reflectionResponse); err != nil {
 		// If JSON parsing fails, return empty result
-		logger := ctxlog.From(ctx)
+		logger := slog.Default()
 		logger.Debug("failed to parse reflection JSON, returning empty result", "error", err.Error())
 		return result, nil
 	}
@@ -131,7 +132,7 @@ func parseReflectionFromResponse(ctx context.Context, response *gollem.Response,
 		})
 	}
 
-	logger := ctxlog.From(ctx)
+	logger := slog.Default()
 	logger.Debug("reflection parsed", "new_tasks", len(result.NewTasks), "updated_tasks", len(result.UpdatedTasks), "reason", reflectionResponse.Reason)
 
 	return result, nil

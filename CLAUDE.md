@@ -43,13 +43,10 @@ Tests may require API keys for integration testing:
 - Anthropic: `ANTHROPIC_API_KEY`
 - Gemini: `GEMINI_PROJECT_ID`, `GEMINI_LOCATION`
 
-When debugging tests with LLM logging enabled, use `zenv -p debug go test` to enable logging environment variables:
+When debugging tests, use the `trace/logger` package to enable LLM logging programmatically, or use `zenv` for environment-based configuration:
 ```bash
-# Enable logging for debugging
+# Run tests with debug profile
 zenv -p debug go test -v ./strategy/planexec/ -run TestName
-
-# This automatically enables GOLLEM_LOGGING_*_PROMPT and GOLLEM_LOGGING_*_RESPONSE
-# as defined in .env.toml [debug] profile
 ```
 
 ### Code Quality
@@ -165,76 +162,47 @@ t.Run("success case", runTest(testCase{
 
 ### LLM Request and Response Logging
 
-gollem provides detailed logging capabilities for LLM interactions to support debugging, monitoring, and observability.
+gollem provides detailed logging via the `trace/logger` package, which implements `trace.Handler` and outputs structured logs through `slog.Logger`.
 
-#### Prompt Logging
+#### Setup
 
-Each LLM provider supports prompt logging through dedicated environment variables:
+```go
+import tracelogger "github.com/m-mizutani/gollem/trace/logger"
 
-- **Claude**: `GOLLEM_LOGGING_CLAUDE_PROMPT`
-- **OpenAI**: `GOLLEM_LOGGING_OPENAI_PROMPT`  
-- **Gemini**: `GOLLEM_LOGGING_GEMINI_PROMPT`
+// Enable all events (default)
+handler := tracelogger.New()
 
-When enabled, logs include:
-- System prompts
-- User messages
-- Tool/function responses
-- Message history context
+// Or enable specific events only
+handler := tracelogger.New(
+    tracelogger.WithEvents(tracelogger.LLMRequest, tracelogger.LLMResponse),
+)
 
-#### Response Logging
-
-Response logging captures LLM outputs for analysis and debugging:
-
-- **Claude**: `GOLLEM_LOGGING_CLAUDE_RESPONSE`
-- **OpenAI**: `GOLLEM_LOGGING_OPENAI_RESPONSE`
-- **Gemini**: `GOLLEM_LOGGING_GEMINI_RESPONSE`
-
-Response logs include:
-- Generated text content
-- Tool/function calls with IDs, names, and arguments
-- Token usage statistics (input/output tokens)
-- Model information and finish reasons
-- Both streaming and non-streaming responses
-
-#### Usage Examples
-
-```bash
-# Enable Claude prompt and response logging
-export GOLLEM_LOGGING_CLAUDE_PROMPT=true
-export GOLLEM_LOGGING_CLAUDE_RESPONSE=true
-
-# Enable OpenAI response logging only
-export GOLLEM_LOGGING_OPENAI_RESPONSE=true
-
-# Enable all Gemini logging
-export GOLLEM_LOGGING_GEMINI_PROMPT=true
-export GOLLEM_LOGGING_GEMINI_RESPONSE=true
+agent := gollem.New(client, gollem.WithTraceHandler(handler))
 ```
+
+#### Available Events
+
+- `AgentExec` - Agent execution start/end
+- `LLMRequest` - LLM request prompts
+- `LLMResponse` - LLM response content
+- `ToolExec` - Tool execution start/end
+- `SubAgent` - Sub-agent execution start/end
+- `CustomEvent` - Custom trace events
 
 #### Log Structure
 
-Logs use structured format with ctxlog scopes:
+Logs use structured format via `slog`:
 
 ```json
 {
-  "level": "info",
-  "scope": "claude_response",
-  "model": "claude-3-sonnet-20240229",
-  "stop_reason": "end_turn",
-  "usage": {
-    "input_tokens": 150,
-    "output_tokens": 75
-  },
-  "content": [
+  "level": "INFO",
+  "msg": "llm_call_end",
+  "elapsed_ms": 1234,
+  "texts": ["Generated response text"],
+  "function_calls": [
     {
-      "type": "text", 
-      "text": "Generated response text"
-    },
-    {
-      "type": "tool_use",
-      "id": "call_123",
-      "name": "search_function", 
-      "input": {"query": "example"}
+      "name": "search_function",
+      "args": {"query": "example"}
     }
   ]
 }

@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"math"
 	"strings"
 	"time"
 
-	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	gollemschema "github.com/m-mizutani/gollem/internal/schema"
@@ -21,14 +19,6 @@ import (
 const (
 	DefaultModel          = "gemini-2.5-flash"
 	DefaultEmbeddingModel = "text-embedding-004"
-)
-
-var (
-	// geminiPromptScope is the logging scope for Gemini prompts
-	geminiPromptScope = ctxlog.NewScope("gemini_prompt", ctxlog.EnabledBy("GOLLEM_LOGGING_GEMINI_PROMPT"))
-
-	// geminiResponseScope is the logging scope for Gemini responses
-	geminiResponseScope = ctxlog.NewScope("gemini_response", ctxlog.EnabledBy("GOLLEM_LOGGING_GEMINI_RESPONSE"))
 )
 
 // Client is a client for the Gemini API.
@@ -486,41 +476,6 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 			contents = append(contents, userContent)
 		}
 
-		// Log prompt if enabled
-		promptLogger := ctxlog.From(ctx, geminiPromptScope)
-		if promptLogger.Enabled(ctx, slog.LevelInfo) {
-			var messages []map[string]any
-			for _, content := range contents {
-				for _, part := range content.Parts {
-					if part.Text != "" {
-						messages = append(messages, map[string]any{
-							"role":    content.Role,
-							"type":    "text",
-							"content": part.Text,
-						})
-					}
-					if part.FunctionResponse != nil {
-						messages = append(messages, map[string]any{
-							"role":     content.Role,
-							"type":     "function_response",
-							"name":     part.FunctionResponse.Name,
-							"response": part.FunctionResponse.Response,
-						})
-					}
-				}
-			}
-			systemPrompt := ""
-			if s.config != nil && s.config.SystemInstruction != nil && len(s.config.SystemInstruction.Parts) > 0 {
-				if part := s.config.SystemInstruction.Parts[0]; part != nil {
-					systemPrompt = part.Text
-				}
-			}
-			promptLogger.Info("Gemini prompt",
-				"system_prompt", systemPrompt,
-				"messages", messages,
-			)
-		}
-
 		// Start LLM call trace span
 		var geminiTraceData *trace.LLMCallData
 		var llmErr error
@@ -541,38 +496,6 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		if err != nil {
 			llmErr = err
 			return nil, err
-		}
-
-		// Log responses if GOLLEM_LOGGING_GEMINI_RESPONSE is set
-		responseLogger := ctxlog.From(ctx, geminiResponseScope)
-		if responseLogger.Enabled(ctx, slog.LevelInfo) {
-			var logContent []map[string]any
-			for _, text := range response.Texts {
-				logContent = append(logContent, map[string]any{
-					"type": "text",
-					"text": text,
-				})
-			}
-			for _, funcCall := range response.FunctionCalls {
-				logContent = append(logContent, map[string]any{
-					"type":      "function_call",
-					"id":        funcCall.ID,
-					"name":      funcCall.Name,
-					"arguments": funcCall.Arguments,
-				})
-			}
-			var finishReason string
-			if len(result.Candidates) > 0 {
-				finishReason = string(result.Candidates[0].FinishReason)
-			}
-			responseLogger.Info("Gemini response",
-				"finish_reason", finishReason,
-				"usage", map[string]any{
-					"prompt_tokens":     response.InputToken,
-					"candidates_tokens": response.OutputToken,
-				},
-				"content", logContent,
-			)
 		}
 
 		// Set trace data for defer
@@ -697,41 +620,6 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				Parts: parts,
 			}
 			contents = append(contents, userContent)
-		}
-
-		// Log prompt if enabled
-		promptLogger := ctxlog.From(ctx, geminiPromptScope)
-		if promptLogger.Enabled(ctx, slog.LevelInfo) {
-			var messages []map[string]any
-			for _, content := range contents {
-				for _, part := range content.Parts {
-					if part.Text != "" {
-						messages = append(messages, map[string]any{
-							"role":    content.Role,
-							"type":    "text",
-							"content": part.Text,
-						})
-					}
-					if part.FunctionResponse != nil {
-						messages = append(messages, map[string]any{
-							"role":     content.Role,
-							"type":     "function_response",
-							"name":     part.FunctionResponse.Name,
-							"response": part.FunctionResponse.Response,
-						})
-					}
-				}
-			}
-			systemPrompt := ""
-			if s.config != nil && s.config.SystemInstruction != nil && len(s.config.SystemInstruction.Parts) > 0 {
-				if part := s.config.SystemInstruction.Parts[0]; part != nil {
-					systemPrompt = part.Text
-				}
-			}
-			promptLogger.Info("Gemini streaming prompt",
-				"system_prompt", systemPrompt,
-				"messages", messages,
-			)
 		}
 
 		// Start LLM call trace span

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem/trace"
 )
@@ -267,8 +266,7 @@ func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool
 		toolList = append(toolList, tool)
 		toolNames = append(toolNames, tool.Spec().Name)
 	}
-	logger := ctxlog.From(ctx)
-	logger.Debug("gollem tool list", "names", toolNames)
+	cfg.logger.Debug("gollem tool list", "names", toolNames)
 
 	return toolMap, toolList, nil
 }
@@ -280,7 +278,7 @@ func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool
 func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse, err error) {
 	cfg := g.gollemConfig.Clone()
 	logger := cfg.logger.With("gollem.exec_id", uuid.New().String())
-	ctx = ctxlog.With(ctx, logger)
+	cfg.logger = logger
 
 	logger.Debug("[start] gollem execution",
 		"input", input,
@@ -507,7 +505,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 }
 
 func handleResponse(ctx context.Context, output *Response, toolMap map[string]Tool, toolMiddlewares []ToolMiddleware) ([]Input, error) {
-	logger := ctxlog.From(ctx)
+	logger := slog.Default()
 
 	newInput := make([]Input, 0)
 
@@ -541,7 +539,7 @@ func handleResponse(ctx context.Context, output *Response, toolMap map[string]To
 
 // executeToolCall executes a single tool call with trace span management via defer.
 func executeToolCall(ctx context.Context, toolCall *FunctionCall, tool Tool, toolMiddlewares []ToolMiddleware) (_ FunctionResponse, retErr error) {
-	logger := ctxlog.From(ctx)
+	logger := slog.Default()
 
 	// Start tool execution trace span
 	var toolResult map[string]any

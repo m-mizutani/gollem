@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
@@ -463,8 +462,8 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 	// Helper function for testing with Agent.Execute
 	testWithAgent := func(client gollem.LLMClient, _ string) func(t *testing.T) {
 		return func(t *testing.T) {
-			logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-			ctx := ctxlog.With(context.Background(), logger)
+			slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			ctx := context.Background()
 
 			// Test with multiple tool calls
 			var toolCallCount int32

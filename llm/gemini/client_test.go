@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/m-mizutani/ctxlog"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/gemini"
@@ -318,11 +317,9 @@ func TestGeminiContentGenerate(t *testing.T) {
 		testLocation = v
 	}
 
-	// Configure ctxlog to output logs during testing
+	// Configure slog for debug output during testing
 	ctx := context.Background()
-	// Create a debug logger that outputs to testing.T
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	ctx = ctxlog.With(ctx, logger)
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
 	client, err := gemini.New(ctx, testProjectID, testLocation)
 	gt.NoError(t, err)
@@ -557,8 +554,7 @@ func TestGeminiTokenLimitErrorIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	ctx = ctxlog.With(ctx, logger)
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
 	client, err := gemini.New(ctx, projectID, location)
 	gt.NoError(t, err)

@@ -2,69 +2,66 @@
 
 ## Logging LLM Requests and Responses
 
-You can enable detailed logging for debugging purposes by setting environment variables.
+You can enable detailed logging using the `trace/logger` package, which implements the `trace.Handler` interface and outputs structured logs via `slog.Logger`.
 
-### Prompt Logging
+### Setup
 
-Log all prompts sent to each LLM provider:
+```go
+import (
+    "log/slog"
+    "os"
 
-| Environment Variable | Provider |
-|---|---|
-| `GOLLEM_LOGGING_CLAUDE_PROMPT=true` | Claude (Anthropic) |
-| `GOLLEM_LOGGING_OPENAI_PROMPT=true` | OpenAI |
-| `GOLLEM_LOGGING_GEMINI_PROMPT=true` | Gemini |
+    "github.com/m-mizutani/gollem"
+    tracelogger "github.com/m-mizutani/gollem/trace/logger"
+)
 
-### Response Logging
+// Enable all events (default)
+handler := tracelogger.New()
 
-Log all responses from each LLM provider:
+// Or enable specific events only
+handler := tracelogger.New(
+    tracelogger.WithEvents(tracelogger.LLMRequest, tracelogger.LLMResponse),
+)
 
-| Environment Variable | Provider |
-|---|---|
-| `GOLLEM_LOGGING_CLAUDE_RESPONSE=true` | Claude (Anthropic) |
-| `GOLLEM_LOGGING_OPENAI_RESPONSE=true` | OpenAI |
-| `GOLLEM_LOGGING_GEMINI_RESPONSE=true` | Gemini |
+// Use a custom logger
+handler := tracelogger.New(
+    tracelogger.WithLogger(slog.New(slog.NewJSONHandler(os.Stdout, nil))),
+)
 
-### Usage
-
-```bash
-# Enable Claude prompt and response logging
-export GOLLEM_LOGGING_CLAUDE_PROMPT=true
-export GOLLEM_LOGGING_CLAUDE_RESPONSE=true
-
-# Enable OpenAI response logging only
-export GOLLEM_LOGGING_OPENAI_RESPONSE=true
-
-# Enable all Gemini logging
-export GOLLEM_LOGGING_GEMINI_PROMPT=true
-export GOLLEM_LOGGING_GEMINI_RESPONSE=true
+// Pass to agent
+agent := gollem.New(client,
+    gollem.WithTraceHandler(handler),
+    gollem.WithTools(tools...),
+)
 ```
 
-These will output the raw prompts and responses to the standard logger, which is useful for debugging conversation flow, tool usage, and token consumption.
+### Available Events
+
+| Event | Description |
+|---|---|
+| `AgentExec` | Agent execution start/end |
+| `LLMRequest` | LLM request prompts |
+| `LLMResponse` | LLM response content |
+| `ToolExec` | Tool execution start/end |
+| `SubAgent` | Sub-agent execution start/end |
+| `CustomEvent` | Custom trace events |
+
+By default, all events are enabled. Use `WithEvents()` to enable only specific events.
 
 ### Log Output Format
 
-Logs are structured with ctxlog scopes:
+Logs are structured via `slog`:
 
 ```json
 {
-  "level": "info",
-  "scope": "claude_response",
-  "model": "claude-3-sonnet-20240229",
-  "stop_reason": "end_turn",
-  "usage": {
-    "input_tokens": 150,
-    "output_tokens": 75
-  },
-  "content": [
+  "level": "INFO",
+  "msg": "llm_call_end",
+  "elapsed_ms": 1234,
+  "texts": ["Generated response text"],
+  "function_calls": [
     {
-      "type": "text",
-      "text": "Generated response text"
-    },
-    {
-      "type": "tool_use",
-      "id": "call_123",
       "name": "search_function",
-      "input": {"query": "example"}
+      "args": {"query": "example"}
     }
   ]
 }
