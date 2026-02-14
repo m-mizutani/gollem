@@ -1,6 +1,7 @@
 package gollem_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/m-mizutani/gollem"
@@ -223,6 +224,244 @@ func TestToolSpecValidation(t *testing.T) {
 			},
 		}
 		gt.Error(t, spec.Validate())
+	})
+}
+
+func TestToolSpecValidateArgs(t *testing.T) {
+	t.Run("all valid args", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name:        "search",
+			Description: "search tool",
+			Parameters: map[string]*gollem.Parameter{
+				"query":       {Type: gollem.TypeString, Required: true},
+				"max_results": {Type: gollem.TypeInteger},
+			},
+		}
+		err := spec.ValidateArgs(map[string]any{
+			"query":       "hello",
+			"max_results": 10,
+		})
+		gt.NoError(t, err)
+	})
+
+	t.Run("missing required parameter", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "search",
+			Parameters: map[string]*gollem.Parameter{
+				"query": {Type: gollem.TypeString, Required: true},
+			},
+		}
+		err := spec.ValidateArgs(map[string]any{})
+		gt.Error(t, err)
+		gt.True(t, errors.Is(err, gollem.ErrToolArgsValidation))
+	})
+
+	t.Run("wrong type parameter", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "search",
+			Parameters: map[string]*gollem.Parameter{
+				"count": {Type: gollem.TypeInteger},
+			},
+		}
+		err := spec.ValidateArgs(map[string]any{"count": "not a number"})
+		gt.Error(t, err)
+		gt.True(t, errors.Is(err, gollem.ErrToolArgsValidation))
+	})
+
+	t.Run("multiple validation errors collected", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "search",
+			Parameters: map[string]*gollem.Parameter{
+				"query":  {Type: gollem.TypeString, Required: true},
+				"count":  {Type: gollem.TypeInteger},
+				"format": {Type: gollem.TypeString, Enum: []string{"json", "csv"}},
+			},
+		}
+		err := spec.ValidateArgs(map[string]any{
+			"count":  "not a number",
+			"format": "xml",
+		})
+		gt.Error(t, err)
+		gt.True(t, errors.Is(err, gollem.ErrToolArgsValidation))
+		// Error message should mention tool name
+		gt.S(t, err.Error()).Contains("search")
+	})
+
+	t.Run("nil parameters is valid", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name:       "noop",
+			Parameters: nil,
+		}
+		err := spec.ValidateArgs(map[string]any{})
+		gt.NoError(t, err)
+	})
+
+	t.Run("optional parameter with nil value is valid", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "search",
+			Parameters: map[string]*gollem.Parameter{
+				"query": {Type: gollem.TypeString, Required: false},
+			},
+		}
+		err := spec.ValidateArgs(map[string]any{})
+		gt.NoError(t, err)
+	})
+
+	t.Run("error message contains structured info", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "my_tool",
+			Parameters: map[string]*gollem.Parameter{
+				"name": {Type: gollem.TypeString, Required: true},
+			},
+		}
+		err := spec.ValidateArgs(map[string]any{})
+		gt.Error(t, err)
+		msg := err.Error()
+		gt.S(t, msg).Contains("my_tool")
+		gt.S(t, msg).Contains("Please correct the arguments and retry the tool call.")
+	})
+
+	t.Run("nil args map treats all values as nil", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "search",
+			Parameters: map[string]*gollem.Parameter{
+				"query": {Type: gollem.TypeString, Required: true},
+			},
+		}
+		err := spec.ValidateArgs(nil)
+		gt.Error(t, err)
+		gt.True(t, errors.Is(err, gollem.ErrToolArgsValidation))
+	})
+
+	t.Run("nil args map with optional params is valid", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "search",
+			Parameters: map[string]*gollem.Parameter{
+				"query": {Type: gollem.TypeString, Required: false},
+			},
+		}
+		err := spec.ValidateArgs(nil)
+		gt.NoError(t, err)
+	})
+
+	t.Run("nested object property validation", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "create_user",
+			Parameters: map[string]*gollem.Parameter{
+				"user": {
+					Type: gollem.TypeObject,
+					Properties: map[string]*gollem.Parameter{
+						"name": {Type: gollem.TypeString, Required: true},
+						"age":  {Type: gollem.TypeInteger},
+					},
+				},
+			},
+		}
+
+		// Valid nested object
+		gt.NoError(t, spec.ValidateArgs(map[string]any{
+			"user": map[string]any{"name": "Alice", "age": 30},
+		}))
+
+		// Missing required nested property
+		err := spec.ValidateArgs(map[string]any{
+			"user": map[string]any{"age": 30},
+		})
+		gt.Error(t, err)
+		gt.True(t, errors.Is(err, gollem.ErrToolArgsValidation))
+
+		// Wrong type in nested property
+		err = spec.ValidateArgs(map[string]any{
+			"user": map[string]any{"name": 123},
+		})
+		gt.Error(t, err)
+	})
+
+	t.Run("array element validation", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "tag_items",
+			Parameters: map[string]*gollem.Parameter{
+				"tags": {
+					Type:  gollem.TypeArray,
+					Items: &gollem.Parameter{Type: gollem.TypeString},
+				},
+			},
+		}
+
+		// Valid array
+		gt.NoError(t, spec.ValidateArgs(map[string]any{
+			"tags": []any{"go", "rust"},
+		}))
+
+		// Invalid element type in array
+		err := spec.ValidateArgs(map[string]any{
+			"tags": []any{"go", 123},
+		})
+		gt.Error(t, err)
+		gt.True(t, errors.Is(err, gollem.ErrToolArgsValidation))
+	})
+
+	t.Run("number constraint violation", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "set_volume",
+			Parameters: map[string]*gollem.Parameter{
+				"level": {Type: gollem.TypeNumber, Minimum: ptr(0.0), Maximum: ptr(100.0)},
+			},
+		}
+
+		gt.NoError(t, spec.ValidateArgs(map[string]any{"level": 50.0}))
+
+		err := spec.ValidateArgs(map[string]any{"level": 200.0})
+		gt.Error(t, err)
+		gt.True(t, errors.Is(err, gollem.ErrToolArgsValidation))
+
+		err = spec.ValidateArgs(map[string]any{"level": -1.0})
+		gt.Error(t, err)
+	})
+
+	t.Run("string enum constraint violation", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "set_mode",
+			Parameters: map[string]*gollem.Parameter{
+				"mode": {Type: gollem.TypeString, Enum: []string{"auto", "manual"}},
+			},
+		}
+
+		gt.NoError(t, spec.ValidateArgs(map[string]any{"mode": "auto"}))
+
+		err := spec.ValidateArgs(map[string]any{"mode": "turbo"})
+		gt.Error(t, err)
+		gt.True(t, errors.Is(err, gollem.ErrToolArgsValidation))
+	})
+
+	t.Run("string pattern constraint violation", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "set_id",
+			Parameters: map[string]*gollem.Parameter{
+				"id": {Type: gollem.TypeString, Pattern: "^[A-Z]{3}-[0-9]{4}$"},
+			},
+		}
+
+		gt.NoError(t, spec.ValidateArgs(map[string]any{"id": "ABC-1234"}))
+
+		err := spec.ValidateArgs(map[string]any{"id": "invalid"})
+		gt.Error(t, err)
+		gt.True(t, errors.Is(err, gollem.ErrToolArgsValidation))
+	})
+
+	t.Run("extra args not in spec are ignored", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "search",
+			Parameters: map[string]*gollem.Parameter{
+				"query": {Type: gollem.TypeString, Required: true},
+			},
+		}
+		err := spec.ValidateArgs(map[string]any{
+			"query":          "hello",
+			"unknown_param":  "extra",
+			"another_unused": 42,
+		})
+		gt.NoError(t, err)
 	})
 }
 

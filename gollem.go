@@ -76,6 +76,9 @@ type gollemConfig struct {
 
 	// Trace handler for agent execution tracing
 	traceHandler trace.Handler
+
+	// disableArgsValidation disables automatic argument validation before tool execution
+	disableArgsValidation bool
 }
 
 func (c *gollemConfig) Clone() *gollemConfig {
@@ -99,6 +102,8 @@ func (c *gollemConfig) Clone() *gollemConfig {
 		contentStreamMiddlewares: c.contentStreamMiddlewares[:],
 		toolMiddlewares:          c.toolMiddlewares[:],
 		traceHandler:             c.traceHandler,
+
+		disableArgsValidation: c.disableArgsValidation,
 	}
 }
 
@@ -249,6 +254,15 @@ func WithResponseSchema(schema *Parameter) Option {
 func WithTrace(handler trace.Handler) Option {
 	return func(s *gollemConfig) {
 		s.traceHandler = handler
+	}
+}
+
+// WithDisableArgsValidation disables automatic argument validation before tool execution.
+// By default, the agent validates tool arguments from LLM against the tool's parameter
+// specifications before calling Tool.Run(). Use this option to skip that validation.
+func WithDisableArgsValidation() Option {
+	return func(s *gollemConfig) {
+		s.disableArgsValidation = true
 	}
 }
 
@@ -464,7 +478,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 				return nil, err
 			}
 
-			newInput, err := handleResponse(ctx, logger, output, toolMap, cfg.toolMiddlewares)
+			newInput, err := handleResponse(ctx, logger, output, toolMap, cfg.toolMiddlewares, cfg.disableArgsValidation)
 			if err != nil {
 				return nil, err
 			}
@@ -482,7 +496,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 			var streamedResponse Response
 			for output := range stream {
 				logger.Debug("recv response", "output", output)
-				newInput, err := handleResponse(ctx, logger, output, toolMap, cfg.toolMiddlewares)
+				newInput, err := handleResponse(ctx, logger, output, toolMap, cfg.toolMiddlewares, cfg.disableArgsValidation)
 				if err != nil {
 					return nil, err
 				}
@@ -504,7 +518,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 	return nil, goerr.Wrap(ErrLoopLimitExceeded, "session stopped", goerr.V("loop_limit", cfg.loopLimit))
 }
 
-func handleResponse(ctx context.Context, logger *slog.Logger, output *Response, toolMap map[string]Tool, toolMiddlewares []ToolMiddleware) ([]Input, error) {
+func handleResponse(ctx context.Context, logger *slog.Logger, output *Response, toolMap map[string]Tool, toolMiddlewares []ToolMiddleware, disableArgsValidation bool) ([]Input, error) {
 
 	newInput := make([]Input, 0)
 
@@ -526,7 +540,7 @@ func handleResponse(ctx context.Context, logger *slog.Logger, output *Response, 
 			continue
 		}
 
-		resp, err := executeToolCall(ctx, logger, toolCall, tool, toolMiddlewares)
+		resp, err := executeToolCall(ctx, logger, toolCall, tool, toolMiddlewares, disableArgsValidation)
 		if err != nil {
 			return nil, err
 		}
@@ -537,7 +551,7 @@ func handleResponse(ctx context.Context, logger *slog.Logger, output *Response, 
 }
 
 // executeToolCall executes a single tool call with trace span management via defer.
-func executeToolCall(ctx context.Context, logger *slog.Logger, toolCall *FunctionCall, tool Tool, toolMiddlewares []ToolMiddleware) (_ FunctionResponse, retErr error) {
+func executeToolCall(ctx context.Context, logger *slog.Logger, toolCall *FunctionCall, tool Tool, toolMiddlewares []ToolMiddleware, disableArgsValidation bool) (_ FunctionResponse, retErr error) {
 
 	// Start tool execution trace span
 	var toolResult map[string]any
@@ -548,6 +562,15 @@ func executeToolCall(ctx context.Context, logger *slog.Logger, toolCall *Functio
 
 	// Create base tool handler
 	baseHandler := func(ctx context.Context, req *ToolExecRequest) (*ToolExecResponse, error) {
+		// Validate arguments before execution
+		if !disableArgsValidation && req.ToolSpec != nil {
+			if err := req.ToolSpec.ValidateArgs(req.Tool.Arguments); err != nil {
+				return &ToolExecResponse{
+					Error: err,
+				}, nil
+			}
+		}
+
 		start := time.Now()
 		result, err := tool.Run(ctx, req.Tool.Arguments)
 		duration := time.Since(start).Milliseconds()

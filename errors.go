@@ -55,6 +55,10 @@ var (
 	// ErrProhibitedContent is returned when the content violates policy
 	ErrProhibitedContent = errors.New("prohibited content")
 
+	// ErrToolArgsValidation is returned when the tool arguments from LLM fail validation.
+	// This is distinct from ErrInvalidParameter which is for spec definition validation.
+	ErrToolArgsValidation = errors.New("tool arguments validation failed")
+
 	// ErrSubAgentFactory is returned when the subagent factory fails to create an agent.
 	ErrSubAgentFactory = errors.New("subagent factory failed")
 

@@ -929,6 +929,289 @@ func TestExecuteWithExecuteResponse(t *testing.T) {
 	})
 }
 
+func TestArgsValidation(t *testing.T) {
+	t.Run("invalid args returns validation error to LLM", func(t *testing.T) {
+		callCount := 0
+		var receivedError error
+
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						callCount++
+						if callCount == 1 {
+							// LLM sends tool call with wrong type args
+							return &gollem.Response{
+								FunctionCalls: []*gollem.FunctionCall{
+									{
+										ID:   "call_1",
+										Name: "search",
+										Arguments: map[string]any{
+											"query": 123, // wrong type: should be string
+										},
+									},
+								},
+							}, nil
+						}
+						// Second call: LLM receives validation error and should see it
+						if callCount == 2 {
+							if len(input) > 0 {
+								if funcResp, ok := input[0].(gollem.FunctionResponse); ok {
+									receivedError = funcResp.Error
+								}
+							}
+							return &gollem.Response{
+								Texts: []string{"Done"},
+							}, nil
+						}
+						return &gollem.Response{Texts: []string{"unexpected"}}, nil
+					},
+				}, nil
+			},
+		}
+
+		toolRunCalled := false
+		tool := &mockTool{
+			spec: gollem.ToolSpec{
+				Name: "search",
+				Parameters: map[string]*gollem.Parameter{
+					"query": {Type: gollem.TypeString, Required: true},
+				},
+			},
+			run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+				toolRunCalled = true
+				return map[string]any{"result": "ok"}, nil
+			},
+		}
+
+		agent := gollem.New(mockClient, gollem.WithTools(tool), gollem.WithLoopLimit(5))
+		_, err := agent.Execute(t.Context(), gollem.Text("search something"))
+		gt.NoError(t, err)
+		gt.Equal(t, 2, callCount)
+		gt.False(t, toolRunCalled) // tool.Run should NOT have been called
+		gt.NotNil(t, receivedError)
+		gt.S(t, receivedError.Error()).Contains("search")
+	})
+
+	t.Run("valid args allows tool execution", func(t *testing.T) {
+		callCount := 0
+
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						callCount++
+						if callCount == 1 {
+							return &gollem.Response{
+								FunctionCalls: []*gollem.FunctionCall{
+									{
+										ID:   "call_1",
+										Name: "search",
+										Arguments: map[string]any{
+											"query": "hello",
+										},
+									},
+								},
+							}, nil
+						}
+						return &gollem.Response{Texts: []string{"Done"}}, nil
+					},
+				}, nil
+			},
+		}
+
+		toolRunCalled := false
+		tool := &mockTool{
+			spec: gollem.ToolSpec{
+				Name: "search",
+				Parameters: map[string]*gollem.Parameter{
+					"query": {Type: gollem.TypeString, Required: true},
+				},
+			},
+			run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+				toolRunCalled = true
+				return map[string]any{"result": "found"}, nil
+			},
+		}
+
+		agent := gollem.New(mockClient, gollem.WithTools(tool), gollem.WithLoopLimit(5))
+		_, err := agent.Execute(t.Context(), gollem.Text("search something"))
+		gt.NoError(t, err)
+		gt.True(t, toolRunCalled)
+	})
+
+	t.Run("missing required arg returns validation error to LLM", func(t *testing.T) {
+		callCount := 0
+		var receivedError error
+
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						callCount++
+						if callCount == 1 {
+							// LLM sends tool call without required param
+							return &gollem.Response{
+								FunctionCalls: []*gollem.FunctionCall{
+									{
+										ID:        "call_1",
+										Name:      "search",
+										Arguments: map[string]any{}, // missing "query"
+									},
+								},
+							}, nil
+						}
+						if callCount == 2 {
+							if len(input) > 0 {
+								if funcResp, ok := input[0].(gollem.FunctionResponse); ok {
+									receivedError = funcResp.Error
+								}
+							}
+							return &gollem.Response{Texts: []string{"Done"}}, nil
+						}
+						return &gollem.Response{Texts: []string{"unexpected"}}, nil
+					},
+				}, nil
+			},
+		}
+
+		toolRunCalled := false
+		tool := &mockTool{
+			spec: gollem.ToolSpec{
+				Name: "search",
+				Parameters: map[string]*gollem.Parameter{
+					"query": {Type: gollem.TypeString, Required: true},
+				},
+			},
+			run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+				toolRunCalled = true
+				return map[string]any{"result": "ok"}, nil
+			},
+		}
+
+		agent := gollem.New(mockClient, gollem.WithTools(tool), gollem.WithLoopLimit(5))
+		_, err := agent.Execute(t.Context(), gollem.Text("search something"))
+		gt.NoError(t, err)
+		gt.Equal(t, 2, callCount)
+		gt.False(t, toolRunCalled)
+		gt.NotNil(t, receivedError)
+		gt.S(t, receivedError.Error()).Contains("required")
+	})
+
+	t.Run("ToolSet tool args are validated", func(t *testing.T) {
+		callCount := 0
+		var receivedError error
+
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						callCount++
+						if callCount == 1 {
+							return &gollem.Response{
+								FunctionCalls: []*gollem.FunctionCall{
+									{
+										ID:   "call_1",
+										Name: "toolset_search",
+										Arguments: map[string]any{
+											"query": 999, // wrong type
+										},
+									},
+								},
+							}, nil
+						}
+						if callCount == 2 {
+							if len(input) > 0 {
+								if funcResp, ok := input[0].(gollem.FunctionResponse); ok {
+									receivedError = funcResp.Error
+								}
+							}
+							return &gollem.Response{Texts: []string{"Done"}}, nil
+						}
+						return &gollem.Response{Texts: []string{"unexpected"}}, nil
+					},
+				}, nil
+			},
+		}
+
+		toolSetRunCalled := false
+		ts := &mockToolSet{
+			specs: []gollem.ToolSpec{
+				{
+					Name: "toolset_search",
+					Parameters: map[string]*gollem.Parameter{
+						"query": {Type: gollem.TypeString, Required: true},
+					},
+				},
+			},
+			run: func(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
+				toolSetRunCalled = true
+				return map[string]any{"result": "ok"}, nil
+			},
+		}
+
+		agent := gollem.New(mockClient, gollem.WithToolSets(ts), gollem.WithLoopLimit(5))
+		_, err := agent.Execute(t.Context(), gollem.Text("search"))
+		gt.NoError(t, err)
+		gt.Equal(t, 2, callCount)
+		gt.False(t, toolSetRunCalled)
+		gt.NotNil(t, receivedError)
+		gt.S(t, receivedError.Error()).Contains("toolset_search")
+	})
+
+	t.Run("WithDisableArgsValidation skips validation", func(t *testing.T) {
+		callCount := 0
+
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						callCount++
+						if callCount == 1 {
+							// LLM sends wrong type, but validation is disabled
+							return &gollem.Response{
+								FunctionCalls: []*gollem.FunctionCall{
+									{
+										ID:   "call_1",
+										Name: "echo",
+										Arguments: map[string]any{
+											"message": "hello",
+										},
+									},
+								},
+							}, nil
+						}
+						return &gollem.Response{Texts: []string{"Done"}}, nil
+					},
+				}, nil
+			},
+		}
+
+		toolRunCalled := false
+		tool := &mockTool{
+			spec: gollem.ToolSpec{
+				Name: "echo",
+				Parameters: map[string]*gollem.Parameter{
+					"message": {Type: gollem.TypeInteger, Required: true}, // Spec says integer
+				},
+			},
+			run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+				toolRunCalled = true
+				return map[string]any{"echo": args["message"]}, nil
+			},
+		}
+
+		agent := gollem.New(mockClient,
+			gollem.WithTools(tool),
+			gollem.WithDisableArgsValidation(),
+			gollem.WithLoopLimit(5),
+		)
+		_, err := agent.Execute(t.Context(), gollem.Text("echo something"))
+		gt.NoError(t, err)
+		gt.True(t, toolRunCalled) // tool.Run should be called despite type mismatch
+	})
+}
+
 func TestDefaultStrategyWithExecuteResponse(t *testing.T) {
 	t.Run("default strategy generates conclusion for LLM response without tool calls", func(t *testing.T) {
 		mockClient := &mock.LLMClientMock{}
