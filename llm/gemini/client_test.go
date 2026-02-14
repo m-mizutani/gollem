@@ -3,7 +3,6 @@ package gemini_test
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"math"
 	"os"
 	"strings"
@@ -317,9 +316,7 @@ func TestGeminiContentGenerate(t *testing.T) {
 		testLocation = v
 	}
 
-	// Configure slog for debug output during testing
 	ctx := context.Background()
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
 	client, err := gemini.New(ctx, testProjectID, testLocation)
 	gt.NoError(t, err)
@@ -554,7 +551,6 @@ func TestGeminiTokenLimitErrorIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
 	client, err := gemini.New(ctx, projectID, location)
 	gt.NoError(t, err)

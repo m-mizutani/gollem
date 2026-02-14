@@ -37,19 +37,18 @@ type generationParameters struct {
 }
 
 // setTemperatureAndTopP sets temperature and/or top_p on the request params.
-// Claude Sonnet 4.5 does not allow both to be specified simultaneously.
-// If both are set, temperature takes priority and a warning is logged.
-func setTemperatureAndTopP(ctx context.Context, params *anthropic.MessageNewParams, temperature, topP float64) {
-	// Claude Sonnet 4.5 does not allow both temperature and top_p.
-	// Set only one, prioritizing temperature if both are set.
+// Claude does not allow both to be specified simultaneously.
+// Returns an error if both are set.
+func setTemperatureAndTopP(params *anthropic.MessageNewParams, temperature, topP float64) error {
+	if temperature >= 0 && topP >= 0 {
+		return goerr.New("both Temperature and TopP are set; Claude does not allow both")
+	}
 	if temperature >= 0 {
-		if topP >= 0 {
-			discardLogger.Warn("Both Temperature and TopP are set for Claude; using Temperature as it is prioritized")
-		}
 		params.Temperature = anthropic.Float(temperature)
 	} else if topP >= 0 {
 		params.TopP = anthropic.Float(topP)
 	}
+	return nil
 }
 
 // Client is a client for the Claude API.
@@ -377,7 +376,6 @@ func createSystemPrompt(ctx context.Context, cfg gollem.SessionConfig) ([]anthro
 		if cfg.ResponseSchema() != nil {
 			schemaText, err := schema.ConvertParameterToJSONString(cfg.ResponseSchema())
 			if err != nil {
-				discardLogger.Warn("Failed to convert response schema to JSON string for Claude prompt", "error", err)
 				return nil, goerr.Wrap(err, "failed to convert response schema to JSON string")
 			}
 			if schemaText != "" {
@@ -408,8 +406,7 @@ func extractJSON(ctx context.Context, text string) string {
 
 	jsonBytes, err := json.Marshal(jsonResult)
 	if err != nil {
-		// Log the error if marshalling fails after successful unmarshal
-		discardLogger.Warn("Failed to re-marshal extracted JSON, returning original text", "error", err)
+		// Re-marshal failed after successful unmarshal; return original text as fallback
 		return text
 	}
 
@@ -437,8 +434,10 @@ func generateClaudeContent(
 		Messages:  messages,
 	}
 
-	// Set temperature and/or top_p (mutually exclusive for Claude Sonnet 4.5)
-	setTemperatureAndTopP(ctx, &msgParams, params.Temperature, params.TopP)
+	// Set temperature and/or top_p (mutually exclusive for Claude)
+	if err := setTemperatureAndTopP(&msgParams, params.Temperature, params.TopP); err != nil {
+		return nil, goerr.Wrap(err, "failed to set generation parameters")
+	}
 
 	if len(tools) > 0 {
 		msgParams.Tools = tools
@@ -491,8 +490,10 @@ func generateClaudeStream(
 		Messages:  messages,
 	}
 
-	// Set temperature and/or top_p (mutually exclusive for Claude Sonnet 4.5)
-	setTemperatureAndTopP(ctx, &msgParams, params.Temperature, params.TopP)
+	// Set temperature and/or top_p (mutually exclusive for Claude)
+	if err := setTemperatureAndTopP(&msgParams, params.Temperature, params.TopP); err != nil {
+		return nil, goerr.Wrap(err, "failed to set generation parameters")
+	}
 
 	if len(tools) > 0 {
 		msgParams.Tools = tools
@@ -707,8 +708,10 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 			MaxTokens: s.params.MaxTokens,
 		}
 
-		// Set temperature and/or top_p (mutually exclusive for Claude Sonnet 4.5)
-		setTemperatureAndTopP(ctx, &request, s.params.Temperature, s.params.TopP)
+		// Set temperature and/or top_p (mutually exclusive for Claude)
+		if err := setTemperatureAndTopP(&request, s.params.Temperature, s.params.TopP); err != nil {
+			return nil, goerr.Wrap(err, "failed to set generation parameters")
+		}
 
 		if len(systemPrompt) > 0 {
 			request.System = systemPrompt
@@ -861,8 +864,10 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 			MaxTokens: s.params.MaxTokens,
 		}
 
-		// Set temperature and/or top_p (mutually exclusive for Claude Sonnet 4.5)
-		setTemperatureAndTopP(ctx, &request, s.params.Temperature, s.params.TopP)
+		// Set temperature and/or top_p (mutually exclusive for Claude)
+		if err := setTemperatureAndTopP(&request, s.params.Temperature, s.params.TopP); err != nil {
+			return nil, goerr.Wrap(err, "failed to set generation parameters")
+		}
 
 		if len(systemPrompt) > 0 {
 			request.System = systemPrompt

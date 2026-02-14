@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -23,8 +22,6 @@ func TestClaudeContentGenerate(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	// Configure slog for debug output during testing
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
 	client, err := claude.New(ctx, apiKey)
 	gt.NoError(t, err)
@@ -317,7 +314,6 @@ func TestClaudeTokenLimitErrorIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
 	client, err := claude.New(ctx, apiKey)
 	gt.NoError(t, err)

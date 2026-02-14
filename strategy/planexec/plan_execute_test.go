@@ -2,7 +2,6 @@ package planexec_test
 
 import (
 	"context"
-	"log/slog"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -462,7 +461,6 @@ func TestPlanExecuteWithLLMs(t *testing.T) {
 	// Helper function for testing with Agent.Execute
 	testWithAgent := func(client gollem.LLMClient, _ string) func(t *testing.T) {
 		return func(t *testing.T) {
-			slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 			ctx := context.Background()
 
 			// Test with multiple tool calls

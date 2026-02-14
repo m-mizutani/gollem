@@ -293,7 +293,6 @@ func (r *Recorder) Finish(ctx context.Context) error {
 	}
 
 	if err := repo.Save(ctx, trace); err != nil {
-		r.logger.Warn("failed to save trace", slog.String("error", err.Error()))
 		return err
 	}
 
