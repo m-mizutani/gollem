@@ -56,8 +56,6 @@ func TestCreateSystemPrompt(t *testing.T) {
 		result, err := claude.CreateSystemPrompt(ctx, cfg)
 		gt.NoError(t, err)
 
-		// Type assertion to verify it's []anthropic.TextBlockParam
-		var _ []anthropic.TextBlockParam = result
 		// Empty slice can be nil in this implementation
 		gt.Equal(t, 0, len(result))
 	})
@@ -71,9 +69,7 @@ func TestCreateSystemPrompt(t *testing.T) {
 		gt.NoError(t, err)
 
 		// At minimum, should not panic and return valid type
-		var systemPrompt []anthropic.TextBlockParam = result
-		// Check the type is correct (compilation would fail if not)
-		_ = systemPrompt
+		_ = result
 	})
 }
 
@@ -90,11 +86,8 @@ func TestSystemPromptSDKCompliance(t *testing.T) {
 		result, err := claude.CreateSystemPrompt(ctx, cfg)
 		gt.NoError(t, err)
 
-		// Should be able to use as []anthropic.TextBlockParam
-		var systemBlocks []anthropic.TextBlockParam = result
-
 		// Empty case should return empty slice
-		gt.Equal(t, 0, len(systemBlocks))
+		gt.Equal(t, 0, len(result))
 	})
 
 	t.Run("TextBlockParam structure", func(t *testing.T) {
@@ -129,9 +122,6 @@ func TestSystemPromptComment(t *testing.T) {
 		cfg := gollem.NewSessionConfig()
 		result, err := claude.CreateSystemPrompt(ctx, cfg)
 		gt.NoError(t, err)
-
-		// Should be the correct type
-		var _ []anthropic.TextBlockParam = result
 
 		// Should handle empty case correctly
 		if len(result) > 0 {

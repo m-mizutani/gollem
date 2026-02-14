@@ -674,7 +674,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 
 		go func() {
 			defer close(responseChan)
-			defer stream.Close()
+			defer func() { _ = stream.Close() }()
 
 			var streamTraceData *trace.LLMCallData
 			var streamErr error
@@ -1062,8 +1062,8 @@ func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, e
 	tokensPerName := 1
 
 	// Adjust for specific model families
-	switch {
-	case s.defaultModel == "gpt-3.5-turbo-0301":
+	switch s.defaultModel {
+	case "gpt-3.5-turbo-0301":
 		tokensPerMessage = 4
 		tokensPerName = -1
 	}

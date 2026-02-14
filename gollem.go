@@ -121,12 +121,12 @@ func New(llmClient LLMClient, options ...Option) *Agent {
 	}
 
 	s.logger.Info("gollem agent created",
-		"loop_limit", s.gollemConfig.loopLimit,
-		"system_prompt", s.gollemConfig.systemPrompt,
-		"tools_count", len(s.gollemConfig.tools),
-		"tool_sets_count", len(s.gollemConfig.toolSets),
-		"response_mode", s.gollemConfig.responseMode,
-		"has_history", s.gollemConfig.history != nil,
+		"loop_limit", s.loopLimit,
+		"system_prompt", s.systemPrompt,
+		"tools_count", len(s.tools),
+		"tool_sets_count", len(s.toolSets),
+		"response_mode", s.responseMode,
+		"has_history", s.history != nil,
 	)
 
 	return s
@@ -276,7 +276,7 @@ func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool
 // Returns (*ExecuteResponse, error) where ExecuteResponse contains the final conclusion.
 // Use this method instead of Prompt for better agent-like behavior.
 func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse, err error) {
-	cfg := g.gollemConfig.Clone()
+	cfg := g.Clone()
 	logger := cfg.logger.With("gollem.exec_id", uuid.New().String())
 	cfg.logger = logger
 
@@ -366,7 +366,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 		g.currentSession = ssn
 	}
 
-	strategy := g.gollemConfig.strategy
+	strategy := g.strategy
 
 	var lastResponse *Response
 	nextInput := input

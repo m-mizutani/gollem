@@ -257,24 +257,6 @@ func (s *Session) convertInputs(ctx context.Context, input ...gollem.Input) ([]a
 	return convertGollemInputsToClaude(ctx, input...)
 }
 
-// contentBlockToString converts a ContentBlockParamUnion to a string representation for logging
-func contentBlockToString(content anthropic.ContentBlockParamUnion) string {
-	if content.OfText != nil {
-		return fmt.Sprintf("text: %s", content.OfText.Text)
-	} else if content.OfImage != nil {
-		mediaType := ""
-		if content.OfImage.Source.OfBase64 != nil {
-			mediaType = string(content.OfImage.Source.OfBase64.MediaType)
-		}
-		return fmt.Sprintf("image: %s", mediaType)
-	} else if content.OfToolUse != nil {
-		return fmt.Sprintf("tool_use: %s (input: %v)", content.OfToolUse.Name, content.OfToolUse.Input)
-	} else if content.OfToolResult != nil {
-		return fmt.Sprintf("tool_result: %s", content.OfToolResult.ToolUseID)
-	}
-	return "unknown"
-}
-
 // convertGollemInputsToClaude is a shared helper function that converts gollem.Input to Claude messages and tool results
 // This function is used by both the standard Claude client and the Vertex AI Claude client to avoid code duplication.
 // IMPORTANT: Multiple consecutive Text and Image inputs are combined into a single user message with multiple content blocks,
