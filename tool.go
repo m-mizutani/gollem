@@ -22,8 +22,16 @@ type ToolSpec struct {
 // It checks all parameters and collects all validation errors.
 // Returns nil if all arguments are valid.
 func (s *ToolSpec) ValidateArgs(args map[string]any) error {
+	// Sort parameter names for deterministic error ordering
+	names := make([]string, 0, len(s.Parameters))
+	for name := range s.Parameters {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
 	var errs []error
-	for name, param := range s.Parameters {
+	for _, name := range names {
+		param := s.Parameters[name]
 		if err := param.ValidateValue(name, args[name]); err != nil {
 			errs = append(errs, err)
 		}
