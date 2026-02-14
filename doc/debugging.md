@@ -50,22 +50,22 @@ By default, all events are enabled. Use `WithEvents()` to enable only specific e
 
 ### Log Output Format
 
-Logs are structured via `slog`:
+Logs are structured via `slog` at the `DEBUG` level:
 
 ```json
 {
-  "level": "INFO",
-  "msg": "llm_call_end",
-  "elapsed_ms": 1234,
-  "texts": ["Generated response text"],
-  "function_calls": [
-    {
-      "name": "search_function",
-      "args": {"query": "example"}
-    }
-  ]
+  "level": "DEBUG",
+  "msg": "llm call",
+  "duration": "1.234s",
+  "model": "claude-3-sonnet-20240229",
+  "input_tokens": 150,
+  "output_tokens": 75,
+  "request": { ... },
+  "response": { ... }
 }
 ```
+
+The `request` and `response` fields are included only when the corresponding `LLMRequest` / `LLMResponse` events are enabled.
 
 ### Benefits
 

@@ -133,7 +133,7 @@ func subAgentNameFrom(ctx context.Context) string {
 // StartAgentExecute logs agent execution start.
 func (h *handler) StartAgentExecute(ctx context.Context) context.Context {
 	if h.enabled(AgentExec) {
-		h.logger().InfoContext(ctx, "agent execution started")
+		h.logger().DebugContext(ctx, "agent execution started")
 	}
 	return withStartTime(ctx, time.Now())
 }
@@ -150,7 +150,7 @@ func (h *handler) EndAgentExecute(ctx context.Context, err error) {
 	if err != nil {
 		attrs = append(attrs, slog.String("error", err.Error()))
 	}
-	h.logger().InfoContext(ctx, "agent execution ended", attrs...)
+	h.logger().DebugContext(ctx, "agent execution ended", attrs...)
 }
 
 // StartLLMCall records the start time for duration calculation.
@@ -191,7 +191,7 @@ func (h *handler) EndLLMCall(ctx context.Context, data *trace.LLMCallData, err e
 		attrs = append(attrs, slog.String("error", err.Error()))
 	}
 
-	h.logger().InfoContext(ctx, "llm call", attrs...)
+	h.logger().DebugContext(ctx, "llm call", attrs...)
 }
 
 // StartToolExec records the start time and tool info for EndToolExec.
@@ -217,7 +217,7 @@ func (h *handler) EndToolExec(ctx context.Context, result map[string]any, err er
 	if err != nil {
 		attrs = append(attrs, slog.String("error", err.Error()))
 	}
-	h.logger().InfoContext(ctx, "tool execution", attrs...)
+	h.logger().DebugContext(ctx, "tool execution", attrs...)
 }
 
 // StartSubAgent logs sub-agent start and stores the name in context.
@@ -225,7 +225,7 @@ func (h *handler) StartSubAgent(ctx context.Context, name string) context.Contex
 	ctx = withStartTime(ctx, time.Now())
 	ctx = withSubAgentName(ctx, name)
 	if h.enabled(SubAgent) {
-		h.logger().InfoContext(ctx, "sub agent started", slog.String("name", name))
+		h.logger().DebugContext(ctx, "sub agent started", slog.String("name", name))
 	}
 	return ctx
 }
@@ -243,7 +243,7 @@ func (h *handler) EndSubAgent(ctx context.Context, err error) {
 	if err != nil {
 		attrs = append(attrs, slog.String("error", err.Error()))
 	}
-	h.logger().InfoContext(ctx, "sub agent ended", attrs...)
+	h.logger().DebugContext(ctx, "sub agent ended", attrs...)
 }
 
 // AddEvent logs a custom strategy event.
@@ -252,7 +252,7 @@ func (h *handler) AddEvent(ctx context.Context, kind string, data any) {
 		return
 	}
 
-	h.logger().InfoContext(ctx, "event",
+	h.logger().DebugContext(ctx, "event",
 		slog.String("kind", kind),
 		slog.Any("data", data),
 	)

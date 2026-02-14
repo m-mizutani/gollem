@@ -191,20 +191,18 @@ agent := gollem.New(client, gollem.WithTraceHandler(handler))
 
 #### Log Structure
 
-Logs use structured format via `slog`:
+Logs use structured format via `slog` at the `DEBUG` level:
 
 ```json
 {
-  "level": "INFO",
-  "msg": "llm_call_end",
-  "elapsed_ms": 1234,
-  "texts": ["Generated response text"],
-  "function_calls": [
-    {
-      "name": "search_function",
-      "args": {"query": "example"}
-    }
-  ]
+  "level": "DEBUG",
+  "msg": "llm call",
+  "duration": "1.234s",
+  "model": "claude-3-sonnet-20240229",
+  "input_tokens": 150,
+  "output_tokens": 75,
+  "request": { ... },
+  "response": { ... }
 }
 ```
 
