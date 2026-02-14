@@ -20,9 +20,6 @@ type reflectionResult struct {
 // It evaluates task results against the Plan, which contains all necessary context and constraints.
 // This is an internal analysis process - the conversation history is not preserved
 func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completedTask *Task, tools []gollem.Tool, middleware []gollem.ContentBlockMiddleware, currentIteration, maxIterations int, history *gollem.History, systemPrompt string) (*reflectionResult, error) {
-	logger := discardLogger
-	logger.Debug("performing reflection", "goal", plan.Goal)
-
 	// Create a new session for reflection with JSON content type
 	// NOTE: Do NOT pass tools to reflection session.
 	// - Tools: When provided, some LLM providers (like Gemini) prioritize function calls
@@ -62,7 +59,6 @@ func reflect(ctx context.Context, client gollem.LLMClient, plan *Plan, completed
 		return nil, goerr.Wrap(err, "failed to parse reflection response")
 	}
 
-	logger.Debug("reflection completed", "new_tasks", len(result.NewTasks), "updated_tasks", len(result.UpdatedTasks))
 	return result, nil
 }
 
@@ -96,8 +92,6 @@ func parseReflectionFromResponse(ctx context.Context, response *gollem.Response,
 
 	if err := json.Unmarshal([]byte(response.Texts[0]), &reflectionResponse); err != nil {
 		// If JSON parsing fails, return empty result
-		logger := discardLogger
-		logger.Debug("failed to parse reflection JSON, returning empty result", "error", err.Error())
 		return result, nil
 	}
 
@@ -130,9 +124,6 @@ func parseReflectionFromResponse(ctx context.Context, response *gollem.Response,
 			State:       state,
 		})
 	}
-
-	logger := discardLogger
-	logger.Debug("reflection parsed", "new_tasks", len(result.NewTasks), "updated_tasks", len(result.UpdatedTasks), "reason", reflectionResponse.Reason)
 
 	return result, nil
 }

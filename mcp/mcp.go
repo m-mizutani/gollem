@@ -8,8 +8,6 @@ import (
 	"os/exec"
 	"sync"
 
-	"log/slog"
-
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -45,26 +43,17 @@ type Client struct {
 
 	// Connection management
 	initMutex sync.Mutex
-
-	// Logger (defaults to discard)
-	logger *slog.Logger
 }
 
 // Specs implements gollem.ToolSet interface
 func (c *Client) Specs(ctx context.Context) ([]gollem.ToolSpec, error) {
-	logger := c.logger
-
 	tools, err := c.listTools(ctx)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list tools")
 	}
 
 	specs := make([]gollem.ToolSpec, len(tools))
-	toolNames := make([]string, len(tools))
-
 	for i, tool := range tools {
-		toolNames[i] = tool.Name
-
 		param, err := convertToolToSpec(tool)
 		if err != nil {
 			return nil, goerr.Wrap(err,
@@ -76,17 +65,11 @@ func (c *Client) Specs(ctx context.Context) ([]gollem.ToolSpec, error) {
 		specs[i] = param
 	}
 
-	logger.Debug("found MCP tools", "names", toolNames)
-
 	return specs, nil
 }
 
 // Run implements gollem.ToolSet interface
 func (c *Client) Run(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
-	logger := c.logger
-
-	logger.Debug("call MCP tool", "name", name, "args", args)
-
 	resp, err := c.callTool(ctx, name, args)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to call tool")
@@ -118,7 +101,6 @@ func NewStdio(ctx context.Context, path string, args []string, options ...StdioO
 	client := &Client{
 		name:    DefaultClientName,
 		version: DefaultClientVersion,
-		logger:  slog.New(slog.DiscardHandler),
 	}
 	for _, option := range options {
 		option(client)
@@ -149,7 +131,6 @@ func NewSSE(ctx context.Context, baseURL string, options ...SSEOption) (*Client,
 		headers:    make(map[string]string),
 		baseURL:    baseURL,
 		httpClient: http.DefaultClient,
-		logger:     slog.New(slog.DiscardHandler),
 	}
 	for _, option := range options {
 		option(client)
@@ -221,7 +202,6 @@ func NewStreamableHTTP(ctx context.Context, baseURL string, options ...Streamabl
 		headers:    make(map[string]string),
 		baseURL:    baseURL,
 		httpClient: http.DefaultClient,
-		logger:     slog.New(slog.DiscardHandler),
 	}
 	for _, option := range options {
 		option(client)
@@ -238,8 +218,6 @@ func NewStreamableHTTP(ctx context.Context, baseURL string, options ...Streamabl
 func (c *Client) init(ctx context.Context, cmd *exec.Cmd) error {
 	c.initMutex.Lock()
 	defer c.initMutex.Unlock()
-
-	logger := c.logger
 
 	if c.session != nil {
 		return nil
@@ -265,16 +243,12 @@ func (c *Client) init(ctx context.Context, cmd *exec.Cmd) error {
 		c.cmd = cmd
 	}
 
-	logger.Debug("MCP client initialized", "name", c.name, "version", c.version)
-
 	return nil
 }
 
 func (c *Client) initStreamableHTTP(ctx context.Context) error {
 	c.initMutex.Lock()
 	defer c.initMutex.Unlock()
-
-	logger := c.logger
 
 	if c.session != nil {
 		return nil
@@ -301,16 +275,12 @@ func (c *Client) initStreamableHTTP(ctx context.Context) error {
 	c.session = session
 	c.transport = transport
 
-	logger.Debug("StreamableHTTP MCP client initialized", "name", c.name, "version", c.version, "baseURL", c.baseURL)
-
 	return nil
 }
 
 func (c *Client) initSSE(ctx context.Context) error {
 	c.initMutex.Lock()
 	defer c.initMutex.Unlock()
-
-	logger := c.logger
 
 	if c.session != nil {
 		return nil
@@ -336,8 +306,6 @@ func (c *Client) initSSE(ctx context.Context) error {
 	}
 	c.session = session
 	c.transport = transport
-
-	logger.Debug("SSE MCP client initialized", "name", c.name, "version", c.version, "baseURL", c.baseURL)
 
 	return nil
 }

@@ -2,7 +2,6 @@ package trace
 
 import (
 	"context"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -42,14 +41,11 @@ type Recorder struct {
 	repo     Repository
 	metadata TraceMetadata
 	traceID  string
-	logger   *slog.Logger
 }
 
 // New creates a new Recorder with the given options.
 func New(opts ...Option) *Recorder {
-	r := &Recorder{
-		logger: slog.New(slog.DiscardHandler),
-	}
+	r := &Recorder{}
 	for _, opt := range opts {
 		opt(r)
 	}

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -18,9 +17,6 @@ import (
 	"github.com/m-mizutani/gollem/trace"
 	"github.com/m-mizutani/jsonex"
 )
-
-// discardLogger is the package-level logger that discards all output by default.
-var discardLogger = slog.New(slog.DiscardHandler)
 
 // generationParameters represents the parameters for text generation.
 type generationParameters struct {
@@ -264,7 +260,6 @@ func (s *Session) convertInputs(ctx context.Context, input ...gollem.Input) ([]a
 // IMPORTANT: Multiple consecutive Text and Image inputs are combined into a single user message with multiple content blocks,
 // as per the Anthropic API specification for multi-modal messages.
 func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]anthropic.MessageParam, []anthropic.ContentBlockParamUnion, error) {
-	logger := discardLogger
 	var toolResults []anthropic.ContentBlockParamUnion
 	var messages []anthropic.MessageParam
 
@@ -315,12 +310,6 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 				}
 				response = string(data)
 			}
-
-			logger.Debug("creating tool_result",
-				"tool_use_id", v.ID,
-				"tool_name", v.Name,
-				"is_error", isError,
-				"response_length", len(response))
 
 			// Create tool result block with new API
 			toolResult := anthropic.NewToolResultBlock(v.ID, response, isError)
@@ -425,8 +414,6 @@ func generateClaudeContent(
 	cfg gollem.SessionConfig,
 	apiName string,
 ) (*anthropic.Message, error) {
-	logger := discardLogger
-
 	// Prepare message parameters
 	msgParams := anthropic.MessageNewParams{
 		Model:     anthropic.Model(model),
@@ -452,21 +439,11 @@ func generateClaudeContent(
 		msgParams.System = systemPrompt
 	}
 
-	logger.Debug(apiName+" API calling",
-		"model", model,
-		"message_count", len(messages),
-		"tools_count", len(tools))
-
 	resp, err := client.Messages.New(ctx, msgParams)
 	if err != nil {
-		logger.Debug(apiName+" API request failed", "error", err)
 		opts := tokenLimitErrorOptions(err)
 		return nil, goerr.Wrap(err, "failed to create message via "+apiName, opts...)
 	}
-
-	logger.Debug(apiName+" API response received",
-		"content_blocks", len(resp.Content),
-		"stop_reason", resp.StopReason)
 
 	return resp, nil
 }

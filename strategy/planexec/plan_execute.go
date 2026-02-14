@@ -38,20 +38,11 @@ func (s *Strategy) Init(ctx context.Context, inputs []gollem.Input) error {
 
 // Handle determines the next input for the LLM based on the current state
 func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]gollem.Input, *gollem.ExecuteResponse, error) {
-	logger := discardLogger
-	logger.Debug("plan-execute strategy handle",
-		"iteration", state.Iteration,
-		"next_input_len", len(state.NextInput),
-		"plan", s.plan,
-		"current_task", s.currentTask,
-		"last_response_nil", state.LastResponse == nil)
-
 	// ========== Phase 0: Pass through NextInput (e.g., tool responses) ==========
 	// If there's pending input (like tool responses), we must send it to the LLM
 	// before proceeding with strategy logic.
 	// IMPORTANT: Don't pass through on iteration 0 - that's the initial input for planning
 	if state.Iteration > 0 && len(state.NextInput) > 0 {
-		logger.Debug("passing through NextInput", "count", len(state.NextInput))
 		// Save tool results for later use in Phase 2
 		s.pendingToolResults = state.NextInput
 		return state.NextInput, nil, nil
@@ -140,7 +131,6 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 		if s.taskIterationCount >= s.maxIterations {
 			finalResponse, err := getFinalConclusion(ctx, s.client, s.plan, s.middleware, state.SystemPrompt)
 			if err != nil {
-				logger.Debug("failed to generate conclusion, using simple summary", "error", err.Error())
 				return nil, generateFinalResponse(ctx, s.plan), nil
 			}
 			return nil, finalResponse, nil
@@ -151,8 +141,6 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 		if err != nil {
 			return nil, nil, goerr.Wrap(err, "reflection failed")
 		}
-		logger.Debug("plan reflected", "result", reflectionResult)
-
 		// Apply task updates from reflection
 		hasChanges := false
 		if len(reflectionResult.UpdatedTasks) > 0 {
@@ -212,7 +200,6 @@ func (s *Strategy) Handle(ctx context.Context, state *gollem.StrategyState) ([]g
 			finalResponse, err := getFinalConclusion(ctx, s.client, s.plan, s.middleware, state.SystemPrompt)
 			if err != nil {
 				// If conclusion generation fails, fall back to simple summary
-				logger.Debug("failed to generate conclusion, using simple summary", "error", err.Error())
 				return nil, generateFinalResponse(ctx, s.plan), nil
 			}
 			return nil, finalResponse, nil
