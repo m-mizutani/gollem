@@ -77,143 +77,91 @@ type ToolResponseContent struct {
 	IsError    bool                   `json:"is_error,omitempty"` // Whether this is an error response (Claude)
 }
 
+// makeContent marshals v into JSON and wraps it in a MessageContent with the given type.
+func makeContent[T any](t MessageContentType, v T) (MessageContent, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return MessageContent{}, err
+	}
+	return MessageContent{Type: t, Data: data}, nil
+}
+
+// decodeContent checks that mc has the expected type, then decodes its Data into T.
+func decodeContent[T any](t MessageContentType, mc *MessageContent) (*T, error) {
+	if mc.Type != t {
+		return nil, ErrInvalidHistoryData
+	}
+	var content T
+	if err := json.Unmarshal(mc.Data, &content); err != nil {
+		return nil, err
+	}
+	return &content, nil
+}
+
 // Helper methods for creating MessageContent
 
 // NewTextContent creates a new text message content
 func NewTextContent(text string) (MessageContent, error) {
-	data, err := json.Marshal(TextContent{Text: text})
-	if err != nil {
-		return MessageContent{}, err
-	}
-	return MessageContent{
-		Type: MessageContentTypeText,
-		Data: data,
-	}, nil
+	return makeContent(MessageContentTypeText, TextContent{Text: text})
 }
 
 // NewImageContent creates a new image message content
 func NewImageContent(mediaType string, imageData []byte, url string, detail string) (MessageContent, error) {
-	data, err := json.Marshal(ImageContent{
+	return makeContent(MessageContentTypeImage, ImageContent{
 		MediaType: mediaType,
 		Data:      imageData,
 		URL:       url,
 		Detail:    detail,
 	})
-	if err != nil {
-		return MessageContent{}, err
-	}
-	return MessageContent{
-		Type: MessageContentTypeImage,
-		Data: data,
-	}, nil
 }
 
 // NewPDFContent creates a new PDF message content
 func NewPDFContent(pdfData []byte, url string) (MessageContent, error) {
-	data, err := json.Marshal(PDFContent{
-		Data: pdfData,
-		URL:  url,
-	})
-	if err != nil {
-		return MessageContent{}, err
-	}
-	return MessageContent{
-		Type: MessageContentTypePDF,
-		Data: data,
-	}, nil
+	return makeContent(MessageContentTypePDF, PDFContent{Data: pdfData, URL: url})
 }
 
 // NewToolCallContent creates a new tool call message content
 func NewToolCallContent(id, name string, args map[string]interface{}) (MessageContent, error) {
-	data, err := json.Marshal(ToolCallContent{
+	return makeContent(MessageContentTypeToolCall, ToolCallContent{
 		ID:        id,
 		Name:      name,
 		Arguments: args,
 	})
-	if err != nil {
-		return MessageContent{}, err
-	}
-	return MessageContent{
-		Type: MessageContentTypeToolCall,
-		Data: data,
-	}, nil
 }
 
 // NewToolResponseContent creates a new tool response message content
 func NewToolResponseContent(toolCallID, name string, response map[string]interface{}, isError bool) (MessageContent, error) {
-	data, err := json.Marshal(ToolResponseContent{
+	return makeContent(MessageContentTypeToolResponse, ToolResponseContent{
 		ToolCallID: toolCallID,
 		Name:       name,
 		Response:   response,
 		IsError:    isError,
 	})
-	if err != nil {
-		return MessageContent{}, err
-	}
-	return MessageContent{
-		Type: MessageContentTypeToolResponse,
-		Data: data,
-	}, nil
 }
 
 // Helper methods for extracting content from MessageContent
 
 // GetTextContent extracts text content from a MessageContent
 func (mc *MessageContent) GetTextContent() (*TextContent, error) {
-	if mc.Type != MessageContentTypeText {
-		return nil, ErrInvalidHistoryData
-	}
-	var content TextContent
-	if err := json.Unmarshal(mc.Data, &content); err != nil {
-		return nil, err
-	}
-	return &content, nil
+	return decodeContent[TextContent](MessageContentTypeText, mc)
 }
 
 // GetImageContent extracts image content from a MessageContent
 func (mc *MessageContent) GetImageContent() (*ImageContent, error) {
-	if mc.Type != MessageContentTypeImage {
-		return nil, ErrInvalidHistoryData
-	}
-	var content ImageContent
-	if err := json.Unmarshal(mc.Data, &content); err != nil {
-		return nil, err
-	}
-	return &content, nil
+	return decodeContent[ImageContent](MessageContentTypeImage, mc)
 }
 
 // GetPDFContent extracts PDF content from a MessageContent
 func (mc *MessageContent) GetPDFContent() (*PDFContent, error) {
-	if mc.Type != MessageContentTypePDF {
-		return nil, ErrInvalidHistoryData
-	}
-	var content PDFContent
-	if err := json.Unmarshal(mc.Data, &content); err != nil {
-		return nil, err
-	}
-	return &content, nil
+	return decodeContent[PDFContent](MessageContentTypePDF, mc)
 }
 
 // GetToolCallContent extracts tool call content from a MessageContent
 func (mc *MessageContent) GetToolCallContent() (*ToolCallContent, error) {
-	if mc.Type != MessageContentTypeToolCall {
-		return nil, ErrInvalidHistoryData
-	}
-	var content ToolCallContent
-	if err := json.Unmarshal(mc.Data, &content); err != nil {
-		return nil, err
-	}
-	return &content, nil
+	return decodeContent[ToolCallContent](MessageContentTypeToolCall, mc)
 }
 
 // GetToolResponseContent extracts tool response content from a MessageContent
 func (mc *MessageContent) GetToolResponseContent() (*ToolResponseContent, error) {
-	if mc.Type != MessageContentTypeToolResponse {
-		return nil, ErrInvalidHistoryData
-	}
-	var content ToolResponseContent
-	if err := json.Unmarshal(mc.Data, &content); err != nil {
-		return nil, err
-	}
-	return &content, nil
+	return decodeContent[ToolResponseContent](MessageContentTypeToolResponse, mc)
 }

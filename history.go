@@ -74,26 +74,39 @@ func (x *History) Clone() *History {
 		return nil
 	}
 
-	// Use JSON marshal/unmarshal for deep copy to avoid field-specific code
-	// This ensures all fields are copied correctly even when structs are modified
-	data, err := json.Marshal(x)
-	if err != nil {
-		// If marshaling fails, return a basic clone with empty messages
-		// This should not happen in practice as History is designed to be JSON-serializable
-		return &History{
-			LLType:  x.LLType,
-			Version: x.Version,
+	clone := &History{
+		LLType:   x.LLType,
+		Version:  x.Version,
+		Messages: make([]Message, len(x.Messages)),
+	}
+	for i, msg := range x.Messages {
+		clone.Messages[i] = cloneMessage(msg)
+	}
+	return clone
+}
+
+// cloneMessage returns a deep copy of m.
+func cloneMessage(m Message) Message {
+	clone := Message{
+		Role: m.Role,
+		Name: m.Name,
+	}
+
+	if m.Contents != nil {
+		clone.Contents = make([]MessageContent, len(m.Contents))
+		for i, c := range m.Contents {
+			dataCopy := make(json.RawMessage, len(c.Data))
+			copy(dataCopy, c.Data)
+			clone.Contents[i] = MessageContent{Type: c.Type, Data: dataCopy}
 		}
 	}
 
-	var clone History
-	if err := json.Unmarshal(data, &clone); err != nil {
-		// If unmarshaling fails, return a basic clone with empty messages
-		return &History{
-			LLType:  x.LLType,
-			Version: x.Version,
+	if m.Metadata != nil {
+		clone.Metadata = make(map[string]interface{}, len(m.Metadata))
+		for k, v := range m.Metadata {
+			clone.Metadata[k] = v
 		}
 	}
 
-	return &clone
+	return clone
 }

@@ -154,55 +154,84 @@ func (i Image) Base64() string {
 	return base64.StdEncoding.EncodeToString(i.data)
 }
 
+// imageMimeEntry maps a MIME type to a byte-pattern matcher used for detection.
+type imageMimeEntry struct {
+	mimeType ImageMimeType
+	match    func(data []byte) bool
+}
+
+// imageMimeTable is the single source of truth for supported image MIME types.
+// Both detectImageMimeType and IsValidImageMimeType derive their behavior from it.
+var imageMimeTable = []imageMimeEntry{
+	{
+		ImageMimeTypeJPEG,
+		func(d []byte) bool { return d[0] == 0xFF && d[1] == 0xD8 && d[2] == 0xFF },
+	},
+	{
+		ImageMimeTypePNG,
+		func(d []byte) bool {
+			return bytes.Equal(d[:8], []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A})
+		},
+	},
+	{
+		// GIF87a and GIF89a share the same MIME type.
+		ImageMimeTypeGIF,
+		func(d []byte) bool {
+			return bytes.Equal(d[:6], []byte("GIF87a")) || bytes.Equal(d[:6], []byte("GIF89a"))
+		},
+	},
+	{
+		// WebP: "RIFF" at offset 0, "WEBP" at offset 8.
+		ImageMimeTypeWebP,
+		func(d []byte) bool {
+			return bytes.Equal(d[:4], []byte("RIFF")) && len(d) >= 12 && bytes.Equal(d[8:12], []byte("WEBP"))
+		},
+	},
+	{
+		// HEIC brands: heic, heix, heim, heis.
+		ImageMimeTypeHEIC,
+		func(d []byte) bool {
+			if !bytes.Equal(d[4:8], []byte("ftyp")) {
+				return false
+			}
+			brand := string(d[8:12])
+			return brand == "heic" || brand == "heix" || brand == "heim" || brand == "heis"
+		},
+	},
+	{
+		// HEIF brands: heif, mif1.
+		ImageMimeTypeHEIF,
+		func(d []byte) bool {
+			if !bytes.Equal(d[4:8], []byte("ftyp")) {
+				return false
+			}
+			brand := string(d[8:12])
+			return brand == "heif" || brand == "mif1"
+		},
+	},
+}
+
 // detectImageMimeType detects MIME type from image data
 func detectImageMimeType(data []byte) (ImageMimeType, error) {
 	if len(data) < 12 {
 		return "", goerr.New("data too short to detect format")
 	}
-
-	// JPEG: 0xFF 0xD8 0xFF (SOI + first marker)
-	if data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
-		return ImageMimeTypeJPEG, nil
-	}
-
-	// PNG: 0x89 0x50 0x4E 0x47 0x0D 0x0A 0x1A 0x0A (PNG signature)
-	if bytes.Equal(data[:8], []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}) {
-		return ImageMimeTypePNG, nil
-	}
-
-	// GIF: "GIF87a" or "GIF89a"
-	if bytes.Equal(data[:6], []byte("GIF87a")) || bytes.Equal(data[:6], []byte("GIF89a")) {
-		return ImageMimeTypeGIF, nil
-	}
-
-	// WebP: "RIFF" ... "WEBP"
-	if bytes.Equal(data[:4], []byte("RIFF")) && len(data) >= 12 && bytes.Equal(data[8:12], []byte("WEBP")) {
-		return ImageMimeTypeWebP, nil
-	}
-
-	// HEIC/HEIF: ftypheic, ftypheim, ftypheis, ftypheix
-	if len(data) >= 12 && bytes.Equal(data[4:8], []byte("ftyp")) {
-		brand := string(data[8:12])
-		if brand == "heic" || brand == "heix" || brand == "heim" || brand == "heis" {
-			return ImageMimeTypeHEIC, nil
-		}
-		if brand == "heif" || brand == "mif1" {
-			return ImageMimeTypeHEIF, nil
+	for _, e := range imageMimeTable {
+		if e.match(data) {
+			return e.mimeType, nil
 		}
 	}
-
 	return "", goerr.New("unsupported image format")
 }
 
 // IsValidImageMimeType checks if the MIME type is supported
 func IsValidImageMimeType(mimeType ImageMimeType) bool {
-	switch mimeType {
-	case ImageMimeTypeJPEG, ImageMimeTypePNG, ImageMimeTypeGIF, ImageMimeTypeWebP,
-		ImageMimeTypeHEIC, ImageMimeTypeHEIF:
-		return true
-	default:
-		return false
+	for _, e := range imageMimeTable {
+		if e.mimeType == mimeType {
+			return true
+		}
 	}
+	return false
 }
 
 func validateImageMimeType(mimeType ImageMimeType) error {

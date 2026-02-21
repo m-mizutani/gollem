@@ -78,6 +78,28 @@ func (c *Client) Run(ctx context.Context, name string, args map[string]any) (map
 	return convertContentToMap(resp.Content), nil
 }
 
+// applyClientInfo returns a func that sets the client name and version fields.
+func applyClientInfo(name, version string) func(*Client) {
+	return func(c *Client) {
+		c.name = name
+		c.version = version
+	}
+}
+
+// applyHeaders returns a func that replaces the client headers map.
+func applyHeaders(headers map[string]string) func(*Client) {
+	return func(c *Client) {
+		c.headers = headers
+	}
+}
+
+// applyHTTPClient returns a func that sets the HTTP client.
+func applyHTTPClient(hc *http.Client) func(*Client) {
+	return func(c *Client) {
+		c.httpClient = hc
+	}
+}
+
 // StdioOption is the option for the MCP client for local MCP server via Stdio.
 type StdioOption func(*Client)
 
@@ -90,10 +112,7 @@ func WithEnvVars(envVars []string) StdioOption {
 
 // WithStdioClientInfo sets the client name and version for the MCP client.
 func WithStdioClientInfo(name, version string) StdioOption {
-	return func(m *Client) {
-		m.name = name
-		m.version = version
-	}
+	return StdioOption(applyClientInfo(name, version))
 }
 
 // NewStdio creates a new MCP client for local MCP executable server via stdio.
@@ -149,24 +168,17 @@ type SSEOption func(*Client)
 
 // WithSSEHeaders sets the headers for the MCP client. It replaces the existing headers setting.
 func WithSSEHeaders(headers map[string]string) SSEOption {
-	return func(m *Client) {
-		m.headers = headers
-	}
+	return SSEOption(applyHeaders(headers))
 }
 
 // WithSSEClient sets the HTTP client for the MCP client.
 func WithSSEClient(client *http.Client) SSEOption {
-	return func(m *Client) {
-		m.httpClient = client
-	}
+	return SSEOption(applyHTTPClient(client))
 }
 
 // WithSSEClientInfo sets the client name and version for the MCP client.
 func WithSSEClientInfo(name, version string) SSEOption {
-	return func(m *Client) {
-		m.name = name
-		m.version = version
-	}
+	return SSEOption(applyClientInfo(name, version))
 }
 
 // StreamableHTTPOption is the option for the MCP client for remote MCP server via Streamable HTTP.
@@ -174,24 +186,17 @@ type StreamableHTTPOption func(*Client)
 
 // WithStreamableHTTPHeaders sets the headers for the MCP client. It replaces the existing headers setting.
 func WithStreamableHTTPHeaders(headers map[string]string) StreamableHTTPOption {
-	return func(m *Client) {
-		m.headers = headers
-	}
+	return StreamableHTTPOption(applyHeaders(headers))
 }
 
 // WithStreamableHTTPClient sets the HTTP client for the MCP client.
 func WithStreamableHTTPClient(client *http.Client) StreamableHTTPOption {
-	return func(m *Client) {
-		m.httpClient = client
-	}
+	return StreamableHTTPOption(applyHTTPClient(client))
 }
 
 // WithStreamableHTTPClientInfo sets the client name and version for the MCP client.
 func WithStreamableHTTPClientInfo(name, version string) StreamableHTTPOption {
-	return func(m *Client) {
-		m.name = name
-		m.version = version
-	}
+	return StreamableHTTPOption(applyClientInfo(name, version))
 }
 
 // NewStreamableHTTP creates a new MCP client for remote MCP server via Streamable HTTP.
