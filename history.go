@@ -74,26 +74,45 @@ func (x *History) Clone() *History {
 		return nil
 	}
 
-	// Use JSON marshal/unmarshal for deep copy to avoid field-specific code
-	// This ensures all fields are copied correctly even when structs are modified
-	data, err := json.Marshal(x)
-	if err != nil {
-		// If marshaling fails, return a basic clone with empty messages
-		// This should not happen in practice as History is designed to be JSON-serializable
-		return &History{
-			LLType:  x.LLType,
-			Version: x.Version,
+	clone := &History{
+		LLType:   x.LLType,
+		Version:  x.Version,
+		Messages: make([]Message, len(x.Messages)),
+	}
+	for i, msg := range x.Messages {
+		clone.Messages[i] = cloneMessage(msg)
+	}
+	return clone
+}
+
+// cloneMessage returns a deep copy of m.
+func cloneMessage(m Message) Message {
+	clone := Message{
+		Role: m.Role,
+		Name: m.Name,
+	}
+
+	if m.Contents != nil {
+		clone.Contents = make([]MessageContent, len(m.Contents))
+		for i, c := range m.Contents {
+			dataCopy := make(json.RawMessage, len(c.Data))
+			copy(dataCopy, c.Data)
+			clone.Contents[i] = MessageContent{Type: c.Type, Data: dataCopy}
 		}
 	}
 
-	var clone History
-	if err := json.Unmarshal(data, &clone); err != nil {
-		// If unmarshaling fails, return a basic clone with empty messages
-		return &History{
-			LLType:  x.LLType,
-			Version: x.Version,
+	if m.Metadata != nil {
+		// Use JSON round-trip to deep-copy Metadata values, which may themselves be
+		// reference types (maps or slices).
+		if data, err := json.Marshal(m.Metadata); err == nil {
+			var metaCopy map[string]interface{}
+			if err := json.Unmarshal(data, &metaCopy); err == nil {
+				clone.Metadata = metaCopy
+			}
 		}
+		// If marshal/unmarshal fails (should not happen for well-formed metadata),
+		// clone.Metadata remains nil rather than sharing the original's references.
 	}
 
-	return &clone
+	return clone
 }
