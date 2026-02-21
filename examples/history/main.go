@@ -31,8 +31,11 @@ func NewFileRepository(dir string) *FileRepository {
 
 // Load retrieves History by session ID. Returns nil if the session does not exist yet.
 func (r *FileRepository) Load(ctx context.Context, sessionID string) (*gollem.History, error) {
+	if err := validateSessionID(sessionID); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(r.dir, sessionID+".json")
-	data, err := os.ReadFile(path) // #nosec G304 -- sessionID should be validated by callers
+	data, err := os.ReadFile(path) // #nosec G304 -- path traversal prevented by validateSessionID
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil // new session
@@ -49,6 +52,9 @@ func (r *FileRepository) Load(ctx context.Context, sessionID string) (*gollem.Hi
 
 // Save persists History for the given session ID, overwriting any previous value.
 func (r *FileRepository) Save(ctx context.Context, sessionID string, history *gollem.History) error {
+	if err := validateSessionID(sessionID); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(r.dir, 0750); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
@@ -57,8 +63,17 @@ func (r *FileRepository) Save(ctx context.Context, sessionID string, history *go
 		return fmt.Errorf("marshal history: %w", err)
 	}
 	path := filepath.Join(r.dir, sessionID+".json")
-	if err := os.WriteFile(path, data, 0600); err != nil { // #nosec G304
+	if err := os.WriteFile(path, data, 0600); err != nil { // #nosec G304 -- path traversal prevented by validateSessionID
 		return fmt.Errorf("write history: %w", err)
+	}
+	return nil
+}
+
+// validateSessionID rejects session IDs that could cause path traversal.
+// filepath.Base(id) == id ensures no path separators or ".." sequences are present.
+func validateSessionID(id string) error {
+	if id == "" || id == "." || filepath.Base(id) != id {
+		return fmt.Errorf("invalid session ID %q: must not be empty or contain path separators", id)
 	}
 	return nil
 }
