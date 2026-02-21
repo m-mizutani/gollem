@@ -2,10 +2,23 @@
 package gollem
 
 import (
+	"context"
 	"encoding/json"
 
 	"github.com/m-mizutani/goerr/v2"
 )
+
+// HistoryRepository is an interface for storing and loading conversation history.
+// Implementations can use any storage backend (filesystem, S3, GCS, database, etc.).
+type HistoryRepository interface {
+	// Load retrieves a History by session ID.
+	// Returns nil History and nil error if the session ID is not found.
+	Load(ctx context.Context, sessionID string) (*History, error)
+
+	// Save persists a History with the given session ID.
+	// If a History already exists for the session ID, it is overwritten.
+	Save(ctx context.Context, sessionID string, history *History) error
+}
 
 // History represents a conversation history that can be used across different LLM sessions.
 // It stores messages in a format specific to each LLM type (OpenAI, Claude, or Gemini).

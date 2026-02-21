@@ -187,8 +187,68 @@ if history := agent.Session().History(); history != nil {
 
 Note: The History returned from Prompt contains the complete conversation history, so there's no need to manage or track individual messages. Each Prompt response provides a new History instance that includes all previous messages.
 
-## Best Practices
+## Automatic History Persistence with HistoryRepository
 
+`HistoryRepository` is an interface that lets gollem automatically load and save conversation history to any storage backend — filesystem, S3, GCS, a database, etc.
+
+```go
+type HistoryRepository interface {
+    Load(ctx context.Context, sessionID string) (*History, error)
+    Save(ctx context.Context, sessionID string, history *History) error
+}
+```
+
+### How it works
+
+- **On first `Execute`**: history is loaded from the repository using `sessionID`. If no history exists yet, the session starts fresh.
+- **After each LLM round-trip**: history is saved automatically. This ensures that even if the process crashes mid-conversation, progress up to the last completed round-trip is preserved.
+- `Load` returns `nil, nil` when the session ID is not found (new session — not an error).
+- `Save` always overwrites the previous value for that session ID.
+
+### Usage
+
+```go
+agent := gollem.New(client,
+    gollem.WithHistoryRepository(repo, "user-123"),
+)
+
+// First run: loads history from repo (or starts fresh if none exists)
+resp, err := agent.Execute(ctx, gollem.Text("Hello!"))
+
+// Second run (same agent): session already exists, no Load is called again
+resp, err = agent.Execute(ctx, gollem.Text("What did I just say?"))
+```
+
+> **Note**: `WithHistory` and `WithHistoryRepository` cannot be used together — an error is returned from `Execute` if both are set.
+
+### Implementing HistoryRepository
+
+The interface is intentionally minimal. A filesystem implementation looks like this (see also [examples/history](../examples/history/main.go)):
+
+```go
+type FileRepository struct{ dir string }
+
+func (r *FileRepository) Load(ctx context.Context, id string) (*gollem.History, error) {
+    data, err := os.ReadFile(filepath.Join(r.dir, id+".json"))
+    if errors.Is(err, os.ErrNotExist) {
+        return nil, nil
+    }
+    if err != nil {
+        return nil, err
+    }
+    var h gollem.History
+    return &h, json.Unmarshal(data, &h)
+}
+
+func (r *FileRepository) Save(ctx context.Context, id string, h *gollem.History) error {
+    data, _ := json.Marshal(h)
+    return os.WriteFile(filepath.Join(r.dir, id+".json"), data, 0600)
+}
+```
+
+For cloud storage, implement the same two methods using your SDK of choice — gollem imposes no additional constraints.
+
+## Best Practices
 
 
 ## Next Steps
