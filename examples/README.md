@@ -57,6 +57,15 @@ This directory contains various examples demonstrating the usage of Gollem with 
 - Multiple text processing
 - Dimension specification
 
+## 💾 History Repository Example
+**[History Example](history/main.go)** - Shows how to implement `gollem.HistoryRepository` and use it with `WithHistoryRepository` for automatic conversation persistence.
+
+**Demonstrates:**
+- How to implement the `gollem.HistoryRepository` interface (filesystem-based sample)
+- Using `WithHistoryRepository` to persist history across sessions
+- Session ID-based history management
+- Blueprint for cloud storage implementations (S3, GCS, database, etc.)
+
 ## 🔄 Query Example
 **[Query Example](query/main.go)** - Shows direct LLM querying without agent features.
 

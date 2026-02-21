@@ -67,9 +67,9 @@ func (s *Strategy) buildObservationPrompt(toolResults []ToolResult) string {
 	sb.WriteString("Observation:\n")
 	for _, result := range toolResults {
 		if result.Success {
-			sb.WriteString(fmt.Sprintf("- %s: %s\n", result.ToolName, result.Output))
+			fmt.Fprintf(&sb, "- %s: %s\n", result.ToolName, result.Output)
 		} else {
-			sb.WriteString(fmt.Sprintf("- %s: Error: %s\n", result.ToolName, result.Error))
+			fmt.Fprintf(&sb, "- %s: Error: %s\n", result.ToolName, result.Error)
 		}
 	}
 	sb.WriteString("\nThought:")

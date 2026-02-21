@@ -1276,3 +1276,179 @@ func TestDefaultStrategyWithExecuteResponse(t *testing.T) {
 		gt.Equal(t, 2, callCount)
 	})
 }
+
+// mockHistoryRepository is a simple in-memory HistoryRepository for testing.
+type mockHistoryRepository struct {
+	loadFn func(ctx context.Context, sessionID string) (*gollem.History, error)
+	saveFn func(ctx context.Context, sessionID string, history *gollem.History) error
+
+	loadCalls []string
+	saveCalls []*gollem.History
+}
+
+func (m *mockHistoryRepository) Load(ctx context.Context, sessionID string) (*gollem.History, error) {
+	m.loadCalls = append(m.loadCalls, sessionID)
+	if m.loadFn != nil {
+		return m.loadFn(ctx, sessionID)
+	}
+	return nil, nil
+}
+
+func (m *mockHistoryRepository) Save(ctx context.Context, sessionID string, history *gollem.History) error {
+	m.saveCalls = append(m.saveCalls, history)
+	if m.saveFn != nil {
+		return m.saveFn(ctx, sessionID, history)
+	}
+	return nil
+}
+
+func TestWithHistoryRepository(t *testing.T) {
+	newSimpleSession := func() *mock.SessionMock {
+		callCount := 0
+		return &mock.SessionMock{
+			GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+				callCount++
+				if callCount == 1 {
+					return &gollem.Response{Texts: []string{"done"}}, nil
+				}
+				return &gollem.Response{}, nil
+			},
+			HistoryFunc: func() (*gollem.History, error) {
+				return &gollem.History{Version: gollem.HistoryVersion}, nil
+			},
+			AppendHistoryFunc: func(history *gollem.History) error { return nil },
+		}
+	}
+
+	t.Run("Load is called once on first Execute, Save is called after GenerateContent", func(t *testing.T) {
+		repo := &mockHistoryRepository{}
+		mockSession := newSimpleSession()
+
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return mockSession, nil
+			},
+		}
+
+		agent := gollem.New(mockClient, gollem.WithHistoryRepository(repo, "sess1"))
+		_, err := agent.Execute(context.Background(), gollem.Text("hello"))
+		gt.NoError(t, err)
+
+		// Load should be called exactly once (on first Execute)
+		gt.Equal(t, 1, len(repo.loadCalls))
+		gt.Equal(t, "sess1", repo.loadCalls[0])
+
+		// Save should be called at least once (after GenerateContent)
+		gt.Equal(t, true, len(repo.saveCalls) > 0)
+	})
+
+	t.Run("Load is called only on first Execute, not on subsequent Executes", func(t *testing.T) {
+		repo := &mockHistoryRepository{}
+		mockSession := newSimpleSession()
+
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return mockSession, nil
+			},
+		}
+
+		agent := gollem.New(mockClient, gollem.WithHistoryRepository(repo, "sess1"))
+		_, err := agent.Execute(context.Background(), gollem.Text("first"))
+		gt.NoError(t, err)
+		_, err = agent.Execute(context.Background(), gollem.Text("second"))
+		gt.NoError(t, err)
+
+		// Load should only be called once (only when currentSession is nil)
+		gt.Equal(t, 1, len(repo.loadCalls))
+	})
+
+	t.Run("WithHistory and WithHistoryRepository together returns error", func(t *testing.T) {
+		repo := &mockHistoryRepository{}
+		existingHistory := &gollem.History{Version: gollem.HistoryVersion}
+
+		mockSession := newSimpleSession()
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return mockSession, nil
+			},
+		}
+
+		agent := gollem.New(mockClient,
+			gollem.WithHistory(existingHistory),
+			gollem.WithHistoryRepository(repo, "sess1"),
+		)
+		_, err := agent.Execute(context.Background(), gollem.Text("hello"))
+		gt.Error(t, err)
+	})
+
+	t.Run("Load error is propagated from Execute", func(t *testing.T) {
+		loadErr := errors.New("load failed")
+		repo := &mockHistoryRepository{
+			loadFn: func(ctx context.Context, sessionID string) (*gollem.History, error) {
+				return nil, loadErr
+			},
+		}
+
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return newSimpleSession(), nil
+			},
+		}
+
+		agent := gollem.New(mockClient, gollem.WithHistoryRepository(repo, "sess1"))
+		_, err := agent.Execute(context.Background(), gollem.Text("hello"))
+		gt.Error(t, err)
+	})
+
+	t.Run("Save error stops the execution loop", func(t *testing.T) {
+		saveErr := errors.New("save failed")
+		repo := &mockHistoryRepository{
+			saveFn: func(ctx context.Context, sessionID string, history *gollem.History) error {
+				return saveErr
+			},
+		}
+
+		mockSession := newSimpleSession()
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return mockSession, nil
+			},
+		}
+
+		agent := gollem.New(mockClient, gollem.WithHistoryRepository(repo, "sess1"))
+		_, err := agent.Execute(context.Background(), gollem.Text("hello"))
+		gt.Error(t, err)
+	})
+
+	t.Run("Existing history is loaded from repository into session", func(t *testing.T) {
+		savedHistory := &gollem.History{
+			Version: gollem.HistoryVersion,
+			Messages: []gollem.Message{
+				{Role: gollem.RoleUser},
+			},
+		}
+		repo := &mockHistoryRepository{
+			loadFn: func(ctx context.Context, sessionID string) (*gollem.History, error) {
+				return savedHistory, nil
+			},
+		}
+
+		var sessionOptions []gollem.SessionOption
+		mockSession := newSimpleSession()
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				sessionOptions = options
+				return mockSession, nil
+			},
+		}
+
+		agent := gollem.New(mockClient, gollem.WithHistoryRepository(repo, "sess1"))
+		_, err := agent.Execute(context.Background(), gollem.Text("hello"))
+		gt.NoError(t, err)
+
+		// Verify that NewSession was called with the loaded history
+		cfg := gollem.NewSessionConfig(sessionOptions...)
+		gt.NotEqual(t, nil, cfg.History())
+		gt.Equal(t, 1, len(cfg.History().Messages))
+	})
+}

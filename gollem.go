@@ -79,6 +79,11 @@ type gollemConfig struct {
 
 	// disableArgsValidation disables automatic argument validation before tool execution
 	disableArgsValidation bool
+
+	// historyRepo and historySessionID enable automatic history persistence.
+	// When set, the agent loads history on first Execute and saves after each LLM round-trip.
+	historyRepo      HistoryRepository
+	historySessionID string
 }
 
 func (c *gollemConfig) Clone() *gollemConfig {
@@ -104,6 +109,9 @@ func (c *gollemConfig) Clone() *gollemConfig {
 		traceHandler:             c.traceHandler,
 
 		disableArgsValidation: c.disableArgsValidation,
+
+		historyRepo:      c.historyRepo,
+		historySessionID: c.historySessionID,
 	}
 }
 
@@ -257,6 +265,17 @@ func WithTrace(handler trace.Handler) Option {
 	}
 }
 
+// WithHistoryRepository sets a HistoryRepository for automatic history persistence.
+// When set, the agent automatically loads history on session creation and saves
+// history after each LLM round-trip.
+// The sessionID uniquely identifies the conversation session in the repository.
+func WithHistoryRepository(repo HistoryRepository, sessionID string) Option {
+	return func(s *gollemConfig) {
+		s.historyRepo = repo
+		s.historySessionID = sessionID
+	}
+}
+
 // WithDisableArgsValidation disables automatic argument validation before tool execution.
 // By default, the agent validates tool arguments from LLM against the tool's parameter
 // specifications before calling Tool.Run(). Use this option to skip that validation.
@@ -341,6 +360,11 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 
 	// If no current session exists, create a new one
 	if g.currentSession == nil {
+		// WithHistory and WithHistoryRepository cannot be used together
+		if cfg.history != nil && cfg.historyRepo != nil {
+			return nil, goerr.New("WithHistory and WithHistoryRepository cannot be used together")
+		}
+
 		sessionOptions := []SessionOption{
 			WithSessionSystemPrompt(cfg.systemPrompt),
 		}
@@ -357,6 +381,18 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 
 		if cfg.history != nil {
 			sessionOptions = append(sessionOptions, WithSessionHistory(cfg.history))
+		}
+
+		// Load history from repository if configured
+		if cfg.historyRepo != nil {
+			repoHistory, err := cfg.historyRepo.Load(ctx, cfg.historySessionID)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to load history from repository",
+					goerr.V("session_id", cfg.historySessionID))
+			}
+			if repoHistory != nil {
+				sessionOptions = append(sessionOptions, WithSessionHistory(repoHistory))
+			}
 		}
 		if len(toolList) > 0 {
 			sessionOptions = append(sessionOptions, WithSessionTools(toolList...))
@@ -422,6 +458,9 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 					if err := g.currentSession.AppendHistory(userHistory); err != nil {
 						return nil, goerr.Wrap(err, "failed to append user inputs to session history")
 					}
+					if err := saveHistoryToRepo(ctx, g.currentSession, cfg); err != nil {
+						return nil, err
+					}
 				}
 			}
 
@@ -459,6 +498,9 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 				if err := g.currentSession.AppendHistory(textHistory); err != nil {
 					return nil, goerr.Wrap(err, "failed to append texts to session history")
 				}
+				if err := saveHistoryToRepo(ctx, g.currentSession, cfg); err != nil {
+					return nil, err
+				}
 			}
 
 			// Return strategy's response immediately
@@ -480,6 +522,9 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 
 			newInput, err := handleResponse(ctx, logger, output, toolMap, cfg.toolMiddlewares, cfg.disableArgsValidation)
 			if err != nil {
+				return nil, err
+			}
+			if err := saveHistoryToRepo(ctx, g.currentSession, cfg); err != nil {
 				return nil, err
 			}
 			lastResponse = output
@@ -511,11 +556,31 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 					streamedResponse.Error = output.Error
 				}
 			}
+			if err := saveHistoryToRepo(ctx, g.currentSession, cfg); err != nil {
+				return nil, err
+			}
 			lastResponse = &streamedResponse
 		}
 	}
 
 	return nil, goerr.Wrap(ErrLoopLimitExceeded, "session stopped", goerr.V("loop_limit", cfg.loopLimit))
+}
+
+// saveHistoryToRepo saves the current session history to the configured HistoryRepository.
+// It is a no-op if no repository is configured.
+func saveHistoryToRepo(ctx context.Context, session Session, cfg *gollemConfig) error {
+	if cfg.historyRepo == nil {
+		return nil
+	}
+	history, err := session.History()
+	if err != nil {
+		return goerr.Wrap(err, "failed to get session history for save")
+	}
+	if err := cfg.historyRepo.Save(ctx, cfg.historySessionID, history); err != nil {
+		return goerr.Wrap(err, "failed to save history to repository",
+			goerr.V("session_id", cfg.historySessionID))
+	}
+	return nil
 }
 
 func handleResponse(ctx context.Context, logger *slog.Logger, output *Response, toolMap map[string]Tool, toolMiddlewares []ToolMiddleware, disableArgsValidation bool) ([]Input, error) {
