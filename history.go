@@ -102,10 +102,16 @@ func cloneMessage(m Message) Message {
 	}
 
 	if m.Metadata != nil {
-		clone.Metadata = make(map[string]interface{}, len(m.Metadata))
-		for k, v := range m.Metadata {
-			clone.Metadata[k] = v
+		// Use JSON round-trip to deep-copy Metadata values, which may themselves be
+		// reference types (maps or slices).
+		if data, err := json.Marshal(m.Metadata); err == nil {
+			var metaCopy map[string]interface{}
+			if err := json.Unmarshal(data, &metaCopy); err == nil {
+				clone.Metadata = metaCopy
+			}
 		}
+		// If marshal/unmarshal fails (should not happen for well-formed metadata),
+		// clone.Metadata remains nil rather than sharing the original's references.
 	}
 
 	return clone
