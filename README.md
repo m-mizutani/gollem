@@ -200,6 +200,17 @@ json.Unmarshal(data, &restored)
 agent := gollem.New(client, gollem.WithHistory(&restored))
 ```
 
+For automatic persistence, implement `HistoryRepository` and pass it via `WithHistoryRepository`. gollem then loads history at the start of a session and saves it after every LLM round-trip — no manual marshaling required.
+
+```go
+agent := gollem.New(client,
+    gollem.WithHistoryRepository(repo, "session-id"),
+)
+
+// History is loaded automatically on first Execute, and saved after each round-trip
+err := agent.Execute(ctx, gollem.Text("Hello!"))
+```
+
 ## Examples
 
 See the [examples](https://github.com/m-mizutani/gollem/tree/main/examples) directory for complete working examples:

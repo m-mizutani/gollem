@@ -250,6 +250,37 @@ For cloud storage, implement the same two methods using your SDK of choice — g
 
 ## Best Practices
 
+### Prefer HistoryRepository over manual JSON marshaling
+
+For any application that persists history across requests, `WithHistoryRepository` is the recommended approach. It removes boilerplate, guarantees saves happen after every round-trip (even on mid-conversation failures), and keeps session lifetime management out of your application code.
+
+Use manual `json.Marshal` / `json.Unmarshal` only when you need one-off exports (e.g., backup, analytics, or migration).
+
+### Choose a stable session ID
+
+The session ID is the primary key for history. Use an ID that is stable for the lifetime of the conversation — for example a user ID, a ticket ID, or a UUID generated when the conversation starts. Avoid IDs that change between requests (e.g., request IDs).
+
+### Validate the history version before restoring
+
+`History.UnmarshalJSON` returns `ErrHistoryVersionMismatch` if the serialized version does not match `gollem.HistoryVersion`. When loading from persistent storage, handle this error explicitly and start a fresh session rather than crashing:
+
+```go
+var h gollem.History
+if err := json.Unmarshal(data, &h); err != nil {
+    if errors.Is(err, gollem.ErrHistoryVersionMismatch) {
+        // Stored history is from an older version — start fresh
+        return nil, nil
+    }
+    return nil, err
+}
+return &h, nil
+```
+
+`HistoryRepository.Load` implementations should apply the same pattern.
+
+### Do not mix LLM providers for the same history
+
+Each `History` is tied to the LLM type that created it. Restoring a history serialized from an OpenAI session into a Claude agent (or vice versa) is not supported and will produce incorrect results.
 
 ## Next Steps
 
