@@ -3,14 +3,11 @@ import { Link } from "react-router-dom";
 import type { TraceSummary } from "../api/types";
 import { formatBytes, formatRelativeTime, formatDateTime } from "../utils/format";
 
+const PAGE_SIZE = 20;
+
 interface TraceListTableProps {
   traces: TraceSummary[];
   isLoading: boolean;
-  currentPage: number;
-  hasNextPage: boolean;
-  hasPrevPage: boolean;
-  onNextPage: () => void;
-  onPrevPage: () => void;
 }
 
 type SortField = "updated_at" | "size";
@@ -19,16 +16,12 @@ type SortOrder = "asc" | "desc";
 export default function TraceListTable({
   traces,
   isLoading,
-  currentPage,
-  hasNextPage,
-  hasPrevPage,
-  onNextPage,
-  onPrevPage,
 }: TraceListTableProps) {
   const [filter, setFilter] = useState("");
   const [sortField, setSortField] = useState<SortField>("updated_at");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [showRelativeTime, setShowRelativeTime] = useState(true);
+  const [currentPage, setCurrentPage] = useState(0);
 
   const filteredAndSorted = useMemo(() => {
     let result = traces;
@@ -51,7 +44,16 @@ export default function TraceListTable({
     });
   }, [traces, filter, sortField, sortOrder]);
 
+  // Reset page when filter or sort changes
+  const totalPages = Math.max(1, Math.ceil(filteredAndSorted.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages - 1);
+  const pageTraces = filteredAndSorted.slice(
+    safePage * PAGE_SIZE,
+    (safePage + 1) * PAGE_SIZE
+  );
+
   const toggleSort = (field: SortField) => {
+    setCurrentPage(0);
     if (sortField === field) {
       setSortOrder(sortOrder === "asc" ? "desc" : "asc");
     } else {
@@ -80,7 +82,10 @@ export default function TraceListTable({
           type="text"
           placeholder="Filter by Trace ID..."
           value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+          onChange={(e) => {
+            setFilter(e.target.value);
+            setCurrentPage(0);
+          }}
           className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
       </div>
@@ -104,14 +109,14 @@ export default function TraceListTable({
           </tr>
         </thead>
         <tbody>
-          {filteredAndSorted.length === 0 ? (
+          {pageTraces.length === 0 ? (
             <tr>
               <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
                 No traces found
               </td>
             </tr>
           ) : (
-            filteredAndSorted.map((trace) => (
+            pageTraces.map((trace) => (
               <tr
                 key={trace.trace_id}
                 className="border-t border-gray-100 hover:bg-gray-50"
@@ -146,18 +151,20 @@ export default function TraceListTable({
       </table>
 
       <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between">
-        <span className="text-sm text-gray-500">Page {currentPage + 1}</span>
+        <span className="text-sm text-gray-500">
+          {filteredAndSorted.length} traces — Page {safePage + 1} of {totalPages}
+        </span>
         <div className="flex gap-2">
           <button
-            onClick={onPrevPage}
-            disabled={!hasPrevPage}
+            onClick={() => setCurrentPage(safePage - 1)}
+            disabled={safePage <= 0}
             className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Previous
           </button>
           <button
-            onClick={onNextPage}
-            disabled={!hasNextPage}
+            onClick={() => setCurrentPage(safePage + 1)}
+            disabled={safePage >= totalPages - 1}
             className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Next
