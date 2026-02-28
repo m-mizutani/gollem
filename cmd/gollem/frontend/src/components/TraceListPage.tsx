@@ -1,34 +1,9 @@
-import { useState, useCallback } from "react";
-import { useTraces } from "../hooks/useTraces";
+import { useAllTraces } from "../hooks/useAllTraces";
 import TraceIDInput from "./TraceIDInput";
 import TraceListTable from "./TraceListTable";
 
-const PAGE_SIZE = 20;
-
 export default function TraceListPage() {
-  const [pageTokens, setPageTokens] = useState<string[]>([""]);
-  const [currentPage, setCurrentPage] = useState(0);
-
-  const currentToken = pageTokens[currentPage] || "";
-  const { data, isLoading, error } = useTraces(PAGE_SIZE, currentToken);
-
-  const handleNextPage = useCallback(() => {
-    if (data?.next_page_token) {
-      const nextPage = currentPage + 1;
-      setPageTokens((prev) => {
-        const updated = [...prev];
-        updated[nextPage] = data.next_page_token!;
-        return updated;
-      });
-      setCurrentPage(nextPage);
-    }
-  }, [data, currentPage]);
-
-  const handlePrevPage = useCallback(() => {
-    if (currentPage > 0) {
-      setCurrentPage(currentPage - 1);
-    }
-  }, [currentPage]);
+  const { data: traces, isLoading, error } = useAllTraces();
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -42,13 +17,8 @@ export default function TraceListPage() {
       )}
 
       <TraceListTable
-        traces={data?.traces || []}
+        traces={traces || []}
         isLoading={isLoading}
-        currentPage={currentPage}
-        hasNextPage={!!data?.next_page_token}
-        hasPrevPage={currentPage > 0}
-        onNextPage={handleNextPage}
-        onPrevPage={handlePrevPage}
       />
     </div>
   );

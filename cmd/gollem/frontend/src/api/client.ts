@@ -1,4 +1,4 @@
-import type { ListTracesResponse, Trace } from "./types";
+import type { ListTracesResponse, Trace, TraceSummary } from "./types";
 
 const BASE_URL = "/api";
 
@@ -21,6 +21,20 @@ export async function listTraces(
     params.set("page_token", pageToken);
   }
   return fetchJSON<ListTracesResponse>(`/traces?${params.toString()}`);
+}
+
+export async function listAllTraces(): Promise<TraceSummary[]> {
+  const all: TraceSummary[] = [];
+  let pageToken = "";
+  const pageSize = 1000;
+
+  do {
+    const resp = await listTraces(pageSize, pageToken);
+    all.push(...resp.traces);
+    pageToken = resp.next_page_token || "";
+  } while (pageToken);
+
+  return all;
 }
 
 export async function getTrace(traceID: string): Promise<Trace> {
