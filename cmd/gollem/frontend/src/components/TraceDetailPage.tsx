@@ -6,10 +6,9 @@ import TraceHeader from "./TraceHeader";
 import SpanTree from "./SpanTree";
 import SpanDetail from "./SpanDetail";
 import Timeline from "./Timeline";
-import TokenChart from "./TokenChart";
-import DurationChart from "./DurationChart";
+import LLMCallList from "./LLMCallList";
 
-type Tab = "overview" | "timeline" | "charts";
+type Tab = "overview" | "timeline" | "llm_calls";
 
 export default function TraceDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -54,7 +53,7 @@ export default function TraceDetailPage() {
   const tabs: { key: Tab; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "timeline", label: "Timeline" },
-    { key: "charts", label: "Charts" },
+    { key: "llm_calls", label: "LLM Calls" },
   ];
 
   return (
@@ -96,12 +95,7 @@ export default function TraceDetailPage() {
 
       {activeTab === "timeline" && <Timeline trace={trace} />}
 
-      {activeTab === "charts" && (
-        <div className="space-y-6">
-          <TokenChart trace={trace} />
-          <DurationChart trace={trace} />
-        </div>
-      )}
+      {activeTab === "llm_calls" && <LLMCallList trace={trace} />}
     </div>
   );
 }
