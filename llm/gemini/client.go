@@ -807,10 +807,25 @@ func (c *Client) GenerateEmbedding(ctx context.Context, dimension int, input []s
 		config.OutputDimensionality = &outputDim
 	}
 
+	// Start LLM call trace span
+	var traceData *trace.LLMCallData
+	var llmErr error
+	if h := trace.HandlerFrom(ctx); h != nil {
+		ctx = h.StartLLMCall(ctx)
+		defer func() { h.EndLLMCall(ctx, traceData, llmErr) }()
+	}
+
 	// Generate embeddings for the specified model
 	result, err := c.client.Models.EmbedContent(ctx, c.embeddingModel, contents, config)
 	if err != nil {
+		llmErr = err
 		return nil, goerr.Wrap(err, "failed to generate embeddings")
+	}
+
+	traceData = &trace.LLMCallData{
+		Model:    c.embeddingModel,
+		Request:  &trace.LLMRequest{},
+		Response: &trace.LLMResponse{},
 	}
 
 	if result == nil || len(result.Embeddings) == 0 {
@@ -1000,10 +1015,26 @@ func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, e
 		Tools:             s.config.Tools,
 	}
 
+	// Start LLM call trace span
+	var traceData *trace.LLMCallData
+	var llmErr error
+	if h := trace.HandlerFrom(ctx); h != nil {
+		ctx = h.StartLLMCall(ctx)
+		defer func() { h.EndLLMCall(ctx, traceData, llmErr) }()
+	}
+
 	// Call the CountTokens API
 	result, err := s.apiClient.CountTokens(ctx, s.model, contents, countConfig)
 	if err != nil {
+		llmErr = err
 		return 0, goerr.Wrap(err, "failed to count tokens")
+	}
+
+	traceData = &trace.LLMCallData{
+		InputTokens: int(result.TotalTokens),
+		Model:       s.model,
+		Request:     &trace.LLMRequest{},
+		Response:    &trace.LLMResponse{},
 	}
 
 	return int(result.TotalTokens), nil

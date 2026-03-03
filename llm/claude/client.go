@@ -982,10 +982,28 @@ func countTokensWithParams(
 		params.Tools = countTools
 	}
 
+	// Start LLM call trace span
+	var traceData *trace.LLMCallData
+	var llmErr error
+	if h := trace.HandlerFrom(ctx); h != nil {
+		ctx = h.StartLLMCall(ctx)
+		defer func() { h.EndLLMCall(ctx, traceData, llmErr) }()
+	}
+
 	// Call the CountTokens API
 	result, err := apiClient.MessagesCountTokens(ctx, params)
 	if err != nil {
+		llmErr = err
 		return 0, goerr.Wrap(err, "failed to count tokens")
+	}
+
+	traceData = &trace.LLMCallData{
+		InputTokens: int(result.InputTokens),
+		Model:       string(params.Model),
+		Request: &trace.LLMRequest{
+			SystemPrompt: systemPrompt,
+		},
+		Response: &trace.LLMResponse{},
 	}
 
 	return int(result.InputTokens), nil

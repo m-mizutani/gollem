@@ -8,6 +8,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/vertex"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/trace"
 )
 
 const (
@@ -188,6 +189,14 @@ func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...g
 		}
 	}
 
+	// Start LLM call trace span
+	var traceData *trace.LLMCallData
+	var llmErr error
+	if h := trace.HandlerFrom(ctx); h != nil {
+		ctx = h.StartLLMCall(ctx)
+		defer func() { h.EndLLMCall(ctx, traceData, llmErr) }()
+	}
+
 	resp, err := generateClaudeContent(
 		ctx,
 		s.client,
@@ -199,8 +208,12 @@ func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...g
 		"Claude Vertex",
 	)
 	if err != nil {
+		llmErr = err
 		return nil, err
 	}
+
+	// Set trace data for defer
+	traceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt())
 
 	// Only update session history after successful API call
 	s.messages = append(s.messages, messages...)
@@ -232,7 +245,13 @@ func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...go
 		}
 	}
 
-	return generateClaudeStream(
+	// Start LLM call trace span
+	traceHandler := trace.HandlerFrom(ctx)
+	if traceHandler != nil {
+		ctx = traceHandler.StartLLMCall(ctx)
+	}
+
+	ch, err := generateClaudeStream(
 		ctx,
 		s.client,
 		s.messages,
@@ -242,6 +261,66 @@ func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...go
 		s.cfg,
 		&s.messages,
 	)
+	if err != nil {
+		if traceHandler != nil {
+			traceHandler.EndLLMCall(ctx, nil, err)
+		}
+		return nil, err
+	}
+
+	if traceHandler == nil {
+		return ch, nil
+	}
+
+	// Wrap channel to capture trace data on stream completion
+	wrappedCh := make(chan *gollem.Response)
+	go func() {
+		defer close(wrappedCh)
+
+		var streamTraceData *trace.LLMCallData
+		var streamErr error
+		defer func() { traceHandler.EndLLMCall(ctx, streamTraceData, streamErr) }()
+
+		var allTexts []string
+		var allFunctionCalls []*trace.FunctionCall
+		var lastInputTokens, lastOutputTokens int
+
+		for resp := range ch {
+			if resp.Error != nil {
+				streamErr = resp.Error
+			}
+			allTexts = append(allTexts, resp.Texts...)
+			for _, fc := range resp.FunctionCalls {
+				allFunctionCalls = append(allFunctionCalls, &trace.FunctionCall{
+					ID:        fc.ID,
+					Name:      fc.Name,
+					Arguments: fc.Arguments,
+				})
+			}
+			if resp.InputToken > 0 {
+				lastInputTokens = resp.InputToken
+			}
+			if resp.OutputToken > 0 {
+				lastOutputTokens = resp.OutputToken
+			}
+			wrappedCh <- resp
+		}
+
+		streamTraceData = &trace.LLMCallData{
+			InputTokens:  lastInputTokens,
+			OutputTokens: lastOutputTokens,
+			Model:        s.defaultModel,
+			Request: &trace.LLMRequest{
+				SystemPrompt: s.cfg.SystemPrompt(),
+			},
+			Response: &trace.LLMResponse{
+				Texts:         allTexts,
+				FunctionCalls: allFunctionCalls,
+			},
+		}
+	}()
+
+	return wrappedCh, nil
 }
 
 // CountToken calculates the total number of tokens for the given inputs,
