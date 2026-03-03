@@ -286,7 +286,7 @@ func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...go
 		var lastInputTokens, lastOutputTokens int
 
 		for resp := range ch {
-			if resp.Error != nil {
+			if resp.Error != nil && streamErr == nil {
 				streamErr = resp.Error
 			}
 			allTexts = append(allTexts, resp.Texts...)
