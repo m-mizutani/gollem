@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/m-mizutani/gollem/trace"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -31,9 +32,25 @@ func (c *Client) GenerateEmbedding(ctx context.Context, dimension int, input []s
 		Dimensions: dimension,
 	}
 
+	// Start LLM call trace span
+	var traceData *trace.LLMCallData
+	var llmErr error
+	if h := trace.HandlerFrom(ctx); h != nil {
+		ctx = h.StartLLMCall(ctx)
+		defer func() { h.EndLLMCall(ctx, traceData, llmErr) }()
+	}
+
 	resp, err := c.client.CreateEmbeddings(ctx, req)
 	if err != nil {
+		llmErr = err
 		return nil, goerr.Wrap(err, "failed to create embedding")
+	}
+
+	traceData = &trace.LLMCallData{
+		InputTokens: resp.Usage.TotalTokens,
+		Model:       string(resp.Model),
+		Request:     &trace.LLMRequest{},
+		Response:    &trace.LLMResponse{},
 	}
 
 	if len(resp.Data) == 0 {

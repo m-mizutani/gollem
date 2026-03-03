@@ -13,6 +13,7 @@ import (
 	"github.com/m-mizutani/gollem/llm/claude"
 	"github.com/m-mizutani/gollem/llm/gemini"
 	"github.com/m-mizutani/gollem/llm/openai"
+	"github.com/m-mizutani/gollem/trace"
 	"github.com/m-mizutani/gt"
 )
 
@@ -24,9 +25,11 @@ func TestToolExecution(t *testing.T) {
 		client, err := newClient(t)
 		gt.NoError(t, err)
 
+		rec := trace.New()
 		agent := gollem.New(client,
 			gollem.WithTools(&RandomNumberTool{}),
 			gollem.WithLoopLimit(5),
+			gollem.WithTrace(rec),
 		)
 
 		fmt.Printf("[TEST] Agent created: agent=%p\n", agent)
@@ -44,6 +47,15 @@ func TestToolExecution(t *testing.T) {
 		gt.NotNil(t, history)
 		fmt.Printf("[TEST] History after Execute: messages=%d\n", len(history.Messages))
 		gt.True(t, len(history.Messages) >= 2)
+
+		// Verify LLM call traces are recorded
+		traceData := rec.Trace()
+		gt.NotNil(t, traceData)
+		gt.NotNil(t, traceData.RootSpan)
+
+		llmCallCount := countSpansByKind(traceData.RootSpan, trace.SpanKindLLMCall)
+		gt.N(t, llmCallCount).Greater(0)
+		fmt.Printf("[TEST] LLM call spans recorded: %d\n", llmCallCount)
 	}
 
 	t.Run("OpenAI", func(t *testing.T) {
@@ -587,4 +599,19 @@ func TestPDFInput(t *testing.T) {
 			return gemini.New(context.Background(), projectID, location)
 		})
 	})
+}
+
+// countSpansByKind recursively counts spans of a given kind in the trace tree.
+func countSpansByKind(span *trace.Span, kind trace.SpanKind) int {
+	if span == nil {
+		return 0
+	}
+	count := 0
+	if span.Kind == kind {
+		count++
+	}
+	for _, child := range span.Children {
+		count += countSpansByKind(child, kind)
+	}
+	return count
 }
