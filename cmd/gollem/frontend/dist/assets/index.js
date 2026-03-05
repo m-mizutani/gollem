@@ -21879,6 +21879,40 @@ function EventDetail({ data }) {
     ] })
   ] });
 }
+function StackTraceSection({ frames }) {
+  const [expanded, setExpanded] = reactExports.useState(false);
+  if (!frames || frames.length === 0) return null;
+  const shortFile = (file) => {
+    const parts = file.split("/");
+    return parts.length > 2 ? parts.slice(-2).join("/") : file;
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "border border-gray-200 rounded", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "button",
+      {
+        onClick: () => setExpanded(!expanded),
+        className: "w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-500 hover:bg-gray-50",
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "flex-shrink-0", children: expanded ? "▾" : "▸" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
+            "Stack Trace (",
+            frames.length,
+            " frames)"
+          ] })
+        ]
+      }
+    ),
+    expanded && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "border-t border-gray-200 bg-gray-50 px-3 py-2 overflow-x-auto", children: /* @__PURE__ */ jsxRuntimeExports.jsx("table", { className: "text-xs font-mono w-full", children: /* @__PURE__ */ jsxRuntimeExports.jsx("tbody", { children: frames.map((frame, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { className: i === 0 ? "text-gray-900 font-medium" : "text-gray-500", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "pr-2 py-0.5 text-right text-gray-400 select-none w-6", children: i }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "pr-3 py-0.5 whitespace-nowrap", children: frame.function.split("/").pop() }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("td", { className: "py-0.5 whitespace-nowrap text-gray-400", children: [
+        shortFile(frame.file),
+        ":",
+        frame.line
+      ] })
+    ] }, i)) }) }) })
+  ] });
+}
 function SpanDetail({ span }) {
   if (!span) {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "p-6 text-sm text-gray-500 flex items-center justify-center h-full", children: "Select a span from the tree to view details" });
@@ -21940,6 +21974,7 @@ function SpanDetail({ span }) {
       " ",
       span.error
     ] }),
+    span.stack_trace && span.stack_trace.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(StackTraceSection, { frames: span.stack_trace }),
     span.kind === "llm_call" && span.llm_call && /* @__PURE__ */ jsxRuntimeExports.jsx(LLMCallDetail, { data: span.llm_call }),
     span.kind === "tool_exec" && span.tool_exec && /* @__PURE__ */ jsxRuntimeExports.jsx(ToolExecDetail, { data: span.tool_exec }),
     span.kind === "event" && span.event && /* @__PURE__ */ jsxRuntimeExports.jsx(EventDetail, { data: span.event })
