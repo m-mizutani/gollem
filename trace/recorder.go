@@ -109,7 +109,7 @@ func (r *Recorder) StartAgentExecute(ctx context.Context) context.Context {
 		Status:    SpanStatusOK,
 	}
 	if r.stackTrace {
-		span.StackTrace = captureStackTrace(1)
+		span.StackTrace = captureStackTrace(0)
 	}
 
 	traceID := r.traceID
@@ -201,7 +201,7 @@ func (r *Recorder) StartToolExec(ctx context.Context, toolName string, args map[
 		},
 	}
 	if r.stackTrace {
-		span.StackTrace = captureStackTrace(1)
+		span.StackTrace = captureStackTrace(0)
 	}
 
 	parent.Children = append(parent.Children, span)
@@ -290,7 +290,7 @@ func (r *Recorder) AddEvent(ctx context.Context, kind string, data any) {
 		},
 	}
 	if r.stackTrace {
-		span.StackTrace = captureStackTrace(1)
+		span.StackTrace = captureStackTrace(0)
 	}
 
 	parent.Children = append(parent.Children, span)
@@ -341,8 +341,8 @@ func (r *Recorder) startChildSpan(ctx context.Context, kind SpanKind, name strin
 		Status:    SpanStatusOK,
 	}
 	if r.stackTrace {
-		// skip=2: skip startChildSpan and its caller (StartLLMCall/StartSubAgent)
-		span.StackTrace = captureStackTrace(2)
+		// skip=1: skip startChildSpan to show the public caller (StartLLMCall/StartSubAgent)
+		span.StackTrace = captureStackTrace(1)
 	}
 
 	parent.Children = append(parent.Children, span)

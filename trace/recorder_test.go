@@ -354,73 +354,82 @@ func TestRecorderStackTraceEnabled(t *testing.T) {
 	rec := trace.New(trace.WithStackTrace())
 	ctx := context.Background()
 
-	// Each call is on a distinct line so we can verify line numbers
-	agentCtx := rec.StartAgentExecute(ctx)       // agent_execute
-	llmCtx := rec.StartLLMCall(agentCtx)          // llm_call
+	agentCtx := rec.StartAgentExecute(ctx)
+	llmCtx := rec.StartLLMCall(agentCtx)
 	rec.EndLLMCall(llmCtx, &trace.LLMCallData{InputTokens: 10}, nil)
-	toolCtx := rec.StartToolExec(agentCtx, "search", map[string]any{"q": "test"}) // tool_exec
+	toolCtx := rec.StartToolExec(agentCtx, "search", map[string]any{"q": "test"})
 	rec.EndToolExec(toolCtx, nil, nil)
-	rec.AddEvent(agentCtx, "test_event", nil) // event
-	subCtx := rec.StartSubAgent(agentCtx, "child") // sub_agent
+	rec.AddEvent(agentCtx, "test_event", nil)
+	subCtx := rec.StartSubAgent(agentCtx, "child")
 	rec.EndSubAgent(subCtx, nil)
 	rec.EndAgentExecute(agentCtx, nil)
 
 	rootSpan := rec.Trace().RootSpan
 
-	// Helper to verify that a span's stack trace points to this test function and file
-	verifyStackTrace := func(t *testing.T, span *trace.Span) {
-		t.Helper()
-		gt.A(t, span.StackTrace).Longer(0)
-
-		topFrame := span.StackTrace[0]
-		// The top frame must be this test function
-		gt.S(t, topFrame.Function).Contains("TestRecorderStackTraceEnabled")
-		// The top frame must point to recorder_test.go
-		gt.S(t, topFrame.File).Contains("trace/recorder_test.go")
-		// Line number must be positive
-		gt.N(t, topFrame.Line).Greater(0)
-	}
-
-	t.Run("agent_execute span", func(t *testing.T) {
-		verifyStackTrace(t, rootSpan)
-	})
-
 	// Children: llm_call, tool_exec, event, sub_agent (in order)
 	gt.A(t, rootSpan.Children).Length(4)
 
-	t.Run("llm_call span", func(t *testing.T) {
+	t.Run("agent_execute span top frame is StartAgentExecute in recorder.go", func(t *testing.T) {
+		gt.A(t, rootSpan.StackTrace).Longer(1)
+		topFrame := rootSpan.StackTrace[0]
+		gt.S(t, topFrame.Function).Contains("Recorder).StartAgentExecute")
+		gt.S(t, topFrame.File).Contains("trace/recorder.go")
+		gt.N(t, topFrame.Line).Greater(0)
+		// The caller (test function) must appear in a subsequent frame
+		callerFrame := rootSpan.StackTrace[1]
+		gt.S(t, callerFrame.Function).Contains("TestRecorderStackTraceEnabled")
+		gt.S(t, callerFrame.File).Contains("trace/recorder_test.go")
+	})
+
+	t.Run("llm_call span top frame is StartLLMCall in recorder.go", func(t *testing.T) {
 		span := rootSpan.Children[0]
 		gt.V(t, span.Kind).Equal(trace.SpanKindLLMCall)
-		verifyStackTrace(t, span)
+		gt.A(t, span.StackTrace).Longer(1)
+		topFrame := span.StackTrace[0]
+		gt.S(t, topFrame.Function).Contains("Recorder).StartLLMCall")
+		gt.S(t, topFrame.File).Contains("trace/recorder.go")
+		gt.N(t, topFrame.Line).Greater(0)
+		callerFrame := span.StackTrace[1]
+		gt.S(t, callerFrame.Function).Contains("TestRecorderStackTraceEnabled")
+		gt.S(t, callerFrame.File).Contains("trace/recorder_test.go")
 	})
 
-	t.Run("tool_exec span", func(t *testing.T) {
+	t.Run("tool_exec span top frame is StartToolExec in recorder.go", func(t *testing.T) {
 		span := rootSpan.Children[1]
 		gt.V(t, span.Kind).Equal(trace.SpanKindToolExec)
-		verifyStackTrace(t, span)
+		gt.A(t, span.StackTrace).Longer(1)
+		topFrame := span.StackTrace[0]
+		gt.S(t, topFrame.Function).Contains("Recorder).StartToolExec")
+		gt.S(t, topFrame.File).Contains("trace/recorder.go")
+		gt.N(t, topFrame.Line).Greater(0)
+		callerFrame := span.StackTrace[1]
+		gt.S(t, callerFrame.Function).Contains("TestRecorderStackTraceEnabled")
+		gt.S(t, callerFrame.File).Contains("trace/recorder_test.go")
 	})
 
-	t.Run("event span", func(t *testing.T) {
+	t.Run("event span top frame is AddEvent in recorder.go", func(t *testing.T) {
 		span := rootSpan.Children[2]
 		gt.V(t, span.Kind).Equal(trace.SpanKindEvent)
-		verifyStackTrace(t, span)
+		gt.A(t, span.StackTrace).Longer(1)
+		topFrame := span.StackTrace[0]
+		gt.S(t, topFrame.Function).Contains("Recorder).AddEvent")
+		gt.S(t, topFrame.File).Contains("trace/recorder.go")
+		gt.N(t, topFrame.Line).Greater(0)
+		callerFrame := span.StackTrace[1]
+		gt.S(t, callerFrame.Function).Contains("TestRecorderStackTraceEnabled")
+		gt.S(t, callerFrame.File).Contains("trace/recorder_test.go")
 	})
 
-	t.Run("sub_agent span", func(t *testing.T) {
+	t.Run("sub_agent span top frame is StartSubAgent in recorder.go", func(t *testing.T) {
 		span := rootSpan.Children[3]
 		gt.V(t, span.Kind).Equal(trace.SpanKindSubAgent)
-		verifyStackTrace(t, span)
-	})
-
-	t.Run("each span has a different line number", func(t *testing.T) {
-		// All spans should point to different lines since each Start* call is on a different line
-		lines := map[int]trace.SpanKind{}
-		allSpans := append([]*trace.Span{rootSpan}, rootSpan.Children...)
-		for _, span := range allSpans {
-			topLine := span.StackTrace[0].Line
-			_, duplicate := lines[topLine]
-			gt.B(t, duplicate).False()
-			lines[topLine] = span.Kind
-		}
+		gt.A(t, span.StackTrace).Longer(1)
+		topFrame := span.StackTrace[0]
+		gt.S(t, topFrame.Function).Contains("Recorder).StartSubAgent")
+		gt.S(t, topFrame.File).Contains("trace/recorder.go")
+		gt.N(t, topFrame.Line).Greater(0)
+		callerFrame := span.StackTrace[1]
+		gt.S(t, callerFrame.Function).Contains("TestRecorderStackTraceEnabled")
+		gt.S(t, callerFrame.File).Contains("trace/recorder_test.go")
 	})
 }
