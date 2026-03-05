@@ -109,7 +109,8 @@ func (r *Recorder) StartAgentExecute(ctx context.Context) context.Context {
 		Status:    SpanStatusOK,
 	}
 	if r.stackTrace {
-		span.StackTrace = captureStackTrace(0)
+		// skip=1: skip StartAgentExecute to show the caller (e.g., gollem.go)
+		span.StackTrace = captureStackTrace(1)
 	}
 
 	traceID := r.traceID
@@ -201,7 +202,8 @@ func (r *Recorder) StartToolExec(ctx context.Context, toolName string, args map[
 		},
 	}
 	if r.stackTrace {
-		span.StackTrace = captureStackTrace(0)
+		// skip=1: skip StartToolExec to show the caller (e.g., gollem.go)
+		span.StackTrace = captureStackTrace(1)
 	}
 
 	parent.Children = append(parent.Children, span)
@@ -290,7 +292,8 @@ func (r *Recorder) AddEvent(ctx context.Context, kind string, data any) {
 		},
 	}
 	if r.stackTrace {
-		span.StackTrace = captureStackTrace(0)
+		// skip=1: skip AddEvent to show the caller (e.g., strategy code)
+		span.StackTrace = captureStackTrace(1)
 	}
 
 	parent.Children = append(parent.Children, span)
@@ -341,8 +344,8 @@ func (r *Recorder) startChildSpan(ctx context.Context, kind SpanKind, name strin
 		Status:    SpanStatusOK,
 	}
 	if r.stackTrace {
-		// skip=1: skip startChildSpan to show the public caller (StartLLMCall/StartSubAgent)
-		span.StackTrace = captureStackTrace(1)
+		// skip=2: skip startChildSpan and StartLLMCall/StartSubAgent to show the caller (e.g., llm client code)
+		span.StackTrace = captureStackTrace(2)
 	}
 
 	parent.Children = append(parent.Children, span)
