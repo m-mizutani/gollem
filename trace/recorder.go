@@ -33,14 +33,24 @@ func WithTraceID(id string) Option {
 	}
 }
 
+// WithStackTrace enables capturing call stack traces for each span.
+// Stack traces are useful for debugging but add overhead, so they are
+// disabled by default.
+func WithStackTrace() Option {
+	return func(r *Recorder) {
+		r.stackTrace = true
+	}
+}
+
 // Recorder collects tracing data during agent execution into an in-memory Trace structure.
 // It implements the Handler interface and provides access to the collected Trace via Trace().
 type Recorder struct {
-	trace    *Trace
-	mu       sync.Mutex
-	repo     Repository
-	metadata TraceMetadata
-	traceID  string
+	trace      *Trace
+	mu         sync.Mutex
+	repo       Repository
+	metadata   TraceMetadata
+	traceID    string
+	stackTrace bool
 }
 
 // New creates a new Recorder with the given options.
@@ -97,6 +107,9 @@ func (r *Recorder) StartAgentExecute(ctx context.Context) context.Context {
 		Name:      "agent_execute",
 		StartedAt: now,
 		Status:    SpanStatusOK,
+	}
+	if r.stackTrace {
+		span.StackTrace = captureStackTrace(1)
 	}
 
 	traceID := r.traceID
@@ -187,6 +200,9 @@ func (r *Recorder) StartToolExec(ctx context.Context, toolName string, args map[
 			Args:     args,
 		},
 	}
+	if r.stackTrace {
+		span.StackTrace = captureStackTrace(1)
+	}
 
 	parent.Children = append(parent.Children, span)
 	return withCurrentSpan(ctx, span)
@@ -273,6 +289,9 @@ func (r *Recorder) AddEvent(ctx context.Context, kind string, data any) {
 			Data: data,
 		},
 	}
+	if r.stackTrace {
+		span.StackTrace = captureStackTrace(1)
+	}
 
 	parent.Children = append(parent.Children, span)
 }
@@ -320,6 +339,10 @@ func (r *Recorder) startChildSpan(ctx context.Context, kind SpanKind, name strin
 		Name:      name,
 		StartedAt: time.Now(),
 		Status:    SpanStatusOK,
+	}
+	if r.stackTrace {
+		// skip=2: skip startChildSpan and its caller (StartLLMCall/StartSubAgent)
+		span.StackTrace = captureStackTrace(2)
 	}
 
 	parent.Children = append(parent.Children, span)

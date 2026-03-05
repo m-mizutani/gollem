@@ -3,6 +3,7 @@ package trace_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -313,4 +314,71 @@ func TestRecorderWithEmptyTraceID(t *testing.T) {
 	gt.Value(t, tr).NotNil()
 	// Empty string should fall back to auto-generated UUID
 	gt.Value(t, tr.TraceID).NotEqual("")
+}
+
+func TestCaptureStackTrace(t *testing.T) {
+	frames := trace.CaptureStackTrace(0)
+	gt.A(t, frames).Longer(0)
+
+	// The first frame should be this test function
+	gt.B(t, strings.HasSuffix(frames[0].Function, "TestCaptureStackTrace")).True()
+	gt.B(t, strings.HasSuffix(frames[0].File, "recorder_test.go")).True()
+	gt.N(t, frames[0].Line).Greater(0)
+}
+
+func TestRecorderStackTraceDisabledByDefault(t *testing.T) {
+	rec := trace.New()
+	ctx := context.Background()
+
+	agentCtx := rec.StartAgentExecute(ctx)
+	llmCtx := rec.StartLLMCall(agentCtx)
+	rec.EndLLMCall(llmCtx, &trace.LLMCallData{InputTokens: 10}, nil)
+
+	toolCtx := rec.StartToolExec(agentCtx, "search", nil)
+	rec.EndToolExec(toolCtx, nil, nil)
+
+	rec.AddEvent(agentCtx, "test_event", nil)
+
+	subCtx := rec.StartSubAgent(agentCtx, "child")
+	rec.EndSubAgent(subCtx, nil)
+
+	rec.EndAgentExecute(agentCtx, nil)
+
+	rootSpan := rec.Trace().RootSpan
+	gt.Value(t, rootSpan.StackTrace).Nil()
+	for _, child := range rootSpan.Children {
+		gt.Value(t, child.StackTrace).Nil()
+	}
+}
+
+func TestRecorderStackTraceEnabled(t *testing.T) {
+	rec := trace.New(trace.WithStackTrace())
+	ctx := context.Background()
+
+	agentCtx := rec.StartAgentExecute(ctx)
+
+	llmCtx := rec.StartLLMCall(agentCtx)
+	rec.EndLLMCall(llmCtx, &trace.LLMCallData{InputTokens: 10}, nil)
+
+	toolCtx := rec.StartToolExec(agentCtx, "search", map[string]any{"q": "test"})
+	rec.EndToolExec(toolCtx, nil, nil)
+
+	rec.AddEvent(agentCtx, "test_event", nil)
+
+	subCtx := rec.StartSubAgent(agentCtx, "child")
+	rec.EndSubAgent(subCtx, nil)
+
+	rec.EndAgentExecute(agentCtx, nil)
+
+	rootSpan := rec.Trace().RootSpan
+
+	// Root span should have stack trace
+	gt.A(t, rootSpan.StackTrace).Longer(0)
+	gt.B(t, strings.Contains(rootSpan.StackTrace[0].Function, "TestRecorderStackTraceEnabled")).True()
+
+	// All child spans should have stack traces
+	for _, child := range rootSpan.Children {
+		gt.A(t, child.StackTrace).Longer(0)
+		gt.B(t, strings.Contains(child.StackTrace[0].Function, "TestRecorderStackTraceEnabled")).True()
+	}
 }
