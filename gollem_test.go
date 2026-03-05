@@ -12,6 +12,7 @@ import (
 
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/mock"
+	"github.com/m-mizutani/gollem/trace"
 	"github.com/m-mizutani/gt"
 )
 
@@ -1450,5 +1451,75 @@ func TestWithHistoryRepository(t *testing.T) {
 		cfg := gollem.NewSessionConfig(sessionOptions...)
 		gt.NotEqual(t, nil, cfg.History())
 		gt.Equal(t, 1, len(cfg.History().Messages))
+	})
+}
+
+func TestStackTraceWithAgentExecute(t *testing.T) {
+	t.Run("agent_execute and tool_exec stack traces point to gollem internal code", func(t *testing.T) {
+		callCount := 0
+		mockClient := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return &mock.SessionMock{
+					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						callCount++
+						if callCount == 1 {
+							return &gollem.Response{
+								FunctionCalls: []*gollem.FunctionCall{
+									{
+										ID:   "call_1",
+										Name: "random_number",
+										Arguments: map[string]any{
+											"min": float64(1),
+											"max": float64(10),
+										},
+									},
+								},
+							}, nil
+						}
+						return &gollem.Response{
+							Texts: []string{"Done"},
+						}, nil
+					},
+				}, nil
+			},
+		}
+
+		rec := trace.New(trace.WithStackTrace())
+		agent := gollem.New(mockClient,
+			gollem.WithTools(&RandomNumberTool{}),
+			gollem.WithLoopLimit(5),
+			gollem.WithTrace(rec),
+		)
+
+		_, err := agent.Execute(t.Context(), gollem.Text("generate number"))
+		gt.NoError(t, err)
+
+		tr := rec.Trace()
+		gt.Value(t, tr).NotNil()
+
+		rootSpan := tr.RootSpan
+		gt.V(t, rootSpan.Kind).Equal(trace.SpanKindAgentExecute)
+
+		// agent_execute span: top frame must be gollem.go (the Execute method)
+		gt.A(t, rootSpan.StackTrace).Longer(0)
+		gt.S(t, rootSpan.StackTrace[0].File).Contains("gollem.go")
+		gt.S(t, rootSpan.StackTrace[0].Function).Contains("Agent).Execute")
+		gt.N(t, rootSpan.StackTrace[0].Line).Greater(0)
+
+		// Find tool_exec span among children
+		var toolSpan *trace.Span
+		for _, child := range rootSpan.Children {
+			if child.Kind == trace.SpanKindToolExec {
+				toolSpan = child
+				break
+			}
+		}
+		gt.Value(t, toolSpan).NotNil()
+
+		// tool_exec span: top frame must be gollem.go (the executeToolCall function)
+		gt.A(t, toolSpan.StackTrace).Longer(0)
+		gt.S(t, toolSpan.StackTrace[0].File).Contains("gollem.go")
+		gt.S(t, toolSpan.StackTrace[0].Function).Contains("executeToolCall")
+		gt.N(t, toolSpan.StackTrace[0].Line).Greater(0)
 	})
 }
