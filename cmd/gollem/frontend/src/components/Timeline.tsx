@@ -197,23 +197,34 @@ export default function Timeline({ trace }: TimelineProps) {
         })}
 
         {/* Tooltip */}
-        {hoveredSpan && (
-          <foreignObject
-            x={tooltipPos.x}
-            y={tooltipPos.y}
-            width={250}
-            height={80}
-          >
-            <div className="bg-gray-900 text-white text-xs rounded px-3 py-2 shadow-lg">
-              <div className="font-medium">{hoveredSpan.span.name}</div>
-              <div className="text-gray-300 mt-1">
-                Kind: {hoveredSpan.span.kind} | Duration:{" "}
-                {formatDuration(hoveredSpan.span.duration)} | Status:{" "}
-                {hoveredSpan.span.status}
+        {hoveredSpan && (() => {
+          const tooltipWidth = 250;
+          const tooltipHeight = 80;
+          const tx = tooltipPos.x + tooltipWidth > chartWidth
+            ? tooltipPos.x - tooltipWidth - 10
+            : tooltipPos.x;
+          const ty = tooltipPos.y + tooltipHeight > chartHeight
+            ? tooltipPos.y - tooltipHeight
+            : tooltipPos.y;
+          return (
+            <foreignObject
+              x={tx}
+              y={ty}
+              width={tooltipWidth}
+              height={tooltipHeight}
+              style={{ pointerEvents: "none" }}
+            >
+              <div className="bg-gray-900 text-white text-xs rounded px-3 py-2 shadow-lg">
+                <div className="font-medium">{hoveredSpan.span.name}</div>
+                <div className="text-gray-300 mt-1">
+                  Kind: {hoveredSpan.span.kind} | Duration:{" "}
+                  {formatDuration(hoveredSpan.span.duration)} | Status:{" "}
+                  {hoveredSpan.span.status}
+                </div>
               </div>
-            </div>
-          </foreignObject>
-        )}
+            </foreignObject>
+          );
+        })()}
       </svg>
     </div>
   );
