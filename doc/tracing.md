@@ -9,7 +9,7 @@ During agent execution, gollem emits lifecycle events:
 - **Agent Execute**: The root span wrapping an `agent.Execute()` call
 - **LLM Call**: Each request/response to the LLM provider
 - **Tool Exec**: Each tool invocation with arguments and results
-- **Sub Agent**: Internal sub-agent invocations within gollem (e.g., Falcon, BigQuery)
+- **Sub Agent**: Internal sub-agent invocations within gollem via `SubAgent.Run()`
 - **Child Agent**: External agent invocations via `trace.AsSubAgent` (distinguished from internal sub-agents)
 - **Event**: Custom events emitted by strategies (e.g., plan creation, reflection)
 
@@ -123,7 +123,7 @@ Trace
 └── RootSpan (agent_execute)
     ├── LLM Call span (input/output tokens, model, request/response)
     ├── Tool Exec span (tool name, args, result)
-    ├── Sub Agent span (internal, e.g., Falcon)
+    ├── Sub Agent span (internal sub-agent)
     │   ├── LLM Call span
     │   └── Tool Exec span
     ├── Child Agent span (external agent via AsSubAgent)
@@ -235,14 +235,14 @@ Root Agent Execute (agent_execute)
 │   └── Tool Exec
 ├── Child Agent: task-2 (agent_execute)  ← created by AsSubAgent
 │   ├── LLM Call
-│   └── Sub Agent: falcon (sub_agent)   ← gollem-internal sub-agent
+│   └── Sub Agent: searcher (sub_agent)   ← gollem-internal sub-agent
 │       └── LLM Call
 └── LLM Call (final response)
 ```
 
 Key distinction:
 - **`SpanKindAgentExecute`**: External agents created via `AsSubAgent` — these are full `Agent.Execute()` calls
-- **`SpanKindSubAgent`**: Internal sub-agents managed by gollem itself (e.g., Falcon, BigQuery)
+- **`SpanKindSubAgent`**: Internal sub-agents managed by gollem itself via `SubAgent.Run()`
 
 `AsSubAgent` is thread-safe: multiple child handlers can share the same parent recorder and run concurrently.
 
