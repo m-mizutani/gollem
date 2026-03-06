@@ -44,6 +44,7 @@ agent := gollem.New(client,
 | `LLMResponse` | LLM response content |
 | `ToolExec` | Tool execution start/end |
 | `SubAgent` | Sub-agent execution start/end |
+| `ChildAgent` | Child agent execution start/end |
 | `CustomEvent` | Custom trace events |
 
 By default, all events are enabled. Use `WithEvents()` to enable only specific events.

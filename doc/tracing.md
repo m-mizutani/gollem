@@ -9,7 +9,8 @@ During agent execution, gollem emits lifecycle events:
 - **Agent Execute**: The root span wrapping an `agent.Execute()` call
 - **LLM Call**: Each request/response to the LLM provider
 - **Tool Exec**: Each tool invocation with arguments and results
-- **Sub Agent**: Child agent invocations via `SubAgent`
+- **Sub Agent**: Internal sub-agent invocations within gollem via `SubAgent.Run()`
+- **Child Agent**: External agent invocations via `trace.AsChildAgent` (distinguished from internal sub-agents)
 - **Event**: Custom events emitted by strategies (e.g., plan creation, reflection)
 
 These events form a tree structure rooted at the agent execution span.
@@ -31,6 +32,9 @@ type Handler interface {
 
     StartSubAgent(ctx context.Context, name string) context.Context
     EndSubAgent(ctx context.Context, err error)
+
+    StartChildAgent(ctx context.Context, name string) context.Context
+    EndChildAgent(ctx context.Context, err error)
 
     AddEvent(ctx context.Context, kind string, data any)
 
@@ -119,7 +123,10 @@ Trace
 └── RootSpan (agent_execute)
     ├── LLM Call span (input/output tokens, model, request/response)
     ├── Tool Exec span (tool name, args, result)
-    ├── Sub Agent span
+    ├── Sub Agent span (internal sub-agent)
+    │   ├── LLM Call span
+    │   └── Tool Exec span
+    ├── Child Agent span (external agent via AsChildAgent)
     │   ├── LLM Call span
     │   └── Tool Exec span
     └── Event span (strategy-defined events)
@@ -172,6 +179,7 @@ gollem events map to OTel spans as follows:
 | LLM Call | `llm_call` | Client | `llm.model`, `llm.input_tokens`, `llm.output_tokens` |
 | Tool Exec | `tool:{name}` | Internal | `tool.name`, `tool.args` |
 | Sub Agent | `sub_agent:{name}` | Internal | - |
+| Child Agent | `child_agent:{name}` | Internal | - |
 | Event | _(added as span event)_ | - | `event.data` |
 
 Errors are recorded via `span.RecordError()`. Parent-child relationships are preserved through context propagation.
@@ -196,6 +204,49 @@ agent := gollem.New(client,
 ```
 
 `Finish` collects errors from all handlers using `errors.Join`.
+
+### AsChildAgent Helper (`trace.AsChildAgent()`)
+
+`AsChildAgent` creates a `Handler` that maps a child `Agent.Execute()` into the parent trace tree as a `SpanKindAgentExecute` span. This is useful when running multiple gollem Agents within a single trace.
+
+Without `AsChildAgent`, each `Agent.Execute()` would create its own root span, overwriting the parent trace. With `AsChildAgent`, child agents appear as nested spans in the parent trace tree.
+
+```go
+recorder := trace.New(trace.WithRepository(repo))
+
+// Root agent uses the recorder directly
+rootAgent := gollem.New(client, gollem.WithTrace(recorder))
+
+// Child agents use AsChildAgent to appear as nested spans
+childHandler := trace.AsChildAgent(recorder, "task-1")
+childAgent := gollem.New(client,
+    gollem.WithTrace(childHandler),
+    gollem.WithToolSets(tools...),
+)
+resp, err := childAgent.Execute(ctx, gollem.Text("Analyze logs"))
+```
+
+The resulting trace tree:
+
+```
+Root Agent Execute (agent_execute)
+├── Child Agent: task-1 (agent_execute)  ← created by AsChildAgent
+│   ├── LLM Call
+│   └── Tool Exec
+├── Child Agent: task-2 (agent_execute)  ← created by AsChildAgent
+│   ├── LLM Call
+│   └── Sub Agent: searcher (sub_agent)   ← gollem-internal sub-agent
+│       └── LLM Call
+└── LLM Call (final response)
+```
+
+Key distinction:
+- **`SpanKindAgentExecute`**: External agents created via `AsChildAgent` — these are full `Agent.Execute()` calls
+- **`SpanKindSubAgent`**: Internal sub-agents managed by gollem itself via `SubAgent.Run()`
+
+`AsChildAgent` is thread-safe: multiple child handlers can share the same parent recorder and run concurrently.
+
+`Finish` on the child handler is a no-op — the parent handler owns the `Finish` lifecycle.
 
 ## Implementing a Custom Handler
 
@@ -231,6 +282,9 @@ func (h *myHandler) EndToolExec(ctx context.Context, result map[string]any, err 
 
 func (h *myHandler) StartSubAgent(ctx context.Context, name string) context.Context { return ctx }
 func (h *myHandler) EndSubAgent(ctx context.Context, err error) {}
+
+func (h *myHandler) StartChildAgent(ctx context.Context, name string) context.Context { return ctx }
+func (h *myHandler) EndChildAgent(ctx context.Context, err error) {}
 
 func (h *myHandler) AddEvent(ctx context.Context, kind string, data any) {}
 

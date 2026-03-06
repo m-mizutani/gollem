@@ -244,11 +244,26 @@ func (r *Recorder) StartSubAgent(ctx context.Context, name string) context.Conte
 
 // EndSubAgent ends the sub_agent span.
 func (r *Recorder) EndSubAgent(ctx context.Context, err error) {
+	r.endSpanByKind(ctx, SpanKindSubAgent, err)
+}
+
+// StartChildAgent starts a child agent_execute span as a child of the current span.
+func (r *Recorder) StartChildAgent(ctx context.Context, name string) context.Context {
+	return r.startChildSpan(ctx, SpanKindAgentExecute, name)
+}
+
+// EndChildAgent ends a child agent_execute span.
+func (r *Recorder) EndChildAgent(ctx context.Context, err error) {
+	r.endSpanByKind(ctx, SpanKindAgentExecute, err)
+}
+
+// endSpanByKind ends a span of the given kind.
+func (r *Recorder) endSpanByKind(ctx context.Context, kind SpanKind, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	span := currentSpanFrom(ctx)
-	if span == nil || span.Kind != SpanKindSubAgent {
+	if span == nil || span.Kind != kind {
 		return
 	}
 

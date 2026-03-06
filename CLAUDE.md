@@ -187,6 +187,7 @@ agent := gollem.New(client, gollem.WithTraceHandler(handler))
 - `LLMResponse` - LLM response content
 - `ToolExec` - Tool execution start/end
 - `SubAgent` - Sub-agent execution start/end
+- `ChildAgent` - Child agent execution start/end
 - `CustomEvent` - Custom trace events
 
 #### Log Structure
