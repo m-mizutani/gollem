@@ -262,6 +262,31 @@ func (r *Recorder) EndSubAgent(ctx context.Context, err error) {
 	}
 }
 
+// StartChildAgent starts a child agent_execute span as a child of the current span.
+func (r *Recorder) StartChildAgent(ctx context.Context, name string) context.Context {
+	return r.startChildSpan(ctx, SpanKindAgentExecute, name)
+}
+
+// EndChildAgent ends a child agent_execute span.
+func (r *Recorder) EndChildAgent(ctx context.Context, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	span := currentSpanFrom(ctx)
+	if span == nil || span.Kind != SpanKindAgentExecute {
+		return
+	}
+
+	now := time.Now()
+	span.EndedAt = now
+	span.Duration = now.Sub(span.StartedAt)
+
+	if err != nil {
+		span.Status = SpanStatusError
+		span.Error = err.Error()
+	}
+}
+
 // AddEvent adds an event span as a child of the current span.
 // kind is an arbitrary string defined by the Strategy implementation.
 // data is any JSON-serializable value defined by the Strategy.

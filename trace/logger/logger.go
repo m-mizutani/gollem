@@ -246,6 +246,32 @@ func (h *handler) EndSubAgent(ctx context.Context, err error) {
 	h.logger().DebugContext(ctx, "sub agent ended", attrs...)
 }
 
+// StartChildAgent logs child agent start and stores the name in context.
+func (h *handler) StartChildAgent(ctx context.Context, name string) context.Context {
+	ctx = withStartTime(ctx, time.Now())
+	ctx = withSubAgentName(ctx, name)
+	if h.enabled(SubAgent) {
+		h.logger().DebugContext(ctx, "child agent started", slog.String("name", name))
+	}
+	return ctx
+}
+
+// EndChildAgent logs child agent end with duration and error info.
+func (h *handler) EndChildAgent(ctx context.Context, err error) {
+	if !h.enabled(SubAgent) {
+		return
+	}
+
+	attrs := []any{
+		slog.String("name", subAgentNameFrom(ctx)),
+		slog.Duration("duration", time.Since(startTimeFrom(ctx))),
+	}
+	if err != nil {
+		attrs = append(attrs, slog.String("error", err.Error()))
+	}
+	h.logger().DebugContext(ctx, "child agent ended", attrs...)
+}
+
 // AddEvent logs a custom strategy event.
 func (h *handler) AddEvent(ctx context.Context, kind string, data any) {
 	if !h.enabled(CustomEvent) {

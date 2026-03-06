@@ -99,6 +99,21 @@ func (m *multiHandler) EndSubAgent(ctx context.Context, err error) {
 	}
 }
 
+func (m *multiHandler) StartChildAgent(ctx context.Context, name string) context.Context {
+	parentCtxs := m.getContexts(ctx)
+	handlerCtxs := make([]context.Context, len(m.handlers))
+	for i, h := range m.handlers {
+		handlerCtxs[i] = h.StartChildAgent(parentCtxs[i], name)
+	}
+	return m.wrapContexts(ctx, handlerCtxs)
+}
+
+func (m *multiHandler) EndChildAgent(ctx context.Context, err error) {
+	for i, h := range m.handlers {
+		h.EndChildAgent(m.getContexts(ctx)[i], err)
+	}
+}
+
 func (m *multiHandler) AddEvent(ctx context.Context, kind string, data any) {
 	for i, h := range m.handlers {
 		h.AddEvent(m.getContexts(ctx)[i], kind, data)

@@ -135,6 +135,21 @@ func (h *handler) EndSubAgent(ctx context.Context, err error) {
 	span.End()
 }
 
+func (h *handler) StartChildAgent(ctx context.Context, name string) context.Context {
+	ctx, _ = h.tracer.Start(ctx, fmt.Sprintf("child_agent:%s", name),
+		otelTrace.WithSpanKind(otelTrace.SpanKindInternal),
+	)
+	return ctx
+}
+
+func (h *handler) EndChildAgent(ctx context.Context, err error) {
+	span := otelTrace.SpanFromContext(ctx)
+	if err != nil {
+		span.RecordError(err)
+	}
+	span.End()
+}
+
 func (h *handler) AddEvent(ctx context.Context, kind string, data any) {
 	span := otelTrace.SpanFromContext(ctx)
 	if data != nil {
