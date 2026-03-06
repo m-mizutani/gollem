@@ -121,28 +121,29 @@ func (h *handler) EndToolExec(ctx context.Context, result map[string]any, err er
 }
 
 func (h *handler) StartSubAgent(ctx context.Context, name string) context.Context {
-	ctx, _ = h.tracer.Start(ctx, fmt.Sprintf("sub_agent:%s", name),
-		otelTrace.WithSpanKind(otelTrace.SpanKindInternal),
-	)
-	return ctx
+	return h.startAgentSpan(ctx, "sub_agent", name)
 }
 
 func (h *handler) EndSubAgent(ctx context.Context, err error) {
-	span := otelTrace.SpanFromContext(ctx)
-	if err != nil {
-		span.RecordError(err)
-	}
-	span.End()
+	h.endSpan(ctx, err)
 }
 
 func (h *handler) StartChildAgent(ctx context.Context, name string) context.Context {
-	ctx, _ = h.tracer.Start(ctx, fmt.Sprintf("child_agent:%s", name),
+	return h.startAgentSpan(ctx, "child_agent", name)
+}
+
+func (h *handler) EndChildAgent(ctx context.Context, err error) {
+	h.endSpan(ctx, err)
+}
+
+func (h *handler) startAgentSpan(ctx context.Context, prefix, name string) context.Context {
+	ctx, _ = h.tracer.Start(ctx, fmt.Sprintf("%s:%s", prefix, name),
 		otelTrace.WithSpanKind(otelTrace.SpanKindInternal),
 	)
 	return ctx
 }
 
-func (h *handler) EndChildAgent(ctx context.Context, err error) {
+func (h *handler) endSpan(ctx context.Context, err error) {
 	span := otelTrace.SpanFromContext(ctx)
 	if err != nil {
 		span.RecordError(err)

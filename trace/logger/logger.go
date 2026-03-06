@@ -22,6 +22,8 @@ const (
 	ToolExec
 	// SubAgent enables logging of sub-agent start/end.
 	SubAgent
+	// ChildAgent enables logging of child agent start/end.
+	ChildAgent
 	// CustomEvent enables logging of strategy-defined custom events.
 	CustomEvent
 
@@ -250,7 +252,7 @@ func (h *handler) EndSubAgent(ctx context.Context, err error) {
 func (h *handler) StartChildAgent(ctx context.Context, name string) context.Context {
 	ctx = withStartTime(ctx, time.Now())
 	ctx = withSubAgentName(ctx, name)
-	if h.enabled(SubAgent) {
+	if h.enabled(ChildAgent) {
 		h.logger().DebugContext(ctx, "child agent started", slog.String("name", name))
 	}
 	return ctx
@@ -258,7 +260,7 @@ func (h *handler) StartChildAgent(ctx context.Context, name string) context.Cont
 
 // EndChildAgent logs child agent end with duration and error info.
 func (h *handler) EndChildAgent(ctx context.Context, err error) {
-	if !h.enabled(SubAgent) {
+	if !h.enabled(ChildAgent) {
 		return
 	}
 
