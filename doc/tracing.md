@@ -10,7 +10,7 @@ During agent execution, gollem emits lifecycle events:
 - **LLM Call**: Each request/response to the LLM provider
 - **Tool Exec**: Each tool invocation with arguments and results
 - **Sub Agent**: Internal sub-agent invocations within gollem via `SubAgent.Run()`
-- **Child Agent**: External agent invocations via `trace.AsSubAgent` (distinguished from internal sub-agents)
+- **Child Agent**: External agent invocations via `trace.AsChildAgent` (distinguished from internal sub-agents)
 - **Event**: Custom events emitted by strategies (e.g., plan creation, reflection)
 
 These events form a tree structure rooted at the agent execution span.
@@ -126,7 +126,7 @@ Trace
     ├── Sub Agent span (internal sub-agent)
     │   ├── LLM Call span
     │   └── Tool Exec span
-    ├── Child Agent span (external agent via AsSubAgent)
+    ├── Child Agent span (external agent via AsChildAgent)
     │   ├── LLM Call span
     │   └── Tool Exec span
     └── Event span (strategy-defined events)
@@ -205,11 +205,11 @@ agent := gollem.New(client,
 
 `Finish` collects errors from all handlers using `errors.Join`.
 
-### AsSubAgent Helper (`trace.AsSubAgent()`)
+### AsChildAgent Helper (`trace.AsChildAgent()`)
 
-`AsSubAgent` creates a `Handler` that maps a child `Agent.Execute()` into the parent trace tree as a `SpanKindAgentExecute` span. This is useful when running multiple gollem Agents within a single trace.
+`AsChildAgent` creates a `Handler` that maps a child `Agent.Execute()` into the parent trace tree as a `SpanKindAgentExecute` span. This is useful when running multiple gollem Agents within a single trace.
 
-Without `AsSubAgent`, each `Agent.Execute()` would create its own root span, overwriting the parent trace. With `AsSubAgent`, child agents appear as nested spans in the parent trace tree.
+Without `AsChildAgent`, each `Agent.Execute()` would create its own root span, overwriting the parent trace. With `AsChildAgent`, child agents appear as nested spans in the parent trace tree.
 
 ```go
 recorder := trace.New(trace.WithRepository(repo))
@@ -217,8 +217,8 @@ recorder := trace.New(trace.WithRepository(repo))
 // Root agent uses the recorder directly
 rootAgent := gollem.New(client, gollem.WithTrace(recorder))
 
-// Child agents use AsSubAgent to appear as nested spans
-childHandler := trace.AsSubAgent(recorder, "task-1")
+// Child agents use AsChildAgent to appear as nested spans
+childHandler := trace.AsChildAgent(recorder, "task-1")
 childAgent := gollem.New(client,
     gollem.WithTrace(childHandler),
     gollem.WithToolSets(tools...),
@@ -230,10 +230,10 @@ The resulting trace tree:
 
 ```
 Root Agent Execute (agent_execute)
-├── Child Agent: task-1 (agent_execute)  ← created by AsSubAgent
+├── Child Agent: task-1 (agent_execute)  ← created by AsChildAgent
 │   ├── LLM Call
 │   └── Tool Exec
-├── Child Agent: task-2 (agent_execute)  ← created by AsSubAgent
+├── Child Agent: task-2 (agent_execute)  ← created by AsChildAgent
 │   ├── LLM Call
 │   └── Sub Agent: searcher (sub_agent)   ← gollem-internal sub-agent
 │       └── LLM Call
@@ -241,10 +241,10 @@ Root Agent Execute (agent_execute)
 ```
 
 Key distinction:
-- **`SpanKindAgentExecute`**: External agents created via `AsSubAgent` — these are full `Agent.Execute()` calls
+- **`SpanKindAgentExecute`**: External agents created via `AsChildAgent` — these are full `Agent.Execute()` calls
 - **`SpanKindSubAgent`**: Internal sub-agents managed by gollem itself via `SubAgent.Run()`
 
-`AsSubAgent` is thread-safe: multiple child handlers can share the same parent recorder and run concurrently.
+`AsChildAgent` is thread-safe: multiple child handlers can share the same parent recorder and run concurrently.
 
 `Finish` on the child handler is a no-op — the parent handler owns the `Finish` lifecycle.
 

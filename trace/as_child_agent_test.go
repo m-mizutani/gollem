@@ -10,7 +10,7 @@ import (
 	"github.com/m-mizutani/gt"
 )
 
-func TestAsSubAgentDelegation(t *testing.T) {
+func TestAsChildAgentDelegation(t *testing.T) {
 	t.Run("StartAgentExecute maps to parent StartChildAgent", func(t *testing.T) {
 		rec := trace.New()
 		ctx := context.Background()
@@ -18,8 +18,8 @@ func TestAsSubAgentDelegation(t *testing.T) {
 		// Start root agent
 		agentCtx := rec.StartAgentExecute(ctx)
 
-		// Create AsSubAgent handler and start it (simulating child Agent.Execute)
-		childHandler := trace.AsSubAgent(rec, "task-1")
+		// Create AsChildAgent handler and start it (simulating child Agent.Execute)
+		childHandler := trace.AsChildAgent(rec, "task-1")
 		childCtx := childHandler.StartAgentExecute(agentCtx)
 
 		// The child span should be an agent_execute span under the root
@@ -41,7 +41,7 @@ func TestAsSubAgentDelegation(t *testing.T) {
 		ctx := context.Background()
 		agentCtx := rec.StartAgentExecute(ctx)
 
-		childHandler := trace.AsSubAgent(rec, "task-err")
+		childHandler := trace.AsChildAgent(rec, "task-err")
 		childCtx := childHandler.StartAgentExecute(agentCtx)
 
 		childHandler.EndAgentExecute(childCtx, errors.New("child failed"))
@@ -56,7 +56,7 @@ func TestAsSubAgentDelegation(t *testing.T) {
 		ctx := context.Background()
 		agentCtx := rec.StartAgentExecute(ctx)
 
-		childHandler := trace.AsSubAgent(rec, "task-1")
+		childHandler := trace.AsChildAgent(rec, "task-1")
 		childCtx := childHandler.StartAgentExecute(agentCtx)
 
 		llmCtx := childHandler.StartLLMCall(childCtx)
@@ -72,7 +72,7 @@ func TestAsSubAgentDelegation(t *testing.T) {
 		ctx := context.Background()
 		agentCtx := rec.StartAgentExecute(ctx)
 
-		childHandler := trace.AsSubAgent(rec, "task-1")
+		childHandler := trace.AsChildAgent(rec, "task-1")
 		childCtx := childHandler.StartAgentExecute(agentCtx)
 
 		toolCtx := childHandler.StartToolExec(childCtx, "search", map[string]any{"q": "test"})
@@ -88,16 +88,16 @@ func TestAsSubAgentDelegation(t *testing.T) {
 		ctx := context.Background()
 		agentCtx := rec.StartAgentExecute(ctx)
 
-		childHandler := trace.AsSubAgent(rec, "task-1")
+		childHandler := trace.AsChildAgent(rec, "task-1")
 		childCtx := childHandler.StartAgentExecute(agentCtx)
 
-		subCtx := childHandler.StartSubAgent(childCtx, "falcon")
+		subCtx := childHandler.StartSubAgent(childCtx, "searcher")
 		childHandler.EndSubAgent(subCtx, nil)
 
 		childSpan := trace.CurrentSpanFrom(childCtx)
 		gt.Equal(t, len(childSpan.Children), 1)
 		gt.Equal(t, childSpan.Children[0].Kind, trace.SpanKindSubAgent)
-		gt.Equal(t, childSpan.Children[0].Name, "falcon")
+		gt.Equal(t, childSpan.Children[0].Name, "searcher")
 	})
 
 	t.Run("ChildAgent delegates to parent", func(t *testing.T) {
@@ -105,7 +105,7 @@ func TestAsSubAgentDelegation(t *testing.T) {
 		ctx := context.Background()
 		agentCtx := rec.StartAgentExecute(ctx)
 
-		childHandler := trace.AsSubAgent(rec, "task-1")
+		childHandler := trace.AsChildAgent(rec, "task-1")
 		childCtx := childHandler.StartAgentExecute(agentCtx)
 
 		grandchildCtx := childHandler.StartChildAgent(childCtx, "sub-task")
@@ -122,7 +122,7 @@ func TestAsSubAgentDelegation(t *testing.T) {
 		ctx := context.Background()
 		agentCtx := rec.StartAgentExecute(ctx)
 
-		childHandler := trace.AsSubAgent(rec, "task-1")
+		childHandler := trace.AsChildAgent(rec, "task-1")
 		childCtx := childHandler.StartAgentExecute(agentCtx)
 
 		childHandler.AddEvent(childCtx, "plan_created", map[string]any{"goal": "test"})
@@ -139,7 +139,7 @@ func TestAsSubAgentDelegation(t *testing.T) {
 		ctx := context.Background()
 
 		agentCtx := rec.StartAgentExecute(ctx)
-		childHandler := trace.AsSubAgent(rec, "task-1")
+		childHandler := trace.AsChildAgent(rec, "task-1")
 
 		// Finish on child handler should not persist trace
 		err := childHandler.Finish(ctx)
@@ -152,16 +152,16 @@ func TestAsSubAgentDelegation(t *testing.T) {
 	})
 }
 
-func TestAsSubAgentRecorderIntegration(t *testing.T) {
-	t.Run("trace tree structure with AsSubAgent", func(t *testing.T) {
+func TestAsChildAgentRecorderIntegration(t *testing.T) {
+	t.Run("trace tree structure with AsChildAgent", func(t *testing.T) {
 		rec := trace.New()
 		ctx := context.Background()
 
 		// Root agent starts
 		rootCtx := rec.StartAgentExecute(ctx)
 
-		// Child agent via AsSubAgent
-		childHandler := trace.AsSubAgent(rec, "analyzer")
+		// Child agent via AsChildAgent
+		childHandler := trace.AsChildAgent(rec, "analyzer")
 		childCtx := childHandler.StartAgentExecute(rootCtx)
 
 		// LLM call inside child
@@ -185,7 +185,7 @@ func TestAsSubAgentRecorderIntegration(t *testing.T) {
 		gt.Equal(t, rootSpan.Kind, trace.SpanKindAgentExecute)
 		gt.Equal(t, len(rootSpan.Children), 2) // child agent + LLM call
 
-		// First child: agent_execute (from AsSubAgent)
+		// First child: agent_execute (from AsChildAgent)
 		childSpan := rootSpan.Children[0]
 		gt.Equal(t, childSpan.Kind, trace.SpanKindAgentExecute)
 		gt.Equal(t, childSpan.Name, "analyzer")
@@ -198,19 +198,19 @@ func TestAsSubAgentRecorderIntegration(t *testing.T) {
 		gt.Equal(t, rootSpan.Children[1].Kind, trace.SpanKindLLMCall)
 	})
 
-	t.Run("SpanKind distinction between AsSubAgent and native SubAgent", func(t *testing.T) {
+	t.Run("SpanKind distinction between AsChildAgent and native SubAgent", func(t *testing.T) {
 		rec := trace.New()
 		ctx := context.Background()
 
 		rootCtx := rec.StartAgentExecute(ctx)
 
-		// AsSubAgent child -> SpanKindAgentExecute
-		childHandler := trace.AsSubAgent(rec, "task-1")
+		// AsChildAgent child -> SpanKindAgentExecute
+		childHandler := trace.AsChildAgent(rec, "task-1")
 		childCtx := childHandler.StartAgentExecute(rootCtx)
 		childHandler.EndAgentExecute(childCtx, nil)
 
 		// Native SubAgent -> SpanKindSubAgent
-		subCtx := rec.StartSubAgent(rootCtx, "falcon")
+		subCtx := rec.StartSubAgent(rootCtx, "searcher")
 		rec.EndSubAgent(subCtx, nil)
 
 		rec.EndAgentExecute(rootCtx, nil)
@@ -220,23 +220,23 @@ func TestAsSubAgentRecorderIntegration(t *testing.T) {
 		gt.Equal(t, rootSpan.Children[0].Kind, trace.SpanKindAgentExecute)
 		gt.Equal(t, rootSpan.Children[0].Name, "task-1")
 		gt.Equal(t, rootSpan.Children[1].Kind, trace.SpanKindSubAgent)
-		gt.Equal(t, rootSpan.Children[1].Name, "falcon")
+		gt.Equal(t, rootSpan.Children[1].Name, "searcher")
 	})
 }
 
-func TestAsSubAgentNestedScenarios(t *testing.T) {
-	t.Run("AsSubAgent with nested native SubAgent", func(t *testing.T) {
-		// Root(agent_execute) -> ChildAgent("task-1", agent_execute) -> SubAgent("falcon", sub_agent) -> LLM Call
+func TestAsChildAgentNestedScenarios(t *testing.T) {
+	t.Run("AsChildAgent with nested native SubAgent", func(t *testing.T) {
+		// Root(agent_execute) -> ChildAgent("task-1", agent_execute) -> SubAgent("searcher", sub_agent) -> LLM Call
 		rec := trace.New()
 		ctx := context.Background()
 
 		rootCtx := rec.StartAgentExecute(ctx)
 
-		childHandler := trace.AsSubAgent(rec, "task-1")
+		childHandler := trace.AsChildAgent(rec, "task-1")
 		childCtx := childHandler.StartAgentExecute(rootCtx)
 
 		// Native SubAgent inside child agent
-		subCtx := childHandler.StartSubAgent(childCtx, "falcon")
+		subCtx := childHandler.StartSubAgent(childCtx, "searcher")
 		llmCtx := childHandler.StartLLMCall(subCtx)
 		childHandler.EndLLMCall(llmCtx, &trace.LLMCallData{InputTokens: 10}, nil)
 		childHandler.EndSubAgent(subCtx, nil)
@@ -254,12 +254,12 @@ func TestAsSubAgentNestedScenarios(t *testing.T) {
 
 		subSpan := childSpan.Children[0]
 		gt.Equal(t, subSpan.Kind, trace.SpanKindSubAgent)
-		gt.Equal(t, subSpan.Name, "falcon")
+		gt.Equal(t, subSpan.Name, "searcher")
 		gt.Equal(t, len(subSpan.Children), 1)
 		gt.Equal(t, subSpan.Children[0].Kind, trace.SpanKindLLMCall)
 	})
 
-	t.Run("multiple parallel AsSubAgents", func(t *testing.T) {
+	t.Run("multiple parallel AsChildAgents", func(t *testing.T) {
 		rec := trace.New()
 		ctx := context.Background()
 		rootCtx := rec.StartAgentExecute(ctx)
@@ -270,7 +270,7 @@ func TestAsSubAgentNestedScenarios(t *testing.T) {
 			name := []string{"task-1", "task-2", "task-3"}[i]
 			go func(name string) {
 				defer wg.Done()
-				childHandler := trace.AsSubAgent(rec, name)
+				childHandler := trace.AsChildAgent(rec, name)
 				childCtx := childHandler.StartAgentExecute(rootCtx)
 				llmCtx := childHandler.StartLLMCall(childCtx)
 				childHandler.EndLLMCall(llmCtx, &trace.LLMCallData{InputTokens: 10}, nil)
@@ -292,7 +292,7 @@ func TestAsSubAgentNestedScenarios(t *testing.T) {
 		}
 	})
 
-	t.Run("AsSubAgent mixed with direct operations", func(t *testing.T) {
+	t.Run("AsChildAgent mixed with direct operations", func(t *testing.T) {
 		// Root(agent_execute) -> LLM Call
 		//                     -> ChildAgent("analyzer", agent_execute) -> [LLM Call, Tool Exec]
 		//                     -> Tool Exec
@@ -306,8 +306,8 @@ func TestAsSubAgentNestedScenarios(t *testing.T) {
 		llm1 := rec.StartLLMCall(rootCtx)
 		rec.EndLLMCall(llm1, &trace.LLMCallData{InputTokens: 10}, nil)
 
-		// Child agent via AsSubAgent
-		childHandler := trace.AsSubAgent(rec, "analyzer")
+		// Child agent via AsChildAgent
+		childHandler := trace.AsChildAgent(rec, "analyzer")
 		childCtx := childHandler.StartAgentExecute(rootCtx)
 		childLLM := childHandler.StartLLMCall(childCtx)
 		childHandler.EndLLMCall(childLLM, &trace.LLMCallData{InputTokens: 20}, nil)
@@ -340,21 +340,21 @@ func TestAsSubAgentNestedScenarios(t *testing.T) {
 		gt.Equal(t, childSpan.Children[1].Kind, trace.SpanKindToolExec)
 	})
 
-	t.Run("deep nesting with AsSubAgent inside SubAgent", func(t *testing.T) {
+	t.Run("deep nesting with AsChildAgent inside SubAgent", func(t *testing.T) {
 		rec := trace.New()
 		ctx := context.Background()
 
 		rootCtx := rec.StartAgentExecute(ctx)
 
-		// Level 1: AsSubAgent
-		child1Handler := trace.AsSubAgent(rec, "level-1")
+		// Level 1: AsChildAgent
+		child1Handler := trace.AsChildAgent(rec, "level-1")
 		child1Ctx := child1Handler.StartAgentExecute(rootCtx)
 
 		// Level 2: native SubAgent inside child1
 		sub2Ctx := child1Handler.StartSubAgent(child1Ctx, "level-2-sub")
 
-		// Level 3: AsSubAgent with a new handler using the same recorder
-		child3Handler := trace.AsSubAgent(rec, "level-3")
+		// Level 3: AsChildAgent with a new handler using the same recorder
+		child3Handler := trace.AsChildAgent(rec, "level-3")
 		child3Ctx := child3Handler.StartAgentExecute(sub2Ctx)
 
 		llmCtx := child3Handler.StartLLMCall(child3Ctx)
@@ -386,7 +386,7 @@ func TestAsSubAgentNestedScenarios(t *testing.T) {
 	})
 }
 
-func TestAsSubAgentWithMultiHandler(t *testing.T) {
+func TestAsChildAgentWithMultiHandler(t *testing.T) {
 	rec1 := trace.New()
 	rec2 := trace.New()
 	multi := trace.Multi(rec1, rec2)
@@ -394,7 +394,7 @@ func TestAsSubAgentWithMultiHandler(t *testing.T) {
 	ctx := context.Background()
 	agentCtx := multi.StartAgentExecute(ctx)
 
-	childHandler := trace.AsSubAgent(multi, "task-1")
+	childHandler := trace.AsChildAgent(multi, "task-1")
 	childCtx := childHandler.StartAgentExecute(agentCtx)
 
 	llmCtx := childHandler.StartLLMCall(childCtx)
@@ -415,7 +415,7 @@ func TestAsSubAgentWithMultiHandler(t *testing.T) {
 	}
 }
 
-func TestAsSubAgentConcurrentRace(t *testing.T) {
+func TestAsChildAgentConcurrentRace(t *testing.T) {
 	rec := trace.New()
 	ctx := context.Background()
 	rootCtx := rec.StartAgentExecute(ctx)
@@ -425,7 +425,7 @@ func TestAsSubAgentConcurrentRace(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			childHandler := trace.AsSubAgent(rec, "task")
+			childHandler := trace.AsChildAgent(rec, "task")
 			childCtx := childHandler.StartAgentExecute(rootCtx)
 
 			llmCtx := childHandler.StartLLMCall(childCtx)
