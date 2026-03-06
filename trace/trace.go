@@ -80,7 +80,7 @@ func captureStackTrace(skip int) []StackFrame {
 	}
 
 	frames := runtime.CallersFrames(pcs[:n])
-	var result []StackFrame
+	result := make([]StackFrame, 0, n)
 	for {
 		frame, more := frames.Next()
 		result = append(result, StackFrame{
