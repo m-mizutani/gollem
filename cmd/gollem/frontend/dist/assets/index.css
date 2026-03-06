@@ -1308,6 +1308,9 @@ video {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.whitespace-nowrap {
+  white-space: nowrap;
+}
 .whitespace-pre-wrap {
   white-space: pre-wrap;
 }
@@ -1500,6 +1503,12 @@ video {
 .pb-4 {
   padding-bottom: 1rem;
 }
+.pr-2 {
+  padding-right: 0.5rem;
+}
+.pr-3 {
+  padding-right: 0.75rem;
+}
 .pt-3 {
   padding-top: 0.75rem;
 }
@@ -1508,6 +1517,9 @@ video {
 }
 .text-center {
   text-align: center;
+}
+.text-right {
+  text-align: right;
 }
 .font-mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
