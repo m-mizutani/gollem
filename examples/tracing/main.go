@@ -50,6 +50,7 @@ func main() {
 
 	// Create a trace recorder with file repository
 	rec := trace.New(
+		trace.WithStackTrace(),
 		trace.WithRepository(trace.NewFileRepository("./traces")),
 		trace.WithMetadata(trace.TraceMetadata{
 			Labels: map[string]string{"env": "example"},
