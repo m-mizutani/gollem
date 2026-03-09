@@ -1529,53 +1529,72 @@ func TestSubAgentMiddlewareWithSessionAccess(t *testing.T) {
 	})
 }
 
-func TestSubAgentWithSubAgentOptions(t *testing.T) {
-	t.Run("tool middleware is applied to child agent", func(t *testing.T) {
-		middlewareCalled := false
-		var capturedToolName string
-
-		// Create a mock client where the child agent calls a tool
-		callCount := 0
-		mockClient := &mock.LLMClientMock{
-			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
-				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-						callCount++
-						if callCount == 1 {
-							// First call: invoke a tool
-							return &gollem.Response{
-								FunctionCalls: []*gollem.FunctionCall{
-									{
-										ID:        "call_1",
-										Name:      "inner_tool",
-										Arguments: map[string]any{"key": "value"},
-									},
-								},
-							}, nil
-						}
-						// Second call: return response
+// newToolCallingMockClient creates a mock LLM client that simulates a single tool call.
+// On the first GenerateContent call, it returns a FunctionCall for the given tool name and args.
+// On subsequent calls, it returns a text response of "done".
+func newToolCallingMockClient(toolName string, toolArgs map[string]any) *mock.LLMClientMock {
+	callCount := 0
+	return &mock.LLMClientMock{
+		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					callCount++
+					if callCount == 1 {
 						return &gollem.Response{
-							Texts: []string{"done"},
+							FunctionCalls: []*gollem.FunctionCall{
+								{
+									ID:        "call_1",
+									Name:      toolName,
+									Arguments: toolArgs,
+								},
+							},
 						}, nil
-					},
-				}, nil
-			},
-		}
+					}
+					return &gollem.Response{
+						Texts: []string{"done"},
+					}, nil
+				},
+			}, nil
+		},
+	}
+}
 
-		innerTool := &mockSubAgentTool{
+// mockSubAgentTool is a mock tool for testing WithSubAgentOptions
+type mockSubAgentTool struct {
+	name string
+	run  func(ctx context.Context, args map[string]any) (map[string]any, error)
+}
+
+func (t *mockSubAgentTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name:        t.name,
+		Description: "Mock tool for testing",
+		Parameters: map[string]*gollem.Parameter{
+			"key": {Type: gollem.TypeString, Description: "A key"},
+		},
+	}
+}
+
+func (t *mockSubAgentTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	return t.run(ctx, args)
+}
+
+func TestSubAgentWithSubAgentOptions(t *testing.T) {
+	newInnerTool := func() *mockSubAgentTool {
+		return &mockSubAgentTool{
 			name: "inner_tool",
 			run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
 				return map[string]any{"result": "ok"}, nil
 			},
 		}
+	}
 
-		toolMiddleware := func(next gollem.ToolHandler) gollem.ToolHandler {
-			return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
-				middlewareCalled = true
-				capturedToolName = req.Tool.Name
-				return next(ctx, req)
-			}
-		}
+	t.Run("tool middleware is applied to child agent", func(t *testing.T) {
+		middlewareCalled := false
+		var capturedToolName string
+
+		mockClient := newToolCallingMockClient("inner_tool", map[string]any{"key": "value"})
+		innerTool := newInnerTool()
 
 		subagent := gollem.NewSubAgent(
 			"test_agent",
@@ -1587,7 +1606,13 @@ func TestSubAgentWithSubAgentOptions(t *testing.T) {
 				), nil
 			},
 			gollem.WithSubAgentOptions(
-				gollem.WithToolMiddleware(toolMiddleware),
+				gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+					return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+						middlewareCalled = true
+						capturedToolName = req.Tool.Name
+						return next(ctx, req)
+					}
+				}),
 			),
 		)
 
@@ -1605,37 +1630,8 @@ func TestSubAgentWithSubAgentOptions(t *testing.T) {
 		middleware1Called := false
 		middleware2Called := false
 
-		callCount := 0
-		mockClient := &mock.LLMClientMock{
-			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
-				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-						callCount++
-						if callCount == 1 {
-							return &gollem.Response{
-								FunctionCalls: []*gollem.FunctionCall{
-									{
-										ID:        "call_1",
-										Name:      "inner_tool",
-										Arguments: map[string]any{},
-									},
-								},
-							}, nil
-						}
-						return &gollem.Response{
-							Texts: []string{"done"},
-						}, nil
-					},
-				}, nil
-			},
-		}
-
-		innerTool := &mockSubAgentTool{
-			name: "inner_tool",
-			run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
-				return map[string]any{"result": "ok"}, nil
-			},
-		}
+		mockClient := newToolCallingMockClient("inner_tool", map[string]any{})
+		innerTool := newInnerTool()
 
 		subagent := gollem.NewSubAgent(
 			"test_agent",
@@ -1677,37 +1673,8 @@ func TestSubAgentWithSubAgentOptions(t *testing.T) {
 	t.Run("options applied after factory via direct call", func(t *testing.T) {
 		middlewareCalled := false
 
-		callCount := 0
-		mockClient := &mock.LLMClientMock{
-			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
-				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-						callCount++
-						if callCount == 1 {
-							return &gollem.Response{
-								FunctionCalls: []*gollem.FunctionCall{
-									{
-										ID:        "call_1",
-										Name:      "inner_tool",
-										Arguments: map[string]any{},
-									},
-								},
-							}, nil
-						}
-						return &gollem.Response{
-							Texts: []string{"done"},
-						}, nil
-					},
-				}, nil
-			},
-		}
-
-		innerTool := &mockSubAgentTool{
-			name: "inner_tool",
-			run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
-				return map[string]any{"result": "ok"}, nil
-			},
-		}
+		mockClient := newToolCallingMockClient("inner_tool", map[string]any{})
+		innerTool := newInnerTool()
 
 		// Create subagent without options first
 		subagent := gollem.NewSubAgent(
@@ -1739,24 +1706,4 @@ func TestSubAgentWithSubAgentOptions(t *testing.T) {
 		gt.NotNil(t, result)
 		gt.True(t, middlewareCalled)
 	})
-}
-
-// mockSubAgentTool is a mock tool for testing WithSubAgentOptions
-type mockSubAgentTool struct {
-	name string
-	run  func(ctx context.Context, args map[string]any) (map[string]any, error)
-}
-
-func (t *mockSubAgentTool) Spec() gollem.ToolSpec {
-	return gollem.ToolSpec{
-		Name:        t.name,
-		Description: "Mock tool for testing",
-		Parameters: map[string]*gollem.Parameter{
-			"key": {Type: gollem.TypeString, Description: "A key"},
-		},
-	}
-}
-
-func (t *mockSubAgentTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	return t.run(ctx, args)
 }
