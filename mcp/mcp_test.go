@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/m-mizutani/gollem"
@@ -523,6 +524,41 @@ func TestExistingFunctionalityNotAffected(t *testing.T) {
 
 // TestRecursiveSchemaConversion tests the recursive schema conversion functionality
 // that was missing in the initial implementation
+func TestBuildStdioEnvInheritsSystemEnv(t *testing.T) {
+	t.Run("with custom env vars", func(t *testing.T) {
+		customVars := []string{"CUSTOM_VAR=custom_value", "ANOTHER_VAR=another"}
+		result := mcp.BuildStdioEnv(customVars)
+
+		// Should contain system PATH
+		hasPath := false
+		hasCustom := false
+		for _, env := range result {
+			if strings.HasPrefix(env, "PATH=") {
+				hasPath = true
+			}
+			if env == "CUSTOM_VAR=custom_value" {
+				hasCustom = true
+			}
+		}
+		gt.True(t, hasPath)
+		gt.True(t, hasCustom)
+	})
+
+	t.Run("without custom env vars", func(t *testing.T) {
+		result := mcp.BuildStdioEnv(nil)
+
+		// Should still contain system environment
+		hasPath := false
+		for _, env := range result {
+			if strings.HasPrefix(env, "PATH=") {
+				hasPath = true
+			}
+		}
+		gt.True(t, hasPath)
+		gt.Equal(t, len(os.Environ()), len(result))
+	})
+}
+
 func TestRecursiveSchemaConversion(t *testing.T) {
 	type testCase struct {
 		name     string

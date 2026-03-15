@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"sync"
 
@@ -106,11 +107,9 @@ func NewStdio(ctx context.Context, path string, args []string, options ...StdioO
 		option(client)
 	}
 
-	// Create command with environment variables
+	// Create command with environment variables inheriting from the current process
 	cmd := exec.Command(path, args...)
-	if len(client.envVars) > 0 {
-		cmd.Env = append(cmd.Env, client.envVars...)
-	}
+	cmd.Env = append(os.Environ(), client.envVars...)
 
 	// Create transport
 	transport := &mcp.StdioTransport{}
