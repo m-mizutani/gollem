@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/m-mizutani/gollem"
@@ -532,7 +533,7 @@ func TestBuildStdioEnvInheritsSystemEnv(t *testing.T) {
 		hasPath := false
 		hasCustom := false
 		for _, env := range result {
-			if len(env) >= 5 && env[:5] == "PATH=" {
+			if strings.HasPrefix(env, "PATH=") {
 				hasPath = true
 			}
 			if env == "CUSTOM_VAR=custom_value" {
@@ -549,7 +550,7 @@ func TestBuildStdioEnvInheritsSystemEnv(t *testing.T) {
 		// Should still contain system environment
 		hasPath := false
 		for _, env := range result {
-			if len(env) >= 5 && env[:5] == "PATH=" {
+			if strings.HasPrefix(env, "PATH=") {
 				hasPath = true
 			}
 		}
