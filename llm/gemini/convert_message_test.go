@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/gemini"
 	"github.com/m-mizutani/gt"
 	"google.golang.org/genai"
@@ -154,4 +155,201 @@ func TestGeminiMessageRoundTrip(t *testing.T) {
 			},
 		},
 	}))
+
+	t.Run("thought signature on function call", runTest(testCase{
+		name: "thought signature on function call",
+		contents: []*genai.Content{
+			{
+				Role:  "user",
+				Parts: []*genai.Part{{Text: "Write a file"}},
+			},
+			{
+				Role: "model",
+				Parts: []*genai.Part{
+					{
+						Text:             "Let me think about this...",
+						Thought:          true,
+						ThoughtSignature: []byte("thought-sig-001"),
+					},
+					{
+						Text:             "I'll write the file for you.",
+						ThoughtSignature: []byte("text-sig-002"),
+					},
+					{
+						FunctionCall: &genai.FunctionCall{
+							Name: "write_file",
+							Args: map[string]any{"path": "test.txt", "content": "hello"},
+						},
+						ThoughtSignature: []byte("fc-sig-003"),
+					},
+				},
+			},
+		},
+	}))
+
+	t.Run("thought part only", runTest(testCase{
+		name: "thought part only",
+		contents: []*genai.Content{
+			{
+				Role:  "user",
+				Parts: []*genai.Part{{Text: "Hello"}},
+			},
+			{
+				Role: "model",
+				Parts: []*genai.Part{
+					{
+						Text:             "Internal reasoning...",
+						Thought:          true,
+						ThoughtSignature: []byte("thought-sig"),
+					},
+					{
+						Text: "Hello! How can I help you?",
+					},
+				},
+			},
+		},
+	}))
+}
+
+func TestThoughtSignatureRoundTrip(t *testing.T) {
+	// Verify that ThoughtSignature is preserved through Gemini -> Message -> Gemini conversion
+	contents := []*genai.Content{
+		{
+			Role:  "user",
+			Parts: []*genai.Part{{Text: "Write a file"}},
+		},
+		{
+			Role: "model",
+			Parts: []*genai.Part{
+				{
+					Text:             "Thinking...",
+					Thought:          true,
+					ThoughtSignature: []byte("thought-sig-abc"),
+				},
+				{
+					FunctionCall: &genai.FunctionCall{
+						Name: "write_file",
+						Args: map[string]any{"path": "test.txt"},
+					},
+					ThoughtSignature: []byte("fc-sig-def"),
+				},
+			},
+		},
+	}
+
+	// Convert to gollem History
+	history, err := gemini.NewHistory(contents)
+	gt.NoError(t, err)
+
+	// Verify the Messages have Meta set
+	gt.A(t, history.Messages).Length(2)
+	modelMsg := history.Messages[1]
+	gt.A(t, modelMsg.Contents).Length(2)
+
+	// Thought part should have Meta
+	gt.Value(t, modelMsg.Contents[0].Meta).NotEqual(json.RawMessage(nil))
+
+	// Function call part should have Meta
+	gt.Value(t, modelMsg.Contents[1].Meta).NotEqual(json.RawMessage(nil))
+
+	// Convert back to Gemini contents
+	restored, err := gemini.ToContents(history)
+	gt.NoError(t, err)
+
+	gt.A(t, restored).Length(2)
+	modelContent := restored[1]
+	gt.A(t, modelContent.Parts).Length(2)
+
+	// Verify thought part preserved
+	thoughtPart := modelContent.Parts[0]
+	gt.Value(t, thoughtPart.Thought).Equal(true)
+	gt.Value(t, thoughtPart.ThoughtSignature).Equal([]byte("thought-sig-abc"))
+	gt.Value(t, thoughtPart.Text).Equal("Thinking...")
+
+	// Verify function call part preserved
+	fcPart := modelContent.Parts[1]
+	gt.Value(t, fcPart.ThoughtSignature).Equal([]byte("fc-sig-def"))
+	gt.Value(t, fcPart.FunctionCall.Name).Equal("write_file")
+}
+
+func TestThoughtPartsExcludedFromResponse(t *testing.T) {
+	// Verify that thought parts (Thought: true) are not included in gollem Response texts.
+	// This is tested indirectly via the convert function - thought parts are stored
+	// as text content with Meta, but processResponse skips them.
+
+	// Convert a model message with thought parts to gollem format
+	contents := []*genai.Content{
+		{
+			Role: "model",
+			Parts: []*genai.Part{
+				{
+					Text:    "Internal reasoning",
+					Thought: true,
+				},
+				{
+					Text: "Visible response",
+				},
+			},
+		},
+	}
+
+	history, err := gemini.NewHistory(contents)
+	gt.NoError(t, err)
+
+	// Both parts should be in the message (for history preservation)
+	gt.A(t, history.Messages[0].Contents).Length(2)
+
+	// But Meta should distinguish them
+	thoughtContent := history.Messages[0].Contents[0]
+	gt.Value(t, thoughtContent.Type).Equal(gollem.MessageContentTypeText)
+	gt.Value(t, thoughtContent.Meta).NotEqual(json.RawMessage(nil))
+
+	normalContent := history.Messages[0].Contents[1]
+	gt.Value(t, normalContent.Type).Equal(gollem.MessageContentTypeText)
+	// Normal text without thought/signature should have nil Meta
+	gt.Value(t, normalContent.Meta).Equal(json.RawMessage(nil))
+}
+
+func TestBackwardCompatibilityWithoutMeta(t *testing.T) {
+	// Verify that messages without Meta field (from older versions) still work
+	contents := []*genai.Content{
+		{
+			Role:  "user",
+			Parts: []*genai.Part{{Text: "Hello"}},
+		},
+		{
+			Role: "model",
+			Parts: []*genai.Part{
+				{Text: "Hi there!"},
+				{
+					FunctionCall: &genai.FunctionCall{
+						Name: "greet",
+						Args: map[string]any{"name": "world"},
+					},
+				},
+			},
+		},
+	}
+
+	// Convert to history (no ThoughtSignature anywhere)
+	history, err := gemini.NewHistory(contents)
+	gt.NoError(t, err)
+
+	// All Meta should be nil
+	for _, msg := range history.Messages {
+		for _, content := range msg.Contents {
+			gt.Value(t, content.Meta).Equal(json.RawMessage(nil))
+		}
+	}
+
+	// Convert back should work without error
+	restored, err := gemini.ToContents(history)
+	gt.NoError(t, err)
+
+	// Restored parts should have zero-value Thought/ThoughtSignature
+	modelContent := restored[1]
+	for _, part := range modelContent.Parts {
+		gt.Value(t, part.Thought).Equal(false)
+		gt.Value(t, part.ThoughtSignature).Equal([]byte(nil))
+	}
 }
