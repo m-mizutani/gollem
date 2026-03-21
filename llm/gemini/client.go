@@ -408,6 +408,11 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 		}
 
 		for _, part := range candidate.Content.Parts {
+			// Skip thought parts (internal reasoning from thinking models)
+			if part.Thought {
+				continue
+			}
+
 			if part.Text != "" {
 				response.Texts = append(response.Texts, part.Text)
 			}
@@ -501,25 +506,8 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		// Set trace data for defer
 		geminiTraceData = buildGeminiTraceData(response, s.model, s.cfg.SystemPrompt())
 
-		// Update history with the response
-		// Create assistant message from response
-		assistantParts := make([]*genai.Part, 0)
-		if len(response.Texts) > 0 || len(response.FunctionCalls) > 0 {
-			for _, text := range response.Texts {
-				assistantParts = append(assistantParts, &genai.Part{Text: text})
-			}
-			for _, fc := range response.FunctionCalls {
-				assistantParts = append(assistantParts, &genai.Part{
-					FunctionCall: &genai.FunctionCall{
-						Name: fc.Name,
-						Args: fc.Arguments,
-					},
-				})
-			}
-
-		}
-
-		// Convert only the new messages (input + response) to gollem format and append to existing history
+		// Update history with the input and raw response content.
+		// Use candidate.Content directly to preserve all fields (e.g., ThoughtSignature).
 		var newContents []*genai.Content
 		// Add current input as a new user message
 		if len(parts) > 0 {
@@ -529,13 +517,12 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 			}
 			newContents = append(newContents, userContent)
 		}
-		// Add assistant response if available
-		if len(assistantParts) > 0 {
-			assistantContent := &genai.Content{
-				Role:  "model",
-				Parts: assistantParts,
+		// Add raw assistant response content from candidates.
+		// Filter out empty parts that some models (e.g., thinking models) may return.
+		for _, candidate := range result.Candidates {
+			if filtered := filterEmptyParts(candidate.Content); filtered != nil {
+				newContents = append(newContents, filtered)
 			}
-			newContents = append(newContents, assistantContent)
 		}
 
 		// Append new contents to history
@@ -684,7 +671,10 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				}
 			}
 
-			// Update history with accumulated response
+			// Update history with accumulated response.
+			// Note: Streaming chunks don't reliably contain ThoughtSignature,
+			// so we reconstruct parts from accumulated data here.
+			// ThoughtSignature preservation is handled in non-streaming GenerateContent.
 			if len(accumulatedTexts) > 0 || len(accumulatedFunctionCalls) > 0 {
 				var newContents []*genai.Content
 

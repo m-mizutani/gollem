@@ -89,8 +89,12 @@ func TestToolExecution(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_GCP_LOCATION is not set")
 		}
+		var opts []gemini.Option
+		if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
 		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
-			return gemini.New(context.Background(), projectID, location)
+			return gemini.New(context.Background(), projectID, location, opts...)
 		})
 	})
 }
@@ -273,8 +277,12 @@ func TestContentMiddleware(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_GCP_LOCATION is not set")
 		}
+		var opts []gemini.Option
+		if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
 		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
-			return gemini.New(context.Background(), projectID, location)
+			return gemini.New(context.Background(), projectID, location, opts...)
 		})
 	})
 }
@@ -381,8 +389,12 @@ func TestStreamMiddleware(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_GCP_LOCATION is not set")
 		}
+		var opts []gemini.Option
+		if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
 		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
-			return gemini.New(context.Background(), projectID, location)
+			return gemini.New(context.Background(), projectID, location, opts...)
 		})
 	})
 }
@@ -465,8 +477,12 @@ func TestCountToken(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_GCP_LOCATION is not set")
 		}
+		var opts []gemini.Option
+		if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
 		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
-			return gemini.New(context.Background(), projectID, location)
+			return gemini.New(context.Background(), projectID, location, opts...)
 		})
 	})
 }
@@ -595,8 +611,12 @@ func TestPDFInput(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_GCP_LOCATION is not set")
 		}
+		var opts []gemini.Option
+		if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
 		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
-			return gemini.New(context.Background(), projectID, location)
+			return gemini.New(context.Background(), projectID, location, opts...)
 		})
 	})
 }
