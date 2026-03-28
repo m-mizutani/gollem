@@ -1,6 +1,11 @@
 package gollem
 
-import "context"
+import (
+	"context"
+	"errors"
+
+	"github.com/m-mizutani/goerr/v2"
+)
 
 // Session is a session for the LLM. This can be called to generate content and stream. It's mainly used for Prompt() method, but it also can be used for one-shot content generation.
 type Session interface {
@@ -22,6 +27,8 @@ type SessionConfig struct {
 	// Middleware fields (ToolMiddleware excluded - managed at Agent layer)
 	contentBlockMiddlewares  []ContentBlockMiddleware
 	contentStreamMiddlewares []ContentStreamMiddleware
+
+	errs []error // errors accumulated during option application
 }
 
 // History returns the history of the session.
@@ -59,6 +66,11 @@ func (c *SessionConfig) ResponseSchema() *Parameter {
 	return c.responseSchema
 }
 
+// Err returns any errors accumulated during option application.
+func (c *SessionConfig) Err() error {
+	return errors.Join(c.errs...)
+}
+
 // NewSessionConfig creates a new session configuration. This is required for only LLM client implementations.
 func NewSessionConfig(options ...SessionOption) SessionConfig {
 	cfg := SessionConfig{}
@@ -77,6 +89,32 @@ type SessionOption func(cfg *SessionConfig)
 func WithSessionHistory(history *History) SessionOption {
 	return func(cfg *SessionConfig) {
 		cfg.history = history
+	}
+}
+
+// WithDelegatedHistory creates a session option that inherits conversation history
+// from an existing session. The history is deep-copied to avoid side effects on
+// the source session. If the source session's History() returns an error, it is
+// deferred and surfaced when NewSession processes the config.
+//
+// Usage:
+//
+//	newSession, err := llmClient.NewSession(ctx,
+//	    gollem.WithDelegatedHistory(existingSession),
+//	    gollem.WithSessionContentType(gollem.ContentTypeJSON),
+//	)
+func WithDelegatedHistory(src Session) SessionOption {
+	return func(cfg *SessionConfig) {
+		if src == nil {
+			cfg.errs = append(cfg.errs, goerr.New("source session is nil"))
+			return
+		}
+		h, err := src.History()
+		if err != nil {
+			cfg.errs = append(cfg.errs, goerr.Wrap(err, "failed to get history from source session"))
+			return
+		}
+		cfg.history = h.Clone()
 	}
 }
 

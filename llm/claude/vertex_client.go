@@ -126,6 +126,9 @@ type VertexAnthropicSession struct {
 // NewSession creates a new session for Claude via Vertex AI using Anthropic SDK.
 func (c *VertexClient) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 	cfg := gollem.NewSessionConfig(options...)
+	if err := cfg.Err(); err != nil {
+		return nil, err
+	}
 
 	var messages []anthropic.MessageParam
 	if cfg.History() != nil {

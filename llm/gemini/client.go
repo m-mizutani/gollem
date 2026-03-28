@@ -216,6 +216,9 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 // It converts the provided tools to Gemini's tool format and initializes a new chat session.
 func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 	cfg := gollem.NewSessionConfig(options...)
+	if err := cfg.Err(); err != nil {
+		return nil, err
+	}
 
 	// Prepare generation config
 	config := &genai.GenerateContentConfig{}

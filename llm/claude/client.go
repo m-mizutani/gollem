@@ -205,6 +205,9 @@ type Session struct {
 // It converts the provided tools to Claude's tool format and initializes a new chat session.
 func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 	cfg := gollem.NewSessionConfig(options...)
+	if err := cfg.Err(); err != nil {
+		return nil, err
+	}
 
 	// Convert gollem.Tool to anthropic.ToolUnionParam
 	claudeTools := make([]anthropic.ToolUnionParam, len(cfg.Tools()))
