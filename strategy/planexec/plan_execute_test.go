@@ -71,7 +71,7 @@ func TestBasicPlanExecution(t *testing.T) {
 		return &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						jsonResponse := `{
 							"needs_plan": false,
 							"direct_response": "` + response + `"
@@ -94,7 +94,7 @@ func TestBasicPlanExecution(t *testing.T) {
 		return &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						callCount++
 						switch callCount {
 						case 1:
@@ -268,7 +268,7 @@ func TestBasicPlanExecution(t *testing.T) {
 				}
 
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						callCount++
 						switch callCount {
 						case 1:
@@ -601,7 +601,7 @@ func TestExternalPlanGeneration(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{`{
 								"needs_plan": true,
@@ -636,7 +636,7 @@ func TestExternalPlanGeneration(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{`{
 								"needs_plan": true,
@@ -720,7 +720,7 @@ func TestWithPlanOption(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						callCount++
 						switch callCount {
 						case 1:
@@ -791,7 +791,7 @@ func TestWithPlanOption(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						t.Fatal("LLM should not be called when using direct response plan")
 						return nil, nil
 					},
@@ -831,7 +831,7 @@ func TestUserQuestionExtraction(t *testing.T) {
 			mockClient := &mock.LLMClientMock{
 				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 					return &mock.SessionMock{
-						GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 							// Return direct response (no tasks needed)
 							return &gollem.Response{
 								Texts: []string{`{
@@ -920,7 +920,7 @@ func TestEnhancedConclusion(t *testing.T) {
 			mockClient := &mock.LLMClientMock{
 				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 					return &mock.SessionMock{
-						GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 							callCount++
 							switch callCount {
 							case 1:
@@ -1045,7 +1045,7 @@ func TestPlanExec_TaskResultPreservation(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						callCount++
 						switch callCount {
 						case 1:
@@ -1152,7 +1152,7 @@ func TestSystemPromptInReflectionAndConclusion(t *testing.T) {
 				}
 
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						// Planning phase returns plan with one task
 						if sessionCallCount == 1 {
 							return &gollem.Response{
@@ -1244,7 +1244,7 @@ func TestSystemPromptInReflectionAndConclusion(t *testing.T) {
 				}
 
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						// Planning phase (1st call)
 						if sessionCallCount == 1 {
 							return &gollem.Response{

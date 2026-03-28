@@ -329,7 +329,7 @@ func TestGeminiContentGenerate(t *testing.T) {
 	session, err := client.NewSession(ctx)
 	gt.NoError(t, err)
 
-	result, err := session.GenerateContent(ctx, gollem.Text("Say hello in one word"))
+	result, err := session.Generate(ctx, []gollem.Input{gollem.Text("Say hello in one word")})
 	gt.NoError(t, err).Required()
 	gt.A(t, result.Texts).Length(1).Required()
 	gt.Value(t, len(result.Texts[0])).NotEqual(0)
@@ -439,7 +439,7 @@ func TestThinkingBudgetIntegration(t *testing.T) {
 			gt.NotNil(t, session)
 
 			// Simple test prompt
-			response, err := session.GenerateContent(ctx, gollem.Text("Say 'Hello' in one word"))
+			response, err := session.Generate(ctx, []gollem.Input{gollem.Text("Say 'Hello' in one word")})
 			gt.NoError(t, err)
 			gt.NotNil(t, response)
 			gt.Array(t, response.Texts).Length(1).Required()
@@ -621,17 +621,17 @@ func TestThinkingModelAgentLoop(t *testing.T) {
 	ctx := context.Background()
 
 	// First call: should get a function call
-	resp1, err := session.GenerateContent(ctx, gollem.Text("Write a test file"))
+	resp1, err := session.Generate(ctx, []gollem.Input{gollem.Text("Write a test file")})
 	gt.NoError(t, err)
 	gt.A(t, resp1.FunctionCalls).Length(1)
 	// Thought text should NOT appear in Texts
 	gt.A(t, resp1.Texts).Length(0)
 
 	// Second call: send function response (simulating tool execution result)
-	resp2, err := session.GenerateContent(ctx, gollem.FunctionResponse{
+	resp2, err := session.Generate(ctx, []gollem.Input{gollem.FunctionResponse{
 		Name: "write_file",
 		Data: map[string]any{"status": "ok"},
-	})
+	}})
 	gt.NoError(t, err)
 	gt.A(t, resp2.Texts).Length(1)
 	gt.Value(t, resp2.Texts[0]).Equal("File written successfully.")
@@ -675,7 +675,7 @@ func TestThinkingModelHistoryRoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	// Make a call to populate history
-	_, err = session.GenerateContent(ctx, gollem.Text("Hi"))
+	_, err = session.Generate(ctx, []gollem.Input{gollem.Text("Hi")})
 	gt.NoError(t, err)
 
 	// Export history
@@ -721,7 +721,7 @@ func TestThinkingModelHistoryRoundTrip(t *testing.T) {
 	session2, err := gemini.NewSessionWithAPIClient(mock2, cfg2, "gemini-2.5-flash")
 	gt.NoError(t, err)
 
-	resp, err := session2.GenerateContent(ctx, gollem.Text("Continue"))
+	resp, err := session2.Generate(ctx, []gollem.Input{gollem.Text("Continue")})
 	gt.NoError(t, err)
 	gt.A(t, resp.Texts).Length(1)
 	gt.Value(t, resp.Texts[0]).Equal("Continued!")
@@ -758,17 +758,17 @@ func TestGeminiContentGenerateWithModel(t *testing.T) {
 	gt.NoError(t, err)
 
 	// First call: ask the model to use the tool
-	resp1, err := session.GenerateContent(ctx, gollem.Text("Please call the write_file tool with path 'test.txt' and content 'hello world'. Just call the tool, don't explain."))
+	resp1, err := session.Generate(ctx, []gollem.Input{gollem.Text("Please call the write_file tool with path 'test.txt' and content 'hello world'. Just call the tool, don't explain.")})
 	gt.NoError(t, err).Required()
 
 	if len(resp1.FunctionCalls) > 0 {
 		// Second call: send tool response back
 		fc := resp1.FunctionCalls[0]
-		resp2, err := session.GenerateContent(ctx, gollem.FunctionResponse{
+		resp2, err := session.Generate(ctx, []gollem.Input{gollem.FunctionResponse{
 			ID:   fc.ID,
 			Name: fc.Name,
 			Data: map[string]any{"status": "success", "path": "test.txt"},
-		})
+		}})
 		gt.NoError(t, err)
 		gt.A(t, resp2.Texts).Length(1).Required()
 	}
@@ -828,7 +828,7 @@ func TestGeminiTokenLimitErrorIntegration(t *testing.T) {
 	// Repeat a long text many times to ensure we exceed the limit
 	longText := strings.Repeat("This is a test sentence to make the prompt very long. ", 100000)
 
-	_, err = session.GenerateContent(ctx, gollem.Text(longText))
+	_, err = session.Generate(ctx, []gollem.Input{gollem.Text(longText)})
 	gt.Error(t, err)
 
 	// Verify the error has the token exceeded tag

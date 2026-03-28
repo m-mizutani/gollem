@@ -21,7 +21,7 @@ func NewLLMEvaluator(client gollem.LLMClient) Evaluator {
 			return nil, goerr.Wrap(err, "failed to create session for evaluation")
 		}
 
-		resp, err := session.GenerateContent(ctx, gollem.Text(prompt))
+		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text(prompt)})
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to generate evaluation")
 		}

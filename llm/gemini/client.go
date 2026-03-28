@@ -431,8 +431,9 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 	return response, nil
 }
 
-// GenerateContent generates content based on the input.
-func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+// Generate generates content based on the input with optional per-call overrides.
+func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+	// TODO: apply per-call overrides from opts
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	// Always create history (even if empty) to maintain consistency with middleware
@@ -559,8 +560,9 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	}, nil
 }
 
-// GenerateStream generates content based on the input and returns a stream of responses.
-func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+// Stream generates content based on the input and returns a stream of responses with optional per-call overrides.
+func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
+	// TODO: apply per-call overrides from opts
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	// Always create history (even if empty) to maintain consistency with middleware
@@ -966,6 +968,16 @@ func convertResponseSchemaToGenai(param *gollem.Parameter) (*genai.Schema, error
 	schema := convertParameterToNewSchema(param)
 
 	return schema, nil
+}
+
+// Deprecated: GenerateContent is deprecated. Use Generate instead.
+func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	return s.Generate(ctx, input)
+}
+
+// Deprecated: GenerateStream is deprecated. Use Stream instead.
+func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+	return s.Stream(ctx, input)
 }
 
 // CountToken calculates the total number of tokens for the given inputs,

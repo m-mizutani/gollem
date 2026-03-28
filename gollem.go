@@ -515,7 +515,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 
 		switch cfg.responseMode {
 		case ResponseModeBlocking:
-			output, err := g.currentSession.GenerateContent(ctx, strategyInputs...)
+			output, err := g.currentSession.Generate(ctx, strategyInputs)
 			if err != nil {
 				return nil, err
 			}
@@ -531,7 +531,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 			nextInput = newInput
 
 		case ResponseModeStreaming:
-			stream, err := g.currentSession.GenerateStream(ctx, strategyInputs...)
+			stream, err := g.currentSession.Stream(ctx, strategyInputs)
 			if err != nil {
 				return nil, err
 			}

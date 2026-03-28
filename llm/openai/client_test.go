@@ -28,7 +28,7 @@ func TestOpenAIContentGenerate(t *testing.T) {
 	session, err := client.NewSession(ctx)
 	gt.NoError(t, err)
 
-	result, err := session.GenerateContent(ctx, gollem.Text("Say hello in one word"))
+	result, err := session.Generate(ctx, []gollem.Input{gollem.Text("Say hello in one word")})
 	gt.NoError(t, err)
 	gt.Array(t, result.Texts).Length(1).Required()
 	gt.Value(t, len(result.Texts[0])).NotEqual(0)
@@ -130,7 +130,7 @@ func TestOpenAITokenLimitErrorIntegration(t *testing.T) {
 	// Approximately 1 token = 4 characters, aim for ~300k+ tokens
 	longText := strings.Repeat("This is a test sentence to make the prompt very long. ", 25000)
 
-	_, err = session.GenerateContent(ctx, gollem.Text(longText))
+	_, err = session.Generate(ctx, []gollem.Input{gollem.Text(longText)})
 	gt.Error(t, err)
 
 	// Log error details for debugging

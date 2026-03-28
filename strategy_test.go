@@ -121,7 +121,7 @@ func TestCustomStrategies(t *testing.T) {
 		// Mock LLM client
 		mockClient := &mock.LLMClientMock{}
 		mockSession := &mock.SessionMock{}
-		mockSession.GenerateContentFunc = func(ctx context.Context, inputs ...gollem.Input) (*gollem.Response, error) {
+		mockSession.GenerateFunc = func(ctx context.Context, inputs []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 			return &gollem.Response{
 				Texts:         []string{"LLM response"},
 				FunctionCalls: []*gollem.FunctionCall{},

@@ -18,3 +18,6 @@ func init() {
 }
 
 func DebugLogger() *slog.Logger { return debugLogger }
+
+// NewGenerateConfig exposes newGenerateConfig for testing.
+var NewGenerateConfig = newGenerateConfig

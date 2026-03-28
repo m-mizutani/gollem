@@ -130,8 +130,9 @@ func runOpenAIExample() error {
 		return fmt.Errorf("failed to create session: %w", err)
 	}
 
-	resp, err := session.GenerateContent(ctx,
-		gollem.Text("Extract user information: Sarah Johnson is 28 years old, email: sarah.j@example.com, lives in Seattle, USA, and enjoys hiking, photography, and cooking."))
+	resp, err := session.Generate(ctx, []gollem.Input{
+		gollem.Text("Extract user information: Sarah Johnson is 28 years old, email: sarah.j@example.com, lives in Seattle, USA, and enjoys hiking, photography, and cooking."),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to generate content: %w", err)
 	}
@@ -170,8 +171,9 @@ func runClaudeExample() error {
 		return fmt.Errorf("failed to create session: %w", err)
 	}
 
-	resp, err := session.GenerateContent(ctx,
-		gollem.Text("Extract user information: Michael Chen is 35 years old, email: m.chen@tech.com, lives in San Francisco, USA, and enjoys programming, gaming, and traveling."))
+	resp, err := session.Generate(ctx, []gollem.Input{
+		gollem.Text("Extract user information: Michael Chen is 35 years old, email: m.chen@tech.com, lives in San Francisco, USA, and enjoys programming, gaming, and traveling."),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to generate content: %w", err)
 	}
@@ -211,8 +213,9 @@ func runGeminiExample() error {
 		return fmt.Errorf("failed to create session: %w", err)
 	}
 
-	resp, err := session.GenerateContent(ctx,
-		gollem.Text("Extract user information: Emily Davis is 31 years old, email: emily.d@design.com, lives in Portland, USA, and enjoys painting, yoga, and reading."))
+	resp, err := session.Generate(ctx, []gollem.Input{
+		gollem.Text("Extract user information: Emily Davis is 31 years old, email: emily.d@design.com, lives in Portland, USA, and enjoys painting, yoga, and reading."),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to generate content: %w", err)
 	}

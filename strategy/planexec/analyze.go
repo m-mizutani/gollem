@@ -65,7 +65,7 @@ func generatePlanInternal(ctx context.Context, client gollem.LLMClient, inputs [
 	planPrompt := buildPlanPrompt(ctx, inputs, tools)
 
 	// Generate plan using LLM
-	response, err := session.GenerateContent(ctx, planPrompt...)
+	response, err := session.Generate(ctx, planPrompt)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to generate plan")
 	}

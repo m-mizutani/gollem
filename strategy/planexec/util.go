@@ -86,7 +86,7 @@ func getFinalConclusion(ctx context.Context, client gollem.LLMClient, plan *Plan
 	}
 
 	// Generate conclusion
-	response, err := session.GenerateContent(ctx, gollem.Text(conclusionPrompt))
+	response, err := session.Generate(ctx, []gollem.Input{gollem.Text(conclusionPrompt)})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to generate conclusion")
 	}

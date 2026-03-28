@@ -153,11 +153,11 @@ func (mock *LLMClientMock) NewSessionCalls() []struct {
 //			CountTokenFunc: func(ctx context.Context, input ...gollem.Input) (int, error) {
 //				panic("mock out the CountToken method")
 //			},
-//			GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-//				panic("mock out the GenerateContent method")
+//			GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+//				panic("mock out the Generate method")
 //			},
-//			GenerateStreamFunc: func(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
-//				panic("mock out the GenerateStream method")
+//			StreamFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
+//				panic("mock out the Stream method")
 //			},
 //			HistoryFunc: func() (*gollem.History, error) {
 //				panic("mock out the History method")
@@ -175,11 +175,11 @@ type SessionMock struct {
 	// CountTokenFunc mocks the CountToken method.
 	CountTokenFunc func(ctx context.Context, input ...gollem.Input) (int, error)
 
-	// GenerateContentFunc mocks the GenerateContent method.
-	GenerateContentFunc func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error)
+	// GenerateFunc mocks the Generate method.
+	GenerateFunc func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error)
 
-	// GenerateStreamFunc mocks the GenerateStream method.
-	GenerateStreamFunc func(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error)
+	// StreamFunc mocks the Stream method.
+	StreamFunc func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error)
 
 	// HistoryFunc mocks the History method.
 	HistoryFunc func() (*gollem.History, error)
@@ -198,29 +198,33 @@ type SessionMock struct {
 			// Input is the input argument value.
 			Input []gollem.Input
 		}
-		// GenerateContent holds details about calls to the GenerateContent method.
-		GenerateContent []struct {
+		// Generate holds details about calls to the Generate method.
+		Generate []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Input is the input argument value.
 			Input []gollem.Input
+			// Opts is the opts argument value.
+			Opts []gollem.GenerateOption
 		}
-		// GenerateStream holds details about calls to the GenerateStream method.
-		GenerateStream []struct {
+		// Stream holds details about calls to the Stream method.
+		Stream []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Input is the input argument value.
 			Input []gollem.Input
+			// Opts is the opts argument value.
+			Opts []gollem.GenerateOption
 		}
 		// History holds details about calls to the History method.
 		History []struct {
 		}
 	}
-	lockAppendHistory   sync.RWMutex
-	lockCountToken      sync.RWMutex
-	lockGenerateContent sync.RWMutex
-	lockGenerateStream  sync.RWMutex
-	lockHistory         sync.RWMutex
+	lockAppendHistory sync.RWMutex
+	lockCountToken    sync.RWMutex
+	lockGenerate      sync.RWMutex
+	lockStream        sync.RWMutex
+	lockHistory       sync.RWMutex
 }
 
 // AppendHistory calls AppendHistoryFunc.
@@ -298,83 +302,91 @@ func (mock *SessionMock) CountTokenCalls() []struct {
 	return calls
 }
 
-// GenerateContent calls GenerateContentFunc.
-func (mock *SessionMock) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+// Generate calls GenerateFunc.
+func (mock *SessionMock) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 	callInfo := struct {
 		Ctx   context.Context
 		Input []gollem.Input
+		Opts  []gollem.GenerateOption
 	}{
 		Ctx:   ctx,
 		Input: input,
+		Opts:  opts,
 	}
-	mock.lockGenerateContent.Lock()
-	mock.calls.GenerateContent = append(mock.calls.GenerateContent, callInfo)
-	mock.lockGenerateContent.Unlock()
-	if mock.GenerateContentFunc == nil {
+	mock.lockGenerate.Lock()
+	mock.calls.Generate = append(mock.calls.Generate, callInfo)
+	mock.lockGenerate.Unlock()
+	if mock.GenerateFunc == nil {
 		var (
 			responseOut *gollem.Response
 			errOut      error
 		)
 		return responseOut, errOut
 	}
-	return mock.GenerateContentFunc(ctx, input...)
+	return mock.GenerateFunc(ctx, input, opts...)
 }
 
-// GenerateContentCalls gets all the calls that were made to GenerateContent.
+// GenerateCalls gets all the calls that were made to Generate.
 // Check the length with:
 //
-//	len(mockedSession.GenerateContentCalls())
-func (mock *SessionMock) GenerateContentCalls() []struct {
+//	len(mockedSession.GenerateCalls())
+func (mock *SessionMock) GenerateCalls() []struct {
 	Ctx   context.Context
 	Input []gollem.Input
+	Opts  []gollem.GenerateOption
 } {
 	var calls []struct {
 		Ctx   context.Context
 		Input []gollem.Input
+		Opts  []gollem.GenerateOption
 	}
-	mock.lockGenerateContent.RLock()
-	calls = mock.calls.GenerateContent
-	mock.lockGenerateContent.RUnlock()
+	mock.lockGenerate.RLock()
+	calls = mock.calls.Generate
+	mock.lockGenerate.RUnlock()
 	return calls
 }
 
-// GenerateStream calls GenerateStreamFunc.
-func (mock *SessionMock) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+// Stream calls StreamFunc.
+func (mock *SessionMock) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
 	callInfo := struct {
 		Ctx   context.Context
 		Input []gollem.Input
+		Opts  []gollem.GenerateOption
 	}{
 		Ctx:   ctx,
 		Input: input,
+		Opts:  opts,
 	}
-	mock.lockGenerateStream.Lock()
-	mock.calls.GenerateStream = append(mock.calls.GenerateStream, callInfo)
-	mock.lockGenerateStream.Unlock()
-	if mock.GenerateStreamFunc == nil {
+	mock.lockStream.Lock()
+	mock.calls.Stream = append(mock.calls.Stream, callInfo)
+	mock.lockStream.Unlock()
+	if mock.StreamFunc == nil {
 		var (
 			responseChOut <-chan *gollem.Response
 			errOut        error
 		)
 		return responseChOut, errOut
 	}
-	return mock.GenerateStreamFunc(ctx, input...)
+	return mock.StreamFunc(ctx, input, opts...)
 }
 
-// GenerateStreamCalls gets all the calls that were made to GenerateStream.
+// StreamCalls gets all the calls that were made to Stream.
 // Check the length with:
 //
-//	len(mockedSession.GenerateStreamCalls())
-func (mock *SessionMock) GenerateStreamCalls() []struct {
+//	len(mockedSession.StreamCalls())
+func (mock *SessionMock) StreamCalls() []struct {
 	Ctx   context.Context
 	Input []gollem.Input
+	Opts  []gollem.GenerateOption
 } {
 	var calls []struct {
 		Ctx   context.Context
 		Input []gollem.Input
+		Opts  []gollem.GenerateOption
 	}
-	mock.lockGenerateStream.RLock()
-	calls = mock.calls.GenerateStream
-	mock.lockGenerateStream.RUnlock()
+	mock.lockStream.RLock()
+	calls = mock.calls.Stream
+	mock.lockStream.RUnlock()
 	return calls
 }
 

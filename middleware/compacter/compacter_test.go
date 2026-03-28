@@ -116,7 +116,7 @@ func TestContentBlockMiddleware_TokenExceeded(t *testing.T) {
 	mockClient := &mock.LLMClientMock{
 		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 			return &mock.SessionMock{
-				GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+				GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 					return &gollem.Response{
 						Texts: []string{"This is a summary of the conversation."},
 					}, nil
@@ -182,7 +182,7 @@ func TestContentBlockMiddleware_MaxRetriesExceeded(t *testing.T) {
 	mockClient := &mock.LLMClientMock{
 		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 			return &mock.SessionMock{
-				GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+				GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 					return &gollem.Response{
 						Texts: []string{"Summary"},
 					}, nil
@@ -290,7 +290,7 @@ func TestContentStreamMiddleware_TokenExceeded(t *testing.T) {
 	mockClient := &mock.LLMClientMock{
 		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 			return &mock.SessionMock{
-				GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+				GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 					return &gollem.Response{
 						Texts: []string{"Summary"},
 					}, nil
@@ -351,7 +351,7 @@ func TestContentBlockMiddleware_CompactionHook(t *testing.T) {
 	mockClient := &mock.LLMClientMock{
 		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 			return &mock.SessionMock{
-				GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+				GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 					// Return summary for compaction with token usage
 					return &gollem.Response{
 						Texts:       []string{"Compacted conversation summary"},
@@ -455,7 +455,7 @@ func TestContentBlockMiddleware_SummaryRoleAlternation(t *testing.T) {
 			mockClient := &mock.LLMClientMock{
 				NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 					return &mock.SessionMock{
-						GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+						GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 							return &gollem.Response{
 								Texts:       []string{"Summary of conversation"},
 								InputToken:  50,

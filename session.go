@@ -4,8 +4,8 @@ import "context"
 
 // Session is a session for the LLM. This can be called to generate content and stream. It's mainly used for Prompt() method, but it also can be used for one-shot content generation.
 type Session interface {
-	GenerateContent(ctx context.Context, input ...Input) (*Response, error)
-	GenerateStream(ctx context.Context, input ...Input) (<-chan *Response, error)
+	Generate(ctx context.Context, input []Input, opts ...GenerateOption) (*Response, error)
+	Stream(ctx context.Context, input []Input, opts ...GenerateOption) (<-chan *Response, error)
 	History() (*History, error)
 	AppendHistory(*History) error
 	CountToken(ctx context.Context, input ...Input) (int, error)
