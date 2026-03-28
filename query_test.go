@@ -15,6 +15,11 @@ type testQueryResult struct {
 	Count int    `json:"count" description:"number of items"`
 }
 
+type testQueryResultWithConstraints struct {
+	Status string `json:"status" description:"status of the item" enum:"active,inactive" required:"true"`
+	Score  int    `json:"score" description:"score value" min:"0" max:"100"`
+}
+
 func setupQueryMock(t *testing.T, genFunc func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error)) *mock.LLMClientMock {
 	t.Helper()
 	sessionMock := &mock.SessionMock{
@@ -245,4 +250,89 @@ func TestQueryRetryFeedbackMessage(t *testing.T) {
 	gt.Value(t, len(secondCallInputs)).Equal(1)
 	feedbackText := secondCallInputs[0].String()
 	gt.Value(t, feedbackText != "").Equal(true)
+}
+
+func TestQuerySchemaValidationEnumViolation(t *testing.T) {
+	callCount := 0
+	client := setupQueryMock(t, func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+		callCount++
+		if callCount == 1 {
+			// Valid JSON but enum constraint violation
+			return &gollem.Response{
+				Texts:       []string{`{"status":"unknown","score":50}`},
+				InputToken:  10,
+				OutputToken: 5,
+			}, nil
+		}
+		// Second call returns valid data
+		return &gollem.Response{
+			Texts:       []string{`{"status":"active","score":50}`},
+			InputToken:  12,
+			OutputToken: 6,
+		}, nil
+	})
+
+	resp, err := gollem.Query[testQueryResultWithConstraints](context.Background(), client, "test")
+	gt.NoError(t, err)
+	gt.Value(t, resp.Data.Status).Equal("active")
+	gt.Value(t, resp.Data.Score).Equal(50)
+	gt.Value(t, callCount).Equal(2)
+}
+
+func TestQuerySchemaValidationRequiredMissing(t *testing.T) {
+	callCount := 0
+	client := setupQueryMock(t, func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+		callCount++
+		if callCount == 1 {
+			// Missing required "status" field
+			return &gollem.Response{
+				Texts:       []string{`{"score":50}`},
+				InputToken:  10,
+				OutputToken: 5,
+			}, nil
+		}
+		return &gollem.Response{
+			Texts:       []string{`{"status":"active","score":50}`},
+			InputToken:  12,
+			OutputToken: 6,
+		}, nil
+	})
+
+	resp, err := gollem.Query[testQueryResultWithConstraints](context.Background(), client, "test")
+	gt.NoError(t, err)
+	gt.Value(t, resp.Data.Status).Equal("active")
+	gt.Value(t, callCount).Equal(2)
+}
+
+func TestQuerySchemaValidationExhausted(t *testing.T) {
+	callCount := 0
+	client := setupQueryMock(t, func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+		callCount++
+		// Always return invalid enum value
+		return &gollem.Response{
+			Texts: []string{`{"status":"unknown","score":50}`},
+		}, nil
+	})
+
+	_, err := gollem.Query[testQueryResultWithConstraints](context.Background(), client, "test",
+		gollem.WithQueryMaxRetry(2),
+	)
+	gt.Error(t, err)
+	// 1 initial + 2 retries = 3 calls
+	gt.Value(t, callCount).Equal(3)
+}
+
+func TestQuerySchemaValidationSuccess(t *testing.T) {
+	client := setupQueryMock(t, func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+		return &gollem.Response{
+			Texts:       []string{`{"status":"active","score":80}`},
+			InputToken:  10,
+			OutputToken: 5,
+		}, nil
+	})
+
+	resp, err := gollem.Query[testQueryResultWithConstraints](context.Background(), client, "test")
+	gt.NoError(t, err)
+	gt.Value(t, resp.Data.Status).Equal("active")
+	gt.Value(t, resp.Data.Score).Equal(80)
 }

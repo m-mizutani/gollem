@@ -131,6 +131,29 @@ func Query[T any](ctx context.Context, client LLMClient, prompt string, opts ...
 			)
 		}
 
+		// Validate the response against the schema
+		var raw any
+		if unmarshalErr := json.Unmarshal([]byte(jsonText), &raw); unmarshalErr != nil {
+			return nil, goerr.Wrap(unmarshalErr, "failed to unmarshal response for validation",
+				goerr.V("response", jsonText),
+			)
+		}
+		if validateErr := schema.ValidateValue("root", raw); validateErr != nil {
+			if attempt < cfg.maxRetry {
+				input = []Input{
+					Text(fmt.Sprintf(
+						"Your previous response was valid JSON but did not match the schema constraints. Error: %s\nYour response was: %s\nPlease respond with valid JSON matching the schema.",
+						validateErr.Error(), jsonText,
+					)),
+				}
+				continue
+			}
+			return nil, goerr.Wrap(validateErr, "response JSON failed schema validation after retries",
+				goerr.V("attempts", cfg.maxRetry+1),
+				goerr.V("response", jsonText),
+			)
+		}
+
 		return &QueryResponse[T]{
 			Data:        &result,
 			InputToken:  totalInputToken,
