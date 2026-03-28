@@ -142,6 +142,21 @@ resp, _ := session.GenerateContent(ctx, gollem.Text("Extract: John, 30, john@exa
 // resp.Texts[0] is valid JSON matching the schema
 ```
 
+For one-shot queries, `Query[T]()` combines schema generation, session creation, LLM call, and JSON parsing into a single generic function call with automatic retry on parse failures:
+
+```go
+type UserProfile struct {
+	Name  string `json:"name" description:"User's full name"`
+	Age   int    `json:"age" description:"Age in years"`
+	Email string `json:"email" description:"Email address"`
+}
+
+result, _ := gollem.Query[UserProfile](ctx, client, "Extract: John, 30, john@example.com",
+	gollem.WithQuerySystemPrompt("You are a data extractor."),
+)
+// result.Data is *UserProfile — type-safe, already parsed
+```
+
 ### Middleware
 
 Monitor, log, and control agent behavior with composable middleware. [Learn more →](doc/middleware.md)
@@ -216,7 +231,7 @@ err := agent.Execute(ctx, gollem.Text("Hello!"))
 See the [examples](https://github.com/m-mizutani/gollem/tree/main/examples) directory for complete working examples:
 
 - **[Simple](examples/simple)**: Minimal example for getting started
-- **[Query](examples/query)**: Simple LLM query without conversation state
+- **[Query](examples/query)**: Type-safe structured query with `Query[T]()`
 - **[Basic](examples/basic)**: Simple agent with custom tools
 - **[Chat](examples/chat)**: Interactive chat application
 - **[MCP](examples/mcp)**: Integration with MCP servers

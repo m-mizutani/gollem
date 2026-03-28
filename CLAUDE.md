@@ -120,7 +120,7 @@ See `examples/` directory for usage patterns:
 - `mcp/` - MCP server integration
 - `tools/` - Custom tool creation
 - `plan_mode/` - Plan mode agent with goal-oriented task execution
-- `query/` - Simple LLM query without conversation state
+- `query/` - Type-safe structured query with `Query[T]()`
 - `simple/` - Minimal example
 
 ## Development Guidelines
