@@ -348,6 +348,21 @@ session, err := client.NewSession(ctx,
 )
 ```
 
+### Delegating History Between Sessions
+
+When building multi-step workflows that create new sessions with different configuration (e.g., switching from text to JSON mode), use `WithDelegatedHistory` to inherit conversation history from an existing session:
+
+```go
+// Create a new session that inherits history from an existing session
+newSession, err := client.NewSession(ctx,
+    gollem.WithDelegatedHistory(existingSession),
+    gollem.WithSessionContentType(gollem.ContentTypeJSON),
+    gollem.WithSessionResponseSchema(schema),
+)
+```
+
+The history is deep-copied, so mutations in the new session do not affect the source session. If the source session's `History()` returns an error, it is surfaced when `NewSession` returns.
+
 ### Embedding Generation
 
 Providers that support embeddings (OpenAI and Gemini):

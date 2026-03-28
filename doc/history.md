@@ -187,6 +187,28 @@ if history := agent.Session().History(); history != nil {
 
 Note: The History returned from Prompt contains the complete conversation history, so there's no need to manage or track individual messages. Each Prompt response provides a new History instance that includes all previous messages.
 
+## Delegating History Between Sessions
+
+For multi-step workflows where you create a new session with different configuration (e.g., switching content type or response schema), `WithDelegatedHistory` provides a concise way to carry over conversation context:
+
+```go
+// First session: text mode with tools
+planSession, err := client.NewSession(ctx,
+    gollem.WithSessionSystemPrompt("Plan the task."),
+    gollem.WithSessionTools(tools...),
+)
+// ... use planSession ...
+
+// Second session: inherit history, switch to JSON mode
+evalSession, err := client.NewSession(ctx,
+    gollem.WithDelegatedHistory(planSession),
+    gollem.WithSessionContentType(gollem.ContentTypeJSON),
+    gollem.WithSessionResponseSchema(schema),
+)
+```
+
+The history is deep-copied so that mutations in the new session do not affect the source. Only history is inherited — system prompt, tools, content type, and other options are not carried over.
+
 ## Automatic History Persistence with HistoryRepository
 
 `HistoryRepository` is an interface that lets gollem automatically load and save conversation history to any storage backend — filesystem, S3, GCS, a database, etc.
