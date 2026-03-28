@@ -633,9 +633,10 @@ func processResponseWithContentType(ctx context.Context, resp *anthropic.Message
 	return response
 }
 
-// GenerateContent processes the input and generates a response.
+// Generate processes the input and generates a response with optional per-call overrides.
 // It handles both text messages and function responses.
-func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+	// TODO: apply per-call overrides from opts
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	var historyCopy *gollem.History
@@ -757,6 +758,16 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	}, nil
 }
 
+// Deprecated: GenerateContent is deprecated. Use Generate instead.
+func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	return s.Generate(ctx, input)
+}
+
+// Deprecated: GenerateStream is deprecated. Use Stream instead.
+func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+	return s.Stream(ctx, input)
+}
+
 // FunctionCallAccumulator accumulates function call information from stream
 type FunctionCallAccumulator struct {
 	ID        string
@@ -789,9 +800,10 @@ func (a *FunctionCallAccumulator) accumulate() (*gollem.FunctionCall, error) {
 	}, nil
 }
 
-// GenerateStream processes the input and generates a response stream.
+// Stream processes the input and generates a response stream with optional per-call overrides.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
-func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
+	// TODO: apply per-call overrides from opts
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	var historyCopy *gollem.History

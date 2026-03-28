@@ -89,13 +89,24 @@ func Query[T any](ctx context.Context, client LLMClient, prompt string, opts ...
 		cfg.maxRetry = 0
 	}
 
-	var input []Input
-	input = append(input, Text(prompt))
+	input := []Input{Text(prompt)}
+
+	return queryWithRetry[T](ctx, session, input, cfg.maxRetry)
+}
+
+// queryWithRetry is the shared retry loop for Query and SessionQuery.
+// It calls session.Generate with the given input and options, unmarshals
+// the response into T, validates against schema, and retries on failure.
+func queryWithRetry[T any](ctx context.Context, session Session, input []Input, maxRetry int, genOpts ...GenerateOption) (*QueryResponse[T], error) {
+	schema, err := ToSchema(*new(T))
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to generate schema from type parameter")
+	}
 
 	var totalInputToken, totalOutputToken int
 
-	for attempt := range cfg.maxRetry + 1 {
-		resp, err := session.GenerateContent(ctx, input...)
+	for attempt := range maxRetry + 1 {
+		resp, err := session.Generate(ctx, input, genOpts...)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to generate content",
 				goerr.V("attempt", attempt+1),
@@ -115,8 +126,7 @@ func Query[T any](ctx context.Context, client LLMClient, prompt string, opts ...
 
 		var result T
 		if unmarshalErr := json.Unmarshal([]byte(jsonText), &result); unmarshalErr != nil {
-			if attempt < cfg.maxRetry {
-				// Feed back the error for retry
+			if attempt < maxRetry {
 				input = []Input{
 					Text(fmt.Sprintf(
 						"Your previous response was not valid JSON that matches the schema. Error: %s\nYour response was: %s\nPlease respond with valid JSON matching the schema.",
@@ -126,7 +136,7 @@ func Query[T any](ctx context.Context, client LLMClient, prompt string, opts ...
 				continue
 			}
 			return nil, goerr.Wrap(unmarshalErr, "failed to unmarshal response JSON after retries",
-				goerr.V("attempts", cfg.maxRetry+1),
+				goerr.V("attempts", maxRetry+1),
 				goerr.V("response", jsonText),
 			)
 		}
@@ -139,7 +149,7 @@ func Query[T any](ctx context.Context, client LLMClient, prompt string, opts ...
 			)
 		}
 		if validateErr := schema.ValidateValue("root", raw); validateErr != nil {
-			if attempt < cfg.maxRetry {
+			if attempt < maxRetry {
 				input = []Input{
 					Text(fmt.Sprintf(
 						"Your previous response was valid JSON but did not match the schema constraints. Error: %s\nYour response was: %s\nPlease respond with valid JSON matching the schema.",
@@ -149,7 +159,7 @@ func Query[T any](ctx context.Context, client LLMClient, prompt string, opts ...
 				continue
 			}
 			return nil, goerr.Wrap(validateErr, "response JSON failed schema validation after retries",
-				goerr.V("attempts", cfg.maxRetry+1),
+				goerr.V("attempts", maxRetry+1),
 				goerr.V("response", jsonText),
 			)
 		}

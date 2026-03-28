@@ -75,7 +75,7 @@ func TestMiddlewareHistoryIntervention(t *testing.T) {
 
 		// Generate content
 		ctx := context.Background()
-		resp, err := session.GenerateContent(ctx, gollem.Text("test input"))
+		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("test input")})
 		gt.NoError(t, err)
 		gt.NotNil(t, resp)
 
@@ -150,7 +150,7 @@ func TestMiddlewareChainExecution(t *testing.T) {
 
 		// Generate content
 		ctx := context.Background()
-		_, err := session.GenerateContent(ctx, gollem.Text("test"))
+		_, err := session.Generate(ctx, []gollem.Input{gollem.Text("test")})
 		gt.NoError(t, err)
 
 		// Verify execution order
@@ -215,7 +215,7 @@ func TestMiddlewareSameAddressModifiedContent(t *testing.T) {
 		ctx := context.Background()
 
 		// First call
-		_, err := session.GenerateContent(ctx, gollem.Text("first input"))
+		_, err := session.Generate(ctx, []gollem.Input{gollem.Text("first input")})
 		gt.NoError(t, err)
 
 		// Get history after first call
@@ -224,7 +224,7 @@ func TestMiddlewareSameAddressModifiedContent(t *testing.T) {
 		firstCallMessageCount := len(history1.Messages)
 
 		// Second call
-		_, err = session.GenerateContent(ctx, gollem.Text("second input"))
+		_, err = session.Generate(ctx, []gollem.Input{gollem.Text("second input")})
 		gt.NoError(t, err)
 
 		// Get history after second call

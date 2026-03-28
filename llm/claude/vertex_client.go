@@ -169,8 +169,9 @@ func (s *VertexAnthropicSession) convertInputs(ctx context.Context, input ...gol
 	return convertGollemInputsToClaude(ctx, input...)
 }
 
-// GenerateContent processes the input and generates a response.
-func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+// Generate processes the input and generates a response with optional per-call overrides.
+func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+	// TODO: apply per-call overrides from opts
 	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
@@ -227,8 +228,9 @@ func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...g
 	return processResponseWithContentType(ctx, resp, s.cfg.ContentType(), s.cfg.ResponseSchema() != nil), nil
 }
 
-// GenerateStream processes the input and generates a response stream.
-func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+// Stream processes the input and generates a response stream with optional per-call overrides.
+func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
+	// TODO: apply per-call overrides from opts
 	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
@@ -321,6 +323,16 @@ func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...go
 	}()
 
 	return wrappedCh, nil
+}
+
+// Deprecated: GenerateContent is deprecated. Use Generate instead.
+func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	return s.Generate(ctx, input)
+}
+
+// Deprecated: GenerateStream is deprecated. Use Stream instead.
+func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+	return s.Stream(ctx, input)
 }
 
 // CountToken calculates the total number of tokens for the given inputs,

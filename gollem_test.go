@@ -60,7 +60,7 @@ func TestGollemWithTool(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				mockSession := &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						callCount++
 
 						// First call: return tool call
@@ -163,7 +163,7 @@ func TestGollemWithTool(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				mockSession := &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						callCount++
 						// First call: return tool call
 						if callCount == 1 {
@@ -219,12 +219,12 @@ func (t *mockTool) Run(ctx context.Context, args map[string]any) (map[string]any
 	return t.run(ctx, args)
 }
 
-// newMockClient creates a new LLMClientMock with the given GenerateContentFunc
+// newMockClient creates a new LLMClientMock with the given GenerateFunc
 func newMockClient(generateContentFunc func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error)) *mock.LLMClientMock {
 	return &mock.LLMClientMock{
 		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 			mockSession := &mock.SessionMock{
-				GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+				GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 					response, err := generateContentFunc(ctx, input...)
 					if err != nil {
 						return nil, err
@@ -280,7 +280,7 @@ func TestGollemWithOptions(t *testing.T) {
 				cfg := gollem.NewSessionConfig(options...)
 				gt.Equal(t, cfg.SystemPrompt(), "system prompt")
 				mockSession := &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						// Return response based on input
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
@@ -343,7 +343,7 @@ func TestGollemWithOptions(t *testing.T) {
 				gt.True(t, toolNames["test_tool"])
 
 				mockSession := &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						// Return response based on input
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
@@ -410,7 +410,7 @@ func TestGollemWithOptions(t *testing.T) {
 				gt.Equal(t, len(tools), 1)
 
 				mockSession := &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						// Return response based on input
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
@@ -478,7 +478,7 @@ func TestGollemWithOptions(t *testing.T) {
 				isStreamingSession := cfg.SystemPrompt() == "" // Main session has no specific system prompt for streaming
 
 				mockSession := &mock.SessionMock{
-					GenerateStreamFunc: func(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+					StreamFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
 						ch := make(chan *gollem.Response)
 						go func() {
 							defer close(ch)
@@ -497,7 +497,7 @@ func TestGollemWithOptions(t *testing.T) {
 						}()
 						return ch, nil
 					},
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						// Return response based on input
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
@@ -573,7 +573,7 @@ func TestGollemWithOptions(t *testing.T) {
 				gt.True(t, toolNames["test_tool"])
 
 				mockSession := &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						// Return response based on input
 						if len(input) > 0 {
 							if text, ok := input[0].(gollem.Text); ok {
@@ -669,7 +669,7 @@ func TestGollemWithOptions(t *testing.T) {
 				gt.Equal(t, gollem.ContentTypeJSON, cfg.ContentType())
 
 				mockSession := &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{`{"result": "success"}`},
 						}, nil
@@ -709,7 +709,7 @@ func TestGollemWithOptions(t *testing.T) {
 				gt.Equal(t, gollem.TypeObject, cfg.ResponseSchema().Type)
 
 				mockSession := &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{`{"result": "success"}`},
 						}, nil
@@ -753,7 +753,7 @@ func TestGollemWithOptions(t *testing.T) {
 				gt.Equal(t, "Combined test schema", cfg.ResponseSchema().Description)
 
 				mockSession := &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{`{"status": "ok", "message": "test"}`},
 						}, nil
@@ -938,7 +938,7 @@ func TestArgsValidation(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						callCount++
 						if callCount == 1 {
 							// LLM sends tool call with wrong type args
@@ -1000,7 +1000,7 @@ func TestArgsValidation(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						callCount++
 						if callCount == 1 {
 							return &gollem.Response{
@@ -1048,7 +1048,7 @@ func TestArgsValidation(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						callCount++
 						if callCount == 1 {
 							// LLM sends tool call without required param
@@ -1106,7 +1106,7 @@ func TestArgsValidation(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						callCount++
 						if callCount == 1 {
 							return &gollem.Response{
@@ -1166,7 +1166,7 @@ func TestArgsValidation(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						callCount++
 						if callCount == 1 {
 							// LLM sends wrong type, but validation is disabled
@@ -1219,7 +1219,7 @@ func TestDefaultStrategyWithExecuteResponse(t *testing.T) {
 
 		// Mock session that returns a response without function calls
 		mockSession := &mock.SessionMock{}
-		mockSession.GenerateContentFunc = func(ctx context.Context, inputs ...gollem.Input) (*gollem.Response, error) {
+		mockSession.GenerateFunc = func(ctx context.Context, inputs []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 			return &gollem.Response{
 				Texts:         []string{"Task completed successfully"},
 				FunctionCalls: []*gollem.FunctionCall{}, // No tool calls
@@ -1243,7 +1243,7 @@ func TestDefaultStrategyWithExecuteResponse(t *testing.T) {
 
 		callCount := 0
 		mockSession := &mock.SessionMock{}
-		mockSession.GenerateContentFunc = func(ctx context.Context, inputs ...gollem.Input) (*gollem.Response, error) {
+		mockSession.GenerateFunc = func(ctx context.Context, inputs []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 			callCount++
 			if callCount == 1 {
 				// First call: return tool call
@@ -1307,7 +1307,7 @@ func TestWithHistoryRepository(t *testing.T) {
 	newSimpleSession := func() *mock.SessionMock {
 		callCount := 0
 		return &mock.SessionMock{
-			GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+			GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 				callCount++
 				if callCount == 1 {
 					return &gollem.Response{Texts: []string{"done"}}, nil
@@ -1460,7 +1460,7 @@ func TestStackTraceWithAgentExecute(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						callCount++
 						if callCount == 1 {
 							return &gollem.Response{

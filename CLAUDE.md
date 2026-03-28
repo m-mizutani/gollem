@@ -85,6 +85,14 @@ type LLMClient interface {
     GenerateEmbedding(ctx context.Context, dimension int, input []string) ([][]float64, error)
 }
 
+type Session interface {
+    Generate(ctx context.Context, input []Input, opts ...GenerateOption) (*Response, error)
+    Stream(ctx context.Context, input []Input, opts ...GenerateOption) (<-chan *Response, error)
+    History() (*History, error)
+    AppendHistory(*History) error
+    CountToken(ctx context.Context, input ...Input) (int, error)
+}
+
 type Tool interface {
     Spec() ToolSpec
     Run(ctx context.Context, args map[string]any) (map[string]any, error)
@@ -94,6 +102,14 @@ type ToolSet interface {
     Specs(ctx context.Context) ([]ToolSpec, error)
     Run(ctx context.Context, name string, args map[string]any) (map[string]any, error)
 }
+```
+
+### Structured Queries
+
+- `Query[T]()` — One-shot structured query. Creates a new session, calls LLM with JSON schema, unmarshals into T.
+- `SessionQuery[T]()` — Structured query on an existing session. Reuses conversation context via per-call `GenerateOption` (ResponseSchema). History is preserved across calls.
+- Per-call `GenerateOption` (e.g. `WithTemperature`, `WithGenerateResponseSchema`) can override session defaults for a single `Generate`/`Stream` call.
+- Each LLM provider's concrete session type also keeps deprecated `GenerateContent`/`GenerateStream` wrappers for backward compatibility.
 ```
 
 ### LLM Provider Support

@@ -19,7 +19,7 @@ func generateReflection(ctx context.Context, client gollem.LLMClient, trajectory
 		return "", goerr.Wrap(err, "failed to create session for reflection")
 	}
 
-	resp, err := session.GenerateContent(ctx, gollem.Text(prompt))
+	resp, err := session.Generate(ctx, []gollem.Input{gollem.Text(prompt)})
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to generate reflection")
 	}

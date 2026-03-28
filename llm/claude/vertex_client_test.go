@@ -80,7 +80,7 @@ func TestVertexClient(t *testing.T) {
 	gt.NoError(t, err)
 
 	// Test basic text generation
-	response, err := session.GenerateContent(ctx, gollem.Text("Hello! Please respond with 'Vertex AI working!' to confirm this integration works."))
+	response, err := session.Generate(ctx, []gollem.Input{gollem.Text("Hello! Please respond with 'Vertex AI working!' to confirm this integration works.")})
 	gt.NoError(t, err)
 	gt.NotNil(t, response)
 	gt.True(t, len(response.Texts) > 0)
@@ -117,7 +117,7 @@ func TestVertexClientWithTools(t *testing.T) {
 	gt.NoError(t, err)
 
 	// Test tool calling
-	response, err := session.GenerateContent(ctx, gollem.Text("Please calculate 15 + 27 using the calculator tool."))
+	response, err := session.Generate(ctx, []gollem.Input{gollem.Text("Please calculate 15 + 27 using the calculator tool.")})
 	gt.NoError(t, err)
 	gt.NotNil(t, response)
 
@@ -137,7 +137,7 @@ func TestVertexClientWithTools(t *testing.T) {
 			Data: result,
 		}
 
-		finalResponse, err := session.GenerateContent(ctx, funcResp)
+		finalResponse, err := session.Generate(ctx, []gollem.Input{funcResp})
 		gt.NoError(t, err)
 		gt.NotNil(t, finalResponse)
 		gt.True(t, len(finalResponse.Texts) > 0)

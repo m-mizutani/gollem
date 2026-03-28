@@ -20,10 +20,10 @@ type testQueryResultWithConstraints struct {
 	Score  int    `json:"score" description:"score value" min:"0" max:"100"`
 }
 
-func setupQueryMock(t *testing.T, genFunc func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error)) *mock.LLMClientMock {
+func setupQueryMock(t *testing.T, genFunc func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error)) *mock.LLMClientMock {
 	t.Helper()
 	sessionMock := &mock.SessionMock{
-		GenerateContentFunc: genFunc,
+		GenerateFunc: genFunc,
 	}
 	return &mock.LLMClientMock{
 		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
@@ -33,7 +33,7 @@ func setupQueryMock(t *testing.T, genFunc func(ctx context.Context, input ...gol
 }
 
 func TestQuerySuccess(t *testing.T) {
-	client := setupQueryMock(t, func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 		return &gollem.Response{
 			Texts:       []string{`{"name":"test","count":42}`},
 			InputToken:  10,
@@ -56,7 +56,7 @@ func buildSessionConfig(opts []gollem.SessionOption) gollem.SessionConfig {
 func TestQueryWithSystemPrompt(t *testing.T) {
 	var capturedOpts []gollem.SessionOption
 	sessionMock := &mock.SessionMock{
-		GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+		GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 			return &gollem.Response{
 				Texts: []string{`{"name":"x","count":1}`},
 			}, nil
@@ -84,7 +84,7 @@ func TestQueryWithSystemPrompt(t *testing.T) {
 func TestQueryWithHistory(t *testing.T) {
 	var capturedOpts []gollem.SessionOption
 	sessionMock := &mock.SessionMock{
-		GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+		GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 			return &gollem.Response{
 				Texts: []string{`{"name":"x","count":1}`},
 			}, nil
@@ -112,7 +112,7 @@ func TestQueryWithHistory(t *testing.T) {
 
 func TestQueryRetrySuccess(t *testing.T) {
 	callCount := 0
-	client := setupQueryMock(t, func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 		callCount++
 		if callCount == 1 {
 			// First call returns invalid JSON
@@ -142,7 +142,7 @@ func TestQueryRetrySuccess(t *testing.T) {
 
 func TestQueryRetryExhausted(t *testing.T) {
 	callCount := 0
-	client := setupQueryMock(t, func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 		callCount++
 		return &gollem.Response{
 			Texts: []string{`not json`},
@@ -158,7 +158,7 @@ func TestQueryRetryExhausted(t *testing.T) {
 }
 
 func TestQueryEmptyResponse(t *testing.T) {
-	client := setupQueryMock(t, func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 		return &gollem.Response{
 			Texts: []string{},
 		}, nil
@@ -171,7 +171,7 @@ func TestQueryEmptyResponse(t *testing.T) {
 func TestQueryGenerateContentError(t *testing.T) {
 	callCount := 0
 	sessionMock := &mock.SessionMock{
-		GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+		GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 			callCount++
 			return nil, errors.New("network error")
 		},
@@ -212,7 +212,7 @@ func TestQueryNilSession(t *testing.T) {
 
 func TestQueryNegativeMaxRetry(t *testing.T) {
 	callCount := 0
-	client := setupQueryMock(t, func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 		callCount++
 		return &gollem.Response{
 			Texts: []string{`{"name":"ok","count":1}`},
@@ -231,7 +231,7 @@ func TestQueryNegativeMaxRetry(t *testing.T) {
 func TestQueryRetryFeedbackMessage(t *testing.T) {
 	var secondCallInputs []gollem.Input
 	callCount := 0
-	client := setupQueryMock(t, func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 		callCount++
 		if callCount == 1 {
 			return &gollem.Response{
@@ -254,7 +254,7 @@ func TestQueryRetryFeedbackMessage(t *testing.T) {
 
 func TestQuerySchemaValidationEnumViolation(t *testing.T) {
 	callCount := 0
-	client := setupQueryMock(t, func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 		callCount++
 		if callCount == 1 {
 			// Valid JSON but enum constraint violation
@@ -281,7 +281,7 @@ func TestQuerySchemaValidationEnumViolation(t *testing.T) {
 
 func TestQuerySchemaValidationRequiredMissing(t *testing.T) {
 	callCount := 0
-	client := setupQueryMock(t, func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 		callCount++
 		if callCount == 1 {
 			// Missing required "status" field
@@ -306,7 +306,7 @@ func TestQuerySchemaValidationRequiredMissing(t *testing.T) {
 
 func TestQuerySchemaValidationExhausted(t *testing.T) {
 	callCount := 0
-	client := setupQueryMock(t, func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 		callCount++
 		// Always return invalid enum value
 		return &gollem.Response{
@@ -323,7 +323,7 @@ func TestQuerySchemaValidationExhausted(t *testing.T) {
 }
 
 func TestQuerySchemaValidationSuccess(t *testing.T) {
-	client := setupQueryMock(t, func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 		return &gollem.Response{
 			Texts:       []string{`{"status":"active","score":80}`},
 			InputToken:  10,

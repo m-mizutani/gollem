@@ -718,7 +718,7 @@ func TestSchemaIntegration(t *testing.T) {
 		Tags: fiction, sci-fi.
 		Highly recommended.`
 
-		resp, err := session.GenerateContent(context.Background(), gollem.Text(prompt))
+		resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text(prompt)})
 		gt.NoError(t, err)
 		gt.NotNil(t, resp)
 		gt.True(t, len(resp.Texts) > 0)
