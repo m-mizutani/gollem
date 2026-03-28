@@ -8,7 +8,7 @@ GO for Large LanguagE Model (GOLLEM)
 
 `gollem` provides:
 - **Common interface** to query prompt to Large Language Model (LLM) services
-  - GenerateContent: Generate text content from prompt
+  - Generate / Stream: Generate text content from prompt (with per-call option overrides)
   - GenerateEmbedding: Generate embedding vector from text (OpenAI and Gemini)
 - **Framework for building agentic applications** of LLMs with
   - Tools by MCP (Model Context Protocol) server and your built-in tools
@@ -61,7 +61,7 @@ func main() {
 	}
 
 	// Generate content
-	result, err := session.GenerateContent(ctx, gollem.Text("Hello, how are you?"))
+	result, err := session.Generate(ctx, []gollem.Input{gollem.Text("Hello, how are you?")})
 	if err != nil {
 		panic(err)
 	}
@@ -125,7 +125,7 @@ Send images and PDFs alongside text prompts. [Learn more →](doc/llm.md#pdf-inp
 img, _ := gollem.NewImage(imageBytes)
 pdf, _ := gollem.NewPDFFromReader(file)
 
-result, _ := session.GenerateContent(ctx, img, pdf, gollem.Text("Describe these."))
+result, _ := session.Generate(ctx, []gollem.Input{img, pdf, gollem.Text("Describe these.")})
 ```
 
 ### Structured Output
@@ -138,7 +138,7 @@ session, _ := client.NewSession(ctx,
 	gollem.WithSessionContentType(gollem.ContentTypeJSON),
 	gollem.WithSessionResponseSchema(schema),
 )
-resp, _ := session.GenerateContent(ctx, gollem.Text("Extract: John, 30, john@example.com"))
+resp, _ := session.Generate(ctx, []gollem.Input{gollem.Text("Extract: John, 30, john@example.com")})
 // resp.Texts[0] is valid JSON matching the schema
 ```
 
@@ -155,6 +155,15 @@ result, _ := gollem.Query[UserProfile](ctx, client, "Extract: John, 30, john@exa
 	gollem.WithQuerySystemPrompt("You are a data extractor."),
 )
 // result.Data is *UserProfile — type-safe, already parsed
+```
+
+To run a structured query on an **existing session** (preserving conversation history), use `SessionQuery[T]()`:
+
+```go
+// session already has conversation context from prior Generate calls
+resp, _ := gollem.SessionQuery[UserProfile](ctx, session, "Who am I?")
+// resp.Data is *UserProfile, parsed from the LLM's JSON response
+// The session's history (including this exchange) is preserved
 ```
 
 ### Middleware

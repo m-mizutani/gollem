@@ -54,8 +54,8 @@ if err != nil {
 ### 3. Generate Structured Content
 
 ```go
-resp, err := session.GenerateContent(ctx,
-	gollem.Text("Extract user info: John Doe, 30 years old, john@example.com"))
+resp, err := session.Generate(ctx, []gollem.Input{
+	gollem.Text("Extract user info: John Doe, 30 years old, john@example.com")})
 if err != nil {
 	return err
 }
@@ -557,7 +557,7 @@ schema := &gollem.ResponseSchema{
 When schema validation fails (rare with proper setup):
 
 ```go
-resp, err := session.GenerateContent(ctx, gollem.Text("..."))
+resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("...")})
 if err != nil {
 	return fmt.Errorf("failed to generate content: %w", err)
 }

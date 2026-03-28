@@ -21,10 +21,20 @@ func WithSessionQueryMaxRetry(n int) SessionQueryOption {
 }
 
 // SessionQuery executes a structured query on an existing session.
-// Unlike Query, it reuses the provided session and its conversation context,
-// applying per-call GenerateOptions to override the session's default response format.
-// If JSON unmarshalling fails, it retries up to maxRetry times (default 3),
-// feeding back the error to the LLM for correction.
+// Unlike [Query], it reuses the provided session so the conversation
+// history built by prior Generate calls is preserved.
+// The response schema is derived from T and passed as a per-call
+// [GenerateOption], leaving the session's default config unchanged.
+// If JSON unmarshalling or schema validation fails, it retries up to
+// maxRetry times (default 3), feeding back the error for correction.
+//
+// Example:
+//
+//	type Answer struct {
+//	    Name string `json:"name"`
+//	}
+//	// session already has conversation context from earlier Generate calls
+//	resp, err := gollem.SessionQuery[Answer](ctx, session, "What is my name?")
 func SessionQuery[T any](ctx context.Context, session Session, prompt string, opts ...SessionQueryOption) (*QueryResponse[T], error) {
 	cfg := &sessionQueryConfig{
 		maxRetry: defaultMaxRetry,
