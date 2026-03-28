@@ -67,6 +67,39 @@ fmt.Printf("Name: %s, Age: %v, Email: %s\n",
 	profile["name"], profile["age"], profile["email"])
 ```
 
+## One-Shot Typed Query with `Query[T]()`
+
+For the common pattern of "send prompt, get structured data back", use the generic `Query[T]()` function. It combines schema generation, session creation, LLM call, and JSON parsing into a single call with automatic retry on parse failures:
+
+```go
+type UserProfile struct {
+	Name  string `json:"name" description:"Full name of the user" required:"true"`
+	Age   int    `json:"age" description:"Age in years" min:"0" max:"150"`
+	Email string `json:"email" description:"Email address" required:"true"`
+}
+
+result, err := gollem.Query[UserProfile](ctx, client,
+	"Extract user info: John Doe, 30 years old, john@example.com",
+	gollem.WithQuerySystemPrompt("You are a data extraction assistant."),
+)
+if err != nil {
+	return err
+}
+
+fmt.Printf("Name: %s, Age: %d, Email: %s\n",
+	result.Data.Name, result.Data.Age, result.Data.Email)
+fmt.Printf("Tokens used: %d input, %d output\n",
+	result.InputToken, result.OutputToken)
+```
+
+### Query Options
+
+| Option | Description |
+|--------|-------------|
+| `WithQuerySystemPrompt(string)` | Set the system prompt for the query |
+| `WithQueryHistory(*History)` | Provide conversation history |
+| `WithQueryMaxRetry(int)` | Maximum retries on JSON parse failure (default: 3) |
+
 ## Schema Parameter Types
 
 gollem supports the following JSON Schema types:
