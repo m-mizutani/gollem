@@ -44,6 +44,10 @@ func TestQuerySuccess(t *testing.T) {
 	gt.Value(t, resp.OutputToken).Equal(5)
 }
 
+func buildSessionConfig(opts []gollem.SessionOption) gollem.SessionConfig {
+	return gollem.NewSessionConfig(opts...)
+}
+
 func TestQueryWithSystemPrompt(t *testing.T) {
 	var capturedOpts []gollem.SessionOption
 	sessionMock := &mock.SessionMock{
@@ -65,9 +69,11 @@ func TestQueryWithSystemPrompt(t *testing.T) {
 	)
 	gt.NoError(t, err)
 
-	// Verify session was created with options (ContentTypeJSON, ResponseSchema, SystemPrompt)
-	// There should be at least 3 options: ContentType, ResponseSchema, SystemPrompt
-	gt.Value(t, len(capturedOpts) >= 3).Equal(true)
+	cfg := buildSessionConfig(capturedOpts)
+	gt.Value(t, cfg.ContentType()).Equal(gollem.ContentTypeJSON)
+	gt.Value(t, cfg.ResponseSchema()).NotEqual((*gollem.Parameter)(nil))
+	gt.Value(t, cfg.SystemPrompt()).Equal("You are a planner")
+	gt.Value(t, cfg.History()).Equal((*gollem.History)(nil))
 }
 
 func TestQueryWithHistory(t *testing.T) {
@@ -92,8 +98,11 @@ func TestQueryWithHistory(t *testing.T) {
 	)
 	gt.NoError(t, err)
 
-	// ContentTypeJSON, ResponseSchema, History = 3 options
-	gt.Value(t, len(capturedOpts)).Equal(3)
+	cfg := buildSessionConfig(capturedOpts)
+	gt.Value(t, cfg.ContentType()).Equal(gollem.ContentTypeJSON)
+	gt.Value(t, cfg.ResponseSchema()).NotEqual((*gollem.Parameter)(nil))
+	gt.Value(t, cfg.SystemPrompt()).Equal("")
+	gt.Value(t, cfg.History()).Equal(history)
 }
 
 func TestQueryRetrySuccess(t *testing.T) {
@@ -183,6 +192,35 @@ func TestQueryNewSessionError(t *testing.T) {
 
 	_, err := gollem.Query[testQueryResult](context.Background(), client, "test")
 	gt.Error(t, err)
+}
+
+func TestQueryNilSession(t *testing.T) {
+	client := &mock.LLMClientMock{
+		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+			return nil, nil
+		},
+	}
+
+	_, err := gollem.Query[testQueryResult](context.Background(), client, "test")
+	gt.Error(t, err)
+}
+
+func TestQueryNegativeMaxRetry(t *testing.T) {
+	callCount := 0
+	client := setupQueryMock(t, func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+		callCount++
+		return &gollem.Response{
+			Texts: []string{`{"name":"ok","count":1}`},
+		}, nil
+	})
+
+	// Negative retry should still make the initial request
+	resp, err := gollem.Query[testQueryResult](context.Background(), client, "test",
+		gollem.WithQueryMaxRetry(-5),
+	)
+	gt.NoError(t, err)
+	gt.Value(t, resp.Data.Name).Equal("ok")
+	gt.Value(t, callCount).Equal(1)
 }
 
 func TestQueryRetryFeedbackMessage(t *testing.T) {

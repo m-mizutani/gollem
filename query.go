@@ -81,6 +81,13 @@ func Query[T any](ctx context.Context, client LLMClient, prompt string, opts ...
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create session for query")
 	}
+	if session == nil {
+		return nil, goerr.New("LLMClient.NewSession returned nil session")
+	}
+
+	if cfg.maxRetry < 0 {
+		cfg.maxRetry = 0
+	}
 
 	var input []Input
 	input = append(input, Text(prompt))
