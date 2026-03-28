@@ -390,6 +390,16 @@ func (mock *SessionMock) StreamCalls() []struct {
 	return calls
 }
 
+// Deprecated: GenerateContent delegates to Generate for backward compatibility.
+func (mock *SessionMock) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	return mock.Generate(ctx, input)
+}
+
+// Deprecated: GenerateStream delegates to Stream for backward compatibility.
+func (mock *SessionMock) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+	return mock.Stream(ctx, input)
+}
+
 // History calls HistoryFunc.
 func (mock *SessionMock) History() (*gollem.History, error) {
 	callInfo := struct {

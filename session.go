@@ -6,6 +6,12 @@ import "context"
 type Session interface {
 	Generate(ctx context.Context, input []Input, opts ...GenerateOption) (*Response, error)
 	Stream(ctx context.Context, input []Input, opts ...GenerateOption) (<-chan *Response, error)
+
+	// Deprecated: Use Generate instead.
+	GenerateContent(ctx context.Context, input ...Input) (*Response, error)
+	// Deprecated: Use Stream instead.
+	GenerateStream(ctx context.Context, input ...Input) (<-chan *Response, error)
+
 	History() (*History, error)
 	AppendHistory(*History) error
 	CountToken(ctx context.Context, input ...Input) (int, error)

@@ -50,6 +50,14 @@ func (m *mockSession) Stream(ctx context.Context, inputs []gollem.Input, opts ..
 	return nil, nil
 }
 
+func (m *mockSession) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	return m.Generate(ctx, input)
+}
+
+func (m *mockSession) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+	return m.Stream(ctx, input)
+}
+
 func (m *mockSession) History() (*gollem.History, error) {
 	return &gollem.History{}, nil
 }

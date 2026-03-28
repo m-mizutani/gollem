@@ -96,8 +96,13 @@ func Query[T any](ctx context.Context, client LLMClient, prompt string, opts ...
 
 // queryWithRetry is the shared retry loop for Query and SessionQuery.
 // It calls session.Generate with the given input and options, unmarshals
-// the response into T, and retries on unmarshal failure.
+// the response into T, validates against schema, and retries on failure.
 func queryWithRetry[T any](ctx context.Context, session Session, input []Input, maxRetry int, genOpts ...GenerateOption) (*QueryResponse[T], error) {
+	schema, err := ToSchema(*new(T))
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to generate schema from type parameter")
+	}
+
 	var totalInputToken, totalOutputToken int
 
 	for attempt := range maxRetry + 1 {
@@ -122,7 +127,6 @@ func queryWithRetry[T any](ctx context.Context, session Session, input []Input, 
 		var result T
 		if unmarshalErr := json.Unmarshal([]byte(jsonText), &result); unmarshalErr != nil {
 			if attempt < maxRetry {
-				// Feed back the error for retry
 				input = []Input{
 					Text(fmt.Sprintf(
 						"Your previous response was not valid JSON that matches the schema. Error: %s\nYour response was: %s\nPlease respond with valid JSON matching the schema.",
@@ -132,6 +136,29 @@ func queryWithRetry[T any](ctx context.Context, session Session, input []Input, 
 				continue
 			}
 			return nil, goerr.Wrap(unmarshalErr, "failed to unmarshal response JSON after retries",
+				goerr.V("attempts", maxRetry+1),
+				goerr.V("response", jsonText),
+			)
+		}
+
+		// Validate the response against the schema
+		var raw any
+		if unmarshalErr := json.Unmarshal([]byte(jsonText), &raw); unmarshalErr != nil {
+			return nil, goerr.Wrap(unmarshalErr, "failed to unmarshal response for validation",
+				goerr.V("response", jsonText),
+			)
+		}
+		if validateErr := schema.ValidateValue("root", raw); validateErr != nil {
+			if attempt < maxRetry {
+				input = []Input{
+					Text(fmt.Sprintf(
+						"Your previous response was valid JSON but did not match the schema constraints. Error: %s\nYour response was: %s\nPlease respond with valid JSON matching the schema.",
+						validateErr.Error(), jsonText,
+					)),
+				}
+				continue
+			}
+			return nil, goerr.Wrap(validateErr, "response JSON failed schema validation after retries",
 				goerr.V("attempts", maxRetry+1),
 				goerr.V("response", jsonText),
 			)
