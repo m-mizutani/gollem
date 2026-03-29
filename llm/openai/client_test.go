@@ -16,13 +16,18 @@ import (
 	openaiapi "github.com/sashabaranov/go-openai"
 )
 
+const (
+	testTimeout   = 30 * time.Second
+	maxTestTokens = 2048
+)
+
 func TestOpenAIContentGenerate(t *testing.T) {
 	apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
 	if !ok {
 		t.Skip("TEST_OPENAI_API_KEY is not set")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	client, err := openai.New(ctx, apiKey)
@@ -31,7 +36,7 @@ func TestOpenAIContentGenerate(t *testing.T) {
 	session, err := client.NewSession(ctx)
 	gt.NoError(t, err)
 
-	result, err := session.Generate(ctx, []gollem.Input{gollem.Text("Say hello in one word")}, gollem.WithMaxTokens(2048))
+	result, err := session.Generate(ctx, []gollem.Input{gollem.Text("Say hello in one word")}, gollem.WithMaxTokens(maxTestTokens))
 	gt.NoError(t, err)
 	gt.Array(t, result.Texts).Length(1).Required()
 	gt.Value(t, len(result.Texts[0])).NotEqual(0)
@@ -119,7 +124,7 @@ func TestOpenAITokenLimitErrorIntegration(t *testing.T) {
 		t.Skip("TEST_TOKEN_LIMIT_ERROR is not set to true")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	// Use gpt-5 (default model) which has 128k context limit
@@ -154,7 +159,7 @@ func TestPerCallGenerateOptions(t *testing.T) {
 		t.Skip("TEST_OPENAI_API_KEY is not set")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	client, err := openai.New(ctx, apiKey)
@@ -176,7 +181,7 @@ func TestPerCallGenerateOptions(t *testing.T) {
 	resp, err := session.Generate(ctx,
 		[]gollem.Input{gollem.Text("Name a color.")},
 		gollem.WithGenerateResponseSchema(schema),
-		gollem.WithMaxTokens(2048),
+		gollem.WithMaxTokens(maxTestTokens),
 	)
 	gt.NoError(t, err)
 	gt.True(t, len(resp.Texts) > 0)

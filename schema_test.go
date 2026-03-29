@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
@@ -696,7 +695,7 @@ func TestSchemaIntegration(t *testing.T) {
 	t.Parallel()
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 		defer cancel()
 
 		client, err := newClient(t)
@@ -722,7 +721,7 @@ func TestSchemaIntegration(t *testing.T) {
 		Tags: fiction, sci-fi.
 		Highly recommended.`
 
-		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text(prompt)}, gollem.WithMaxTokens(2048))
+		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text(prompt)}, gollem.WithMaxTokens(maxTestTokens))
 		gt.NoError(t, err)
 		gt.NotNil(t, resp)
 		gt.True(t, len(resp.Texts) > 0)

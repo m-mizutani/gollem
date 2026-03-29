@@ -17,6 +17,11 @@ import (
 	"google.golang.org/genai"
 )
 
+const (
+	testTimeout   = 30 * time.Second
+	maxTestTokens = 2048
+)
+
 // Tests for client.go functionality
 
 func TestClientMalformedFunctionCallErrorHandling(t *testing.T) {
@@ -317,7 +322,7 @@ func TestGeminiContentGenerate(t *testing.T) {
 		testLocation = v
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	var opts []gemini.Option
@@ -331,7 +336,7 @@ func TestGeminiContentGenerate(t *testing.T) {
 	session, err := client.NewSession(ctx)
 	gt.NoError(t, err)
 
-	result, err := session.Generate(ctx, []gollem.Input{gollem.Text("Say hello in one word")}, gollem.WithMaxTokens(2048))
+	result, err := session.Generate(ctx, []gollem.Input{gollem.Text("Say hello in one word")}, gollem.WithMaxTokens(maxTestTokens))
 	gt.NoError(t, err).Required()
 	gt.A(t, result.Texts).Length(1).Required()
 	gt.Value(t, len(result.Texts[0])).NotEqual(0)
@@ -419,7 +424,7 @@ func TestThinkingBudgetIntegration(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()
 
 			client, err := gemini.New(ctx, projectID, location,
@@ -442,7 +447,7 @@ func TestThinkingBudgetIntegration(t *testing.T) {
 			gt.NotNil(t, session)
 
 			// Simple test prompt
-			response, err := session.Generate(ctx, []gollem.Input{gollem.Text("Say 'Hello' in one word")}, gollem.WithMaxTokens(2048))
+			response, err := session.Generate(ctx, []gollem.Input{gollem.Text("Say 'Hello' in one word")}, gollem.WithMaxTokens(maxTestTokens))
 			gt.NoError(t, err)
 			gt.NotNil(t, response)
 			gt.Array(t, response.Texts).Length(1).Required()
@@ -744,7 +749,7 @@ func TestGeminiContentGenerateWithModel(t *testing.T) {
 		t.Skip("TEST_GCP_MODEL is not set")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	client, err := gemini.New(ctx, projectID, location,
@@ -762,7 +767,7 @@ func TestGeminiContentGenerateWithModel(t *testing.T) {
 	gt.NoError(t, err)
 
 	// First call: ask the model to use the tool
-	resp1, err := session.Generate(ctx, []gollem.Input{gollem.Text("Please call the write_file tool with path 'test.txt' and content 'hello world'. Just call the tool, don't explain.")}, gollem.WithMaxTokens(2048))
+	resp1, err := session.Generate(ctx, []gollem.Input{gollem.Text("Please call the write_file tool with path 'test.txt' and content 'hello world'. Just call the tool, don't explain.")}, gollem.WithMaxTokens(maxTestTokens))
 	gt.NoError(t, err).Required()
 
 	if len(resp1.FunctionCalls) > 0 {
@@ -772,7 +777,7 @@ func TestGeminiContentGenerateWithModel(t *testing.T) {
 			ID:   fc.ID,
 			Name: fc.Name,
 			Data: map[string]any{"status": "success", "path": "test.txt"},
-		}}, gollem.WithMaxTokens(2048))
+		}}, gollem.WithMaxTokens(maxTestTokens))
 		gt.NoError(t, err)
 		gt.A(t, resp2.Texts).Length(1).Required()
 	}
@@ -820,7 +825,7 @@ func TestGeminiTokenLimitErrorIntegration(t *testing.T) {
 		t.Skip("TEST_TOKEN_LIMIT_ERROR is not set to true")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	client, err := gemini.New(ctx, projectID, location)
@@ -853,7 +858,7 @@ func TestPerCallGenerateOptions(t *testing.T) {
 		t.Skip("TEST_GCP_LOCATION is not set")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	var opts []gemini.Option
@@ -879,7 +884,7 @@ func TestPerCallGenerateOptions(t *testing.T) {
 	resp, err := session.Generate(ctx,
 		[]gollem.Input{gollem.Text("Name a color.")},
 		gollem.WithGenerateResponseSchema(schema),
-		gollem.WithMaxTokens(2048),
+		gollem.WithMaxTokens(maxTestTokens),
 	)
 	gt.NoError(t, err)
 	gt.True(t, len(resp.Texts) > 0)
