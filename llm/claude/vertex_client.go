@@ -8,7 +8,6 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/vertex"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
-	"github.com/m-mizutani/gollem/internal/schema"
 	"github.com/m-mizutani/gollem/trace"
 )
 
@@ -172,7 +171,6 @@ func (s *VertexAnthropicSession) convertInputs(ctx context.Context, input ...gol
 
 // Generate processes the input and generates a response with optional per-call overrides.
 func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
-	genCfg := gollem.NewGenerateConfig(opts...)
 	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
@@ -191,37 +189,10 @@ func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.In
 		}
 	}
 
-	// Apply per-call overrides to a copy of params
-	params := s.params
-	if t := genCfg.Temperature(); t != nil {
-		params.Temperature = *t
-	}
-	if p := genCfg.TopP(); p != nil {
-		params.TopP = *p
-	}
-	if m := genCfg.MaxTokens(); m != nil {
-		params.MaxTokens = int64(*m)
-	}
-
-	// Build system prompt, applying per-call schema override if present
+	// Build system prompt
 	systemPrompt, err := createSystemPrompt(ctx, s.cfg)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create system prompt")
-	}
-	if perCallSchema := genCfg.ResponseSchema(); perCallSchema != nil {
-		jsonInstruction := "\nPlease format your response as valid JSON."
-		schemaText, err := schema.ConvertParameterToJSONString(perCallSchema)
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to convert per-call response schema")
-		}
-		if schemaText != "" {
-			jsonInstruction += "\n\nYour response must conform to this JSON Schema:\n" + schemaText
-		}
-		if len(systemPrompt) > 0 {
-			systemPrompt[0].Text += jsonInstruction
-		} else {
-			systemPrompt = []anthropic.TextBlockParam{{Text: jsonInstruction}}
-		}
 	}
 
 	// Start LLM call trace span
@@ -232,14 +203,13 @@ func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.In
 		defer func() { h.EndLLMCall(ctx, traceData, llmErr) }()
 	}
 
-	// Build request directly instead of using generateClaudeContent,
-	// so we can apply per-call system prompt overrides
+	// Build request
 	msgParams := anthropic.MessageNewParams{
 		Model:     anthropic.Model(s.defaultModel),
-		MaxTokens: params.MaxTokens,
+		MaxTokens: s.params.MaxTokens,
 		Messages:  apiMessages,
 	}
-	if err := setTemperatureAndTopP(&msgParams, params.Temperature, params.TopP); err != nil {
+	if err := setTemperatureAndTopP(&msgParams, s.params.Temperature, s.params.TopP); err != nil {
 		return nil, goerr.Wrap(err, "failed to set generation parameters")
 	}
 	if len(tools) > 0 {
@@ -247,6 +217,11 @@ func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.In
 	}
 	if len(systemPrompt) > 0 {
 		msgParams.System = systemPrompt
+	}
+
+	// Apply per-call overrides
+	if err := applyPerCallOverrides(&msgParams, opts...); err != nil {
+		return nil, err
 	}
 
 	resp, err := s.client.Messages.New(ctx, msgParams)
@@ -273,18 +248,12 @@ func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.In
 	}
 
 	// Use JSON content type if per-call schema is set
-	effectiveContentType := s.cfg.ContentType()
-	hasSchema := s.cfg.ResponseSchema() != nil
-	if genCfg.ResponseSchema() != nil {
-		effectiveContentType = gollem.ContentTypeJSON
-		hasSchema = true
-	}
-	return processResponseWithContentType(ctx, resp, effectiveContentType, hasSchema), nil
+	effectiveCT, hasSchema := effectiveContentType(s.cfg.ContentType(), s.cfg.ResponseSchema(), opts...)
+	return processResponseWithContentType(ctx, resp, effectiveCT, hasSchema), nil
 }
 
 // Stream processes the input and generates a response stream with optional per-call overrides.
 func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
-	genCfg := gollem.NewGenerateConfig(opts...)
 	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
@@ -301,7 +270,25 @@ func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Inpu
 		}
 	}
 
-	// Apply per-call overrides to a copy of params
+	// Build a temporary request to compute the system prompt override via applyPerCallOverrides
+	var systemPromptOverride []anthropic.TextBlockParam
+	genCfg := gollem.NewGenerateConfig(opts...)
+	if genCfg.ResponseSchema() != nil {
+		tmpRequest := anthropic.MessageNewParams{}
+		systemPrompt, err := createSystemPrompt(ctx, s.cfg)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create system prompt")
+		}
+		if len(systemPrompt) > 0 {
+			tmpRequest.System = systemPrompt
+		}
+		if err := applyPerCallOverrides(&tmpRequest, opts...); err != nil {
+			return nil, err
+		}
+		systemPromptOverride = tmpRequest.System
+	}
+
+	// Apply per-call overrides to a copy of params for Temperature/TopP/MaxTokens
 	params := s.params
 	if t := genCfg.Temperature(); t != nil {
 		params.Temperature = *t
@@ -311,29 +298,6 @@ func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Inpu
 	}
 	if m := genCfg.MaxTokens(); m != nil {
 		params.MaxTokens = int64(*m)
-	}
-
-	// Build system prompt with per-call schema override if present
-	var systemPromptOverride []anthropic.TextBlockParam
-	if perCallSchema := genCfg.ResponseSchema(); perCallSchema != nil {
-		systemPrompt, err := createSystemPrompt(ctx, s.cfg)
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to create system prompt")
-		}
-		jsonInstruction := "\nPlease format your response as valid JSON."
-		schemaText, err := schema.ConvertParameterToJSONString(perCallSchema)
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to convert per-call response schema")
-		}
-		if schemaText != "" {
-			jsonInstruction += "\n\nYour response must conform to this JSON Schema:\n" + schemaText
-		}
-		if len(systemPrompt) > 0 {
-			systemPrompt[0].Text += jsonInstruction
-		} else {
-			systemPrompt = []anthropic.TextBlockParam{{Text: jsonInstruction}}
-		}
-		systemPromptOverride = systemPrompt
 	}
 
 	// Start LLM call trace span

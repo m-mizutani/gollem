@@ -462,7 +462,6 @@ func (s *Session) createRequest(stream bool) (openai.ChatCompletionRequest, erro
 // Generate processes the input and generates a response with optional per-call overrides.
 // It handles both text messages and function responses.
 func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
-	genCfg := gollem.NewGenerateConfig(opts...)
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	var historyCopy *gollem.History
@@ -501,25 +500,8 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			return nil, err
 		}
 
-		// Apply per-call overrides
-		if t := genCfg.Temperature(); t != nil {
-			openaiReq.Temperature = float32(*t)
-		}
-		if p := genCfg.TopP(); p != nil {
-			openaiReq.TopP = float32(*p)
-		}
-		if m := genCfg.MaxTokens(); m != nil {
-			openaiReq.MaxTokens = *m
-		}
-		if schema := genCfg.ResponseSchema(); schema != nil {
-			jsonSchema, err := convertResponseSchemaToOpenAI(schema, s.strictMode)
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to convert per-call response schema")
-			}
-			openaiReq.ResponseFormat = &openai.ChatCompletionResponseFormat{
-				Type:       openai.ChatCompletionResponseFormatTypeJSONSchema,
-				JSONSchema: jsonSchema,
-			}
+		if err := s.applyPerCallOverrides(&openaiReq, opts...); err != nil {
+			return nil, err
 		}
 
 		// Start LLM call trace span
@@ -638,7 +620,6 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 // Stream processes the input and generates a response stream with optional per-call overrides.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
 func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
-	genCfg := gollem.NewGenerateConfig(opts...)
 	// Build the content request for middleware
 	var historyCopy *gollem.History
 	var err error
@@ -676,25 +657,8 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			return nil, err
 		}
 
-		// Apply per-call overrides
-		if t := genCfg.Temperature(); t != nil {
-			openaiReq.Temperature = float32(*t)
-		}
-		if p := genCfg.TopP(); p != nil {
-			openaiReq.TopP = float32(*p)
-		}
-		if m := genCfg.MaxTokens(); m != nil {
-			openaiReq.MaxTokens = *m
-		}
-		if schema := genCfg.ResponseSchema(); schema != nil {
-			jsonSchema, err := convertResponseSchemaToOpenAI(schema, s.strictMode)
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to convert per-call response schema")
-			}
-			openaiReq.ResponseFormat = &openai.ChatCompletionResponseFormat{
-				Type:       openai.ChatCompletionResponseFormatTypeJSONSchema,
-				JSONSchema: jsonSchema,
-			}
+		if err := s.applyPerCallOverrides(&openaiReq, opts...); err != nil {
+			return nil, err
 		}
 
 		// Start LLM call trace span
@@ -1062,6 +1026,31 @@ func convertParameterToJSONSchemaWithStrict(param *gollem.Parameter, strict bool
 	}
 
 	return result
+}
+
+// applyPerCallOverrides applies per-call GenerateOption overrides to an API request.
+func (s *Session) applyPerCallOverrides(req *openai.ChatCompletionRequest, opts ...gollem.GenerateOption) error {
+	genCfg := gollem.NewGenerateConfig(opts...)
+	if t := genCfg.Temperature(); t != nil {
+		req.Temperature = float32(*t)
+	}
+	if p := genCfg.TopP(); p != nil {
+		req.TopP = float32(*p)
+	}
+	if m := genCfg.MaxTokens(); m != nil {
+		req.MaxTokens = *m
+	}
+	if schema := genCfg.ResponseSchema(); schema != nil {
+		jsonSchema, err := convertResponseSchemaToOpenAI(schema, s.strictMode)
+		if err != nil {
+			return goerr.Wrap(err, "failed to convert per-call response schema")
+		}
+		req.ResponseFormat = &openai.ChatCompletionResponseFormat{
+			Type:       openai.ChatCompletionResponseFormatTypeJSONSchema,
+			JSONSchema: jsonSchema,
+		}
+	}
+	return nil
 }
 
 // Deprecated: GenerateContent is deprecated. Use Generate instead.

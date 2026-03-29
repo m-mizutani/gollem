@@ -598,7 +598,6 @@ func processResponseWithContentType(ctx context.Context, resp *anthropic.Message
 // Generate processes the input and generates a response with optional per-call overrides.
 // It handles both text messages and function responses.
 func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
-	genCfg := gollem.NewGenerateConfig(opts...)
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	var historyCopy *gollem.History
@@ -662,30 +661,8 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		}
 
 		// Apply per-call overrides
-		if t := genCfg.Temperature(); t != nil {
-			request.Temperature = anthropic.Float(*t)
-		}
-		if p := genCfg.TopP(); p != nil {
-			request.TopP = anthropic.Float(*p)
-		}
-		if m := genCfg.MaxTokens(); m != nil {
-			request.MaxTokens = int64(*m)
-		}
-		if perCallSchema := genCfg.ResponseSchema(); perCallSchema != nil {
-			// Rebuild system prompt with JSON instruction for per-call schema
-			jsonInstruction := "\nPlease format your response as valid JSON."
-			schemaText, err := schema.ConvertParameterToJSONString(perCallSchema)
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to convert per-call response schema")
-			}
-			if schemaText != "" {
-				jsonInstruction += "\n\nYour response must conform to this JSON Schema:\n" + schemaText
-			}
-			if len(request.System) > 0 {
-				request.System[0].Text += jsonInstruction
-			} else {
-				request.System = []anthropic.TextBlockParam{{Text: jsonInstruction}}
-			}
+		if err := applyPerCallOverrides(&request, opts...); err != nil {
+			return nil, err
 		}
 
 		// Start LLM call trace span
@@ -704,14 +681,8 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		}
 
 		// Process response and extract content
-		// Use JSON content type if per-call schema is set
-		effectiveContentType := s.cfg.ContentType()
-		hasSchema := s.cfg.ResponseSchema() != nil
-		if genCfg.ResponseSchema() != nil {
-			effectiveContentType = gollem.ContentTypeJSON
-			hasSchema = true
-		}
-		processedResp := processResponseWithContentType(ctx, resp, effectiveContentType, hasSchema)
+		effectiveCT, hasSchema := effectiveContentType(s.cfg.ContentType(), s.cfg.ResponseSchema(), opts...)
+		processedResp := processResponseWithContentType(ctx, resp, effectiveCT, hasSchema)
 
 		// Set trace data for defer
 		traceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt())
@@ -752,6 +723,45 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		InputToken:    contentResp.InputToken,
 		OutputToken:   contentResp.OutputToken,
 	}, nil
+}
+
+// applyPerCallOverrides applies per-call GenerateOption overrides to Claude request params.
+func applyPerCallOverrides(request *anthropic.MessageNewParams, opts ...gollem.GenerateOption) error {
+	genCfg := gollem.NewGenerateConfig(opts...)
+	if t := genCfg.Temperature(); t != nil {
+		request.Temperature = anthropic.Float(*t)
+	}
+	if p := genCfg.TopP(); p != nil {
+		request.TopP = anthropic.Float(*p)
+	}
+	if m := genCfg.MaxTokens(); m != nil {
+		request.MaxTokens = int64(*m)
+	}
+	if perCallSchema := genCfg.ResponseSchema(); perCallSchema != nil {
+		jsonInstruction := "\nPlease format your response as valid JSON."
+		schemaText, err := schema.ConvertParameterToJSONString(perCallSchema)
+		if err != nil {
+			return goerr.Wrap(err, "failed to convert per-call response schema")
+		}
+		if schemaText != "" {
+			jsonInstruction += "\n\nYour response must conform to this JSON Schema:\n" + schemaText
+		}
+		if len(request.System) > 0 {
+			request.System[0].Text += jsonInstruction
+		} else {
+			request.System = []anthropic.TextBlockParam{{Text: jsonInstruction}}
+		}
+	}
+	return nil
+}
+
+// effectiveContentType returns the content type considering per-call schema override.
+func effectiveContentType(sessionContentType gollem.ContentType, sessionSchema *gollem.Parameter, opts ...gollem.GenerateOption) (gollem.ContentType, bool) {
+	genCfg := gollem.NewGenerateConfig(opts...)
+	if genCfg.ResponseSchema() != nil {
+		return gollem.ContentTypeJSON, true
+	}
+	return sessionContentType, sessionSchema != nil
 }
 
 // Deprecated: GenerateContent is deprecated. Use Generate instead.
@@ -799,7 +809,6 @@ func (a *FunctionCallAccumulator) accumulate() (*gollem.FunctionCall, error) {
 // Stream processes the input and generates a response stream with optional per-call overrides.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
 func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
-	genCfg := gollem.NewGenerateConfig(opts...)
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	var historyCopy *gollem.History
@@ -863,30 +872,8 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		}
 
 		// Apply per-call overrides
-		if t := genCfg.Temperature(); t != nil {
-			request.Temperature = anthropic.Float(*t)
-		}
-		if p := genCfg.TopP(); p != nil {
-			request.TopP = anthropic.Float(*p)
-		}
-		if m := genCfg.MaxTokens(); m != nil {
-			request.MaxTokens = int64(*m)
-		}
-		if perCallSchema := genCfg.ResponseSchema(); perCallSchema != nil {
-			// Rebuild system prompt with JSON instruction for per-call schema
-			jsonInstruction := "\nPlease format your response as valid JSON."
-			schemaText, err := schema.ConvertParameterToJSONString(perCallSchema)
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to convert per-call response schema")
-			}
-			if schemaText != "" {
-				jsonInstruction += "\n\nYour response must conform to this JSON Schema:\n" + schemaText
-			}
-			if len(request.System) > 0 {
-				request.System[0].Text += jsonInstruction
-			} else {
-				request.System = []anthropic.TextBlockParam{{Text: jsonInstruction}}
-			}
+		if err := applyPerCallOverrides(&request, opts...); err != nil {
+			return nil, err
 		}
 
 		// Start LLM call trace span
