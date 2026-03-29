@@ -417,15 +417,15 @@ func (s *Session) createRequest(stream bool) (openai.ChatCompletionRequest, erro
 	}
 
 	req := openai.ChatCompletionRequest{
-		Model:            s.defaultModel,
-		Messages:         messages,
-		Tools:            s.tools,
-		Temperature:      s.params.Temperature,
-		TopP:             s.params.TopP,
+		Model:               s.defaultModel,
+		Messages:            messages,
+		Tools:               s.tools,
+		Temperature:         s.params.Temperature,
+		TopP:                s.params.TopP,
 		MaxCompletionTokens: s.params.MaxTokens,
-		PresencePenalty:  s.params.PresencePenalty,
-		FrequencyPenalty: s.params.FrequencyPenalty,
-		Stream:           stream,
+		PresencePenalty:     s.params.PresencePenalty,
+		FrequencyPenalty:    s.params.FrequencyPenalty,
+		Stream:              stream,
 	}
 
 	if s.params.ReasoningEffort != "" {
