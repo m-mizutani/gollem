@@ -695,6 +695,9 @@ func TestSchemaIntegration(t *testing.T) {
 	t.Parallel()
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+
 		client, err := newClient(t)
 		gt.NoError(t, err)
 
@@ -702,7 +705,7 @@ func TestSchemaIntegration(t *testing.T) {
 		schema := createComplexBookSchema()
 
 		// Create session with JSON content type and response schema
-		session, err := client.NewSession(context.Background(),
+		session, err := client.NewSession(ctx,
 			gollem.WithSessionContentType(gollem.ContentTypeJSON),
 			gollem.WithSessionResponseSchema(schema),
 		)
@@ -718,7 +721,7 @@ func TestSchemaIntegration(t *testing.T) {
 		Tags: fiction, sci-fi.
 		Highly recommended.`
 
-		resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text(prompt)})
+		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text(prompt)}, gollem.WithMaxTokens(maxTestTokens))
 		gt.NoError(t, err)
 		gt.NotNil(t, resp)
 		gt.True(t, len(resp.Texts) > 0)
