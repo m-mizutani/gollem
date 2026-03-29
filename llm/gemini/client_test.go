@@ -2,6 +2,7 @@ package gemini_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"os"
@@ -833,4 +834,52 @@ func TestGeminiTokenLimitErrorIntegration(t *testing.T) {
 
 	// Verify the error has the token exceeded tag
 	gt.True(t, goerr.HasTag(err, gollem.ErrTagTokenExceeded))
+}
+
+// TestPerCallGenerateOptions verifies that per-call GenerateOption overrides
+// actually change the API request. A text-mode session gets a per-call
+// ResponseSchema, and the response must be valid JSON matching the schema.
+func TestPerCallGenerateOptions(t *testing.T) {
+	projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+	if !ok {
+		t.Skip("TEST_GCP_PROJECT_ID is not set")
+	}
+	location, ok := os.LookupEnv("TEST_GCP_LOCATION")
+	if !ok {
+		t.Skip("TEST_GCP_LOCATION is not set")
+	}
+
+	ctx := context.Background()
+	var opts []gemini.Option
+	if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+		opts = append(opts, gemini.WithModel(model))
+	}
+	client, err := gemini.New(ctx, projectID, location, opts...)
+	gt.NoError(t, err)
+
+	// Create a plain text session — no ContentTypeJSON, no ResponseSchema
+	session, err := client.NewSession(ctx)
+	gt.NoError(t, err)
+
+	schema := &gollem.Parameter{
+		Type:  gollem.TypeObject,
+		Title: "Color",
+		Properties: map[string]*gollem.Parameter{
+			"name": {Type: gollem.TypeString, Description: "color name", Required: true},
+		},
+	}
+
+	// Per-call option should force JSON output via ResponseMIMEType + ResponseSchema
+	resp, err := session.Generate(ctx,
+		[]gollem.Input{gollem.Text("Name a color.")},
+		gollem.WithGenerateResponseSchema(schema),
+	)
+	gt.NoError(t, err)
+	gt.True(t, len(resp.Texts) > 0)
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(resp.Texts[0]), &parsed); err != nil {
+		t.Fatalf("response is not valid JSON: %s (raw: %s)", err, resp.Texts[0])
+	}
+	gt.True(t, parsed["name"] != nil)
 }

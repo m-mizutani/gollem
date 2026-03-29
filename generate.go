@@ -20,8 +20,9 @@ type generateConfig struct {
 	maxTokens      *int
 }
 
-// newGenerateConfig creates a generateConfig from the given options.
-func newGenerateConfig(opts ...GenerateOption) generateConfig {
+// NewGenerateConfig creates a generateConfig from the given options.
+// This is required for LLM client implementations.
+func NewGenerateConfig(opts ...GenerateOption) generateConfig { //nolint:revive
 	cfg := generateConfig{}
 	for _, opt := range opts {
 		opt(&cfg)

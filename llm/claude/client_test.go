@@ -361,3 +361,41 @@ func TestWithBaseURL(t *testing.T) {
 		gt.Equal(t, "", claude.GetBaseURL(client2)) // Should be empty, not first URL
 	})
 }
+
+// TestPerCallGenerateOptions verifies that per-call GenerateOption overrides
+// actually change the API request. A text-mode session gets a per-call
+// ResponseSchema, and the response must be valid JSON matching the schema.
+func TestPerCallGenerateOptions(t *testing.T) {
+	apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
+	if !ok {
+		t.Skip("TEST_CLAUDE_API_KEY is not set")
+	}
+
+	ctx := context.Background()
+	client, err := claude.New(ctx, apiKey)
+	gt.NoError(t, err)
+
+	// Create a plain text session — no ContentTypeJSON, no ResponseSchema
+	session, err := client.NewSession(ctx)
+	gt.NoError(t, err)
+
+	schema := &gollem.Parameter{
+		Type:  gollem.TypeObject,
+		Title: "Color",
+		Properties: map[string]*gollem.Parameter{
+			"name": {Type: gollem.TypeString, Description: "color name", Required: true},
+		},
+	}
+
+	// Per-call option should force JSON output via system prompt injection
+	resp, err := session.Generate(ctx,
+		[]gollem.Input{gollem.Text("Name a color.")},
+		gollem.WithGenerateResponseSchema(schema),
+	)
+	gt.NoError(t, err)
+	gt.True(t, len(resp.Texts) > 0)
+
+	var parsed map[string]any
+	gt.NoError(t, json.Unmarshal([]byte(resp.Texts[0]), &parsed))
+	gt.True(t, parsed["name"] != nil)
+}

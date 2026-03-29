@@ -348,6 +348,20 @@ session, err := client.NewSession(ctx,
 )
 ```
 
+### Per-Call Options
+
+Override session defaults for a single `Generate` or `Stream` call:
+
+```go
+resp, err := session.Generate(ctx, inputs,
+    gollem.WithTemperature(0.2),
+    gollem.WithMaxTokens(256),
+    gollem.WithGenerateResponseSchema(schema), // forces JSON output for this call
+)
+```
+
+See [Per-Call Generate Options](schema.md#per-call-generate-options) for details.
+
 ### Embedding Generation
 
 Providers that support embeddings (OpenAI and Gemini):

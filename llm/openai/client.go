@@ -462,7 +462,7 @@ func (s *Session) createRequest(stream bool) (openai.ChatCompletionRequest, erro
 // Generate processes the input and generates a response with optional per-call overrides.
 // It handles both text messages and function responses.
 func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
-	// TODO: apply per-call overrides from opts
+	genCfg := gollem.NewGenerateConfig(opts...)
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	var historyCopy *gollem.History
@@ -500,6 +500,28 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		if err != nil {
 			return nil, err
 		}
+
+		// Apply per-call overrides
+		if t := genCfg.Temperature(); t != nil {
+			openaiReq.Temperature = float32(*t)
+		}
+		if p := genCfg.TopP(); p != nil {
+			openaiReq.TopP = float32(*p)
+		}
+		if m := genCfg.MaxTokens(); m != nil {
+			openaiReq.MaxTokens = *m
+		}
+		if schema := genCfg.ResponseSchema(); schema != nil {
+			jsonSchema, err := convertResponseSchemaToOpenAI(schema, s.strictMode)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to convert per-call response schema")
+			}
+			openaiReq.ResponseFormat = &openai.ChatCompletionResponseFormat{
+				Type:       openai.ChatCompletionResponseFormatTypeJSONSchema,
+				JSONSchema: jsonSchema,
+			}
+		}
+
 		// Start LLM call trace span
 		var openaiTraceData *trace.LLMCallData
 		var llmErr error
@@ -616,7 +638,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 // Stream processes the input and generates a response stream with optional per-call overrides.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
 func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
-	// TODO: apply per-call overrides from opts
+	genCfg := gollem.NewGenerateConfig(opts...)
 	// Build the content request for middleware
 	var historyCopy *gollem.History
 	var err error
@@ -653,6 +675,28 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		if err != nil {
 			return nil, err
 		}
+
+		// Apply per-call overrides
+		if t := genCfg.Temperature(); t != nil {
+			openaiReq.Temperature = float32(*t)
+		}
+		if p := genCfg.TopP(); p != nil {
+			openaiReq.TopP = float32(*p)
+		}
+		if m := genCfg.MaxTokens(); m != nil {
+			openaiReq.MaxTokens = *m
+		}
+		if schema := genCfg.ResponseSchema(); schema != nil {
+			jsonSchema, err := convertResponseSchemaToOpenAI(schema, s.strictMode)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to convert per-call response schema")
+			}
+			openaiReq.ResponseFormat = &openai.ChatCompletionResponseFormat{
+				Type:       openai.ChatCompletionResponseFormatTypeJSONSchema,
+				JSONSchema: jsonSchema,
+			}
+		}
+
 		// Start LLM call trace span
 		traceHandler := trace.HandlerFrom(ctx)
 		if traceHandler != nil {
