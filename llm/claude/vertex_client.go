@@ -171,7 +171,6 @@ func (s *VertexAnthropicSession) convertInputs(ctx context.Context, input ...gol
 
 // Generate processes the input and generates a response with optional per-call overrides.
 func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
-	// TODO: apply per-call overrides from opts
 	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
@@ -190,6 +189,12 @@ func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.In
 		}
 	}
 
+	// Build system prompt
+	systemPrompt, err := createSystemPrompt(ctx, s.cfg)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create system prompt")
+	}
+
 	// Start LLM call trace span
 	var traceData *trace.LLMCallData
 	var llmErr error
@@ -198,16 +203,33 @@ func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.In
 		defer func() { h.EndLLMCall(ctx, traceData, llmErr) }()
 	}
 
-	resp, err := generateClaudeContent(
-		ctx,
-		s.client,
-		apiMessages,
-		s.defaultModel,
-		s.params,
-		tools,
-		s.cfg,
-		"Claude Vertex",
-	)
+	// Build request
+	msgParams := anthropic.MessageNewParams{
+		Model:     anthropic.Model(s.defaultModel),
+		MaxTokens: s.params.MaxTokens,
+		Messages:  apiMessages,
+	}
+	if err := setTemperatureAndTopP(&msgParams, s.params.Temperature, s.params.TopP); err != nil {
+		return nil, goerr.Wrap(err, "failed to set generation parameters")
+	}
+	if len(tools) > 0 {
+		msgParams.Tools = tools
+	}
+	if len(systemPrompt) > 0 {
+		msgParams.System = systemPrompt
+	}
+
+	// Apply per-call overrides
+	if err := applyPerCallOverrides(&msgParams, opts...); err != nil {
+		return nil, err
+	}
+
+	resp, err := s.client.Messages.New(ctx, msgParams)
+	if err != nil {
+		llmErr = err
+		opts := tokenLimitErrorOptions(err)
+		return nil, goerr.Wrap(err, "failed to create message via Claude Vertex", opts...)
+	}
 	if err != nil {
 		llmErr = err
 		return nil, err
@@ -225,12 +247,13 @@ func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.In
 		s.messages = append(s.messages, respParam)
 	}
 
-	return processResponseWithContentType(ctx, resp, s.cfg.ContentType(), s.cfg.ResponseSchema() != nil), nil
+	// Use JSON content type if per-call schema is set
+	effectiveCT, hasSchema := effectiveContentType(s.cfg.ContentType(), s.cfg.ResponseSchema(), opts...)
+	return processResponseWithContentType(ctx, resp, effectiveCT, hasSchema), nil
 }
 
 // Stream processes the input and generates a response stream with optional per-call overrides.
 func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
-	// TODO: apply per-call overrides from opts
 	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
@@ -247,6 +270,36 @@ func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Inpu
 		}
 	}
 
+	// Build a temporary request to compute the system prompt override via applyPerCallOverrides
+	var systemPromptOverride []anthropic.TextBlockParam
+	genCfg := gollem.NewGenerateConfig(opts...)
+	if genCfg.ResponseSchema() != nil {
+		tmpRequest := anthropic.MessageNewParams{}
+		systemPrompt, err := createSystemPrompt(ctx, s.cfg)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create system prompt")
+		}
+		if len(systemPrompt) > 0 {
+			tmpRequest.System = systemPrompt
+		}
+		if err := applyPerCallOverrides(&tmpRequest, opts...); err != nil {
+			return nil, err
+		}
+		systemPromptOverride = tmpRequest.System
+	}
+
+	// Apply per-call overrides to a copy of params for Temperature/TopP/MaxTokens
+	params := s.params
+	if t := genCfg.Temperature(); t != nil {
+		params.Temperature = *t
+	}
+	if p := genCfg.TopP(); p != nil {
+		params.TopP = *p
+	}
+	if m := genCfg.MaxTokens(); m != nil {
+		params.MaxTokens = int64(*m)
+	}
+
 	// Start LLM call trace span
 	traceHandler := trace.HandlerFrom(ctx)
 	if traceHandler != nil {
@@ -258,10 +311,11 @@ func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Inpu
 		s.client,
 		s.messages,
 		s.defaultModel,
-		s.params,
+		params,
 		tools,
 		s.cfg,
 		&s.messages,
+		systemPromptOverride,
 	)
 	if err != nil {
 		if traceHandler != nil {

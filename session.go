@@ -2,9 +2,19 @@ package gollem
 
 import "context"
 
-// Session is a session for the LLM. This can be called to generate content and stream. It's mainly used for Prompt() method, but it also can be used for one-shot content generation.
+// Session is a session for the LLM. It maintains conversation state across
+// multiple calls and can be used with the Agent (via Execute) or standalone
+// for direct LLM interaction.
 type Session interface {
+	// Generate sends input to the LLM and returns the complete response.
+	// Optional GenerateOption values override session-level defaults
+	// (e.g. temperature, response schema) for this single call only.
 	Generate(ctx context.Context, input []Input, opts ...GenerateOption) (*Response, error)
+
+	// Stream sends input to the LLM and returns a channel that yields
+	// response chunks as they arrive. Optional GenerateOption values
+	// override session-level defaults for this single call only.
+	// The channel is closed when the response is complete.
 	Stream(ctx context.Context, input []Input, opts ...GenerateOption) (<-chan *Response, error)
 
 	// Deprecated: Use Generate instead.

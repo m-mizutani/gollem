@@ -402,54 +402,9 @@ func extractJSON(ctx context.Context, text string) string {
 	return string(jsonBytes)
 }
 
-// generateClaudeContent is a shared helper function that handles the core logic for generating content
-// This function is used by both the standard Claude client and the Vertex AI Claude client.
-func generateClaudeContent(
-	ctx context.Context,
-	client *anthropic.Client,
-	messages []anthropic.MessageParam,
-	model string,
-	params generationParameters,
-	tools []anthropic.ToolUnionParam,
-	cfg gollem.SessionConfig,
-	apiName string,
-) (*anthropic.Message, error) {
-	// Prepare message parameters
-	msgParams := anthropic.MessageNewParams{
-		Model:     anthropic.Model(model),
-		MaxTokens: params.MaxTokens,
-		Messages:  messages,
-	}
-
-	// Set temperature and/or top_p (mutually exclusive for Claude)
-	if err := setTemperatureAndTopP(&msgParams, params.Temperature, params.TopP); err != nil {
-		return nil, goerr.Wrap(err, "failed to set generation parameters")
-	}
-
-	if len(tools) > 0 {
-		msgParams.Tools = tools
-	}
-
-	// Add system prompt if available
-	systemPrompt, err := createSystemPrompt(ctx, cfg)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create system prompt")
-	}
-	if len(systemPrompt) > 0 {
-		msgParams.System = systemPrompt
-	}
-
-	resp, err := client.Messages.New(ctx, msgParams)
-	if err != nil {
-		opts := tokenLimitErrorOptions(err)
-		return nil, goerr.Wrap(err, "failed to create message via "+apiName, opts...)
-	}
-
-	return resp, nil
-}
-
 // generateClaudeStream is a shared helper function that handles the core logic for generating streaming content
 // This function is used by both the standard Claude client and the Vertex AI Claude client.
+// If systemPromptOverride is non-nil, it replaces the system prompt derived from cfg.
 func generateClaudeStream(
 	ctx context.Context,
 	client *anthropic.Client,
@@ -459,6 +414,7 @@ func generateClaudeStream(
 	tools []anthropic.ToolUnionParam,
 	cfg gollem.SessionConfig,
 	messageHistory *[]anthropic.MessageParam,
+	systemPromptOverride []anthropic.TextBlockParam,
 ) (<-chan *gollem.Response, error) {
 	// Prepare message parameters
 	msgParams := anthropic.MessageNewParams{
@@ -476,10 +432,16 @@ func generateClaudeStream(
 		msgParams.Tools = tools
 	}
 
-	// Add system prompt if available
-	systemPrompt, err := createSystemPrompt(ctx, cfg)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create system prompt")
+	// Add system prompt (use override if provided, otherwise derive from cfg)
+	var systemPrompt []anthropic.TextBlockParam
+	if systemPromptOverride != nil {
+		systemPrompt = systemPromptOverride
+	} else {
+		var err error
+		systemPrompt, err = createSystemPrompt(ctx, cfg)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create system prompt")
+		}
 	}
 	if len(systemPrompt) > 0 {
 		msgParams.System = systemPrompt
@@ -636,7 +598,6 @@ func processResponseWithContentType(ctx context.Context, resp *anthropic.Message
 // Generate processes the input and generates a response with optional per-call overrides.
 // It handles both text messages and function responses.
 func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
-	// TODO: apply per-call overrides from opts
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	var historyCopy *gollem.History
@@ -699,6 +660,11 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			request.Tools = s.tools
 		}
 
+		// Apply per-call overrides
+		if err := applyPerCallOverrides(&request, opts...); err != nil {
+			return nil, err
+		}
+
 		// Start LLM call trace span
 		var traceData *trace.LLMCallData
 		var llmErr error
@@ -715,7 +681,8 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		}
 
 		// Process response and extract content
-		processedResp := processResponseWithContentType(ctx, resp, s.cfg.ContentType(), s.cfg.ResponseSchema() != nil)
+		effectiveCT, hasSchema := effectiveContentType(s.cfg.ContentType(), s.cfg.ResponseSchema(), opts...)
+		processedResp := processResponseWithContentType(ctx, resp, effectiveCT, hasSchema)
 
 		// Set trace data for defer
 		traceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt())
@@ -756,6 +723,45 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		InputToken:    contentResp.InputToken,
 		OutputToken:   contentResp.OutputToken,
 	}, nil
+}
+
+// applyPerCallOverrides applies per-call GenerateOption overrides to Claude request params.
+func applyPerCallOverrides(request *anthropic.MessageNewParams, opts ...gollem.GenerateOption) error {
+	genCfg := gollem.NewGenerateConfig(opts...)
+	if t := genCfg.Temperature(); t != nil {
+		request.Temperature = anthropic.Float(*t)
+	}
+	if p := genCfg.TopP(); p != nil {
+		request.TopP = anthropic.Float(*p)
+	}
+	if m := genCfg.MaxTokens(); m != nil {
+		request.MaxTokens = int64(*m)
+	}
+	if perCallSchema := genCfg.ResponseSchema(); perCallSchema != nil {
+		jsonInstruction := "\nPlease format your response as valid JSON."
+		schemaText, err := schema.ConvertParameterToJSONString(perCallSchema)
+		if err != nil {
+			return goerr.Wrap(err, "failed to convert per-call response schema")
+		}
+		if schemaText != "" {
+			jsonInstruction += "\n\nYour response must conform to this JSON Schema:\n" + schemaText
+		}
+		if len(request.System) > 0 {
+			request.System[0].Text += jsonInstruction
+		} else {
+			request.System = []anthropic.TextBlockParam{{Text: jsonInstruction}}
+		}
+	}
+	return nil
+}
+
+// effectiveContentType returns the content type considering per-call schema override.
+func effectiveContentType(sessionContentType gollem.ContentType, sessionSchema *gollem.Parameter, opts ...gollem.GenerateOption) (gollem.ContentType, bool) {
+	genCfg := gollem.NewGenerateConfig(opts...)
+	if genCfg.ResponseSchema() != nil {
+		return gollem.ContentTypeJSON, true
+	}
+	return sessionContentType, sessionSchema != nil
 }
 
 // Deprecated: GenerateContent is deprecated. Use Generate instead.
@@ -803,7 +809,6 @@ func (a *FunctionCallAccumulator) accumulate() (*gollem.FunctionCall, error) {
 // Stream processes the input and generates a response stream with optional per-call overrides.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
 func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
-	// TODO: apply per-call overrides from opts
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	var historyCopy *gollem.History
@@ -864,6 +869,11 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 
 		if len(s.tools) > 0 {
 			request.Tools = s.tools
+		}
+
+		// Apply per-call overrides
+		if err := applyPerCallOverrides(&request, opts...); err != nil {
+			return nil, err
 		}
 
 		// Start LLM call trace span

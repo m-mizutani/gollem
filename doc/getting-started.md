@@ -117,7 +117,7 @@ if err != nil {
     panic(err)
 }
 
-result, err := session.GenerateContent(ctx, gollem.Text("Hello"))
+result, err := session.Generate(ctx, []gollem.Input{gollem.Text("Hello")})
 if err != nil {
     panic(err)
 }

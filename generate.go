@@ -2,6 +2,13 @@ package gollem
 
 // GenerateOption configures a single Generate/Stream call.
 // Options override session-level defaults for that call only.
+//
+// Example:
+//
+//	resp, err := session.Generate(ctx, inputs,
+//	    gollem.WithTemperature(0.2),
+//	    gollem.WithMaxTokens(256),
+//	)
 type GenerateOption func(*generateConfig)
 
 // generateConfig holds per-call overrides for generation parameters.
@@ -13,8 +20,9 @@ type generateConfig struct {
 	maxTokens      *int
 }
 
-// newGenerateConfig creates a generateConfig from the given options.
-func newGenerateConfig(opts ...GenerateOption) generateConfig {
+// NewGenerateConfig creates a generateConfig from the given options.
+// This is required for LLM client implementations.
+func NewGenerateConfig(opts ...GenerateOption) generateConfig { //nolint:revive
 	cfg := generateConfig{}
 	for _, opt := range opts {
 		opt(&cfg)

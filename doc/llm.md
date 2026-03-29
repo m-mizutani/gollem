@@ -304,10 +304,10 @@ pdf, err := gollem.NewPDFFromReader(f, gollem.WithMaxPDFSize(64*1024*1024)) // 6
 ### Sending PDF to LLM
 
 ```go
-result, err := session.GenerateContent(ctx,
+result, err := session.Generate(ctx, []gollem.Input{
     pdf,
     gollem.Text("What are the key findings in this document?"),
-)
+})
 if err != nil {
     return err
 }
@@ -348,6 +348,20 @@ session, err := client.NewSession(ctx,
 )
 ```
 
+### Per-Call Options
+
+Override session defaults for a single `Generate` or `Stream` call:
+
+```go
+resp, err := session.Generate(ctx, inputs,
+    gollem.WithTemperature(0.2),
+    gollem.WithMaxTokens(256),
+    gollem.WithGenerateResponseSchema(schema), // forces JSON output for this call
+)
+```
+
+See [Per-Call Generate Options](schema.md#per-call-generate-options) for details.
+
 ### Embedding Generation
 
 Providers that support embeddings (OpenAI and Gemini):
@@ -367,7 +381,7 @@ embeddings, err := client.GenerateEmbedding(ctx,
 All providers return standardized errors that can be checked:
 
 ```go
-resp, err := session.GenerateContent(ctx, input)
+resp, err := session.Generate(ctx, []gollem.Input{input})
 if err != nil {
     // Check for specific error types
     // Handle token limit errors, rate limits, etc.

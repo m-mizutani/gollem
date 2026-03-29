@@ -433,7 +433,6 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 
 // Generate generates content based on the input with optional per-call overrides.
 func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
-	// TODO: apply per-call overrides from opts
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	// Always create history (even if empty) to maintain consistency with middleware
@@ -490,8 +489,14 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			defer func() { h.EndLLMCall(ctx, geminiTraceData, llmErr) }()
 		}
 
+		// Build effective config with per-call overrides
+		effectiveConfig, err := s.buildEffectiveConfig(opts...)
+		if err != nil {
+			return nil, err
+		}
+
 		// Call the API
-		result, err := s.apiClient.GenerateContent(ctx, s.model, contents, s.config)
+		result, err := s.apiClient.GenerateContent(ctx, s.model, contents, effectiveConfig)
 		if err != nil {
 			llmErr = err
 			opts := tokenLimitErrorOptions(err)
@@ -562,7 +567,6 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 
 // Stream generates content based on the input and returns a stream of responses with optional per-call overrides.
 func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
-	// TODO: apply per-call overrides from opts
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	// Always create history (even if empty) to maintain consistency with middleware
@@ -630,8 +634,15 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				defer func() { traceHandler.EndLLMCall(ctx, streamTraceData, streamErr) }()
 			}
 
+			// Build effective config with per-call overrides
+			effectiveConfig, err := s.buildEffectiveConfig(opts...)
+			if err != nil {
+				streamChan <- &gollem.ContentResponse{Error: err}
+				return
+			}
+
 			// Get the streaming response from API
-			apiStreamChan := s.apiClient.GenerateContentStream(ctx, s.model, contents, s.config)
+			apiStreamChan := s.apiClient.GenerateContentStream(ctx, s.model, contents, effectiveConfig)
 
 			// Accumulate response data for history
 			var accumulatedTexts []string
@@ -968,6 +979,35 @@ func convertResponseSchemaToGenai(param *gollem.Parameter) (*genai.Schema, error
 	schema := convertParameterToNewSchema(param)
 
 	return schema, nil
+}
+
+// buildEffectiveConfig creates a copy of the session config with per-call overrides applied.
+func (s *Session) buildEffectiveConfig(opts ...gollem.GenerateOption) (*genai.GenerateContentConfig, error) {
+	genCfg := gollem.NewGenerateConfig(opts...)
+	effectiveConfig := *s.config
+	if t := genCfg.Temperature(); t != nil {
+		temp := float32(*t)
+		effectiveConfig.Temperature = &temp
+	}
+	if p := genCfg.TopP(); p != nil {
+		topP := float32(*p)
+		effectiveConfig.TopP = &topP
+	}
+	if m := genCfg.MaxTokens(); m != nil {
+		if *m > math.MaxInt32 || *m < 0 {
+			return nil, goerr.New("maxTokens out of int32 range", goerr.V("maxTokens", *m))
+		}
+		effectiveConfig.MaxOutputTokens = int32(*m)
+	}
+	if perCallSchema := genCfg.ResponseSchema(); perCallSchema != nil {
+		effectiveConfig.ResponseMIMEType = "application/json"
+		genaiSchema, err := convertResponseSchemaToGenai(perCallSchema)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert per-call response schema")
+		}
+		effectiveConfig.ResponseSchema = genaiSchema
+	}
+	return &effectiveConfig, nil
 }
 
 // Deprecated: GenerateContent is deprecated. Use Generate instead.
