@@ -422,7 +422,7 @@ func (s *Session) createRequest(stream bool) (openai.ChatCompletionRequest, erro
 		Tools:            s.tools,
 		Temperature:      s.params.Temperature,
 		TopP:             s.params.TopP,
-		MaxTokens:        s.params.MaxTokens,
+		MaxCompletionTokens: s.params.MaxTokens,
 		PresencePenalty:  s.params.PresencePenalty,
 		FrequencyPenalty: s.params.FrequencyPenalty,
 		Stream:           stream,
@@ -1038,7 +1038,7 @@ func (s *Session) applyPerCallOverrides(req *openai.ChatCompletionRequest, opts 
 		req.TopP = float32(*p)
 	}
 	if m := genCfg.MaxTokens(); m != nil {
-		req.MaxTokens = *m
+		req.MaxCompletionTokens = *m
 	}
 	if schema := genCfg.ResponseSchema(); schema != nil {
 		jsonSchema, err := convertResponseSchemaToOpenAI(schema, s.strictMode)

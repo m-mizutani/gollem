@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
@@ -65,7 +66,8 @@ func TestVertexClient(t *testing.T) {
 		location = "us-east5" // Default to us-east5 where Claude Sonnet 4 is working
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Create Vertex AI client using Anthropic's official SDK
 	client, err := claude.NewWithVertex(ctx, location, projectID,
@@ -80,7 +82,7 @@ func TestVertexClient(t *testing.T) {
 	gt.NoError(t, err)
 
 	// Test basic text generation
-	response, err := session.Generate(ctx, []gollem.Input{gollem.Text("Hello! Please respond with 'Vertex AI working!' to confirm this integration works.")})
+	response, err := session.Generate(ctx, []gollem.Input{gollem.Text("Hello! Please respond with 'Vertex AI working!' to confirm this integration works.")}, gollem.WithMaxTokens(2048))
 	gt.NoError(t, err)
 	gt.NotNil(t, response)
 	gt.True(t, len(response.Texts) > 0)
@@ -99,7 +101,8 @@ func TestVertexClientWithTools(t *testing.T) {
 		location = "us-east5" // Default to us-east5 where Claude Sonnet 4 is working
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Create Vertex AI client using Anthropic's official SDK
 	client, err := claude.NewWithVertex(ctx, location, projectID,
@@ -117,7 +120,7 @@ func TestVertexClientWithTools(t *testing.T) {
 	gt.NoError(t, err)
 
 	// Test tool calling
-	response, err := session.Generate(ctx, []gollem.Input{gollem.Text("Please calculate 15 + 27 using the calculator tool.")})
+	response, err := session.Generate(ctx, []gollem.Input{gollem.Text("Please calculate 15 + 27 using the calculator tool.")}, gollem.WithMaxTokens(2048))
 	gt.NoError(t, err)
 	gt.NotNil(t, response)
 
@@ -137,7 +140,7 @@ func TestVertexClientWithTools(t *testing.T) {
 			Data: result,
 		}
 
-		finalResponse, err := session.Generate(ctx, []gollem.Input{funcResp})
+		finalResponse, err := session.Generate(ctx, []gollem.Input{funcResp}, gollem.WithMaxTokens(2048))
 		gt.NoError(t, err)
 		gt.NotNil(t, finalResponse)
 		gt.True(t, len(finalResponse.Texts) > 0)

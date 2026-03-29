@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
@@ -22,6 +23,9 @@ func TestToolExecution(t *testing.T) {
 	t.Parallel()
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
 		client, err := newClient(t)
 		gt.NoError(t, err)
 
@@ -34,7 +38,7 @@ func TestToolExecution(t *testing.T) {
 
 		fmt.Printf("[TEST] Agent created: agent=%p\n", agent)
 
-		_, err = agent.Execute(t.Context(), gollem.Text("Generate a random number between 1 and 100."))
+		_, err = agent.Execute(ctx, gollem.Text("Generate a random number between 1 and 100."))
 		gt.NoError(t, err)
 
 		// Verify Agent.Session().History() works correctly
@@ -104,6 +108,9 @@ func TestContentMiddleware(t *testing.T) {
 	t.Parallel()
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
 		userName := "Quetzalcoatl"
 
 		// Content middleware that injects fake history before the first call
@@ -135,13 +142,13 @@ func TestContentMiddleware(t *testing.T) {
 		client, err := newClient(t)
 		gt.NoError(t, err)
 
-		session, err := client.NewSession(context.Background(),
+		session, err := client.NewSession(ctx,
 			gollem.WithSessionContentBlockMiddleware(contentMiddleware),
 		)
 		gt.NoError(t, err)
 
 		// Single call: ask about the injected name (1 API call)
-		resp, err := session.Generate(t.Context(), []gollem.Input{gollem.Text("What is my name?")})
+		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("What is my name?")}, gollem.WithMaxTokens(2048))
 		gt.NoError(t, err)
 		gt.True(t, len(resp.Texts) > 0)
 
@@ -197,6 +204,9 @@ func TestStreamMiddleware(t *testing.T) {
 	t.Parallel()
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
 		modifiedPrompt := "Modified: Please respond with exactly: MIDDLEWARE_WORKS"
 
 		// Streaming middleware that modifies the input prompt
@@ -217,13 +227,13 @@ func TestStreamMiddleware(t *testing.T) {
 		client, err := newClient(t)
 		gt.NoError(t, err)
 
-		session, err := client.NewSession(context.Background(),
+		session, err := client.NewSession(ctx,
 			gollem.WithSessionContentStreamMiddleware(streamMiddleware),
 		)
 		gt.NoError(t, err)
 
 		// Generate stream with original prompt (will be modified by middleware)
-		streamChan, err := session.Stream(t.Context(), []gollem.Input{gollem.Text("Say ORIGINAL_PROMPT")})
+		streamChan, err := session.Stream(ctx, []gollem.Input{gollem.Text("Say ORIGINAL_PROMPT")}, gollem.WithMaxTokens(2048))
 		gt.NoError(t, err)
 		if err != nil {
 			return // Early return if stream creation failed
@@ -309,10 +319,13 @@ func TestCountToken(t *testing.T) {
 	t.Parallel()
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
 		client, err := newClient(t)
 		gt.NoError(t, err)
 
-		session, err := client.NewSession(context.Background(),
+		session, err := client.NewSession(ctx,
 			gollem.WithSessionSystemPrompt("You are a helpful assistant."),
 			gollem.WithSessionTools(&RandomNumberTool{}),
 		)
@@ -323,7 +336,7 @@ func TestCountToken(t *testing.T) {
 		gt.NoError(t, err)
 
 		// Basic token count - verify it doesn't modify history
-		count, err := session.CountToken(t.Context(), gollem.Text("Hello, world!"))
+		count, err := session.CountToken(ctx, gollem.Text("Hello, world!"))
 		gt.NoError(t, err)
 		gt.N(t, count).Greater(0)
 
@@ -333,7 +346,7 @@ func TestCountToken(t *testing.T) {
 		gt.V(t, historyAfterCount).Equal(initialHistory)
 
 		// Generate content to add history
-		_, err = session.Generate(t.Context(), []gollem.Input{gollem.Text("Hi!")})
+		_, err = session.Generate(ctx, []gollem.Input{gollem.Text("Hi!")}, gollem.WithMaxTokens(2048))
 		gt.NoError(t, err)
 
 		// Get history after GenerateContent
@@ -341,7 +354,7 @@ func TestCountToken(t *testing.T) {
 		gt.NoError(t, err)
 
 		// Count tokens with history - verify it doesn't modify history
-		count, err = session.CountToken(t.Context(), gollem.Text("What is 2+2?"))
+		count, err = session.CountToken(ctx, gollem.Text("What is 2+2?"))
 		gt.NoError(t, err)
 		gt.N(t, count).Greater(0)
 
@@ -475,16 +488,19 @@ func TestPDFInput(t *testing.T) {
 	gt.NoError(t, err)
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
 		client, err := newClient(t)
 		gt.NoError(t, err).Required()
 
-		session, err := client.NewSession(context.Background())
+		session, err := client.NewSession(ctx)
 		gt.NoError(t, err).Required()
 
-		result, err := session.Generate(t.Context(), []gollem.Input{
+		result, err := session.Generate(ctx, []gollem.Input{
 			pdf,
 			gollem.Text("This PDF document contains a secret code. What is the secret code? Reply with only the code, nothing else."),
-		})
+		}, gollem.WithMaxTokens(2048))
 		gt.NoError(t, err).Required()
 		gt.V(t, len(result.Texts) > 0).Equal(true)
 		// The PDF contains "The secret code is: GOLLEM-PDF-7X9K2"
@@ -538,17 +554,20 @@ func TestSessionQueryWithRealLLM(t *testing.T) {
 	}
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
 		client, err := newClient(t)
 		gt.NoError(t, err).Required()
 
 		// Create a plain-text session (no ContentTypeJSON, no ResponseSchema)
-		session, err := client.NewSession(context.Background())
+		session, err := client.NewSession(ctx)
 		gt.NoError(t, err).Required()
 
 		// Step 1: Tell the LLM a name via normal Generate (builds history)
-		_, err = session.Generate(context.Background(), []gollem.Input{
+		_, err = session.Generate(ctx, []gollem.Input{
 			gollem.Text("My name is Quetzalcoatl."),
-		})
+		}, gollem.WithMaxTokens(2048))
 		gt.NoError(t, err)
 
 		// Step 2: SessionQuery on the same session.
@@ -556,7 +575,7 @@ func TestSessionQueryWithRealLLM(t *testing.T) {
 		// Per-call override is not yet fully implemented in providers,
 		// so the prompt explicitly requests JSON to maximize reliability.
 		resp, err := gollem.SessionQuery[nameAnswer](
-			context.Background(), session,
+			ctx, session,
 			`What is my name? Respond as {"name":"..."}`,
 			gollem.WithSessionQueryMaxRetry(3),
 		)
