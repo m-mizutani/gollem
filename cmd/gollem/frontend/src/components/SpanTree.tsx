@@ -140,10 +140,8 @@ function SpanNode({
 
       {expanded &&
         hasChildren &&
-        span.children!.map((child) => {
-          const childTokenInfo = tokenInfo?.children.find(
-            (c) => c.span.span_id === child.span_id
-          );
+        span.children!.map((child, index) => {
+          const childTokenInfo = tokenInfo?.children[index];
           return (
             <SpanNode
               key={child.span_id}

@@ -11578,10 +11578,8 @@ function SpanNode({
         ]
       }
     ),
-    expanded && hasChildren && span.children.map((child) => {
-      const childTokenInfo = tokenInfo == null ? void 0 : tokenInfo.children.find(
-        (c) => c.span.span_id === child.span_id
-      );
+    expanded && hasChildren && span.children.map((child, index2) => {
+      const childTokenInfo = tokenInfo == null ? void 0 : tokenInfo.children[index2];
       return /* @__PURE__ */ jsxRuntimeExports.jsx(
         SpanNode,
         {
