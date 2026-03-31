@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import type { Span, SpanKind } from "../api/types";
 import { formatDuration } from "../utils/format";
 
@@ -16,12 +16,55 @@ const kindColors: Record<SpanKind, string> = {
   event: "bg-orange-100 text-orange-700",
 };
 
+// Token aggregation types and logic (inline to avoid external dependency)
+interface SpanTokenInfo {
+  span: Span;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  children: SpanTokenInfo[];
+}
+
+function aggregateTokens(span: Span): SpanTokenInfo {
+  let input = 0;
+  let output = 0;
+
+  if (span.kind === "llm_call" && span.llm_call) {
+    input += span.llm_call.input_tokens;
+    output += span.llm_call.output_tokens;
+  }
+
+  const children: SpanTokenInfo[] = [];
+  for (const child of span.children || []) {
+    const childInfo = aggregateTokens(child);
+    input += childInfo.inputTokens;
+    output += childInfo.outputTokens;
+    children.push(childInfo);
+  }
+
+  return {
+    span,
+    inputTokens: input,
+    outputTokens: output,
+    totalTokens: input + output,
+    children,
+  };
+}
+
+function formatTokens(tokens: number): string {
+  if (tokens < 1000) return String(tokens);
+  if (tokens < 10000) return `${(tokens / 1000).toFixed(1)}k`;
+  if (tokens < 1000000) return `${Math.round(tokens / 1000)}k`;
+  return `${(tokens / 1000000).toFixed(1)}M`;
+}
+
 interface SpanNodeProps {
   span: Span;
   depth: number;
   selectedSpan: Span | null;
   onSelectSpan: (span: Span) => void;
   defaultExpanded: boolean;
+  tokenInfo?: SpanTokenInfo;
 }
 
 function SpanNode({
@@ -30,6 +73,7 @@ function SpanNode({
   selectedSpan,
   onSelectSpan,
   defaultExpanded,
+  tokenInfo,
 }: SpanNodeProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const hasChildren = span.children && span.children.length > 0;
@@ -83,6 +127,12 @@ function SpanNode({
           {formatDuration(span.duration)}
         </span>
 
+        {tokenInfo && tokenInfo.totalTokens > 0 && (
+          <span className="text-xs text-blue-500 flex-shrink-0 font-mono">
+            {formatTokens(tokenInfo.totalTokens)} tok
+          </span>
+        )}
+
         {span.status === "error" && (
           <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
         )}
@@ -90,16 +140,22 @@ function SpanNode({
 
       {expanded &&
         hasChildren &&
-        span.children!.map((child) => (
-          <SpanNode
-            key={child.span_id}
-            span={child}
-            depth={depth + 1}
-            selectedSpan={selectedSpan}
-            onSelectSpan={onSelectSpan}
-            defaultExpanded={depth < 1}
-          />
-        ))}
+        span.children!.map((child) => {
+          const childTokenInfo = tokenInfo?.children.find(
+            (c) => c.span.span_id === child.span_id
+          );
+          return (
+            <SpanNode
+              key={child.span_id}
+              span={child}
+              depth={depth + 1}
+              selectedSpan={selectedSpan}
+              onSelectSpan={onSelectSpan}
+              defaultExpanded={depth < 1}
+              tokenInfo={childTokenInfo}
+            />
+          );
+        })}
     </div>
   );
 }
@@ -109,6 +165,11 @@ export default function SpanTree({
   selectedSpan,
   onSelectSpan,
 }: SpanTreeProps) {
+  const rootTokenInfo = useMemo(() => {
+    if (!rootSpan) return undefined;
+    return aggregateTokens(rootSpan);
+  }, [rootSpan]);
+
   if (!rootSpan) {
     return (
       <div className="p-4 text-sm text-gray-500">No span data available</div>
@@ -123,6 +184,7 @@ export default function SpanTree({
         selectedSpan={selectedSpan}
         onSelectSpan={onSelectSpan}
         defaultExpanded={true}
+        tokenInfo={rootTokenInfo}
       />
     </div>
   );
