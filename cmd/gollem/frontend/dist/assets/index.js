@@ -11496,12 +11496,41 @@ const kindColors = {
   sub_agent: "bg-purple-100 text-purple-700",
   event: "bg-orange-100 text-orange-700"
 };
+function aggregateTokens(span) {
+  let input = 0;
+  let output = 0;
+  if (span.kind === "llm_call" && span.llm_call) {
+    input += span.llm_call.input_tokens;
+    output += span.llm_call.output_tokens;
+  }
+  const children2 = [];
+  for (const child of span.children || []) {
+    const childInfo = aggregateTokens(child);
+    input += childInfo.inputTokens;
+    output += childInfo.outputTokens;
+    children2.push(childInfo);
+  }
+  return {
+    span,
+    inputTokens: input,
+    outputTokens: output,
+    totalTokens: input + output,
+    children: children2
+  };
+}
+function formatTokens(tokens) {
+  if (tokens < 1e3) return String(tokens);
+  if (tokens < 1e4) return `${(tokens / 1e3).toFixed(1)}k`;
+  if (tokens < 1e6) return `${Math.round(tokens / 1e3)}k`;
+  return `${(tokens / 1e6).toFixed(1)}M`;
+}
 function SpanNode({
   span,
   depth,
   selectedSpan,
   onSelectSpan,
-  defaultExpanded
+  defaultExpanded,
+  tokenInfo
 }) {
   const [expanded, setExpanded] = reactExports.useState(defaultExpanded);
   const hasChildren = span.children && span.children.length > 0;
@@ -11541,21 +11570,29 @@ function SpanNode({
           ),
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "truncate flex-1", title: span.name, children: span.name }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-gray-400 flex-shrink-0", children: formatDuration(span.duration) }),
+          tokenInfo && tokenInfo.totalTokens > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-blue-500 flex-shrink-0 font-mono", children: [
+            formatTokens(tokenInfo.totalTokens),
+            " tok"
+          ] }),
           span.status === "error" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-2 h-2 rounded-full bg-red-500 flex-shrink-0" })
         ]
       }
     ),
-    expanded && hasChildren && span.children.map((child) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-      SpanNode,
-      {
-        span: child,
-        depth: depth + 1,
-        selectedSpan,
-        onSelectSpan,
-        defaultExpanded: depth < 1
-      },
-      child.span_id
-    ))
+    expanded && hasChildren && span.children.map((child, index2) => {
+      const childTokenInfo = tokenInfo == null ? void 0 : tokenInfo.children[index2];
+      return /* @__PURE__ */ jsxRuntimeExports.jsx(
+        SpanNode,
+        {
+          span: child,
+          depth: depth + 1,
+          selectedSpan,
+          onSelectSpan,
+          defaultExpanded: depth < 1,
+          tokenInfo: childTokenInfo
+        },
+        child.span_id
+      );
+    })
   ] });
 }
 function SpanTree({
@@ -11563,6 +11600,10 @@ function SpanTree({
   selectedSpan,
   onSelectSpan
 }) {
+  const rootTokenInfo = reactExports.useMemo(() => {
+    if (!rootSpan) return void 0;
+    return aggregateTokens(rootSpan);
+  }, [rootSpan]);
   if (!rootSpan) {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "p-4 text-sm text-gray-500", children: "No span data available" });
   }
@@ -11573,7 +11614,8 @@ function SpanTree({
       depth: 0,
       selectedSpan,
       onSelectSpan,
-      defaultExpanded: true
+      defaultExpanded: true,
+      tokenInfo: rootTokenInfo
     }
   ) });
 }
