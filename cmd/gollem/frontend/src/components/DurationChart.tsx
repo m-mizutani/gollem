@@ -7,6 +7,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import type { PieLabelRenderProps } from "recharts";
 import type { Trace, Span, SpanKind } from "../api/types";
 import { formatDuration } from "../utils/format";
 
@@ -86,8 +87,8 @@ export default function DurationChart({ trace }: DurationChartProps) {
             cx="50%"
             cy="50%"
             outerRadius={100}
-            label={({ name, percent }) =>
-              `${name} (${(percent * 100).toFixed(0)}%)`
+            label={({ name, percent }: PieLabelRenderProps) =>
+              `${name ?? ""} (${((percent ?? 0) * 100).toFixed(0)}%)`
             }
           >
             {data.map((entry, i) => (
