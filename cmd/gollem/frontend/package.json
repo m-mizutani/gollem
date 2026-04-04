@@ -15,7 +15,7 @@
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
     "react-router-dom": "^6.28.0",
-    "recharts": "^2.15.0",
+    "recharts": "^3.8.1",
     "rehype-sanitize": "^6.0.0"
   },
   "pnpm": {
