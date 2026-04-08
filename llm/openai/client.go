@@ -347,6 +347,22 @@ func (s *Session) convertInputsToMessages(input ...gollem.Input) ([]openai.ChatC
 				},
 			})
 
+		case gollem.File:
+			if v.MimeType() == "application/pdf" {
+				pdfURL := fmt.Sprintf("data:application/pdf;base64,%s", v.Base64())
+				userContentParts = append(userContentParts, openai.ChatMessagePart{
+					Type: openai.ChatMessagePartTypeImageURL,
+					ImageURL: &openai.ChatMessageImageURL{
+						URL: pdfURL,
+					},
+				})
+				continue
+			}
+			userContentParts = append(userContentParts, openai.ChatMessagePart{
+				Type: openai.ChatMessagePartTypeText,
+				Text: fmt.Sprintf("[File: %s, type: %s, size: %d bytes - binary content omitted]", v.Name(), v.MimeType(), len(v.Data())),
+			})
+
 		case gollem.FunctionResponse:
 			// If we have accumulated user content, create a message for it
 			if len(userContentParts) > 0 {
@@ -416,6 +432,12 @@ func (s *Session) createRequest(stream bool) (openai.ChatCompletionRequest, erro
 		return openai.ChatCompletionRequest{}, goerr.Wrap(err, "failed to get messages for API call")
 	}
 
+	if sp := s.cfg.SystemPrompt(); sp != "" {
+		messages = append([]openai.ChatCompletionMessage{
+			{Role: openai.ChatMessageRoleSystem, Content: sp},
+		}, messages...)
+	}
+
 	req := openai.ChatCompletionRequest{
 		Model:               s.defaultModel,
 		Messages:            messages,
@@ -477,6 +499,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		Inputs:       input,
 		History:      historyCopy,
 		SystemPrompt: s.cfg.SystemPrompt(),
+		Metadata:     s.cfg.Metadata(),
 	}
 
 	// Create the base handler that performs the actual API call
@@ -634,6 +657,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		Inputs:       input,
 		History:      historyCopy,
 		SystemPrompt: s.cfg.SystemPrompt(),
+		Metadata:     s.cfg.Metadata(),
 	}
 
 	// Create the base handler that performs the actual API call

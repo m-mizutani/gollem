@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"cloud.google.com/go/auth/credentials"
 	"context"
 	"errors"
 	"fmt"
@@ -42,6 +43,9 @@ type Client struct {
 	// They can be set using WithGoogleCloudOptions.
 	gcpOptions []option.ClientOption
 
+	// serviceAccountJSON overrides ADC for Vertex AI.
+	serviceAccountJSON []byte
+
 	// generationConfig contains the default generation parameters
 	generationConfig *genai.GenerateContentConfig
 
@@ -76,6 +80,17 @@ func WithEmbeddingModel(model string) Option {
 func WithGoogleCloudOptions(opts ...option.ClientOption) Option {
 	return func(c *Client) {
 		c.gcpOptions = append(c.gcpOptions, opts...)
+	}
+}
+
+// WithServiceAccountJSON sets explicit service account credentials for Vertex AI.
+func WithServiceAccountJSON(serviceAccountJSON []byte) Option {
+	return func(c *Client) {
+		if len(serviceAccountJSON) == 0 {
+			c.serviceAccountJSON = nil
+			return
+		}
+		c.serviceAccountJSON = append([]byte(nil), serviceAccountJSON...)
 	}
 }
 
@@ -152,6 +167,20 @@ func WithThinkingBudget(budget int32) Option {
 	}
 }
 
+// WithThinkingLevel sets the thinking level for text generation.
+func WithThinkingLevel(level genai.ThinkingLevel) Option {
+	return func(c *Client) {
+		if c.generationConfig == nil {
+			c.generationConfig = &genai.GenerateContentConfig{}
+		}
+		if c.generationConfig.ThinkingConfig == nil {
+			c.generationConfig.ThinkingConfig = &genai.ThinkingConfig{}
+		}
+		c.generationConfig.ThinkingConfig.ThinkingLevel = level
+		c.generationConfig.ThinkingConfig.ThinkingBudget = nil
+	}
+}
+
 // WithSystemPrompt sets the system prompt to use for chat completions.
 func WithSystemPrompt(prompt string) Option {
 	return func(c *Client) {
@@ -201,6 +230,55 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 		Project:  projectID,
 		Location: location,
 		Backend:  genai.BackendVertexAI,
+	}
+
+	if len(client.serviceAccountJSON) > 0 {
+		creds, err := credentials.DetectDefault(&credentials.DetectOptions{
+			Scopes:          []string{"https://www.googleapis.com/auth/cloud-platform"},
+			CredentialsJSON: client.serviceAccountJSON,
+		})
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create credentials from service account json")
+		}
+		config.Credentials = creds
+	}
+
+	newClient, err := genai.NewClient(ctx, config)
+	if err != nil {
+		return nil, err
+	}
+
+	client.client = newClient
+	return client, nil
+}
+
+// NewWithAPIKey creates a Gemini client that uses the Gemini API directly.
+func NewWithAPIKey(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return nil, goerr.New("apiKey is required")
+	}
+
+	var budget int32 = 0
+
+	client := &Client{
+		defaultModel:   DefaultModel,
+		embeddingModel: DefaultEmbeddingModel,
+		contentType:    gollem.ContentTypeText,
+		generationConfig: &genai.GenerateContentConfig{
+			ThinkingConfig: &genai.ThinkingConfig{
+				ThinkingBudget: &budget,
+			},
+		},
+	}
+
+	for _, option := range options {
+		option(client)
+	}
+
+	config := &genai.ClientConfig{
+		APIKey:  apiKey,
+		Backend: genai.BackendGeminiAPI,
 	}
 
 	newClient, err := genai.NewClient(ctx, config)
@@ -351,6 +429,13 @@ func (s *Session) convertInputs(input ...gollem.Input) ([]*genai.Part, error) {
 					Data:     v.Data(),
 				},
 			})
+		case gollem.File:
+			parts = append(parts, &genai.Part{
+				InlineData: &genai.Blob{
+					MIMEType: v.MimeType(),
+					Data:     v.Data(),
+				},
+			})
 		case gollem.FunctionResponse:
 			if v.Error != nil {
 				parts = append(parts, &genai.Part{
@@ -445,6 +530,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		Inputs:       input,
 		History:      historyCopy,
 		SystemPrompt: s.cfg.SystemPrompt(),
+		Metadata:     s.cfg.Metadata(),
 	}
 
 	// Create the base handler that performs the actual API call
@@ -579,6 +665,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		Inputs:       input,
 		History:      historyCopy,
 		SystemPrompt: s.cfg.SystemPrompt(),
+		Metadata:     s.cfg.Metadata(),
 	}
 
 	// Create the base handler that performs the actual API call

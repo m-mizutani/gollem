@@ -18,9 +18,10 @@ type ContentStreamHandler func(ctx context.Context, req *ContentRequest) (<-chan
 
 // ContentRequest represents a request for content generation with modifiable history.
 type ContentRequest struct {
-	Inputs       []Input  // Current user inputs
-	History      *History // Modifiable conversation history
-	SystemPrompt string   // System prompt for this request
+	Inputs       []Input           // Current user inputs
+	History      *History          // Modifiable conversation history
+	SystemPrompt string            // System prompt for this request
+	Metadata     map[string]string // Request metadata for logging/tracing
 }
 
 // ContentResponse represents a response from content generation.

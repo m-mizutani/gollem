@@ -785,6 +785,24 @@ func convertInputsToHistory(inputs []Input) (*History, error) {
 			}
 			contents = append(contents, mc)
 
+		case File:
+			if v.MimeType() == "application/pdf" {
+				mc, err := NewPDFContent(v.Data(), "")
+				if err != nil {
+					return nil, goerr.Wrap(err, "failed to marshal PDF file content")
+				}
+				contents = append(contents, mc)
+				continue
+			}
+			textData, err := json.Marshal(map[string]string{"text": v.String()})
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to marshal file content")
+			}
+			contents = append(contents, MessageContent{
+				Type: MessageContentTypeText,
+				Data: textData,
+			})
+
 		case FunctionResponse:
 			// FunctionResponse is not user input, skip it
 			// It should be handled separately in the normal flow

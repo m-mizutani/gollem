@@ -12,7 +12,7 @@ require (
 	github.com/sashabaranov/go-openai v1.41.2
 	go.opentelemetry.io/otel/sdk v1.40.0
 	google.golang.org/api v0.264.0
-	google.golang.org/genai v1.28.0
+	google.golang.org/genai v1.43.0
 )
 
 require (
@@ -30,7 +30,7 @@ require (
 
 require (
 	cloud.google.com/go v0.123.0 // indirect
-	cloud.google.com/go/auth v0.18.1 // indirect
+	cloud.google.com/go/auth v0.18.1
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect

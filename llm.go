@@ -403,3 +403,66 @@ func NewPDFFromReader(r io.Reader, opts ...PDFOption) (PDF, error) {
 	}
 	return NewPDF(data, opts...)
 }
+
+// File represents a generic file input for LLMs.
+type File struct {
+	data     []byte
+	mimeType string
+	name     string
+}
+
+// isInput implements Input interface.
+func (f File) isInput() restrictedValue {
+	return restrictedValue{}
+}
+
+// LogValue returns a slog.Value for structured logging.
+func (f File) LogValue() slog.Value {
+	return slog.StringValue(f.String())
+}
+
+// String returns a human-readable description of the file.
+func (f File) String() string {
+	if f.name != "" {
+		return fmt.Sprintf("file %s (%d bytes, %s)", f.name, len(f.data), f.mimeType)
+	}
+	return fmt.Sprintf("file (%d bytes, %s)", len(f.data), f.mimeType)
+}
+
+// Data returns the file data as bytes.
+func (f File) Data() []byte {
+	return f.data
+}
+
+// MimeType returns the file MIME type.
+func (f File) MimeType() string {
+	return f.mimeType
+}
+
+// Name returns the file name.
+func (f File) Name() string {
+	return f.name
+}
+
+// Base64 returns the base64-encoded file data.
+func (f File) Base64() string {
+	return base64.StdEncoding.EncodeToString(f.data)
+}
+
+// NewFile creates a generic file input.
+func NewFile(mimeType string, data []byte, name string) File {
+	return File{
+		data:     data,
+		mimeType: mimeType,
+		name:     name,
+	}
+}
+
+// NewFileFromReader creates a generic file input from an io.Reader.
+func NewFileFromReader(mimeType string, r io.Reader, name string) (File, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return File{}, goerr.Wrap(err, "failed to read file data")
+	}
+	return NewFile(mimeType, data, name), nil
+}

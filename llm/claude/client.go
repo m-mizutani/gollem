@@ -291,6 +291,17 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 			})
 			userContentBlocks = append(userContentBlocks, docBlock)
 
+		case gollem.File:
+			if v.MimeType() == "application/pdf" {
+				docBlock := anthropic.NewDocumentBlock(anthropic.Base64PDFSourceParam{
+					Data: v.Base64(),
+				})
+				userContentBlocks = append(userContentBlocks, docBlock)
+				continue
+			}
+			fileRef := fmt.Sprintf("[File: %s, type: %s, size: %d bytes]", v.Name(), v.MimeType(), len(v.Data()))
+			userContentBlocks = append(userContentBlocks, anthropic.NewTextBlock(fileRef))
+
 		case gollem.FunctionResponse:
 			// If we have accumulated user content, create a message for it
 			if len(userContentBlocks) > 0 {
@@ -613,6 +624,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		Inputs:       input,
 		History:      historyCopy,
 		SystemPrompt: s.cfg.SystemPrompt(),
+		Metadata:     s.cfg.Metadata(),
 	}
 
 	// Create the base handler that performs the actual API call
@@ -824,6 +836,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		Inputs:       input,
 		History:      historyCopy,
 		SystemPrompt: s.cfg.SystemPrompt(),
+		Metadata:     s.cfg.Metadata(),
 	}
 
 	// Create the base handler that performs the actual API call

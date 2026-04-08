@@ -34,6 +34,7 @@ type SessionConfig struct {
 	systemPrompt   string
 	tools          []Tool
 	responseSchema *Parameter
+	metadata       map[string]string
 
 	// Middleware fields (ToolMiddleware excluded - managed at Agent layer)
 	contentBlockMiddlewares  []ContentBlockMiddleware
@@ -73,6 +74,11 @@ func (c *SessionConfig) ContentStreamMiddlewares() []ContentStreamMiddleware {
 // ResponseSchema returns the response schema of the session.
 func (c *SessionConfig) ResponseSchema() *Parameter {
 	return c.responseSchema
+}
+
+// Metadata returns the metadata of the session.
+func (c *SessionConfig) Metadata() map[string]string {
+	return c.metadata
 }
 
 // NewSessionConfig creates a new session configuration. This is required for only LLM client implementations.
@@ -162,6 +168,13 @@ func WithSessionContentStreamMiddleware(middlewares ...ContentStreamMiddleware) 
 func WithSessionResponseSchema(schema *Parameter) SessionOption {
 	return func(cfg *SessionConfig) {
 		cfg.responseSchema = schema
+	}
+}
+
+// WithSessionMetadata sets metadata for the session.
+func WithSessionMetadata(metadata map[string]string) SessionOption {
+	return func(cfg *SessionConfig) {
+		cfg.metadata = metadata
 	}
 }
 
