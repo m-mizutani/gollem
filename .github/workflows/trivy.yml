@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Checkout upstream repo
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ github.head_ref }}
 
@@ -48,6 +48,6 @@ jobs:
 
       - name: Upload Trivy scan results to GitHub Security tab
         if: failure() && steps.scan-table.outcome == 'failure'
-        uses: github/codeql-action/upload-sarif@439137e1b50c27ba9e2f9befc93e43091b449c34 # v3.32.0
+        uses: github/codeql-action/upload-sarif@7fc1baf373eb073c686865bd453d412d506a05a2 # v3.35.1
         with:
           sarif_file: "trivy-results.sarif"
