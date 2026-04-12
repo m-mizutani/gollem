@@ -236,7 +236,7 @@ func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.In
 	}
 
 	// Set trace data for defer
-	traceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt())
+	traceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt(), apiMessages)
 
 	// Only update session history after successful API call
 	s.messages = append(s.messages, messages...)

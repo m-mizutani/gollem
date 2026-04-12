@@ -685,7 +685,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		processedResp := processResponseWithContentType(ctx, resp, effectiveCT, hasSchema)
 
 		// Set trace data for defer
-		traceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt())
+		traceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt(), apiMessages)
 
 		// Update history with new messages (already in Claude format)
 		s.historyMessages = append(s.historyMessages, messages...)
@@ -894,7 +894,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		}
 
 		// Set trace data for defer
-		streamTraceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt())
+		streamTraceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt(), allMessages)
 
 		responseChan := make(chan *gollem.ContentResponse)
 
@@ -1107,14 +1107,85 @@ func tokenLimitErrorOptions(err error) []goerr.Option {
 	return nil
 }
 
+// claudeMessagesToTraceMessages converts Claude message params to trace messages.
+func claudeMessagesToTraceMessages(messages []anthropic.MessageParam) []trace.Message {
+	var result []trace.Message
+	for _, msg := range messages {
+		var blocks []trace.MessageContent
+		for _, block := range msg.Content {
+			switch {
+			case block.OfText != nil:
+				blocks = append(blocks, trace.NewTextContent(block.OfText.Text))
+			case block.OfToolUse != nil:
+				var args map[string]any
+				if input, ok := block.OfToolUse.Input.(map[string]any); ok {
+					args = input
+				}
+				blocks = append(blocks, trace.NewToolCallContent(
+					block.OfToolUse.ID, block.OfToolUse.Name, args,
+				))
+			case block.OfToolResult != nil:
+				blocks = append(blocks, trace.NewToolResponseContent(
+					block.OfToolResult.ToolUseID, "", nil,
+				))
+				for _, c := range block.OfToolResult.Content {
+					switch {
+					case c.OfText != nil:
+						blocks = append(blocks, trace.NewTextContent(c.OfText.Text))
+					case c.OfImage != nil:
+						mc := trace.NewMediaContent("image", "")
+						if mt := c.OfImage.Source.GetMediaType(); mt != nil {
+							mc.MediaType = *mt
+						}
+						blocks = append(blocks, mc)
+					}
+				}
+			case block.OfImage != nil:
+				mc := trace.NewMediaContent("image", "")
+				if mt := block.OfImage.Source.GetMediaType(); mt != nil {
+					mc.MediaType = *mt
+				}
+				if block.OfImage.Source.OfURL != nil {
+					mc.URL = block.OfImage.Source.OfURL.URL
+				}
+				blocks = append(blocks, mc)
+			case block.OfDocument != nil:
+				mc := trace.NewMediaContent("document", "")
+				if mt := block.OfDocument.Source.GetMediaType(); mt != nil {
+					mc.MediaType = *mt
+				}
+				if block.OfDocument.Source.OfURL != nil {
+					mc.URL = block.OfDocument.Source.OfURL.URL
+				}
+				if block.OfDocument.Title.Valid() {
+					mc.Title = block.OfDocument.Title.Value
+				}
+				blocks = append(blocks, mc)
+			case block.OfThinking != nil:
+				blocks = append(blocks, trace.NewThinkingContent(block.OfThinking.Thinking))
+			case block.OfRedactedThinking != nil:
+				blocks = append(blocks, trace.NewRedactedThinkingContent())
+			}
+		}
+		if len(blocks) > 0 {
+			result = append(result, trace.Message{
+				Role:     string(msg.Role),
+				Contents: blocks,
+			})
+		}
+	}
+	return result
+}
+
 // buildClaudeTraceData builds trace.LLMCallData from a Claude API response.
-func buildClaudeTraceData(resp *anthropic.Message, model string, systemPrompt string) *trace.LLMCallData {
+func buildClaudeTraceData(resp *anthropic.Message, model string, systemPrompt string, messages []anthropic.MessageParam) *trace.LLMCallData {
 	data := &trace.LLMCallData{
 		InputTokens:  int(resp.Usage.InputTokens),
 		OutputTokens: int(resp.Usage.OutputTokens),
 		Model:        string(resp.Model),
 		Request: &trace.LLMRequest{
 			SystemPrompt: systemPrompt,
+			Messages:     claudeMessagesToTraceMessages(messages),
 		},
 		Response: &trace.LLMResponse{},
 	}

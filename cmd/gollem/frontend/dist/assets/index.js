@@ -21781,6 +21781,106 @@ function JSONView({ data }) {
     )
   ] });
 }
+function renderMessageContent(content2, key) {
+  switch (content2.type) {
+    case "text":
+      return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "prose prose-sm max-w-none", children: /* @__PURE__ */ jsxRuntimeExports.jsx(MarkdownContent, { content: content2.text || "" }) }, key);
+    case "tool_call":
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "border border-purple-200 bg-purple-50 rounded p-2 text-sm",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 mb-1", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs font-semibold text-purple-600", children: "Tool Call" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-mono font-medium", children: content2.name }),
+              content2.id && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-gray-400", children: [
+                "ID: ",
+                content2.id
+              ] })
+            ] }),
+            content2.arguments && /* @__PURE__ */ jsxRuntimeExports.jsx(JSONView, { data: prettyJSON(content2.arguments) })
+          ]
+        },
+        key
+      );
+    case "tool_response":
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "border border-green-200 bg-green-50 rounded p-2 text-sm",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 mb-1", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs font-semibold text-green-600", children: "Tool Response" }),
+              content2.name && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-mono font-medium", children: content2.name }),
+              content2.tool_call_id && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-gray-400", children: [
+                "Call ID: ",
+                content2.tool_call_id
+              ] })
+            ] }),
+            content2.result && /* @__PURE__ */ jsxRuntimeExports.jsx(JSONView, { data: prettyJSON(content2.result) }),
+            !content2.result && content2.text && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "prose prose-sm max-w-none", children: /* @__PURE__ */ jsxRuntimeExports.jsx(MarkdownContent, { content: content2.text }) })
+          ]
+        },
+        key
+      );
+    case "image":
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "inline-block bg-gray-100 border border-gray-200 rounded px-2 py-1 text-xs text-gray-500",
+          children: [
+            "[Image",
+            content2.media_type ? `: ${content2.media_type}` : "",
+            "]"
+          ]
+        },
+        key
+      );
+    case "document":
+    case "file":
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "inline-block bg-gray-100 border border-gray-200 rounded px-2 py-1 text-xs text-gray-500",
+          children: [
+            "[",
+            content2.type,
+            content2.media_type ? `: ${content2.media_type}` : "",
+            "]"
+          ]
+        },
+        key
+      );
+    case "thinking":
+    case "redacted_thinking":
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "inline-block bg-orange-50 border border-orange-200 rounded px-2 py-1 text-xs text-orange-500",
+          children: [
+            "[",
+            content2.type,
+            "]"
+          ]
+        },
+        key
+      );
+    default:
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "inline-block bg-gray-100 rounded px-2 py-1 text-xs text-gray-500",
+          children: [
+            "[",
+            content2.type,
+            "]"
+          ]
+        },
+        key
+      );
+  }
+}
 function LLMCallDetail({ data }) {
   const [showSystemPrompt, setShowSystemPrompt] = reactExports.useState(false);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
@@ -21819,17 +21919,22 @@ function LLMCallDetail({ data }) {
       ] }),
       data.request.messages && data.request.messages.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("h5", { className: "text-sm font-medium text-gray-600 mb-2", children: "Messages" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: data.request.messages.map((msg, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          "div",
-          {
-            className: `rounded p-3 text-sm ${msg.role === "user" ? "bg-blue-50 border border-blue-100" : msg.role === "assistant" ? "bg-gray-50 border border-gray-200 ml-4" : "bg-yellow-50 border border-yellow-100"}`,
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs font-medium text-gray-500 mb-1", children: msg.role }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "prose prose-sm max-w-none", children: /* @__PURE__ */ jsxRuntimeExports.jsx(MarkdownContent, { content: msg.content }) })
-            ]
-          },
-          i
-        )) })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: data.request.messages.map((msg, i) => {
+          var _a2;
+          return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "div",
+            {
+              className: `rounded p-3 text-sm ${msg.role === "user" ? "bg-blue-50 border border-blue-100" : msg.role === "assistant" ? "bg-gray-50 border border-gray-200 ml-4" : msg.role === "tool" ? "bg-yellow-50 border border-yellow-100" : "bg-gray-50 border border-gray-200"}`,
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs font-medium text-gray-500 mb-1", children: msg.role }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: (_a2 = msg.contents) == null ? void 0 : _a2.map(
+                  (content2, j) => renderMessageContent(content2, j)
+                ) })
+              ]
+            },
+            i
+          );
+        }) })
       ] }),
       data.request.tools && data.request.tools.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("h5", { className: "text-sm font-medium text-gray-600 mb-2", children: [
@@ -22217,13 +22322,14 @@ function Timeline({ trace }) {
     }
   ) });
 }
-function collectLLMCalls(span, result, parentName) {
+function collectLLMCalls(span, result, parentName, breadcrumbs) {
   if (span.kind === "llm_call" && span.llm_call) {
-    result.push({ span, seq: result.length + 1, parentName });
+    result.push({ span, seq: result.length + 1, parentName, breadcrumbs });
   }
   const nextParent = span.kind === "agent_execute" || span.kind === "sub_agent" ? span.name : parentName;
   for (const child of span.children || []) {
-    collectLLMCalls(child, result, nextParent);
+    const nextBreadcrumbs = child.kind !== "llm_call" ? [...breadcrumbs, { kind: child.kind, name: child.name }] : breadcrumbs;
+    collectLLMCalls(child, result, nextParent, nextBreadcrumbs);
   }
 }
 function LLMCallList({ trace }) {
@@ -22231,7 +22337,7 @@ function LLMCallList({ trace }) {
   const calls = reactExports.useMemo(() => {
     if (!trace.root_span) return [];
     const result = [];
-    collectLLMCalls(trace.root_span, result, "root");
+    collectLLMCalls(trace.root_span, result, "root", []);
     return result;
   }, [trace]);
   const totals = reactExports.useMemo(() => {
@@ -22289,21 +22395,33 @@ function LLMCallList({ trace }) {
               "button",
               {
                 onClick: () => setExpandedSeq(isExpanded ? null : entry.seq),
-                className: "w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-4",
+                className: "w-full px-4 py-3 text-left hover:bg-gray-50",
                 children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-gray-400 font-mono w-6", children: [
-                    "#",
-                    entry.seq
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-4", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-gray-400 font-mono w-6", children: [
+                      "#",
+                      entry.seq
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-medium flex-1 truncate", children: entry.span.name }),
+                    llm.model && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded", children: llm.model }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-gray-500", children: [
+                      llm.input_tokens + llm.output_tokens,
+                      " tokens"
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-gray-500", children: formatDuration(entry.span.duration) }),
+                    isError && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-red-600 font-medium", children: "error" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-gray-400 text-xs", children: isExpanded ? "▾" : "▸" })
                   ] }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-medium flex-1 truncate", children: entry.span.name }),
-                  llm.model && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded", children: llm.model }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-gray-500", children: [
-                    llm.input_tokens + llm.output_tokens,
-                    " tokens"
-                  ] }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-gray-500", children: formatDuration(entry.span.duration) }),
-                  isError && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-red-600 font-medium", children: "error" }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-gray-400 text-xs", children: isExpanded ? "▾" : "▸" })
+                  entry.breadcrumbs.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-1 mt-1 ml-6 text-xs text-gray-400", children: entry.breadcrumbs.map((bc, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex items-center gap-1", children: [
+                    i > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "›" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "span",
+                      {
+                        className: `px-1 py-0.5 rounded ${bc.kind === "tool_exec" ? "bg-green-50 text-green-600" : bc.kind === "agent_execute" ? "bg-gray-100 text-gray-600" : bc.kind === "sub_agent" ? "bg-purple-50 text-purple-600" : "bg-gray-50 text-gray-500"}`,
+                        children: bc.name
+                      }
+                    )
+                  ] }, i)) })
                 ]
               }
             ),

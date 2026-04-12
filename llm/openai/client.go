@@ -583,7 +583,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		}
 
 		// Set trace data for defer
-		openaiTraceData = buildOpenAITraceData(resp, s.defaultModel, s.cfg.SystemPrompt())
+		openaiTraceData = buildOpenAITraceData(resp, s.defaultModel, s.cfg.SystemPrompt(), openaiReq.Messages)
 
 		// History is already updated by updateHistoryWithResponse above
 
@@ -848,6 +848,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				Model:        s.defaultModel,
 				Request: &trace.LLMRequest{
 					SystemPrompt: s.cfg.SystemPrompt(),
+					Messages:     openaiMessagesToTraceMessages(openaiReq.Messages),
 				},
 				Response: &trace.LLMResponse{},
 			}
@@ -1191,14 +1192,65 @@ func tokenLimitErrorOptions(err error) []goerr.Option {
 	return nil
 }
 
+// openaiMessagesToTraceMessages converts OpenAI messages to trace messages.
+func openaiMessagesToTraceMessages(messages []openai.ChatCompletionMessage) []trace.Message {
+	var result []trace.Message
+	for _, msg := range messages {
+		var blocks []trace.MessageContent
+		if msg.ToolCallID != "" {
+			// Tool response message: combine content into the tool_response block
+			tc := trace.NewToolResponseContent(msg.ToolCallID, msg.Name, nil)
+			if msg.Content != "" {
+				tc.Text = msg.Content
+			}
+			blocks = append(blocks, tc)
+		} else {
+			if msg.Content != "" {
+				blocks = append(blocks, trace.NewTextContent(msg.Content))
+			}
+			for _, mc := range msg.MultiContent {
+				switch mc.Type {
+				case openai.ChatMessagePartTypeText:
+					if mc.Text != "" {
+						blocks = append(blocks, trace.NewTextContent(mc.Text))
+					}
+				case openai.ChatMessagePartTypeImageURL:
+					imgBlock := trace.NewMediaContent("image", "")
+					if mc.ImageURL != nil {
+						imgBlock.URL = mc.ImageURL.URL
+					}
+					blocks = append(blocks, imgBlock)
+				}
+			}
+			for _, tc := range msg.ToolCalls {
+				var args map[string]any
+				if tc.Function.Arguments != "" {
+					_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+				}
+				blocks = append(blocks, trace.NewToolCallContent(
+					tc.ID, tc.Function.Name, args,
+				))
+			}
+		}
+		if len(blocks) > 0 {
+			result = append(result, trace.Message{
+				Role:     msg.Role,
+				Contents: blocks,
+			})
+		}
+	}
+	return result
+}
+
 // buildOpenAITraceData builds trace.LLMCallData from an OpenAI API response.
-func buildOpenAITraceData(resp openai.ChatCompletionResponse, model string, systemPrompt string) *trace.LLMCallData {
+func buildOpenAITraceData(resp openai.ChatCompletionResponse, model string, systemPrompt string, messages []openai.ChatCompletionMessage) *trace.LLMCallData {
 	data := &trace.LLMCallData{
 		InputTokens:  resp.Usage.PromptTokens,
 		OutputTokens: resp.Usage.CompletionTokens,
 		Model:        resp.Model,
 		Request: &trace.LLMRequest{
 			SystemPrompt: systemPrompt,
+			Messages:     openaiMessagesToTraceMessages(messages),
 		},
 		Response: &trace.LLMResponse{},
 	}

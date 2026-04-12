@@ -67,7 +67,18 @@ export interface LLMResponse {
 
 export interface Message {
   role: string;
-  content: string;
+  contents: MessageContent[];
+}
+
+export interface MessageContent {
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  arguments?: Record<string, unknown>;
+  tool_call_id?: string;
+  result?: Record<string, unknown>;
+  media_type?: string;
 }
 
 export interface ToolSpec {

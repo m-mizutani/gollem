@@ -23,10 +23,62 @@ type LLMResponse struct {
 	FunctionCalls []*FunctionCall `json:"function_calls,omitempty"`
 }
 
-// Message represents a message in the trace (simplified from gollem.Message).
+// Message represents a message in the trace with structured content blocks.
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role     string           `json:"role"`
+	Contents []MessageContent `json:"contents"`
+}
+
+// MessageContent represents a single content block within a trace message.
+type MessageContent struct {
+	Type string `json:"type"`
+
+	// Text content (type: "text")
+	Text string `json:"text,omitempty"`
+
+	// Tool call content (type: "tool_call")
+	ID        string         `json:"id,omitempty"`
+	Name      string         `json:"name,omitempty"`
+	Arguments map[string]any `json:"arguments,omitempty"`
+
+	// Tool response content (type: "tool_response")
+	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Result     map[string]any `json:"result,omitempty"`
+
+	// Media content (type: "image", "pdf", "document", "file")
+	MediaType string `json:"media_type,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Title     string `json:"title,omitempty"`
+}
+
+// NewTextContent creates a text content block for trace messages.
+func NewTextContent(text string) MessageContent {
+	return MessageContent{Type: "text", Text: text}
+}
+
+// NewToolCallContent creates a tool call content block for trace messages.
+func NewToolCallContent(id, name string, args map[string]any) MessageContent {
+	return MessageContent{Type: "tool_call", ID: id, Name: name, Arguments: args}
+}
+
+// NewToolResponseContent creates a tool response content block for trace messages.
+func NewToolResponseContent(toolCallID, name string, result map[string]any) MessageContent {
+	return MessageContent{Type: "tool_response", ToolCallID: toolCallID, Name: name, Result: result}
+}
+
+// NewMediaContent creates a media content block (image, pdf, etc.) for trace messages.
+func NewMediaContent(contentType, mediaType string) MessageContent {
+	return MessageContent{Type: contentType, MediaType: mediaType}
+}
+
+// NewThinkingContent creates a thinking content block for trace messages.
+func NewThinkingContent(thinking string) MessageContent {
+	return MessageContent{Type: "thinking", Text: thinking}
+}
+
+// NewRedactedThinkingContent creates a redacted thinking content block for trace messages.
+func NewRedactedThinkingContent() MessageContent {
+	return MessageContent{Type: "redacted_thinking"}
 }
 
 // ToolSpec represents a tool specification in the trace (simplified from gollem.ToolSpec).

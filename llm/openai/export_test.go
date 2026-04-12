@@ -7,9 +7,10 @@ import (
 
 // Export convert functions for testing
 var (
-	ConvertTool              = convertTool
-	ConvertParameterToSchema = convertParameterToSchema
-	TokenLimitErrorOptions   = tokenLimitErrorOptions
+	ConvertTool                   = convertTool
+	ConvertParameterToSchema      = convertParameterToSchema
+	TokenLimitErrorOptions        = tokenLimitErrorOptions
+	OpenaiMessagesToTraceMessages = openaiMessagesToTraceMessages
 )
 
 // Export for testing

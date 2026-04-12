@@ -77,7 +77,7 @@ func TestRecorderLLMCallSpan(t *testing.T) {
 		Model:        "test-model",
 		Request: &trace.LLMRequest{
 			SystemPrompt: "You are helpful",
-			Messages:     []trace.Message{{Role: "user", Content: "hello"}},
+			Messages:     []trace.Message{{Role: "user", Contents: []trace.MessageContent{trace.NewTextContent("hello")}}},
 		},
 		Response: &trace.LLMResponse{
 			Texts: []string{"Hi!"},

@@ -510,7 +510,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		}
 
 		// Set trace data for defer
-		geminiTraceData = buildGeminiTraceData(response, s.model, s.cfg.SystemPrompt())
+		geminiTraceData = buildGeminiTraceData(response, s.model, s.cfg.SystemPrompt(), contents)
 
 		// Update history with the input and raw response content.
 		// Use candidate.Content directly to preserve all fields (e.g., ThoughtSignature).
@@ -735,6 +735,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				Model:        s.model,
 				Request: &trace.LLMRequest{
 					SystemPrompt: s.cfg.SystemPrompt(),
+					Messages:     contentsToTraceMessages(contents),
 				},
 				Response: &trace.LLMResponse{},
 			}
@@ -1110,14 +1111,79 @@ func tokenLimitErrorOptions(err error) []goerr.Option {
 	return nil
 }
 
+// contentsToTraceMessages converts Gemini contents to trace messages.
+func contentsToTraceMessages(contents []*genai.Content) []trace.Message {
+	var messages []trace.Message
+	for _, c := range contents {
+		if c == nil {
+			continue
+		}
+		var blocks []trace.MessageContent
+		for _, p := range c.Parts {
+			if p == nil {
+				continue
+			}
+			switch {
+			case p.Thought && p.Text != "":
+				blocks = append(blocks, trace.NewThinkingContent(p.Text))
+			case p.Text != "":
+				blocks = append(blocks, trace.NewTextContent(p.Text))
+			case p.FunctionCall != nil:
+				blocks = append(blocks, trace.NewToolCallContent(
+					"", p.FunctionCall.Name, p.FunctionCall.Args,
+				))
+			case p.FunctionResponse != nil:
+				var result map[string]any
+				if p.FunctionResponse.Response != nil {
+					result = p.FunctionResponse.Response
+				}
+				blocks = append(blocks, trace.NewToolResponseContent(
+					"", p.FunctionResponse.Name, result,
+				))
+			case p.InlineData != nil:
+				mc := trace.NewMediaContent("image", p.InlineData.MIMEType)
+				if p.InlineData.DisplayName != "" {
+					mc.Title = p.InlineData.DisplayName
+				}
+				blocks = append(blocks, mc)
+			case p.FileData != nil:
+				mc := trace.NewMediaContent("file", p.FileData.MIMEType)
+				mc.URL = p.FileData.FileURI
+				if p.FileData.DisplayName != "" {
+					mc.Title = p.FileData.DisplayName
+				}
+				blocks = append(blocks, mc)
+			case p.ExecutableCode != nil:
+				blocks = append(blocks, trace.MessageContent{
+					Type: "executable_code",
+					Text: p.ExecutableCode.Code,
+				})
+			case p.CodeExecutionResult != nil:
+				blocks = append(blocks, trace.MessageContent{
+					Type: "code_execution_result",
+					Text: p.CodeExecutionResult.Output,
+				})
+			}
+		}
+		if len(blocks) > 0 {
+			messages = append(messages, trace.Message{
+				Role:     c.Role,
+				Contents: blocks,
+			})
+		}
+	}
+	return messages
+}
+
 // buildGeminiTraceData builds trace.LLMCallData from a processed gollem.Response.
-func buildGeminiTraceData(response *gollem.Response, model string, systemPrompt string) *trace.LLMCallData {
+func buildGeminiTraceData(response *gollem.Response, model string, systemPrompt string, contents []*genai.Content) *trace.LLMCallData {
 	data := &trace.LLMCallData{
 		InputTokens:  response.InputToken,
 		OutputTokens: response.OutputToken,
 		Model:        model,
 		Request: &trace.LLMRequest{
 			SystemPrompt: systemPrompt,
+			Messages:     contentsToTraceMessages(contents),
 		},
 		Response: &trace.LLMResponse{},
 	}
