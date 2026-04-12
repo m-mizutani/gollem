@@ -13,6 +13,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/gemini"
+	"github.com/m-mizutani/gollem/trace"
 	"github.com/m-mizutani/gt"
 	"google.golang.org/genai"
 )
@@ -894,4 +895,227 @@ func TestPerCallGenerateOptions(t *testing.T) {
 		t.Fatalf("response is not valid JSON: %s (raw: %s)", err, resp.Texts[0])
 	}
 	gt.True(t, parsed["name"] != nil)
+}
+
+func TestContentsToTraceMessages(t *testing.T) {
+	type testCase struct {
+		contents []*genai.Content
+		expected []trace.Message
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			result := gemini.ContentsToTraceMessages(tc.contents)
+			gt.Equal(t, tc.expected, result)
+		}
+	}
+
+	t.Run("text message", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role:  "user",
+				Parts: []*genai.Part{{Text: "hello world"}},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewTextContent("hello world"),
+			}},
+		},
+	}))
+
+	t.Run("multiple parts in single content", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{Text: "first"},
+					{Text: "second"},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewTextContent("first"),
+				trace.NewTextContent("second"),
+			}},
+		},
+	}))
+
+	t.Run("function call", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "model",
+				Parts: []*genai.Part{
+					{FunctionCall: &genai.FunctionCall{Name: "search"}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "model", Contents: []trace.MessageContent{
+				trace.NewToolCallContent("", "search", nil),
+			}},
+		},
+	}))
+
+	t.Run("function response", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{FunctionResponse: &genai.FunctionResponse{Name: "search"}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewToolResponseContent("", "search", nil),
+			}},
+		},
+	}))
+
+	t.Run("inline data", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{InlineData: &genai.Blob{MIMEType: "image/png", Data: []byte("data")}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewMediaContent("image", "image/png"),
+			}},
+		},
+	}))
+
+	t.Run("file data with URI", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{FileData: &genai.FileData{FileURI: "gs://bucket/file", MIMEType: "application/pdf", DisplayName: "report.pdf"}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				{Type: "file", MediaType: "application/pdf", URL: "gs://bucket/file", Title: "report.pdf"},
+			}},
+		},
+	}))
+
+	t.Run("multiple contents", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role:  "user",
+				Parts: []*genai.Part{{Text: "hello"}},
+			},
+			{
+				Role:  "model",
+				Parts: []*genai.Part{{Text: "world"}},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{trace.NewTextContent("hello")}},
+			{Role: "model", Contents: []trace.MessageContent{trace.NewTextContent("world")}},
+		},
+	}))
+
+	t.Run("nil contents", runTest(testCase{
+		contents: nil,
+		expected: nil,
+	}))
+
+	t.Run("empty contents", runTest(testCase{
+		contents: []*genai.Content{},
+		expected: nil,
+	}))
+
+	t.Run("nil content entry", runTest(testCase{
+		contents: []*genai.Content{nil},
+		expected: nil,
+	}))
+
+	t.Run("mixed content types", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{Text: "analyze this image"},
+					{InlineData: &genai.Blob{MIMEType: "image/jpeg"}},
+				},
+			},
+			{
+				Role: "model",
+				Parts: []*genai.Part{
+					{Text: "I see an image"},
+					{FunctionCall: &genai.FunctionCall{Name: "describe_image"}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewTextContent("analyze this image"),
+				trace.NewMediaContent("image", "image/jpeg"),
+			}},
+			{Role: "model", Contents: []trace.MessageContent{
+				trace.NewTextContent("I see an image"),
+				trace.NewToolCallContent("", "describe_image", nil),
+			}},
+		},
+	}))
+
+	t.Run("thought text", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "model",
+				Parts: []*genai.Part{
+					{Text: "Let me reason about this...", Thought: true},
+					{Text: "The answer is 42"},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "model", Contents: []trace.MessageContent{
+				trace.NewThinkingContent("Let me reason about this..."),
+				trace.NewTextContent("The answer is 42"),
+			}},
+		},
+	}))
+
+	t.Run("executable code and result", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "model",
+				Parts: []*genai.Part{
+					{ExecutableCode: &genai.ExecutableCode{Code: "print('hello')", Language: "PYTHON"}},
+					{CodeExecutionResult: &genai.CodeExecutionResult{Output: "hello", Outcome: "OUTCOME_OK"}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "model", Contents: []trace.MessageContent{
+				{Type: "executable_code", Text: "print('hello')"},
+				{Type: "code_execution_result", Text: "hello"},
+			}},
+		},
+	}))
+
+	t.Run("inline data with display name", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{InlineData: &genai.Blob{MIMEType: "image/png", Data: []byte("data"), DisplayName: "screenshot.png"}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				{Type: "image", MediaType: "image/png", Title: "screenshot.png"},
+			}},
+		},
+	}))
 }

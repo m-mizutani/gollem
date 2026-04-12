@@ -21781,6 +21781,105 @@ function JSONView({ data }) {
     )
   ] });
 }
+function renderMessageContent(content2, key) {
+  switch (content2.type) {
+    case "text":
+      return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "prose prose-sm max-w-none", children: /* @__PURE__ */ jsxRuntimeExports.jsx(MarkdownContent, { content: content2.text || "" }) }, key);
+    case "tool_call":
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "border border-purple-200 bg-purple-50 rounded p-2 text-sm",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 mb-1", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs font-semibold text-purple-600", children: "Tool Call" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-mono font-medium", children: content2.name }),
+              content2.id && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-gray-400", children: [
+                "ID: ",
+                content2.id
+              ] })
+            ] }),
+            content2.arguments && /* @__PURE__ */ jsxRuntimeExports.jsx(JSONView, { data: prettyJSON(content2.arguments) })
+          ]
+        },
+        key
+      );
+    case "tool_response":
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "border border-green-200 bg-green-50 rounded p-2 text-sm",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 mb-1", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs font-semibold text-green-600", children: "Tool Response" }),
+              content2.name && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-mono font-medium", children: content2.name }),
+              content2.tool_call_id && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-gray-400", children: [
+                "Call ID: ",
+                content2.tool_call_id
+              ] })
+            ] }),
+            content2.result && /* @__PURE__ */ jsxRuntimeExports.jsx(JSONView, { data: prettyJSON(content2.result) })
+          ]
+        },
+        key
+      );
+    case "image":
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "inline-block bg-gray-100 border border-gray-200 rounded px-2 py-1 text-xs text-gray-500",
+          children: [
+            "[Image",
+            content2.media_type ? `: ${content2.media_type}` : "",
+            "]"
+          ]
+        },
+        key
+      );
+    case "document":
+    case "file":
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "inline-block bg-gray-100 border border-gray-200 rounded px-2 py-1 text-xs text-gray-500",
+          children: [
+            "[",
+            content2.type,
+            content2.media_type ? `: ${content2.media_type}` : "",
+            "]"
+          ]
+        },
+        key
+      );
+    case "thinking":
+    case "redacted_thinking":
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "inline-block bg-orange-50 border border-orange-200 rounded px-2 py-1 text-xs text-orange-500",
+          children: [
+            "[",
+            content2.type,
+            "]"
+          ]
+        },
+        key
+      );
+    default:
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "inline-block bg-gray-100 rounded px-2 py-1 text-xs text-gray-500",
+          children: [
+            "[",
+            content2.type,
+            "]"
+          ]
+        },
+        key
+      );
+  }
+}
 function LLMCallDetail({ data }) {
   const [showSystemPrompt, setShowSystemPrompt] = reactExports.useState(false);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
@@ -21819,17 +21918,22 @@ function LLMCallDetail({ data }) {
       ] }),
       data.request.messages && data.request.messages.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("h5", { className: "text-sm font-medium text-gray-600 mb-2", children: "Messages" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: data.request.messages.map((msg, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          "div",
-          {
-            className: `rounded p-3 text-sm ${msg.role === "user" ? "bg-blue-50 border border-blue-100" : msg.role === "assistant" ? "bg-gray-50 border border-gray-200 ml-4" : "bg-yellow-50 border border-yellow-100"}`,
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs font-medium text-gray-500 mb-1", children: msg.role }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "prose prose-sm max-w-none", children: /* @__PURE__ */ jsxRuntimeExports.jsx(MarkdownContent, { content: msg.content }) })
-            ]
-          },
-          i
-        )) })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: data.request.messages.map((msg, i) => {
+          var _a2;
+          return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "div",
+            {
+              className: `rounded p-3 text-sm ${msg.role === "user" ? "bg-blue-50 border border-blue-100" : msg.role === "assistant" ? "bg-gray-50 border border-gray-200 ml-4" : msg.role === "tool" ? "bg-yellow-50 border border-yellow-100" : "bg-gray-50 border border-gray-200"}`,
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs font-medium text-gray-500 mb-1", children: msg.role }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: (_a2 = msg.contents) == null ? void 0 : _a2.map(
+                  (content2, j) => renderMessageContent(content2, j)
+                ) })
+              ]
+            },
+            i
+          );
+        }) })
       ] }),
       data.request.tools && data.request.tools.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("h5", { className: "text-sm font-medium text-gray-600 mb-2", children: [

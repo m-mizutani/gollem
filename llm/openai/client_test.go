@@ -12,6 +12,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/openai"
+	"github.com/m-mizutani/gollem/trace"
 	"github.com/m-mizutani/gt"
 	openaiapi "github.com/sashabaranov/go-openai"
 )
@@ -221,4 +222,145 @@ func TestWithBaseURL(t *testing.T) {
 		gt.NoError(t, err2)
 		gt.Equal(t, "", openai.GetBaseURL(client2)) // Should be empty, not first URL
 	})
+}
+
+func TestOpenaiMessagesToTraceMessages(t *testing.T) {
+	type testCase struct {
+		messages []openaiapi.ChatCompletionMessage
+		expected []trace.Message
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			result := openai.OpenaiMessagesToTraceMessages(tc.messages)
+			gt.Equal(t, tc.expected, result)
+		}
+	}
+
+	t.Run("user text message", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{
+			{Role: openaiapi.ChatMessageRoleUser, Content: "hello world"},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewTextContent("hello world"),
+			}},
+		},
+	}))
+
+	t.Run("system message", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{
+			{Role: openaiapi.ChatMessageRoleSystem, Content: "you are helpful"},
+		},
+		expected: []trace.Message{
+			{Role: "system", Contents: []trace.MessageContent{
+				trace.NewTextContent("you are helpful"),
+			}},
+		},
+	}))
+
+	t.Run("assistant with tool calls", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{
+			{
+				Role: openaiapi.ChatMessageRoleAssistant,
+				ToolCalls: []openaiapi.ToolCall{
+					{
+						ID:   "call-1",
+						Type: openaiapi.ToolTypeFunction,
+						Function: openaiapi.FunctionCall{
+							Name:      "search",
+							Arguments: `{"q":"test"}`,
+						},
+					},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "assistant", Contents: []trace.MessageContent{
+				trace.NewToolCallContent("call-1", "search", map[string]any{"q": "test"}),
+			}},
+		},
+	}))
+
+	t.Run("tool response", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{
+			{
+				Role:       openaiapi.ChatMessageRoleTool,
+				Content:    "search result",
+				ToolCallID: "call-1",
+			},
+		},
+		expected: []trace.Message{
+			{Role: "tool", Contents: []trace.MessageContent{
+				trace.NewTextContent("search result"),
+				trace.NewToolResponseContent("call-1", "", nil),
+			}},
+		},
+	}))
+
+	t.Run("multi content with image URL", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{
+			{
+				Role: openaiapi.ChatMessageRoleUser,
+				MultiContent: []openaiapi.ChatMessagePart{
+					{Type: openaiapi.ChatMessagePartTypeText, Text: "describe this"},
+					{Type: openaiapi.ChatMessagePartTypeImageURL, ImageURL: &openaiapi.ChatMessageImageURL{URL: "https://example.com/img.png"}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewTextContent("describe this"),
+				{Type: "image", URL: "https://example.com/img.png"},
+			}},
+		},
+	}))
+
+	t.Run("assistant text with tool calls", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{
+			{
+				Role:    openaiapi.ChatMessageRoleAssistant,
+				Content: "Let me search",
+				ToolCalls: []openaiapi.ToolCall{
+					{
+						ID:   "call-1",
+						Type: openaiapi.ToolTypeFunction,
+						Function: openaiapi.FunctionCall{
+							Name:      "search",
+							Arguments: `{"q":"test"}`,
+						},
+					},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "assistant", Contents: []trace.MessageContent{
+				trace.NewTextContent("Let me search"),
+				trace.NewToolCallContent("call-1", "search", map[string]any{"q": "test"}),
+			}},
+		},
+	}))
+
+	t.Run("multiple messages", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{
+			{Role: openaiapi.ChatMessageRoleUser, Content: "hello"},
+			{Role: openaiapi.ChatMessageRoleAssistant, Content: "hi"},
+			{Role: openaiapi.ChatMessageRoleUser, Content: "how are you"},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{trace.NewTextContent("hello")}},
+			{Role: "assistant", Contents: []trace.MessageContent{trace.NewTextContent("hi")}},
+			{Role: "user", Contents: []trace.MessageContent{trace.NewTextContent("how are you")}},
+		},
+	}))
+
+	t.Run("nil messages", runTest(testCase{
+		messages: nil,
+		expected: nil,
+	}))
+
+	t.Run("empty messages", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{},
+		expected: nil,
+	}))
 }

@@ -112,7 +112,7 @@ func TestFileRepositoryWithChildren(t *testing.T) {
 						Model:        "claude-3",
 						Request: &trace.LLMRequest{
 							SystemPrompt: "You are helpful.",
-							Messages:     []trace.Message{{Role: "user", Content: "hello"}},
+							Messages:     []trace.Message{{Role: "user", Contents: []trace.MessageContent{trace.NewTextContent("hello")}}},
 							Tools:        []trace.ToolSpec{{Name: "search", Description: "Search tool"}},
 						},
 						Response: &trace.LLMResponse{

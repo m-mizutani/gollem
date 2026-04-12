@@ -10,6 +10,7 @@ var (
 	ConvertTool              = convertTool
 	ConvertParameterToSchema = convertParameterToSchema
 	TokenLimitErrorOptions   = tokenLimitErrorOptions
+	ContentsToTraceMessages  = contentsToTraceMessages
 )
 
 // GetGenerationConfig returns the generationConfig for testing

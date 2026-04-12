@@ -1,8 +1,100 @@
 import { useState } from "react";
-import type { LLMCallData } from "../api/types";
+import type { LLMCallData, MessageContent } from "../api/types";
 import { prettyJSON } from "../utils/format";
 import MarkdownContent from "./MarkdownContent";
 import JSONView from "./JSONView";
+
+function renderMessageContent(content: MessageContent, key: number) {
+  switch (content.type) {
+    case "text":
+      return (
+        <div key={key} className="prose prose-sm max-w-none">
+          <MarkdownContent content={content.text || ""} />
+        </div>
+      );
+    case "tool_call":
+      return (
+        <div
+          key={key}
+          className="border border-purple-200 bg-purple-50 rounded p-2 text-sm"
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs font-semibold text-purple-600">
+              Tool Call
+            </span>
+            <span className="font-mono font-medium">{content.name}</span>
+            {content.id && (
+              <span className="text-xs text-gray-400">ID: {content.id}</span>
+            )}
+          </div>
+          {content.arguments && (
+            <JSONView data={prettyJSON(content.arguments)} />
+          )}
+        </div>
+      );
+    case "tool_response":
+      return (
+        <div
+          key={key}
+          className="border border-green-200 bg-green-50 rounded p-2 text-sm"
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs font-semibold text-green-600">
+              Tool Response
+            </span>
+            {content.name && (
+              <span className="font-mono font-medium">{content.name}</span>
+            )}
+            {content.tool_call_id && (
+              <span className="text-xs text-gray-400">
+                Call ID: {content.tool_call_id}
+              </span>
+            )}
+          </div>
+          {content.result && <JSONView data={prettyJSON(content.result)} />}
+        </div>
+      );
+    case "image":
+      return (
+        <div
+          key={key}
+          className="inline-block bg-gray-100 border border-gray-200 rounded px-2 py-1 text-xs text-gray-500"
+        >
+          [Image{content.media_type ? `: ${content.media_type}` : ""}]
+        </div>
+      );
+    case "document":
+    case "file":
+      return (
+        <div
+          key={key}
+          className="inline-block bg-gray-100 border border-gray-200 rounded px-2 py-1 text-xs text-gray-500"
+        >
+          [{content.type}
+          {content.media_type ? `: ${content.media_type}` : ""}]
+        </div>
+      );
+    case "thinking":
+    case "redacted_thinking":
+      return (
+        <div
+          key={key}
+          className="inline-block bg-orange-50 border border-orange-200 rounded px-2 py-1 text-xs text-orange-500"
+        >
+          [{content.type}]
+        </div>
+      );
+    default:
+      return (
+        <div
+          key={key}
+          className="inline-block bg-gray-100 rounded px-2 py-1 text-xs text-gray-500"
+        >
+          [{content.type}]
+        </div>
+      );
+  }
+}
 
 interface LLMCallDetailProps {
   data: LLMCallData;
@@ -65,14 +157,18 @@ export default function LLMCallDetail({ data }: LLMCallDetailProps) {
                         ? "bg-blue-50 border border-blue-100"
                         : msg.role === "assistant"
                         ? "bg-gray-50 border border-gray-200 ml-4"
-                        : "bg-yellow-50 border border-yellow-100"
+                        : msg.role === "tool"
+                        ? "bg-yellow-50 border border-yellow-100"
+                        : "bg-gray-50 border border-gray-200"
                     }`}
                   >
                     <div className="text-xs font-medium text-gray-500 mb-1">
                       {msg.role}
                     </div>
-                    <div className="prose prose-sm max-w-none">
-                      <MarkdownContent content={msg.content} />
+                    <div className="space-y-2">
+                      {msg.contents?.map((content, j) =>
+                        renderMessageContent(content, j)
+                      )}
                     </div>
                   </div>
                 ))}
