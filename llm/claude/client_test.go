@@ -469,6 +469,7 @@ func TestClaudeMessagesToTraceMessages(t *testing.T) {
 		expected: []trace.Message{
 			{Role: "user", Contents: []trace.MessageContent{
 				trace.NewToolResponseContent("call-1", "", nil),
+				trace.NewTextContent("result text"),
 			}},
 		},
 	}))

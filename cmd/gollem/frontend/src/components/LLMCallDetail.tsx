@@ -52,6 +52,11 @@ function renderMessageContent(content: MessageContent, key: number) {
             )}
           </div>
           {content.result && <JSONView data={prettyJSON(content.result)} />}
+          {!content.result && content.text && (
+            <div className="prose prose-sm max-w-none">
+              <MarkdownContent content={content.text} />
+            </div>
+          )}
         </div>
       );
     case "image":

@@ -1197,36 +1197,40 @@ func openaiMessagesToTraceMessages(messages []openai.ChatCompletionMessage) []tr
 	var result []trace.Message
 	for _, msg := range messages {
 		var blocks []trace.MessageContent
-		if msg.Content != "" {
-			blocks = append(blocks, trace.NewTextContent(msg.Content))
-		}
-		for _, mc := range msg.MultiContent {
-			switch mc.Type {
-			case openai.ChatMessagePartTypeText:
-				if mc.Text != "" {
-					blocks = append(blocks, trace.NewTextContent(mc.Text))
-				}
-			case openai.ChatMessagePartTypeImageURL:
-				imgBlock := trace.NewMediaContent("image", "")
-				if mc.ImageURL != nil {
-					imgBlock.URL = mc.ImageURL.URL
-				}
-				blocks = append(blocks, imgBlock)
-			}
-		}
-		for _, tc := range msg.ToolCalls {
-			var args map[string]any
-			if tc.Function.Arguments != "" {
-				_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-			}
-			blocks = append(blocks, trace.NewToolCallContent(
-				tc.ID, tc.Function.Name, args,
-			))
-		}
 		if msg.ToolCallID != "" {
-			blocks = append(blocks, trace.NewToolResponseContent(
-				msg.ToolCallID, msg.Name, nil,
-			))
+			// Tool response message: combine content into the tool_response block
+			tc := trace.NewToolResponseContent(msg.ToolCallID, msg.Name, nil)
+			if msg.Content != "" {
+				tc.Text = msg.Content
+			}
+			blocks = append(blocks, tc)
+		} else {
+			if msg.Content != "" {
+				blocks = append(blocks, trace.NewTextContent(msg.Content))
+			}
+			for _, mc := range msg.MultiContent {
+				switch mc.Type {
+				case openai.ChatMessagePartTypeText:
+					if mc.Text != "" {
+						blocks = append(blocks, trace.NewTextContent(mc.Text))
+					}
+				case openai.ChatMessagePartTypeImageURL:
+					imgBlock := trace.NewMediaContent("image", "")
+					if mc.ImageURL != nil {
+						imgBlock.URL = mc.ImageURL.URL
+					}
+					blocks = append(blocks, imgBlock)
+				}
+			}
+			for _, tc := range msg.ToolCalls {
+				var args map[string]any
+				if tc.Function.Arguments != "" {
+					_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+				}
+				blocks = append(blocks, trace.NewToolCallContent(
+					tc.ID, tc.Function.Name, args,
+				))
+			}
 		}
 		if len(blocks) > 0 {
 			result = append(result, trace.Message{

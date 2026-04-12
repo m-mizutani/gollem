@@ -21818,7 +21818,8 @@ function renderMessageContent(content2, key) {
                 content2.tool_call_id
               ] })
             ] }),
-            content2.result && /* @__PURE__ */ jsxRuntimeExports.jsx(JSONView, { data: prettyJSON(content2.result) })
+            content2.result && /* @__PURE__ */ jsxRuntimeExports.jsx(JSONView, { data: prettyJSON(content2.result) }),
+            !content2.result && content2.text && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "prose prose-sm max-w-none", children: /* @__PURE__ */ jsxRuntimeExports.jsx(MarkdownContent, { content: content2.text }) })
           ]
         },
         key

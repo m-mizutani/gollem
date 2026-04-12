@@ -1128,6 +1128,18 @@ func claudeMessagesToTraceMessages(messages []anthropic.MessageParam) []trace.Me
 				blocks = append(blocks, trace.NewToolResponseContent(
 					block.OfToolResult.ToolUseID, "", nil,
 				))
+				for _, c := range block.OfToolResult.Content {
+					switch {
+					case c.OfText != nil:
+						blocks = append(blocks, trace.NewTextContent(c.OfText.Text))
+					case c.OfImage != nil:
+						mc := trace.NewMediaContent("image", "")
+						if mt := c.OfImage.Source.GetMediaType(); mt != nil {
+							mc.MediaType = *mt
+						}
+						blocks = append(blocks, mc)
+					}
+				}
 			case block.OfImage != nil:
 				mc := trace.NewMediaContent("image", "")
 				if mt := block.OfImage.Source.GetMediaType(); mt != nil {

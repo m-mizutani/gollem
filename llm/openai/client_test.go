@@ -292,8 +292,7 @@ func TestOpenaiMessagesToTraceMessages(t *testing.T) {
 		},
 		expected: []trace.Message{
 			{Role: "tool", Contents: []trace.MessageContent{
-				trace.NewTextContent("search result"),
-				trace.NewToolResponseContent("call-1", "", nil),
+				{Type: "tool_response", ToolCallID: "call-1", Text: "search result"},
 			}},
 		},
 	}))
