@@ -149,7 +149,7 @@ function SpanNode({
               depth={depth + 1}
               selectedSpan={selectedSpan}
               onSelectSpan={onSelectSpan}
-              defaultExpanded={depth < 1}
+              defaultExpanded={true}
               tokenInfo={childTokenInfo}
             />
           );
