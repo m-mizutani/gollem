@@ -11587,7 +11587,7 @@ function SpanNode({
           depth: depth + 1,
           selectedSpan,
           onSelectSpan,
-          defaultExpanded: true,
+          defaultExpanded: depth < 1,
           tokenInfo: childTokenInfo
         },
         child.span_id
