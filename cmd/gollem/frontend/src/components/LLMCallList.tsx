@@ -7,26 +7,37 @@ interface LLMCallListProps {
   trace: Trace;
 }
 
+interface BreadcrumbItem {
+  kind: string;
+  name: string;
+}
+
 interface LLMCallEntry {
   span: Span;
   seq: number;
   parentName: string;
+  breadcrumbs: BreadcrumbItem[];
 }
 
 function collectLLMCalls(
   span: Span,
   result: LLMCallEntry[],
-  parentName: string
+  parentName: string,
+  breadcrumbs: BreadcrumbItem[]
 ): void {
   if (span.kind === "llm_call" && span.llm_call) {
-    result.push({ span, seq: result.length + 1, parentName });
+    result.push({ span, seq: result.length + 1, parentName, breadcrumbs });
   }
   const nextParent =
     span.kind === "agent_execute" || span.kind === "sub_agent"
       ? span.name
       : parentName;
   for (const child of span.children || []) {
-    collectLLMCalls(child, result, nextParent);
+    const nextBreadcrumbs =
+      child.kind !== "llm_call"
+        ? [...breadcrumbs, { kind: child.kind, name: child.name }]
+        : breadcrumbs;
+    collectLLMCalls(child, result, nextParent, nextBreadcrumbs);
   }
 }
 
@@ -36,7 +47,7 @@ export default function LLMCallList({ trace }: LLMCallListProps) {
   const calls = useMemo(() => {
     if (!trace.root_span) return [];
     const result: LLMCallEntry[] = [];
-    collectLLMCalls(trace.root_span, result, "root");
+    collectLLMCalls(trace.root_span, result, "root", []);
     return result;
   }, [trace]);
 
@@ -102,8 +113,9 @@ export default function LLMCallList({ trace }: LLMCallListProps) {
                 onClick={() =>
                   setExpandedSeq(isExpanded ? null : entry.seq)
                 }
-                className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-4"
+                className="w-full px-4 py-3 text-left hover:bg-gray-50"
               >
+                <div className="flex items-center gap-4">
                 <span className="text-xs text-gray-400 font-mono w-6">
                   #{entry.seq}
                 </span>
@@ -129,6 +141,29 @@ export default function LLMCallList({ trace }: LLMCallListProps) {
                 <span className="text-gray-400 text-xs">
                   {isExpanded ? "▾" : "▸"}
                 </span>
+                </div>
+                {entry.breadcrumbs.length > 0 && (
+                  <div className="flex items-center gap-1 mt-1 ml-6 text-xs text-gray-400">
+                    {entry.breadcrumbs.map((bc, i) => (
+                      <span key={i} className="flex items-center gap-1">
+                        {i > 0 && <span>›</span>}
+                        <span
+                          className={`px-1 py-0.5 rounded ${
+                            bc.kind === "tool_exec"
+                              ? "bg-green-50 text-green-600"
+                              : bc.kind === "agent_execute"
+                              ? "bg-gray-100 text-gray-600"
+                              : bc.kind === "sub_agent"
+                              ? "bg-purple-50 text-purple-600"
+                              : "bg-gray-50 text-gray-500"
+                          }`}
+                        >
+                          {bc.name}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </button>
               {isExpanded && (
                 <div className="px-4 pb-4 border-t border-gray-100">

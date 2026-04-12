@@ -1146,6 +1146,9 @@ video {
 .ml-4 {
   margin-left: 1rem;
 }
+.ml-6 {
+  margin-left: 1.5rem;
+}
 .mt-1 {
   margin-top: 0.25rem;
 }

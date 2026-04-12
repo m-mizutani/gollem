@@ -22322,13 +22322,14 @@ function Timeline({ trace }) {
     }
   ) });
 }
-function collectLLMCalls(span, result, parentName) {
+function collectLLMCalls(span, result, parentName, breadcrumbs) {
   if (span.kind === "llm_call" && span.llm_call) {
-    result.push({ span, seq: result.length + 1, parentName });
+    result.push({ span, seq: result.length + 1, parentName, breadcrumbs });
   }
   const nextParent = span.kind === "agent_execute" || span.kind === "sub_agent" ? span.name : parentName;
   for (const child of span.children || []) {
-    collectLLMCalls(child, result, nextParent);
+    const nextBreadcrumbs = child.kind !== "llm_call" ? [...breadcrumbs, { kind: child.kind, name: child.name }] : breadcrumbs;
+    collectLLMCalls(child, result, nextParent, nextBreadcrumbs);
   }
 }
 function LLMCallList({ trace }) {
@@ -22336,7 +22337,7 @@ function LLMCallList({ trace }) {
   const calls = reactExports.useMemo(() => {
     if (!trace.root_span) return [];
     const result = [];
-    collectLLMCalls(trace.root_span, result, "root");
+    collectLLMCalls(trace.root_span, result, "root", []);
     return result;
   }, [trace]);
   const totals = reactExports.useMemo(() => {
@@ -22394,21 +22395,33 @@ function LLMCallList({ trace }) {
               "button",
               {
                 onClick: () => setExpandedSeq(isExpanded ? null : entry.seq),
-                className: "w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-4",
+                className: "w-full px-4 py-3 text-left hover:bg-gray-50",
                 children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-gray-400 font-mono w-6", children: [
-                    "#",
-                    entry.seq
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-4", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-gray-400 font-mono w-6", children: [
+                      "#",
+                      entry.seq
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-medium flex-1 truncate", children: entry.span.name }),
+                    llm.model && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded", children: llm.model }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-gray-500", children: [
+                      llm.input_tokens + llm.output_tokens,
+                      " tokens"
+                    ] }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-gray-500", children: formatDuration(entry.span.duration) }),
+                    isError && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-red-600 font-medium", children: "error" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-gray-400 text-xs", children: isExpanded ? "▾" : "▸" })
                   ] }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm font-medium flex-1 truncate", children: entry.span.name }),
-                  llm.model && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded", children: llm.model }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-gray-500", children: [
-                    llm.input_tokens + llm.output_tokens,
-                    " tokens"
-                  ] }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-gray-500", children: formatDuration(entry.span.duration) }),
-                  isError && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-red-600 font-medium", children: "error" }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-gray-400 text-xs", children: isExpanded ? "▾" : "▸" })
+                  entry.breadcrumbs.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-1 mt-1 ml-6 text-xs text-gray-400", children: entry.breadcrumbs.map((bc, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex items-center gap-1", children: [
+                    i > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "›" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "span",
+                      {
+                        className: `px-1 py-0.5 rounded ${bc.kind === "tool_exec" ? "bg-green-50 text-green-600" : bc.kind === "agent_execute" ? "bg-gray-100 text-gray-600" : bc.kind === "sub_agent" ? "bg-purple-50 text-purple-600" : "bg-gray-50 text-gray-500"}`,
+                        children: bc.name
+                      }
+                    )
+                  ] }, i)) })
                 ]
               }
             ),
