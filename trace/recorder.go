@@ -94,9 +94,36 @@ func newSpanID() string {
 }
 
 // StartAgentExecute starts the root agent_execute span.
+// If a trace already exists, it falls back to creating a child agent span
+// instead of overwriting the existing trace. This prevents silent data loss
+// when a single Recorder is shared across multiple Agent.Execute calls.
 func (r *Recorder) StartAgentExecute(ctx context.Context) context.Context {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// If a trace already exists, fall back to child agent span
+	if r.trace != nil {
+		parent := currentSpanFrom(ctx)
+		if parent == nil {
+			return ctx
+		}
+
+		spanID := newSpanID()
+		span := &Span{
+			SpanID:    spanID,
+			ParentID:  parent.SpanID,
+			Kind:      SpanKindAgentExecute,
+			Name:      "agent_execute",
+			StartedAt: time.Now(),
+			Status:    SpanStatusOK,
+		}
+		if r.stackTrace {
+			span.StackTrace = captureStackTrace(1)
+		}
+
+		parent.Children = append(parent.Children, span)
+		return withCurrentSpan(ctx, span)
+	}
 
 	now := time.Now()
 	spanID := newSpanID()
