@@ -433,3 +433,145 @@ func TestRecorderStackTraceEnabled(t *testing.T) {
 		}
 	})
 }
+
+func TestRecorderStartAgentExecuteChildFallback(t *testing.T) {
+	rec := trace.New()
+	ctx := context.Background()
+
+	// First call: creates root trace
+	rootCtx := rec.StartAgentExecute(ctx)
+	rootSpan := trace.CurrentSpanFrom(rootCtx)
+	gt.Value(t, rootSpan).NotNil()
+	gt.Equal(t, rootSpan.Kind, trace.SpanKindAgentExecute)
+
+	tr := rec.Trace()
+	gt.Value(t, tr).NotNil()
+	originalTraceID := tr.TraceID
+
+	// Second call: should fall back to child span, NOT overwrite trace
+	childCtx := rec.StartAgentExecute(rootCtx)
+	childSpan := trace.CurrentSpanFrom(childCtx)
+	gt.Value(t, childSpan).NotNil()
+	gt.Equal(t, childSpan.Kind, trace.SpanKindAgentExecute)
+
+	// Root trace should still exist with same ID
+	gt.Equal(t, rec.Trace().TraceID, originalTraceID)
+	gt.Equal(t, rec.Trace().RootSpan, rootSpan)
+
+	// Child span should be a child of root span
+	gt.Equal(t, len(rootSpan.Children), 1)
+	gt.Equal(t, rootSpan.Children[0], childSpan)
+	gt.Equal(t, childSpan.ParentID, rootSpan.SpanID)
+
+	// End child
+	rec.EndAgentExecute(childCtx, nil)
+	gt.Equal(t, childSpan.Status, trace.SpanStatusOK)
+
+	// End root
+	rec.EndAgentExecute(rootCtx, nil)
+	gt.Equal(t, rootSpan.Status, trace.SpanStatusOK)
+}
+
+func TestRecorderStartAgentExecuteMultipleChildren(t *testing.T) {
+	rec := trace.New()
+	ctx := context.Background()
+
+	// Create root trace
+	rootCtx := rec.StartAgentExecute(ctx)
+	rootSpan := trace.CurrentSpanFrom(rootCtx)
+
+	// First child agent
+	child1Ctx := rec.StartAgentExecute(rootCtx)
+	child1Span := trace.CurrentSpanFrom(child1Ctx)
+
+	// Add LLM call inside child1
+	llmCtx := rec.StartLLMCall(child1Ctx)
+	rec.EndLLMCall(llmCtx, &trace.LLMCallData{InputTokens: 10}, nil)
+
+	rec.EndAgentExecute(child1Ctx, nil)
+
+	// Second child agent
+	child2Ctx := rec.StartAgentExecute(rootCtx)
+	child2Span := trace.CurrentSpanFrom(child2Ctx)
+
+	// Add LLM call inside child2
+	llm2Ctx := rec.StartLLMCall(child2Ctx)
+	rec.EndLLMCall(llm2Ctx, &trace.LLMCallData{InputTokens: 20}, nil)
+
+	rec.EndAgentExecute(child2Ctx, nil)
+
+	rec.EndAgentExecute(rootCtx, nil)
+
+	// Verify tree structure
+	gt.Equal(t, len(rootSpan.Children), 2)
+	gt.Equal(t, rootSpan.Children[0], child1Span)
+	gt.Equal(t, rootSpan.Children[1], child2Span)
+
+	// Each child should have one LLM call child
+	gt.Equal(t, len(child1Span.Children), 1)
+	gt.Equal(t, child1Span.Children[0].Kind, trace.SpanKindLLMCall)
+	gt.Equal(t, child1Span.Children[0].LLMCall.InputTokens, 10)
+
+	gt.Equal(t, len(child2Span.Children), 1)
+	gt.Equal(t, child2Span.Children[0].Kind, trace.SpanKindLLMCall)
+	gt.Equal(t, child2Span.Children[0].LLMCall.InputTokens, 20)
+
+	// Original trace should be preserved
+	gt.Value(t, rec.Trace()).NotNil()
+	gt.Equal(t, rec.Trace().RootSpan, rootSpan)
+}
+
+func TestRecorderStartAgentExecuteTripleNesting(t *testing.T) {
+	rec := trace.New()
+	ctx := context.Background()
+
+	// Root
+	rootCtx := rec.StartAgentExecute(ctx)
+	rootSpan := trace.CurrentSpanFrom(rootCtx)
+
+	// Child 1 (inside root)
+	child1Ctx := rec.StartAgentExecute(rootCtx)
+	child1Span := trace.CurrentSpanFrom(child1Ctx)
+
+	// Grandchild (inside child 1)
+	grandchildCtx := rec.StartAgentExecute(child1Ctx)
+	grandchildSpan := trace.CurrentSpanFrom(grandchildCtx)
+
+	rec.EndAgentExecute(grandchildCtx, nil)
+	rec.EndAgentExecute(child1Ctx, nil)
+	rec.EndAgentExecute(rootCtx, nil)
+
+	// Verify 3-level nesting
+	gt.Equal(t, len(rootSpan.Children), 1)
+	gt.Equal(t, rootSpan.Children[0], child1Span)
+	gt.Equal(t, len(child1Span.Children), 1)
+	gt.Equal(t, child1Span.Children[0], grandchildSpan)
+	gt.Equal(t, grandchildSpan.ParentID, child1Span.SpanID)
+}
+
+func TestRecorderStartAgentExecuteFallbackToRootSpan(t *testing.T) {
+	rec := trace.New()
+	ctx := context.Background()
+
+	// Create root trace
+	rootCtx := rec.StartAgentExecute(ctx)
+	rootSpan := trace.CurrentSpanFrom(rootCtx)
+	gt.Value(t, rootSpan).NotNil()
+
+	// Call StartAgentExecute with a context that has NO current span
+	// (e.g., a fresh context without span info). It should fall back
+	// to using r.trace.RootSpan as the parent.
+	freshCtx := context.Background()
+	childCtx := rec.StartAgentExecute(freshCtx)
+	childSpan := trace.CurrentSpanFrom(childCtx)
+	gt.Value(t, childSpan).NotNil()
+	gt.Equal(t, childSpan.Kind, trace.SpanKindAgentExecute)
+	gt.Equal(t, childSpan.ParentID, rootSpan.SpanID)
+
+	// Child should be attached to root span
+	gt.Equal(t, len(rootSpan.Children), 1)
+	gt.Equal(t, rootSpan.Children[0], childSpan)
+
+	rec.EndAgentExecute(childCtx, nil)
+	rec.EndAgentExecute(rootCtx, nil)
+}
