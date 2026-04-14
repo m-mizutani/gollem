@@ -548,3 +548,30 @@ func TestRecorderStartAgentExecuteTripleNesting(t *testing.T) {
 	gt.Equal(t, child1Span.Children[0], grandchildSpan)
 	gt.Equal(t, grandchildSpan.ParentID, child1Span.SpanID)
 }
+
+func TestRecorderStartAgentExecuteFallbackToRootSpan(t *testing.T) {
+	rec := trace.New()
+	ctx := context.Background()
+
+	// Create root trace
+	rootCtx := rec.StartAgentExecute(ctx)
+	rootSpan := trace.CurrentSpanFrom(rootCtx)
+	gt.Value(t, rootSpan).NotNil()
+
+	// Call StartAgentExecute with a context that has NO current span
+	// (e.g., a fresh context without span info). It should fall back
+	// to using r.trace.RootSpan as the parent.
+	freshCtx := context.Background()
+	childCtx := rec.StartAgentExecute(freshCtx)
+	childSpan := trace.CurrentSpanFrom(childCtx)
+	gt.Value(t, childSpan).NotNil()
+	gt.Equal(t, childSpan.Kind, trace.SpanKindAgentExecute)
+	gt.Equal(t, childSpan.ParentID, rootSpan.SpanID)
+
+	// Child should be attached to root span
+	gt.Equal(t, len(rootSpan.Children), 1)
+	gt.Equal(t, rootSpan.Children[0], childSpan)
+
+	rec.EndAgentExecute(childCtx, nil)
+	rec.EndAgentExecute(rootCtx, nil)
+}

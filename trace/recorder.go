@@ -105,7 +105,7 @@ func (r *Recorder) StartAgentExecute(ctx context.Context) context.Context {
 	if r.trace != nil {
 		parent := currentSpanFrom(ctx)
 		if parent == nil {
-			return ctx
+			parent = r.trace.RootSpan
 		}
 
 		spanID := newSpanID()
