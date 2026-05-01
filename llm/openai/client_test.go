@@ -363,3 +363,76 @@ func TestOpenaiMessagesToTraceMessages(t *testing.T) {
 		expected: nil,
 	}))
 }
+
+func TestReasoningContentExtraction(t *testing.T) {
+	t.Run("non-streaming response with reasoning content", func(t *testing.T) {
+		// Create a mock API client that returns reasoning content
+		mockClient := &apiClientMock{
+			CreateChatCompletionFunc: func(ctx context.Context, req openaiapi.ChatCompletionRequest) (openaiapi.ChatCompletionResponse, error) {
+				return openaiapi.ChatCompletionResponse{
+					Model: "gpt-5",
+					Choices: []openaiapi.ChatCompletionChoice{
+						{
+							Message: openaiapi.ChatCompletionMessage{
+								Role:             openaiapi.ChatMessageRoleAssistant,
+								Content:          "This is the final answer",
+								ReasoningContent: "Let me think through this step by step...",
+							},
+							FinishReason: openaiapi.FinishReasonStop,
+						},
+					},
+					Usage: openaiapi.Usage{
+						PromptTokens:     10,
+						CompletionTokens: 20,
+					},
+				}, nil
+			},
+		}
+
+		cfg := gollem.NewSessionConfig()
+		session, err := openai.NewSessionWithAPIClient(mockClient, cfg, "gpt-5")
+		gt.NoError(t, err)
+
+		result, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("Test input")})
+		gt.NoError(t, err)
+		gt.Equal(t, []string{"This is the final answer"}, result.Texts)
+		gt.Equal(t, []string{"Let me think through this step by step..."}, result.Thinkings)
+		gt.Equal(t, 10, result.InputToken)
+		gt.Equal(t, 20, result.OutputToken)
+	})
+
+	t.Run("non-streaming response without reasoning content", func(t *testing.T) {
+		// Create a mock API client that returns only text content
+		mockClient := &apiClientMock{
+			CreateChatCompletionFunc: func(ctx context.Context, req openaiapi.ChatCompletionRequest) (openaiapi.ChatCompletionResponse, error) {
+				return openaiapi.ChatCompletionResponse{
+					Model: "gpt-5",
+					Choices: []openaiapi.ChatCompletionChoice{
+						{
+							Message: openaiapi.ChatCompletionMessage{
+								Role:    openaiapi.ChatMessageRoleAssistant,
+								Content: "This is the answer",
+							},
+							FinishReason: openaiapi.FinishReasonStop,
+						},
+					},
+					Usage: openaiapi.Usage{
+						PromptTokens:     10,
+						CompletionTokens: 15,
+					},
+				}, nil
+			},
+		}
+
+		cfg := gollem.NewSessionConfig()
+		session, err := openai.NewSessionWithAPIClient(mockClient, cfg, "gpt-5")
+		gt.NoError(t, err)
+
+		result, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("Test input")})
+		gt.NoError(t, err)
+		gt.Equal(t, []string{"This is the answer"}, result.Texts)
+		gt.Equal(t, []string{}, result.Thinkings) // Should be empty slice
+		gt.Equal(t, 10, result.InputToken)
+		gt.Equal(t, 15, result.OutputToken)
+	})
+}
