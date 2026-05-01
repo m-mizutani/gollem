@@ -59,6 +59,11 @@ func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion) (gollem.M
 		return gollem.NewTextContent(block.OfText.Text)
 	}
 
+	// Handle thinking blocks
+	if block.OfThinking != nil {
+		return gollem.NewThinkingContent(block.OfThinking.Thinking)
+	}
+
 	// Handle image blocks
 	if block.OfImage != nil {
 		if block.OfImage.Source.OfBase64 != nil {
@@ -235,6 +240,19 @@ func convertContentToClaude(content gollem.MessageContent, messageRole gollem.Me
 			return anthropic.ContentBlockParamUnion{}, convert.ErrUnsupportedContentType
 		}
 		return anthropic.NewTextBlock(textContent.Text), nil
+
+	case gollem.MessageContentTypeThinking:
+		thinkingContent, err := content.GetThinkingContent()
+		if err != nil {
+			return anthropic.ContentBlockParamUnion{}, err
+		}
+		// Skip empty thinking content
+		if thinkingContent.Text == "" {
+			return anthropic.ContentBlockParamUnion{}, convert.ErrUnsupportedContentType
+		}
+		// Convert thinking to Claude thinking block
+		// NewThinkingBlock(signature, thinking) - note parameter order!
+		return anthropic.NewThinkingBlock("", thinkingContent.Text), nil
 
 	case gollem.MessageContentTypeImage:
 		imgContent, err := content.GetImageContent()

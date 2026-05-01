@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
 	"github.com/m-mizutani/gt"
 )
@@ -96,4 +97,34 @@ func TestClaudeMessageRoundTrip(t *testing.T) {
 			anthropic.NewAssistantMessage(anthropic.NewTextBlock("This PDF contains test data.")),
 		},
 	}))
+
+	t.Run("thinking block", func(t *testing.T) {
+		// Test thinking content conversion (Claude → gollem)
+		block := anthropic.NewThinkingBlock("sig-123", "Let me think...")
+
+		history, err := claude.NewHistory([]anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock("Help me")),
+			anthropic.NewAssistantMessage(block),
+		})
+		gt.NoError(t, err)
+
+		// Find assistant message with thinking content
+		var assistantMsg *gollem.Message
+		for i := range history.Messages {
+			if history.Messages[i].Role == gollem.RoleAssistant {
+				assistantMsg = &history.Messages[i]
+				break
+			}
+		}
+
+		gt.NotNil(t, assistantMsg)
+		gt.Equal(t, 1, len(assistantMsg.Contents))
+
+		content := assistantMsg.Contents[0]
+		gt.Equal(t, gollem.MessageContentTypeThinking, content.Type)
+
+		thinking, err := content.GetThinkingContent()
+		gt.NoError(t, err)
+		gt.Equal(t, "Let me think...", thinking.Text)
+	})
 }
