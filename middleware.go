@@ -26,6 +26,7 @@ type ContentRequest struct {
 // ContentResponse represents a response from content generation.
 type ContentResponse struct {
 	Texts         []string        // Generated text content
+	Thinkings     []string        // Thinking/reasoning content
 	FunctionCalls []*FunctionCall // Function/tool call requests
 	InputToken    int             // Number of input tokens used
 	OutputToken   int             // Number of output tokens used
