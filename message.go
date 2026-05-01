@@ -51,6 +51,11 @@ type TextContent struct {
 	Text string `json:"text"`
 }
 
+// ThinkingContent represents thinking/reasoning content
+type ThinkingContent struct {
+	Text string `json:"text"`
+}
+
 // ImageContent represents image content in a message
 type ImageContent struct {
 	MediaType string `json:"media_type,omitempty"` // e.g., "image/jpeg", "image/png"
