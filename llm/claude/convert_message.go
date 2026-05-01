@@ -64,6 +64,11 @@ func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion) (gollem.M
 		return gollem.NewThinkingContent(block.OfThinking.Thinking)
 	}
 
+	// Handle redacted thinking blocks
+	if block.OfRedactedThinking != nil {
+		return gollem.NewThinkingContent(block.OfRedactedThinking.Data)
+	}
+
 	// Handle image blocks
 	if block.OfImage != nil {
 		if block.OfImage.Source.OfBase64 != nil {
