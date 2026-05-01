@@ -40,6 +40,15 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (gollem.Message, err
 	contents := make([]gollem.MessageContent, 0)
 
 	// Handle different content types
+	// Handle reasoning content first (it should come before text content)
+	if msg.ReasoningContent != "" {
+		content, err := gollem.NewThinkingContent(msg.ReasoningContent)
+		if err != nil {
+			return gollem.Message{}, err
+		}
+		contents = append(contents, content)
+	}
+
 	// Skip text content for tool/function roles as they have special handling
 	if msg.Content != "" && msg.Role != "tool" && msg.Role != "function" {
 		// Simple text content
@@ -236,9 +245,18 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 	var textParts []openai.ChatMessagePart
 	var toolCalls []openai.ToolCall
 	var toolResponses []openai.ChatCompletionMessage
+	var reasoningContent string
 
 	for _, content := range msg.Contents {
 		switch content.Type {
+		case gollem.MessageContentTypeThinking:
+			thinkingContent, err := content.GetThinkingContent()
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to get thinking content")
+			}
+			// Store reasoning content separately (will be set on the main message)
+			reasoningContent = thinkingContent.Text
+
 		case gollem.MessageContentTypeText:
 			textContent, err := content.GetTextContent()
 			if err != nil {
@@ -357,6 +375,11 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 			// Add tool calls
 			if len(toolCalls) > 0 {
 				mainMsg.ToolCalls = toolCalls
+			}
+
+			// Add reasoning content if present
+			if reasoningContent != "" {
+				mainMsg.ReasoningContent = reasoningContent
 			}
 
 			result = append(result, mainMsg)

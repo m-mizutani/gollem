@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/openai"
 	"github.com/m-mizutani/gt"
 	openaiSDK "github.com/sashabaranov/go-openai"
@@ -129,6 +130,58 @@ func TestOpenAIMessageRoundTrip(t *testing.T) {
 			},
 		},
 	}))
+
+	t.Run("reasoning content", func(t *testing.T) {
+		// Test reasoning content conversion (OpenAI → gollem)
+		history, err := openai.NewHistory([]openaiSDK.ChatCompletionMessage{
+			{
+				Role:            "user",
+				Content:         "Help me solve this problem",
+			},
+			{
+				Role:            "assistant",
+				ReasoningContent: "Let me think through this step by step...",
+				Content:         "Here's the solution",
+			},
+		})
+		gt.NoError(t, err)
+
+		// Find assistant message with reasoning content
+		var assistantMsg *gollem.Message
+		for i := range history.Messages {
+			if history.Messages[i].Role == gollem.RoleAssistant {
+				assistantMsg = &history.Messages[i]
+				break
+			}
+		}
+
+		gt.NotNil(t, assistantMsg)
+		gt.Equal(t, 2, len(assistantMsg.Contents))
+
+		// First content should be reasoning
+		reasoningContent := assistantMsg.Contents[0]
+		gt.Equal(t, gollem.MessageContentTypeThinking, reasoningContent.Type)
+
+		thinking, err := reasoningContent.GetThinkingContent()
+		gt.NoError(t, err)
+		gt.Equal(t, "Let me think through this step by step...", thinking.Text)
+
+		// Second content should be text
+		textContent := assistantMsg.Contents[1]
+		gt.Equal(t, gollem.MessageContentTypeText, textContent.Type)
+
+		text, err := textContent.GetTextContent()
+		gt.NoError(t, err)
+		gt.Equal(t, "Here's the solution", text.Text)
+
+		// Test round-trip conversion (gollem → OpenAI)
+		restored, err := openai.ToMessages(history)
+		gt.NoError(t, err)
+
+		gt.Equal(t, 2, len(restored))
+		gt.Equal(t, "Let me think through this step by step...", restored[1].ReasoningContent)
+		gt.Equal(t, "Here's the solution", restored[1].Content)
+	})
 
 	// Legacy function calls are converted to tool calls internally,
 	// so round-trip conversion will not preserve the original function format.
