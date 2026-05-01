@@ -178,3 +178,8 @@ func (mc *MessageContent) GetToolCallContent() (*ToolCallContent, error) {
 func (mc *MessageContent) GetToolResponseContent() (*ToolResponseContent, error) {
 	return decodeContent[ToolResponseContent](MessageContentTypeToolResponse, mc)
 }
+
+// GetThinkingContent extracts thinking content from a MessageContent
+func (mc *MessageContent) GetThinkingContent() (*ThinkingContent, error) {
+	return decodeContent[ThinkingContent](MessageContentTypeThinking, mc)
+}
