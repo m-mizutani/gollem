@@ -15,3 +15,13 @@ func TestThinkingContent(t *testing.T) {
 		t.Errorf("Expected 'Let me think...', got '%s'", content.Text)
 	}
 }
+
+func TestNewThinkingContent(t *testing.T) {
+	mc, err := NewThinkingContent("test thinking")
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if mc.Type != MessageContentTypeThinking {
+		t.Errorf("Expected type 'thinking', got '%s'", mc.Type)
+	}
+}

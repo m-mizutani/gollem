@@ -113,6 +113,11 @@ func NewTextContent(text string) (MessageContent, error) {
 	return makeContent(MessageContentTypeText, TextContent{Text: text})
 }
 
+// NewThinkingContent creates a new thinking message content
+func NewThinkingContent(text string) (MessageContent, error) {
+	return makeContent(MessageContentTypeThinking, ThinkingContent{Text: text})
+}
+
 // NewImageContent creates a new image message content
 func NewImageContent(mediaType string, imageData []byte, url string, detail string) (MessageContent, error) {
 	return makeContent(MessageContentTypeImage, ImageContent{
