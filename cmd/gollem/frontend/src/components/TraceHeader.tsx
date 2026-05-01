@@ -40,12 +40,34 @@ export default function TraceHeader({ trace }: TraceHeaderProps) {
             Copy
           </button>
         </div>
-        <Link
-          to="/"
-          className="text-sm text-blue-600 hover:text-blue-800"
-        >
-          Back to list
-        </Link>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => {
+              const json = JSON.stringify(trace, null, 2);
+              const blob = new Blob([json], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.style.display = "none";
+              a.href = url;
+              a.download = `${trace.trace_id}.json`;
+              document.body.appendChild(a);
+              a.click();
+              setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+              }, 0);
+            }}
+            className="text-sm text-blue-600 hover:text-blue-800"
+          >
+            Download JSON
+          </button>
+          <Link
+            to="/"
+            className="text-sm text-blue-600 hover:text-blue-800"
+          >
+            Back to list
+          </Link>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-4 text-sm">

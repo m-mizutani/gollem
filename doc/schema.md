@@ -54,8 +54,8 @@ if err != nil {
 ### 3. Generate Structured Content
 
 ```go
-resp, err := session.GenerateContent(ctx,
-	gollem.Text("Extract user info: John Doe, 30 years old, john@example.com"))
+resp, err := session.Generate(ctx, []gollem.Input{
+	gollem.Text("Extract user info: John Doe, 30 years old, john@example.com")})
 if err != nil {
 	return err
 }
@@ -66,6 +66,93 @@ json.Unmarshal([]byte(resp.Texts[0]), &profile)
 fmt.Printf("Name: %s, Age: %v, Email: %s\n",
 	profile["name"], profile["age"], profile["email"])
 ```
+
+## One-Shot Typed Query with `Query[T]()`
+
+For the common pattern of "send prompt, get structured data back", use the generic `Query[T]()` function. It combines schema generation, session creation, LLM call, and JSON parsing into a single call with automatic retry on parse failures:
+
+```go
+type UserProfile struct {
+	Name  string `json:"name" description:"Full name of the user" required:"true"`
+	Age   int    `json:"age" description:"Age in years" min:"0" max:"150"`
+	Email string `json:"email" description:"Email address" required:"true"`
+}
+
+result, err := gollem.Query[UserProfile](ctx, client,
+	"Extract user info: John Doe, 30 years old, john@example.com",
+	gollem.WithQuerySystemPrompt("You are a data extraction assistant."),
+)
+if err != nil {
+	return err
+}
+
+fmt.Printf("Name: %s, Age: %d, Email: %s\n",
+	result.Data.Name, result.Data.Age, result.Data.Email)
+fmt.Printf("Tokens used: %d input, %d output\n",
+	result.InputToken, result.OutputToken)
+```
+
+### Query Options
+
+| Option | Description |
+|--------|-------------|
+| `WithQuerySystemPrompt(string)` | Set the system prompt for the query |
+| `WithQueryHistory(*History)` | Provide conversation history |
+| `WithQueryMaxRetry(int)` | Maximum retries on JSON parse failure (default: 3) |
+
+## Session-Based Typed Query with `SessionQuery[T]()`
+
+`SessionQuery[T]()` is like `Query[T]()` but operates on an **existing session** instead of creating a new one. This preserves the conversation history, so the LLM can use context from prior exchanges to answer the structured query.
+
+```go
+// Create a session and have a conversation
+session, _ := client.NewSession(ctx)
+session.Generate(ctx, []gollem.Input{gollem.Text("My name is Alice and I'm 30.")})
+
+// Now ask a structured question — history is preserved
+type UserInfo struct {
+    Name string `json:"name" required:"true"`
+    Age  int    `json:"age"`
+}
+
+result, err := gollem.SessionQuery[UserInfo](ctx, session, "Who am I?")
+// result.Data.Name == "Alice", result.Data.Age == 30
+```
+
+Internally, `SessionQuery` passes a per-call `GenerateOption` with the response schema so the session's default configuration is unchanged.
+
+### SessionQuery Options
+
+| Option | Description |
+|--------|-------------|
+| `WithSessionQueryMaxRetry(int)` | Maximum retries on JSON parse failure (default: 3) |
+
+## Per-Call Generate Options
+
+`Generate` and `Stream` accept optional `GenerateOption` values that override session-level defaults for a single call only. The session's configuration is not modified.
+
+```go
+// Session created with default text mode
+session, _ := client.NewSession(ctx)
+
+// Override temperature for one call
+resp, _ := session.Generate(ctx, inputs, gollem.WithTemperature(0.2))
+
+// Force JSON output with a schema for one call
+schema, _ := gollem.ToSchema(MyStruct{})
+resp, _ = session.Generate(ctx, inputs, gollem.WithGenerateResponseSchema(schema))
+```
+
+### Available Options
+
+| Option | Description |
+|--------|-------------|
+| `WithTemperature(float64)` | Override temperature for this call |
+| `WithTopP(float64)` | Override top-p for this call |
+| `WithMaxTokens(int)` | Override max tokens for this call |
+| `WithGenerateResponseSchema(*Parameter)` | Force JSON output with the given schema for this call |
+
+When `WithGenerateResponseSchema` is set, the provider automatically switches to JSON output mode for that call (e.g., OpenAI sets `ResponseFormat` to JSON Schema, Gemini sets `ResponseMIMEType` to `application/json`, Claude injects schema instructions into the system prompt).
 
 ## Schema Parameter Types
 
@@ -524,7 +611,7 @@ schema := &gollem.ResponseSchema{
 When schema validation fails (rare with proper setup):
 
 ```go
-resp, err := session.GenerateContent(ctx, gollem.Text("..."))
+resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("...")})
 if err != nil {
 	return fmt.Errorf("failed to generate content: %w", err)
 }

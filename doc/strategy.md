@@ -108,7 +108,7 @@ func (s *myStrategy) Init(ctx context.Context, inputs []Input) error {
 
 func (s *myStrategy) Handle(ctx context.Context, state *StrategyState) ([]Input, *ExecuteResponse, error) {
 	// Custom decision logic
-	resp, err := state.GenerateContent(ctx, state.Inputs...)
+	resp, err := state.Generate(ctx, state.Inputs)
 	if err != nil {
 		return nil, nil, err
 	}

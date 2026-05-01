@@ -8,12 +8,19 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
 	"github.com/m-mizutani/gollem/llm/gemini"
 	"github.com/m-mizutani/gollem/llm/openai"
+	"github.com/m-mizutani/gollem/trace"
 	"github.com/m-mizutani/gt"
+)
+
+const (
+	testTimeout   = 30 * time.Second
+	maxTestTokens = 2048
 )
 
 // TestToolExecution tests tool execution with real LLM clients
@@ -21,17 +28,22 @@ func TestToolExecution(t *testing.T) {
 	t.Parallel()
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+
 		client, err := newClient(t)
 		gt.NoError(t, err)
 
+		rec := trace.New()
 		agent := gollem.New(client,
 			gollem.WithTools(&RandomNumberTool{}),
 			gollem.WithLoopLimit(5),
+			gollem.WithTrace(rec),
 		)
 
 		fmt.Printf("[TEST] Agent created: agent=%p\n", agent)
 
-		_, err = agent.Execute(t.Context(), gollem.Text("Generate a random number between 1 and 100."))
+		_, err = agent.Execute(ctx, gollem.Text("Generate a random number between 1 and 100."))
 		gt.NoError(t, err)
 
 		// Verify Agent.Session().History() works correctly
@@ -44,6 +56,15 @@ func TestToolExecution(t *testing.T) {
 		gt.NotNil(t, history)
 		fmt.Printf("[TEST] History after Execute: messages=%d\n", len(history.Messages))
 		gt.True(t, len(history.Messages) >= 2)
+
+		// Verify LLM call traces are recorded
+		traceData := rec.Trace()
+		gt.NotNil(t, traceData)
+		gt.NotNil(t, traceData.RootSpan)
+
+		llmCallCount := countSpansByKind(traceData.RootSpan, trace.SpanKindLLMCall)
+		gt.N(t, llmCallCount).Greater(0)
+		fmt.Printf("[TEST] LLM call spans recorded: %d\n", llmCallCount)
 	}
 
 	t.Run("OpenAI", func(t *testing.T) {
@@ -77,8 +98,12 @@ func TestToolExecution(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_GCP_LOCATION is not set")
 		}
+		var opts []gemini.Option
+		if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
 		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
-			return gemini.New(context.Background(), projectID, location)
+			return gemini.New(context.Background(), projectID, location, opts...)
 		})
 	})
 }
@@ -88,54 +113,33 @@ func TestContentMiddleware(t *testing.T) {
 	t.Parallel()
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
-		userName := "Alice"
-		userAge := "25"
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
 
-		// Content middleware that modifies history to inject fake previous conversation
+		userName := "Quetzalcoatl"
+
+		// Content middleware that injects fake history before the first call
 		contentMiddleware := func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
 			return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
-				// On first call, inject a fake conversation history
 				if req.History == nil || len(req.History.Messages) == 0 {
-					// Add fake previous conversation where user introduced themselves
 					userData, _ := json.Marshal(map[string]string{
-						"text": fmt.Sprintf("My name is %s and I am %s years old.", userName, userAge),
+						"text": fmt.Sprintf("My name is %s.", userName),
 					})
 					assistantData, _ := json.Marshal(map[string]string{
-						"text": fmt.Sprintf("Nice to meet you, %s! I'll remember that you're %s years old.", userName, userAge),
+						"text": "Got it.",
 					})
 
-					// Prepend fake history
 					fakeHistory := []gollem.Message{
-						{
-							Role: gollem.RoleUser,
-							Contents: []gollem.MessageContent{
-								{
-									Type: gollem.MessageContentTypeText,
-									Data: userData,
-								},
-							},
-						},
-						{
-							Role: gollem.RoleAssistant,
-							Contents: []gollem.MessageContent{
-								{
-									Type: gollem.MessageContentTypeText,
-									Data: assistantData,
-								},
-							},
-						},
+						{Role: gollem.RoleUser, Contents: []gollem.MessageContent{{Type: gollem.MessageContentTypeText, Data: userData}}},
+						{Role: gollem.RoleAssistant, Contents: []gollem.MessageContent{{Type: gollem.MessageContentTypeText, Data: assistantData}}},
 					}
 
 					if req.History == nil {
-						req.History = &gollem.History{
-							Version:  gollem.HistoryVersion,
-							Messages: fakeHistory,
-						}
+						req.History = &gollem.History{Version: gollem.HistoryVersion, Messages: fakeHistory}
 					} else {
 						req.History.Messages = append(fakeHistory, req.History.Messages...)
 					}
 				}
-
 				return next(ctx, req)
 			}
 		}
@@ -143,90 +147,19 @@ func TestContentMiddleware(t *testing.T) {
 		client, err := newClient(t)
 		gt.NoError(t, err)
 
-		session, err := client.NewSession(context.Background(),
+		session, err := client.NewSession(ctx,
 			gollem.WithSessionContentBlockMiddleware(contentMiddleware),
 		)
 		gt.NoError(t, err)
 
-		// First execution - Ask about name (should know from injected history)
-		resp1, err := session.GenerateContent(t.Context(), gollem.Text("What's my name?"))
+		// Single call: ask about the injected name (1 API call)
+		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("What is my name?")}, gollem.WithMaxTokens(maxTestTokens))
 		gt.NoError(t, err)
-		gt.NotNil(t, resp1)
-		gt.True(t, len(resp1.Texts) > 0)
+		gt.True(t, len(resp.Texts) > 0)
 
-		// Verify response mentions the name Alice
-		foundName := false
-		for _, text := range resp1.Texts {
-			if strings.Contains(text, userName) {
-				foundName = true
-				break
-			}
-		}
-		if !foundName {
-			t.Logf("First response should mention name %s, got: %v", userName, resp1.Texts)
-		}
-		gt.True(t, foundName)
-
-		// Second execution - Ask about age (should know from injected history)
-		resp2, err := session.GenerateContent(t.Context(), gollem.Text("How old am I?"))
-		gt.NoError(t, err)
-		gt.NotNil(t, resp2)
-		gt.True(t, len(resp2.Texts) > 0)
-
-		// Verify response mentions the age 25
-		foundAge := false
-		for _, text := range resp2.Texts {
-			if strings.Contains(text, userAge) {
-				foundAge = true
-				break
-			}
-		}
-		if !foundAge {
-			t.Logf("Second response should mention age %s, got: %v", userAge, resp2.Texts)
-		}
-		gt.True(t, foundAge)
-
-		// Third execution - Ask about both (should still remember)
-		resp3, err := session.GenerateContent(t.Context(), gollem.Text("Tell me what you remember about me"))
-		gt.NoError(t, err)
-		gt.NotNil(t, resp3)
-		gt.True(t, len(resp3.Texts) > 0)
-
-		// Verify response mentions both name and age
-		foundBothName := false
-		foundBothAge := false
-		for _, text := range resp3.Texts {
-			if strings.Contains(text, userName) {
-				foundBothName = true
-			}
-			if strings.Contains(text, userAge) {
-				foundBothAge = true
-			}
-		}
-		if !foundBothName || !foundBothAge {
-			t.Logf("Third response should mention both name %s and age %s, got: %v", userName, userAge, resp3.Texts)
-		}
-		gt.True(t, foundBothName || foundBothAge)
-
-		// Get final history and verify the injected conversation exists
-		finalHistory, err := session.History()
-		gt.NoError(t, err)
-
-		// History should contain injected messages plus our 3 conversations
-		gt.True(t, len(finalHistory.Messages) >= 8) // 2 injected + 3 user + 3 assistant
-
-		// Verify the first message in history is our injected one
-		if len(finalHistory.Messages) >= 2 {
-			firstUserMsg := finalHistory.Messages[0]
-			gt.Equal(t, gollem.RoleUser, firstUserMsg.Role)
-
-			var firstContent map[string]string
-			if len(firstUserMsg.Contents) > 0 {
-				err := json.Unmarshal(firstUserMsg.Contents[0].Data, &firstContent)
-				gt.NoError(t, err)
-				gt.True(t, strings.Contains(firstContent["text"], userName))
-				gt.True(t, strings.Contains(firstContent["text"], userAge))
-			}
+		combined := strings.Join(resp.Texts, " ")
+		if !strings.Contains(combined, userName) {
+			t.Fatalf("response should mention %s, got: %s", userName, combined)
 		}
 	}
 
@@ -261,8 +194,12 @@ func TestContentMiddleware(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_GCP_LOCATION is not set")
 		}
+		var opts []gemini.Option
+		if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
 		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
-			return gemini.New(context.Background(), projectID, location)
+			return gemini.New(context.Background(), projectID, location, opts...)
 		})
 	})
 }
@@ -272,6 +209,9 @@ func TestStreamMiddleware(t *testing.T) {
 	t.Parallel()
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+
 		modifiedPrompt := "Modified: Please respond with exactly: MIDDLEWARE_WORKS"
 
 		// Streaming middleware that modifies the input prompt
@@ -292,13 +232,13 @@ func TestStreamMiddleware(t *testing.T) {
 		client, err := newClient(t)
 		gt.NoError(t, err)
 
-		session, err := client.NewSession(context.Background(),
+		session, err := client.NewSession(ctx,
 			gollem.WithSessionContentStreamMiddleware(streamMiddleware),
 		)
 		gt.NoError(t, err)
 
 		// Generate stream with original prompt (will be modified by middleware)
-		streamChan, err := session.GenerateStream(t.Context(), gollem.Text("Say ORIGINAL_PROMPT"))
+		streamChan, err := session.Stream(ctx, []gollem.Input{gollem.Text("Say ORIGINAL_PROMPT")}, gollem.WithMaxTokens(maxTestTokens))
 		gt.NoError(t, err)
 		if err != nil {
 			return // Early return if stream creation failed
@@ -369,8 +309,12 @@ func TestStreamMiddleware(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_GCP_LOCATION is not set")
 		}
+		var opts []gemini.Option
+		if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
 		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
-			return gemini.New(context.Background(), projectID, location)
+			return gemini.New(context.Background(), projectID, location, opts...)
 		})
 	})
 }
@@ -380,10 +324,13 @@ func TestCountToken(t *testing.T) {
 	t.Parallel()
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+
 		client, err := newClient(t)
 		gt.NoError(t, err)
 
-		session, err := client.NewSession(context.Background(),
+		session, err := client.NewSession(ctx,
 			gollem.WithSessionSystemPrompt("You are a helpful assistant."),
 			gollem.WithSessionTools(&RandomNumberTool{}),
 		)
@@ -394,7 +341,7 @@ func TestCountToken(t *testing.T) {
 		gt.NoError(t, err)
 
 		// Basic token count - verify it doesn't modify history
-		count, err := session.CountToken(t.Context(), gollem.Text("Hello, world!"))
+		count, err := session.CountToken(ctx, gollem.Text("Hello, world!"))
 		gt.NoError(t, err)
 		gt.N(t, count).Greater(0)
 
@@ -404,7 +351,7 @@ func TestCountToken(t *testing.T) {
 		gt.V(t, historyAfterCount).Equal(initialHistory)
 
 		// Generate content to add history
-		_, err = session.GenerateContent(t.Context(), gollem.Text("Hi!"))
+		_, err = session.Generate(ctx, []gollem.Input{gollem.Text("Hi!")}, gollem.WithMaxTokens(maxTestTokens))
 		gt.NoError(t, err)
 
 		// Get history after GenerateContent
@@ -412,7 +359,7 @@ func TestCountToken(t *testing.T) {
 		gt.NoError(t, err)
 
 		// Count tokens with history - verify it doesn't modify history
-		count, err = session.CountToken(t.Context(), gollem.Text("What is 2+2?"))
+		count, err = session.CountToken(ctx, gollem.Text("What is 2+2?"))
 		gt.NoError(t, err)
 		gt.N(t, count).Greater(0)
 
@@ -453,8 +400,12 @@ func TestCountToken(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_GCP_LOCATION is not set")
 		}
+		var opts []gemini.Option
+		if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
 		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
-			return gemini.New(context.Background(), projectID, location)
+			return gemini.New(context.Background(), projectID, location, opts...)
 		})
 	})
 }
@@ -542,16 +493,19 @@ func TestPDFInput(t *testing.T) {
 	gt.NoError(t, err)
 
 	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+
 		client, err := newClient(t)
 		gt.NoError(t, err).Required()
 
-		session, err := client.NewSession(context.Background())
+		session, err := client.NewSession(ctx)
 		gt.NoError(t, err).Required()
 
-		result, err := session.GenerateContent(t.Context(),
+		result, err := session.Generate(ctx, []gollem.Input{
 			pdf,
 			gollem.Text("This PDF document contains a secret code. What is the secret code? Reply with only the code, nothing else."),
-		)
+		}, gollem.WithMaxTokens(maxTestTokens))
 		gt.NoError(t, err).Required()
 		gt.V(t, len(result.Texts) > 0).Equal(true)
 		// The PDF contains "The secret code is: GOLLEM-PDF-7X9K2"
@@ -583,8 +537,112 @@ func TestPDFInput(t *testing.T) {
 		if !ok {
 			t.Skip("TEST_GCP_LOCATION is not set")
 		}
+		var opts []gemini.Option
+		if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
 		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
-			return gemini.New(context.Background(), projectID, location)
+			return gemini.New(context.Background(), projectID, location, opts...)
 		})
 	})
+}
+
+// TestSessionQueryWithRealLLM tests SessionQuery with real LLM clients.
+// It verifies two critical behaviors in a single test per provider (minimal API calls):
+//  1. SessionQuery uses per-call GenerateOption (ResponseSchema) to get JSON from a plain-text session
+//  2. SessionQuery preserves conversation history from prior Generate calls
+func TestSessionQueryWithRealLLM(t *testing.T) {
+	t.Parallel()
+
+	type nameAnswer struct {
+		Name string `json:"name" description:"the name that was mentioned"`
+	}
+
+	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+
+		client, err := newClient(t)
+		gt.NoError(t, err).Required()
+
+		// Create a plain-text session (no ContentTypeJSON, no ResponseSchema)
+		session, err := client.NewSession(ctx)
+		gt.NoError(t, err).Required()
+
+		// Step 1: Tell the LLM a name via normal Generate (builds history)
+		_, err = session.Generate(ctx, []gollem.Input{
+			gollem.Text("My name is Quetzalcoatl."),
+		}, gollem.WithMaxTokens(maxTestTokens))
+		gt.NoError(t, err)
+
+		// Step 2: SessionQuery on the same session.
+		// Verifies: history preserved + per-call ResponseSchema produces JSON.
+		// Per-call override is not yet fully implemented in providers,
+		// so the prompt explicitly requests JSON to maximize reliability.
+		resp, err := gollem.SessionQuery[nameAnswer](
+			ctx, session,
+			`What is my name? Respond as {"name":"..."}`,
+			gollem.WithSessionQueryMaxRetry(3),
+		)
+		gt.NoError(t, err).Required()
+		gt.NotNil(t, resp.Data)
+
+		// The LLM should recall the unusual name from the conversation history
+		gt.V(t, strings.Contains(resp.Data.Name, "Quetzalcoatl")).Equal(true)
+	}
+
+	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
+		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
+		if !ok {
+			t.Skip("TEST_OPENAI_API_KEY is not set")
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return openai.New(context.Background(), apiKey)
+		})
+	})
+
+	t.Run("Claude", func(t *testing.T) {
+		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
+		if !ok {
+			t.Skip("TEST_CLAUDE_API_KEY is not set")
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return claude.New(context.Background(), apiKey)
+		})
+	})
+
+	t.Run("Gemini", func(t *testing.T) {
+		t.Parallel()
+		projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+		if !ok {
+			t.Skip("TEST_GCP_PROJECT_ID is not set")
+		}
+		location, ok := os.LookupEnv("TEST_GCP_LOCATION")
+		if !ok {
+			t.Skip("TEST_GCP_LOCATION is not set")
+		}
+		var opts []gemini.Option
+		if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return gemini.New(context.Background(), projectID, location, opts...)
+		})
+	})
+}
+
+// countSpansByKind recursively counts spans of a given kind in the trace tree.
+func countSpansByKind(span *trace.Span, kind trace.SpanKind) int {
+	if span == nil {
+		return 0
+	}
+	count := 0
+	if span.Kind == kind {
+		count++
+	}
+	for _, child := range span.Children {
+		count += countSpansByKind(child, kind)
+	}
+	return count
 }

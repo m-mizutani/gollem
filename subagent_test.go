@@ -16,7 +16,7 @@ func newMockAgent(response string) (*gollem.Agent, error) {
 	mockClient := &mock.LLMClientMock{
 		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 			return &mock.SessionMock{
-				GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+				GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 					callCount++
 					return &gollem.Response{
 						Texts: []string{response},
@@ -132,7 +132,7 @@ func TestSubAgentRun_DefaultMode(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						if len(input) > 0 {
 							capturedInput = input[0]
 						}
@@ -178,7 +178,7 @@ func TestSubAgentRun_DefaultMode(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{"Processed"},
 						}, nil
@@ -206,7 +206,7 @@ func TestSubAgentRun_TemplateMode(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						if len(input) > 0 {
 							capturedInput = input[0]
 						}
@@ -257,7 +257,7 @@ func TestSubAgentRun_TemplateMode(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						if len(input) > 0 {
 							capturedInput = input[0]
 						}
@@ -304,7 +304,7 @@ func TestSubAgentTemplateRendering(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						if len(input) > 0 {
 							capturedInput = input[0]
 						}
@@ -384,7 +384,7 @@ func TestAgentWithSubAgent(t *testing.T) {
 		childClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{"Child agent response"},
 						}, nil
@@ -416,7 +416,7 @@ func TestAgentWithSubAgent(t *testing.T) {
 				gt.True(t, hasHelper)
 
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						callCount++
 
 						if callCount == 1 {
@@ -479,7 +479,7 @@ func TestNestedSubAgents(t *testing.T) {
 		grandchildClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{"Grandchild response"},
 						}, nil
@@ -496,7 +496,7 @@ func TestNestedSubAgents(t *testing.T) {
 		childClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						childCallCount++
 						if childCallCount == 1 {
 							// Call grandchild
@@ -528,7 +528,7 @@ func TestNestedSubAgents(t *testing.T) {
 		parentClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						parentCallCount++
 						if parentCallCount == 1 {
 							return &gollem.Response{
@@ -589,7 +589,7 @@ func TestWithSubAgentsOption(t *testing.T) {
 				gt.True(t, toolNames["agent2"])
 
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{"done"},
 						}, nil
@@ -636,7 +636,7 @@ func TestWithSubAgentsOption(t *testing.T) {
 				gt.True(t, toolNames["regular_tool"])
 
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{"done"},
 						}, nil
@@ -757,7 +757,7 @@ func TestSubAgentWithSubAgentMiddleware(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						if len(input) > 0 {
 							capturedInput = input[0]
 						}
@@ -814,7 +814,7 @@ func TestSubAgentWithSubAgentMiddleware(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						if len(input) > 0 {
 							capturedInput = input[0]
 						}
@@ -874,7 +874,7 @@ func TestSubAgentArgsMiddlewareChain(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						if len(input) > 0 {
 							capturedInput = input[0]
 						}
@@ -951,7 +951,7 @@ func TestSubAgentArgsMiddlewareError(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						agentCalled = true
 						return &gollem.Response{
 							Texts: []string{"done"},
@@ -991,7 +991,7 @@ func TestSubAgentArgsMiddlewareError(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{"done"},
 						}, nil
@@ -1037,7 +1037,7 @@ func TestSubAgentArgsMiddlewareNil(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						if len(input) > 0 {
 							capturedInput = input[0]
 						}
@@ -1074,7 +1074,7 @@ func TestSubAgentArgsMiddlewareNil(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						if len(input) > 0 {
 							capturedInput = input[0]
 						}
@@ -1129,7 +1129,7 @@ func TestSubAgentSessionIsolation(t *testing.T) {
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				sessionCount++
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						callCount++
 						return &gollem.Response{
 							Texts: []string{"Response"},
@@ -1261,7 +1261,7 @@ func TestSubAgentMiddlewareFactoryError(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{"success after retry"},
 						}, nil
@@ -1307,7 +1307,7 @@ func TestSubAgentMiddlewareWithSessionAccess(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{"agent response"},
 						}, nil
@@ -1362,7 +1362,7 @@ func TestSubAgentMiddlewareWithSessionAccess(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{"agent response"},
 						}, nil
@@ -1420,7 +1420,7 @@ func TestSubAgentMiddlewareWithSessionAccess(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{"agent response"},
 						}, nil
@@ -1475,7 +1475,7 @@ func TestSubAgentMiddlewareWithSessionAccess(t *testing.T) {
 		mockClient := &mock.LLMClientMock{
 			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 				return &mock.SessionMock{
-					GenerateContentFunc: func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 						return &gollem.Response{
 							Texts: []string{"agent response"},
 						}, nil
@@ -1526,5 +1526,184 @@ func TestSubAgentMiddlewareWithSessionAccess(t *testing.T) {
 		gt.NotNil(t, result)
 		gt.Equal(t, "success", result["status"])
 		gt.Equal(t, "completed", result["post_processing"])
+	})
+}
+
+// newToolCallingMockClient creates a mock LLM client that simulates a single tool call.
+// On the first GenerateContent call, it returns a FunctionCall for the given tool name and args.
+// On subsequent calls, it returns a text response of "done".
+func newToolCallingMockClient(toolName string, toolArgs map[string]any) *mock.LLMClientMock {
+	callCount := 0
+	return &mock.LLMClientMock{
+		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+					callCount++
+					if callCount == 1 {
+						return &gollem.Response{
+							FunctionCalls: []*gollem.FunctionCall{
+								{
+									ID:        "call_1",
+									Name:      toolName,
+									Arguments: toolArgs,
+								},
+							},
+						}, nil
+					}
+					return &gollem.Response{
+						Texts: []string{"done"},
+					}, nil
+				},
+			}, nil
+		},
+	}
+}
+
+// mockSubAgentTool is a mock tool for testing WithSubAgentOptions
+type mockSubAgentTool struct {
+	name string
+	run  func(ctx context.Context, args map[string]any) (map[string]any, error)
+}
+
+func (t *mockSubAgentTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name:        t.name,
+		Description: "Mock tool for testing",
+		Parameters: map[string]*gollem.Parameter{
+			"key": {Type: gollem.TypeString, Description: "A key"},
+		},
+	}
+}
+
+func (t *mockSubAgentTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	return t.run(ctx, args)
+}
+
+func TestSubAgentWithSubAgentOptions(t *testing.T) {
+	newInnerTool := func() *mockSubAgentTool {
+		return &mockSubAgentTool{
+			name: "inner_tool",
+			run: func(ctx context.Context, args map[string]any) (map[string]any, error) {
+				return map[string]any{"result": "ok"}, nil
+			},
+		}
+	}
+
+	t.Run("tool middleware is applied to child agent", func(t *testing.T) {
+		middlewareCalled := false
+		var capturedToolName string
+
+		mockClient := newToolCallingMockClient("inner_tool", map[string]any{"key": "value"})
+		innerTool := newInnerTool()
+
+		subagent := gollem.NewSubAgent(
+			"test_agent",
+			"Test agent",
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient,
+					gollem.WithTools(innerTool),
+					gollem.WithLoopLimit(5),
+				), nil
+			},
+			gollem.WithSubAgentOptions(
+				gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+					return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+						middlewareCalled = true
+						capturedToolName = req.Tool.Name
+						return next(ctx, req)
+					}
+				}),
+			),
+		)
+
+		result, err := subagent.Run(context.Background(), map[string]any{
+			"query": "test",
+		})
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.True(t, middlewareCalled)
+		gt.Equal(t, "inner_tool", capturedToolName)
+	})
+
+	t.Run("multiple WithSubAgentOptions calls accumulate options", func(t *testing.T) {
+		middleware1Called := false
+		middleware2Called := false
+
+		mockClient := newToolCallingMockClient("inner_tool", map[string]any{})
+		innerTool := newInnerTool()
+
+		subagent := gollem.NewSubAgent(
+			"test_agent",
+			"Test agent",
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient,
+					gollem.WithTools(innerTool),
+					gollem.WithLoopLimit(5),
+				), nil
+			},
+			gollem.WithSubAgentOptions(
+				gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+					return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+						middleware1Called = true
+						return next(ctx, req)
+					}
+				}),
+			),
+			gollem.WithSubAgentOptions(
+				gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+					return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+						middleware2Called = true
+						return next(ctx, req)
+					}
+				}),
+			),
+		)
+
+		result, err := subagent.Run(context.Background(), map[string]any{
+			"query": "test",
+		})
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.True(t, middleware1Called)
+		gt.True(t, middleware2Called)
+	})
+
+	t.Run("options applied after factory via direct call", func(t *testing.T) {
+		middlewareCalled := false
+
+		mockClient := newToolCallingMockClient("inner_tool", map[string]any{})
+		innerTool := newInnerTool()
+
+		// Create subagent without options first
+		subagent := gollem.NewSubAgent(
+			"test_agent",
+			"Test agent",
+			func() (*gollem.Agent, error) {
+				return gollem.New(mockClient,
+					gollem.WithTools(innerTool),
+					gollem.WithLoopLimit(5),
+				), nil
+			},
+		)
+
+		// Apply options after creation via direct call
+		gollem.WithSubAgentOptions(
+			gollem.WithToolMiddleware(func(next gollem.ToolHandler) gollem.ToolHandler {
+				return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
+					middlewareCalled = true
+					return next(ctx, req)
+				}
+			}),
+		)(subagent)
+
+		result, err := subagent.Run(context.Background(), map[string]any{
+			"query": "test",
+		})
+
+		gt.NoError(t, err)
+		gt.NotNil(t, result)
+		gt.True(t, middlewareCalled)
 	})
 }

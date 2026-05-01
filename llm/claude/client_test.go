@@ -7,12 +7,19 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/claude"
+	"github.com/m-mizutani/gollem/trace"
 	"github.com/m-mizutani/gt"
+)
+
+const (
+	testTimeout   = 30 * time.Second
+	maxTestTokens = 2048
 )
 
 func TestClaudeContentGenerate(t *testing.T) {
@@ -21,7 +28,8 @@ func TestClaudeContentGenerate(t *testing.T) {
 		t.Skip("TEST_CLAUDE_API_KEY is not set")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
 
 	client, err := claude.New(ctx, apiKey)
 	gt.NoError(t, err)
@@ -29,7 +37,7 @@ func TestClaudeContentGenerate(t *testing.T) {
 	session, err := client.NewSession(ctx)
 	gt.NoError(t, err)
 
-	result, err := session.GenerateContent(ctx, gollem.Text("Say hello in one word"))
+	result, err := session.Generate(ctx, []gollem.Input{gollem.Text("Say hello in one word")}, gollem.WithMaxTokens(maxTestTokens))
 	gt.NoError(t, err)
 	gt.Array(t, result.Texts).Length(1).Required()
 	gt.Value(t, len(result.Texts[0])).NotEqual(0)
@@ -313,7 +321,8 @@ func TestClaudeTokenLimitErrorIntegration(t *testing.T) {
 		t.Skip("TEST_TOKEN_LIMIT_ERROR is not set to true")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
 
 	client, err := claude.New(ctx, apiKey)
 	gt.NoError(t, err)
@@ -325,7 +334,7 @@ func TestClaudeTokenLimitErrorIntegration(t *testing.T) {
 	// Repeat a long text many times to ensure we exceed the limit
 	longText := strings.Repeat("This is a test sentence to make the prompt very long. ", 100000)
 
-	_, err = session.GenerateContent(ctx, gollem.Text(longText))
+	_, err = session.Generate(ctx, []gollem.Input{gollem.Text(longText)})
 	gt.Error(t, err)
 
 	// Verify the error has the token exceeded tag
@@ -360,4 +369,189 @@ func TestWithBaseURL(t *testing.T) {
 		gt.NoError(t, err2)
 		gt.Equal(t, "", claude.GetBaseURL(client2)) // Should be empty, not first URL
 	})
+}
+
+// TestPerCallGenerateOptions verifies that per-call GenerateOption overrides
+// actually change the API request. A text-mode session gets a per-call
+// ResponseSchema, and the response must be valid JSON matching the schema.
+func TestPerCallGenerateOptions(t *testing.T) {
+	apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
+	if !ok {
+		t.Skip("TEST_CLAUDE_API_KEY is not set")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	client, err := claude.New(ctx, apiKey)
+	gt.NoError(t, err)
+
+	// Create a plain text session — no ContentTypeJSON, no ResponseSchema
+	session, err := client.NewSession(ctx)
+	gt.NoError(t, err)
+
+	schema := &gollem.Parameter{
+		Type:  gollem.TypeObject,
+		Title: "Color",
+		Properties: map[string]*gollem.Parameter{
+			"name": {Type: gollem.TypeString, Description: "color name", Required: true},
+		},
+	}
+
+	// Per-call option should force JSON output via system prompt injection
+	resp, err := session.Generate(ctx,
+		[]gollem.Input{gollem.Text("Name a color.")},
+		gollem.WithGenerateResponseSchema(schema),
+		gollem.WithMaxTokens(maxTestTokens),
+	)
+	gt.NoError(t, err)
+	gt.True(t, len(resp.Texts) > 0)
+
+	var parsed map[string]any
+	gt.NoError(t, json.Unmarshal([]byte(resp.Texts[0]), &parsed))
+	gt.True(t, parsed["name"] != nil)
+}
+
+func TestClaudeMessagesToTraceMessages(t *testing.T) {
+	type testCase struct {
+		messages []anthropic.MessageParam
+		expected []trace.Message
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			result := claude.ClaudeMessagesToTraceMessages(tc.messages)
+			gt.Equal(t, tc.expected, result)
+		}
+	}
+
+	t.Run("text message", runTest(testCase{
+		messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock("hello world")),
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewTextContent("hello world"),
+			}},
+		},
+	}))
+
+	t.Run("assistant message", runTest(testCase{
+		messages: []anthropic.MessageParam{
+			anthropic.NewAssistantMessage(anthropic.NewTextBlock("response")),
+		},
+		expected: []trace.Message{
+			{Role: "assistant", Contents: []trace.MessageContent{
+				trace.NewTextContent("response"),
+			}},
+		},
+	}))
+
+	t.Run("tool use", runTest(testCase{
+		messages: []anthropic.MessageParam{
+			anthropic.NewAssistantMessage(
+				anthropic.NewToolUseBlock("call-1", map[string]any{"q": "test"}, "search"),
+			),
+		},
+		expected: []trace.Message{
+			{Role: "assistant", Contents: []trace.MessageContent{
+				trace.NewToolCallContent("call-1", "search", map[string]any{"q": "test"}),
+			}},
+		},
+	}))
+
+	t.Run("tool result", runTest(testCase{
+		messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(
+				anthropic.NewToolResultBlock("call-1", "result text", false),
+			),
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewToolResponseContent("call-1", "", nil),
+				trace.NewTextContent("result text"),
+			}},
+		},
+	}))
+
+	t.Run("multiple messages", runTest(testCase{
+		messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock("hello")),
+			anthropic.NewAssistantMessage(anthropic.NewTextBlock("hi")),
+			anthropic.NewUserMessage(anthropic.NewTextBlock("how are you")),
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{trace.NewTextContent("hello")}},
+			{Role: "assistant", Contents: []trace.MessageContent{trace.NewTextContent("hi")}},
+			{Role: "user", Contents: []trace.MessageContent{trace.NewTextContent("how are you")}},
+		},
+	}))
+
+	t.Run("nil messages", runTest(testCase{
+		messages: nil,
+		expected: nil,
+	}))
+
+	t.Run("empty messages", runTest(testCase{
+		messages: []anthropic.MessageParam{},
+		expected: nil,
+	}))
+
+	t.Run("mixed content blocks", runTest(testCase{
+		messages: []anthropic.MessageParam{
+			anthropic.NewAssistantMessage(
+				anthropic.NewTextBlock("Let me search"),
+				anthropic.NewToolUseBlock("call-1", map[string]any{"q": "test"}, "search"),
+			),
+		},
+		expected: []trace.Message{
+			{Role: "assistant", Contents: []trace.MessageContent{
+				trace.NewTextContent("Let me search"),
+				trace.NewToolCallContent("call-1", "search", map[string]any{"q": "test"}),
+			}},
+		},
+	}))
+
+	t.Run("image with media type", runTest(testCase{
+		messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(
+				anthropic.NewImageBlockBase64("image/png", "iVBOR..."),
+			),
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				{Type: "image", MediaType: "image/png"},
+			}},
+		},
+	}))
+
+	t.Run("thinking block", runTest(testCase{
+		messages: []anthropic.MessageParam{
+			anthropic.NewAssistantMessage(
+				anthropic.NewThinkingBlock("sig123", "Let me think about this..."),
+				anthropic.NewTextBlock("Here is my answer"),
+			),
+		},
+		expected: []trace.Message{
+			{Role: "assistant", Contents: []trace.MessageContent{
+				trace.NewThinkingContent("Let me think about this..."),
+				trace.NewTextContent("Here is my answer"),
+			}},
+		},
+	}))
+
+	t.Run("redacted thinking block", runTest(testCase{
+		messages: []anthropic.MessageParam{
+			anthropic.NewAssistantMessage(
+				anthropic.NewRedactedThinkingBlock("redacted-data"),
+				anthropic.NewTextBlock("answer"),
+			),
+		},
+		expected: []trace.Message{
+			{Role: "assistant", Contents: []trace.MessageContent{
+				trace.NewRedactedThinkingContent(),
+				trace.NewTextContent("answer"),
+			}},
+		},
+	}))
 }

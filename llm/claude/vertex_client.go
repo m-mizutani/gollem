@@ -8,6 +8,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/vertex"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/trace"
 )
 
 const (
@@ -168,8 +169,8 @@ func (s *VertexAnthropicSession) convertInputs(ctx context.Context, input ...gol
 	return convertGollemInputsToClaude(ctx, input...)
 }
 
-// GenerateContent processes the input and generates a response.
-func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+// Generate processes the input and generates a response with optional per-call overrides.
+func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
@@ -188,19 +189,54 @@ func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...g
 		}
 	}
 
-	resp, err := generateClaudeContent(
-		ctx,
-		s.client,
-		apiMessages,
-		s.defaultModel,
-		s.params,
-		tools,
-		s.cfg,
-		"Claude Vertex",
-	)
+	// Build system prompt
+	systemPrompt, err := createSystemPrompt(ctx, s.cfg)
 	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create system prompt")
+	}
+
+	// Start LLM call trace span
+	var traceData *trace.LLMCallData
+	var llmErr error
+	if h := trace.HandlerFrom(ctx); h != nil {
+		ctx = h.StartLLMCall(ctx)
+		defer func() { h.EndLLMCall(ctx, traceData, llmErr) }()
+	}
+
+	// Build request
+	msgParams := anthropic.MessageNewParams{
+		Model:     anthropic.Model(s.defaultModel),
+		MaxTokens: s.params.MaxTokens,
+		Messages:  apiMessages,
+	}
+	if err := setTemperatureAndTopP(&msgParams, s.params.Temperature, s.params.TopP); err != nil {
+		return nil, goerr.Wrap(err, "failed to set generation parameters")
+	}
+	if len(tools) > 0 {
+		msgParams.Tools = tools
+	}
+	if len(systemPrompt) > 0 {
+		msgParams.System = systemPrompt
+	}
+
+	// Apply per-call overrides
+	if err := applyPerCallOverrides(&msgParams, opts...); err != nil {
 		return nil, err
 	}
+
+	resp, err := s.client.Messages.New(ctx, msgParams)
+	if err != nil {
+		llmErr = err
+		opts := tokenLimitErrorOptions(err)
+		return nil, goerr.Wrap(err, "failed to create message via Claude Vertex", opts...)
+	}
+	if err != nil {
+		llmErr = err
+		return nil, err
+	}
+
+	// Set trace data for defer
+	traceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt(), apiMessages)
 
 	// Only update session history after successful API call
 	s.messages = append(s.messages, messages...)
@@ -211,11 +247,13 @@ func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...g
 		s.messages = append(s.messages, respParam)
 	}
 
-	return processResponseWithContentType(ctx, resp, s.cfg.ContentType(), s.cfg.ResponseSchema() != nil), nil
+	// Use JSON content type if per-call schema is set
+	effectiveCT, hasSchema := effectiveContentType(s.cfg.ContentType(), s.cfg.ResponseSchema(), opts...)
+	return processResponseWithContentType(ctx, resp, effectiveCT, hasSchema), nil
 }
 
-// GenerateStream processes the input and generates a response stream.
-func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+// Stream processes the input and generates a response stream with optional per-call overrides.
+func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
 	messages, _, err := s.convertInputs(ctx, input...)
 	if err != nil {
 		return nil, err
@@ -232,16 +270,123 @@ func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...go
 		}
 	}
 
-	return generateClaudeStream(
+	// Build a temporary request to compute the system prompt override via applyPerCallOverrides
+	var systemPromptOverride []anthropic.TextBlockParam
+	genCfg := gollem.NewGenerateConfig(opts...)
+	if genCfg.ResponseSchema() != nil {
+		tmpRequest := anthropic.MessageNewParams{}
+		systemPrompt, err := createSystemPrompt(ctx, s.cfg)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create system prompt")
+		}
+		if len(systemPrompt) > 0 {
+			tmpRequest.System = systemPrompt
+		}
+		if err := applyPerCallOverrides(&tmpRequest, opts...); err != nil {
+			return nil, err
+		}
+		systemPromptOverride = tmpRequest.System
+	}
+
+	// Apply per-call overrides to a copy of params for Temperature/TopP/MaxTokens
+	params := s.params
+	if t := genCfg.Temperature(); t != nil {
+		params.Temperature = *t
+	}
+	if p := genCfg.TopP(); p != nil {
+		params.TopP = *p
+	}
+	if m := genCfg.MaxTokens(); m != nil {
+		params.MaxTokens = int64(*m)
+	}
+
+	// Start LLM call trace span
+	traceHandler := trace.HandlerFrom(ctx)
+	if traceHandler != nil {
+		ctx = traceHandler.StartLLMCall(ctx)
+	}
+
+	ch, err := generateClaudeStream(
 		ctx,
 		s.client,
 		s.messages,
 		s.defaultModel,
-		s.params,
+		params,
 		tools,
 		s.cfg,
 		&s.messages,
+		systemPromptOverride,
 	)
+	if err != nil {
+		if traceHandler != nil {
+			traceHandler.EndLLMCall(ctx, nil, err)
+		}
+		return nil, err
+	}
+
+	if traceHandler == nil {
+		return ch, nil
+	}
+
+	// Wrap channel to capture trace data on stream completion
+	wrappedCh := make(chan *gollem.Response)
+	go func() {
+		defer close(wrappedCh)
+
+		var streamTraceData *trace.LLMCallData
+		var streamErr error
+		defer func() { traceHandler.EndLLMCall(ctx, streamTraceData, streamErr) }()
+
+		var allTexts []string
+		var allFunctionCalls []*trace.FunctionCall
+		var lastInputTokens, lastOutputTokens int
+
+		for resp := range ch {
+			if resp.Error != nil && streamErr == nil {
+				streamErr = resp.Error
+			}
+			allTexts = append(allTexts, resp.Texts...)
+			for _, fc := range resp.FunctionCalls {
+				allFunctionCalls = append(allFunctionCalls, &trace.FunctionCall{
+					ID:        fc.ID,
+					Name:      fc.Name,
+					Arguments: fc.Arguments,
+				})
+			}
+			if resp.InputToken > 0 {
+				lastInputTokens = resp.InputToken
+			}
+			if resp.OutputToken > 0 {
+				lastOutputTokens = resp.OutputToken
+			}
+			wrappedCh <- resp
+		}
+
+		streamTraceData = &trace.LLMCallData{
+			InputTokens:  lastInputTokens,
+			OutputTokens: lastOutputTokens,
+			Model:        s.defaultModel,
+			Request: &trace.LLMRequest{
+				SystemPrompt: s.cfg.SystemPrompt(),
+			},
+			Response: &trace.LLMResponse{
+				Texts:         allTexts,
+				FunctionCalls: allFunctionCalls,
+			},
+		}
+	}()
+
+	return wrappedCh, nil
+}
+
+// Deprecated: GenerateContent is deprecated. Use Generate instead.
+func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	return s.Generate(ctx, input)
+}
+
+// Deprecated: GenerateStream is deprecated. Use Stream instead.
+func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+	return s.Stream(ctx, input)
 }
 
 // CountToken calculates the total number of tokens for the given inputs,

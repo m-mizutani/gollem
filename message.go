@@ -30,6 +30,8 @@ type MessageContent struct {
 	Type MessageContentType `json:"type"`
 	// Data contains type-specific content that should be unmarshaled based on Type
 	Data json.RawMessage `json:"data"`
+	// Meta contains provider-specific metadata (e.g., Gemini's ThoughtSignature)
+	Meta json.RawMessage `json:"meta,omitempty"`
 }
 
 // MessageContentType represents the type of content in a message

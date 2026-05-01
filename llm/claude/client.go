@@ -402,54 +402,9 @@ func extractJSON(ctx context.Context, text string) string {
 	return string(jsonBytes)
 }
 
-// generateClaudeContent is a shared helper function that handles the core logic for generating content
-// This function is used by both the standard Claude client and the Vertex AI Claude client.
-func generateClaudeContent(
-	ctx context.Context,
-	client *anthropic.Client,
-	messages []anthropic.MessageParam,
-	model string,
-	params generationParameters,
-	tools []anthropic.ToolUnionParam,
-	cfg gollem.SessionConfig,
-	apiName string,
-) (*anthropic.Message, error) {
-	// Prepare message parameters
-	msgParams := anthropic.MessageNewParams{
-		Model:     anthropic.Model(model),
-		MaxTokens: params.MaxTokens,
-		Messages:  messages,
-	}
-
-	// Set temperature and/or top_p (mutually exclusive for Claude)
-	if err := setTemperatureAndTopP(&msgParams, params.Temperature, params.TopP); err != nil {
-		return nil, goerr.Wrap(err, "failed to set generation parameters")
-	}
-
-	if len(tools) > 0 {
-		msgParams.Tools = tools
-	}
-
-	// Add system prompt if available
-	systemPrompt, err := createSystemPrompt(ctx, cfg)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create system prompt")
-	}
-	if len(systemPrompt) > 0 {
-		msgParams.System = systemPrompt
-	}
-
-	resp, err := client.Messages.New(ctx, msgParams)
-	if err != nil {
-		opts := tokenLimitErrorOptions(err)
-		return nil, goerr.Wrap(err, "failed to create message via "+apiName, opts...)
-	}
-
-	return resp, nil
-}
-
 // generateClaudeStream is a shared helper function that handles the core logic for generating streaming content
 // This function is used by both the standard Claude client and the Vertex AI Claude client.
+// If systemPromptOverride is non-nil, it replaces the system prompt derived from cfg.
 func generateClaudeStream(
 	ctx context.Context,
 	client *anthropic.Client,
@@ -459,6 +414,7 @@ func generateClaudeStream(
 	tools []anthropic.ToolUnionParam,
 	cfg gollem.SessionConfig,
 	messageHistory *[]anthropic.MessageParam,
+	systemPromptOverride []anthropic.TextBlockParam,
 ) (<-chan *gollem.Response, error) {
 	// Prepare message parameters
 	msgParams := anthropic.MessageNewParams{
@@ -476,10 +432,16 @@ func generateClaudeStream(
 		msgParams.Tools = tools
 	}
 
-	// Add system prompt if available
-	systemPrompt, err := createSystemPrompt(ctx, cfg)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create system prompt")
+	// Add system prompt (use override if provided, otherwise derive from cfg)
+	var systemPrompt []anthropic.TextBlockParam
+	if systemPromptOverride != nil {
+		systemPrompt = systemPromptOverride
+	} else {
+		var err error
+		systemPrompt, err = createSystemPrompt(ctx, cfg)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to create system prompt")
+		}
 	}
 	if len(systemPrompt) > 0 {
 		msgParams.System = systemPrompt
@@ -633,9 +595,9 @@ func processResponseWithContentType(ctx context.Context, resp *anthropic.Message
 	return response
 }
 
-// GenerateContent processes the input and generates a response.
+// Generate processes the input and generates a response with optional per-call overrides.
 // It handles both text messages and function responses.
-func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	var historyCopy *gollem.History
@@ -698,6 +660,11 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 			request.Tools = s.tools
 		}
 
+		// Apply per-call overrides
+		if err := applyPerCallOverrides(&request, opts...); err != nil {
+			return nil, err
+		}
+
 		// Start LLM call trace span
 		var traceData *trace.LLMCallData
 		var llmErr error
@@ -714,10 +681,11 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		}
 
 		// Process response and extract content
-		processedResp := processResponseWithContentType(ctx, resp, s.cfg.ContentType(), s.cfg.ResponseSchema() != nil)
+		effectiveCT, hasSchema := effectiveContentType(s.cfg.ContentType(), s.cfg.ResponseSchema(), opts...)
+		processedResp := processResponseWithContentType(ctx, resp, effectiveCT, hasSchema)
 
 		// Set trace data for defer
-		traceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt())
+		traceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt(), apiMessages)
 
 		// Update history with new messages (already in Claude format)
 		s.historyMessages = append(s.historyMessages, messages...)
@@ -757,6 +725,55 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	}, nil
 }
 
+// applyPerCallOverrides applies per-call GenerateOption overrides to Claude request params.
+func applyPerCallOverrides(request *anthropic.MessageNewParams, opts ...gollem.GenerateOption) error {
+	genCfg := gollem.NewGenerateConfig(opts...)
+	if t := genCfg.Temperature(); t != nil {
+		request.Temperature = anthropic.Float(*t)
+	}
+	if p := genCfg.TopP(); p != nil {
+		request.TopP = anthropic.Float(*p)
+	}
+	if m := genCfg.MaxTokens(); m != nil {
+		request.MaxTokens = int64(*m)
+	}
+	if perCallSchema := genCfg.ResponseSchema(); perCallSchema != nil {
+		jsonInstruction := "\nPlease format your response as valid JSON."
+		schemaText, err := schema.ConvertParameterToJSONString(perCallSchema)
+		if err != nil {
+			return goerr.Wrap(err, "failed to convert per-call response schema")
+		}
+		if schemaText != "" {
+			jsonInstruction += "\n\nYour response must conform to this JSON Schema:\n" + schemaText
+		}
+		if len(request.System) > 0 {
+			request.System[0].Text += jsonInstruction
+		} else {
+			request.System = []anthropic.TextBlockParam{{Text: jsonInstruction}}
+		}
+	}
+	return nil
+}
+
+// effectiveContentType returns the content type considering per-call schema override.
+func effectiveContentType(sessionContentType gollem.ContentType, sessionSchema *gollem.Parameter, opts ...gollem.GenerateOption) (gollem.ContentType, bool) {
+	genCfg := gollem.NewGenerateConfig(opts...)
+	if genCfg.ResponseSchema() != nil {
+		return gollem.ContentTypeJSON, true
+	}
+	return sessionContentType, sessionSchema != nil
+}
+
+// Deprecated: GenerateContent is deprecated. Use Generate instead.
+func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	return s.Generate(ctx, input)
+}
+
+// Deprecated: GenerateStream is deprecated. Use Stream instead.
+func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+	return s.Stream(ctx, input)
+}
+
 // FunctionCallAccumulator accumulates function call information from stream
 type FunctionCallAccumulator struct {
 	ID        string
@@ -789,9 +806,9 @@ func (a *FunctionCallAccumulator) accumulate() (*gollem.FunctionCall, error) {
 	}, nil
 }
 
-// GenerateStream processes the input and generates a response stream.
+// Stream processes the input and generates a response stream with optional per-call overrides.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
-func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	var historyCopy *gollem.History
@@ -854,6 +871,11 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 			request.Tools = s.tools
 		}
 
+		// Apply per-call overrides
+		if err := applyPerCallOverrides(&request, opts...); err != nil {
+			return nil, err
+		}
+
 		// Start LLM call trace span
 		var streamTraceData *trace.LLMCallData
 		var streamErr error
@@ -872,7 +894,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 		}
 
 		// Set trace data for defer
-		streamTraceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt())
+		streamTraceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt(), allMessages)
 
 		responseChan := make(chan *gollem.ContentResponse)
 
@@ -982,10 +1004,28 @@ func countTokensWithParams(
 		params.Tools = countTools
 	}
 
+	// Start LLM call trace span
+	var traceData *trace.LLMCallData
+	var llmErr error
+	if h := trace.HandlerFrom(ctx); h != nil {
+		ctx = h.StartLLMCall(ctx)
+		defer func() { h.EndLLMCall(ctx, traceData, llmErr) }()
+	}
+
 	// Call the CountTokens API
 	result, err := apiClient.MessagesCountTokens(ctx, params)
 	if err != nil {
+		llmErr = err
 		return 0, goerr.Wrap(err, "failed to count tokens")
+	}
+
+	traceData = &trace.LLMCallData{
+		InputTokens: int(result.InputTokens),
+		Model:       string(params.Model),
+		Request: &trace.LLMRequest{
+			SystemPrompt: systemPrompt,
+		},
+		Response: &trace.LLMResponse{},
 	}
 
 	return int(result.InputTokens), nil
@@ -1067,14 +1107,85 @@ func tokenLimitErrorOptions(err error) []goerr.Option {
 	return nil
 }
 
+// claudeMessagesToTraceMessages converts Claude message params to trace messages.
+func claudeMessagesToTraceMessages(messages []anthropic.MessageParam) []trace.Message {
+	var result []trace.Message
+	for _, msg := range messages {
+		var blocks []trace.MessageContent
+		for _, block := range msg.Content {
+			switch {
+			case block.OfText != nil:
+				blocks = append(blocks, trace.NewTextContent(block.OfText.Text))
+			case block.OfToolUse != nil:
+				var args map[string]any
+				if input, ok := block.OfToolUse.Input.(map[string]any); ok {
+					args = input
+				}
+				blocks = append(blocks, trace.NewToolCallContent(
+					block.OfToolUse.ID, block.OfToolUse.Name, args,
+				))
+			case block.OfToolResult != nil:
+				blocks = append(blocks, trace.NewToolResponseContent(
+					block.OfToolResult.ToolUseID, "", nil,
+				))
+				for _, c := range block.OfToolResult.Content {
+					switch {
+					case c.OfText != nil:
+						blocks = append(blocks, trace.NewTextContent(c.OfText.Text))
+					case c.OfImage != nil:
+						mc := trace.NewMediaContent("image", "")
+						if mt := c.OfImage.Source.GetMediaType(); mt != nil {
+							mc.MediaType = *mt
+						}
+						blocks = append(blocks, mc)
+					}
+				}
+			case block.OfImage != nil:
+				mc := trace.NewMediaContent("image", "")
+				if mt := block.OfImage.Source.GetMediaType(); mt != nil {
+					mc.MediaType = *mt
+				}
+				if block.OfImage.Source.OfURL != nil {
+					mc.URL = block.OfImage.Source.OfURL.URL
+				}
+				blocks = append(blocks, mc)
+			case block.OfDocument != nil:
+				mc := trace.NewMediaContent("document", "")
+				if mt := block.OfDocument.Source.GetMediaType(); mt != nil {
+					mc.MediaType = *mt
+				}
+				if block.OfDocument.Source.OfURL != nil {
+					mc.URL = block.OfDocument.Source.OfURL.URL
+				}
+				if block.OfDocument.Title.Valid() {
+					mc.Title = block.OfDocument.Title.Value
+				}
+				blocks = append(blocks, mc)
+			case block.OfThinking != nil:
+				blocks = append(blocks, trace.NewThinkingContent(block.OfThinking.Thinking))
+			case block.OfRedactedThinking != nil:
+				blocks = append(blocks, trace.NewRedactedThinkingContent())
+			}
+		}
+		if len(blocks) > 0 {
+			result = append(result, trace.Message{
+				Role:     string(msg.Role),
+				Contents: blocks,
+			})
+		}
+	}
+	return result
+}
+
 // buildClaudeTraceData builds trace.LLMCallData from a Claude API response.
-func buildClaudeTraceData(resp *anthropic.Message, model string, systemPrompt string) *trace.LLMCallData {
+func buildClaudeTraceData(resp *anthropic.Message, model string, systemPrompt string, messages []anthropic.MessageParam) *trace.LLMCallData {
 	data := &trace.LLMCallData{
 		InputTokens:  int(resp.Usage.InputTokens),
 		OutputTokens: int(resp.Usage.OutputTokens),
 		Model:        string(resp.Model),
 		Request: &trace.LLMRequest{
 			SystemPrompt: systemPrompt,
+			Messages:     claudeMessagesToTraceMessages(messages),
 		},
 		Response: &trace.LLMResponse{},
 	}

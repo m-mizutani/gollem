@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Span } from "../api/types";
 import { formatDuration, formatDateTime } from "../utils/format";
 import LLMCallDetail from "./LLMCallDetail";
@@ -6,6 +7,48 @@ import EventDetail from "./EventDetail";
 
 interface SpanDetailProps {
   span: Span | null;
+}
+
+function StackTraceSection({ frames }: { frames: Span["stack_trace"] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!frames || frames.length === 0) return null;
+
+  // Extract short file name from full path
+  const shortFile = (file: string) => {
+    const parts = file.split("/");
+    return parts.length > 2
+      ? parts.slice(-2).join("/")
+      : file;
+  };
+
+  return (
+    <div className="border border-gray-200 rounded">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-500 hover:bg-gray-50"
+      >
+        <span className="flex-shrink-0">{expanded ? "\u25BE" : "\u25B8"}</span>
+        <span>Stack Trace ({frames.length} frames)</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-gray-200 bg-gray-50 px-3 py-2 overflow-x-auto">
+          <table className="text-xs font-mono w-full">
+            <tbody>
+              {frames.map((frame, i) => (
+                <tr key={i} className={i === 0 ? "text-gray-900 font-medium" : "text-gray-500"}>
+                  <td className="pr-2 py-0.5 text-right text-gray-400 select-none w-6">{i}</td>
+                  <td className="pr-3 py-0.5 whitespace-nowrap">{frame.function.split("/").pop()}</td>
+                  <td className="py-0.5 whitespace-nowrap text-gray-400">
+                    {shortFile(frame.file)}:{frame.line}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function SpanDetail({ span }: SpanDetailProps) {
@@ -69,6 +112,10 @@ export default function SpanDetail({ span }: SpanDetailProps) {
         <div className="bg-red-50 border border-red-200 rounded p-3 text-red-700">
           <span className="font-medium">Error:</span> {span.error}
         </div>
+      )}
+
+      {span.stack_trace && span.stack_trace.length > 0 && (
+        <StackTraceSection frames={span.stack_trace} />
       )}
 
       {span.kind === "llm_call" && span.llm_call && (

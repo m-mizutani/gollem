@@ -408,6 +408,11 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 		}
 
 		for _, part := range candidate.Content.Parts {
+			// Skip thought parts (internal reasoning from thinking models)
+			if part.Thought {
+				continue
+			}
+
 			if part.Text != "" {
 				response.Texts = append(response.Texts, part.Text)
 			}
@@ -426,8 +431,8 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 	return response, nil
 }
 
-// GenerateContent generates content based on the input.
-func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+// Generate generates content based on the input with optional per-call overrides.
+func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	// Always create history (even if empty) to maintain consistency with middleware
@@ -484,8 +489,14 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 			defer func() { h.EndLLMCall(ctx, geminiTraceData, llmErr) }()
 		}
 
+		// Build effective config with per-call overrides
+		effectiveConfig, err := s.buildEffectiveConfig(opts...)
+		if err != nil {
+			return nil, err
+		}
+
 		// Call the API
-		result, err := s.apiClient.GenerateContent(ctx, s.model, contents, s.config)
+		result, err := s.apiClient.GenerateContent(ctx, s.model, contents, effectiveConfig)
 		if err != nil {
 			llmErr = err
 			opts := tokenLimitErrorOptions(err)
@@ -499,27 +510,10 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		}
 
 		// Set trace data for defer
-		geminiTraceData = buildGeminiTraceData(response, s.model, s.cfg.SystemPrompt())
+		geminiTraceData = buildGeminiTraceData(response, s.model, s.cfg.SystemPrompt(), contents)
 
-		// Update history with the response
-		// Create assistant message from response
-		assistantParts := make([]*genai.Part, 0)
-		if len(response.Texts) > 0 || len(response.FunctionCalls) > 0 {
-			for _, text := range response.Texts {
-				assistantParts = append(assistantParts, &genai.Part{Text: text})
-			}
-			for _, fc := range response.FunctionCalls {
-				assistantParts = append(assistantParts, &genai.Part{
-					FunctionCall: &genai.FunctionCall{
-						Name: fc.Name,
-						Args: fc.Arguments,
-					},
-				})
-			}
-
-		}
-
-		// Convert only the new messages (input + response) to gollem format and append to existing history
+		// Update history with the input and raw response content.
+		// Use candidate.Content directly to preserve all fields (e.g., ThoughtSignature).
 		var newContents []*genai.Content
 		// Add current input as a new user message
 		if len(parts) > 0 {
@@ -529,13 +523,12 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 			}
 			newContents = append(newContents, userContent)
 		}
-		// Add assistant response if available
-		if len(assistantParts) > 0 {
-			assistantContent := &genai.Content{
-				Role:  "model",
-				Parts: assistantParts,
+		// Add raw assistant response content from candidates.
+		// Filter out empty parts that some models (e.g., thinking models) may return.
+		for _, candidate := range result.Candidates {
+			if filtered := filterEmptyParts(candidate.Content); filtered != nil {
+				newContents = append(newContents, filtered)
 			}
-			newContents = append(newContents, assistantContent)
 		}
 
 		// Append new contents to history
@@ -572,8 +565,8 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	}, nil
 }
 
-// GenerateStream generates content based on the input and returns a stream of responses.
-func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+// Stream generates content based on the input and returns a stream of responses with optional per-call overrides.
+func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	// Always create history (even if empty) to maintain consistency with middleware
@@ -641,8 +634,15 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				defer func() { traceHandler.EndLLMCall(ctx, streamTraceData, streamErr) }()
 			}
 
+			// Build effective config with per-call overrides
+			effectiveConfig, err := s.buildEffectiveConfig(opts...)
+			if err != nil {
+				streamChan <- &gollem.ContentResponse{Error: err}
+				return
+			}
+
 			// Get the streaming response from API
-			apiStreamChan := s.apiClient.GenerateContentStream(ctx, s.model, contents, s.config)
+			apiStreamChan := s.apiClient.GenerateContentStream(ctx, s.model, contents, effectiveConfig)
 
 			// Accumulate response data for history
 			var accumulatedTexts []string
@@ -684,7 +684,10 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				}
 			}
 
-			// Update history with accumulated response
+			// Update history with accumulated response.
+			// Note: Streaming chunks don't reliably contain ThoughtSignature,
+			// so we reconstruct parts from accumulated data here.
+			// ThoughtSignature preservation is handled in non-streaming GenerateContent.
 			if len(accumulatedTexts) > 0 || len(accumulatedFunctionCalls) > 0 {
 				var newContents []*genai.Content
 
@@ -732,6 +735,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				Model:        s.model,
 				Request: &trace.LLMRequest{
 					SystemPrompt: s.cfg.SystemPrompt(),
+					Messages:     contentsToTraceMessages(contents),
 				},
 				Response: &trace.LLMResponse{},
 			}
@@ -807,10 +811,25 @@ func (c *Client) GenerateEmbedding(ctx context.Context, dimension int, input []s
 		config.OutputDimensionality = &outputDim
 	}
 
+	// Start LLM call trace span
+	var traceData *trace.LLMCallData
+	var llmErr error
+	if h := trace.HandlerFrom(ctx); h != nil {
+		ctx = h.StartLLMCall(ctx)
+		defer func() { h.EndLLMCall(ctx, traceData, llmErr) }()
+	}
+
 	// Generate embeddings for the specified model
 	result, err := c.client.Models.EmbedContent(ctx, c.embeddingModel, contents, config)
 	if err != nil {
+		llmErr = err
 		return nil, goerr.Wrap(err, "failed to generate embeddings")
+	}
+
+	traceData = &trace.LLMCallData{
+		Model:    c.embeddingModel,
+		Request:  &trace.LLMRequest{},
+		Response: &trace.LLMResponse{},
 	}
 
 	if result == nil || len(result.Embeddings) == 0 {
@@ -963,6 +982,45 @@ func convertResponseSchemaToGenai(param *gollem.Parameter) (*genai.Schema, error
 	return schema, nil
 }
 
+// buildEffectiveConfig creates a copy of the session config with per-call overrides applied.
+func (s *Session) buildEffectiveConfig(opts ...gollem.GenerateOption) (*genai.GenerateContentConfig, error) {
+	genCfg := gollem.NewGenerateConfig(opts...)
+	effectiveConfig := *s.config
+	if t := genCfg.Temperature(); t != nil {
+		temp := float32(*t)
+		effectiveConfig.Temperature = &temp
+	}
+	if p := genCfg.TopP(); p != nil {
+		topP := float32(*p)
+		effectiveConfig.TopP = &topP
+	}
+	if m := genCfg.MaxTokens(); m != nil {
+		if *m > math.MaxInt32 || *m < 0 {
+			return nil, goerr.New("maxTokens out of int32 range", goerr.V("maxTokens", *m))
+		}
+		effectiveConfig.MaxOutputTokens = int32(*m)
+	}
+	if perCallSchema := genCfg.ResponseSchema(); perCallSchema != nil {
+		effectiveConfig.ResponseMIMEType = "application/json"
+		genaiSchema, err := convertResponseSchemaToGenai(perCallSchema)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert per-call response schema")
+		}
+		effectiveConfig.ResponseSchema = genaiSchema
+	}
+	return &effectiveConfig, nil
+}
+
+// Deprecated: GenerateContent is deprecated. Use Generate instead.
+func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	return s.Generate(ctx, input)
+}
+
+// Deprecated: GenerateStream is deprecated. Use Stream instead.
+func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+	return s.Stream(ctx, input)
+}
+
 // CountToken calculates the total number of tokens for the given inputs,
 // including system prompt, history messages, and new inputs.
 // This is useful for estimating API costs and checking token limits before making actual API calls.
@@ -1000,10 +1058,26 @@ func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, e
 		Tools:             s.config.Tools,
 	}
 
+	// Start LLM call trace span
+	var traceData *trace.LLMCallData
+	var llmErr error
+	if h := trace.HandlerFrom(ctx); h != nil {
+		ctx = h.StartLLMCall(ctx)
+		defer func() { h.EndLLMCall(ctx, traceData, llmErr) }()
+	}
+
 	// Call the CountTokens API
 	result, err := s.apiClient.CountTokens(ctx, s.model, contents, countConfig)
 	if err != nil {
+		llmErr = err
 		return 0, goerr.Wrap(err, "failed to count tokens")
+	}
+
+	traceData = &trace.LLMCallData{
+		InputTokens: int(result.TotalTokens),
+		Model:       s.model,
+		Request:     &trace.LLMRequest{},
+		Response:    &trace.LLMResponse{},
 	}
 
 	return int(result.TotalTokens), nil
@@ -1037,14 +1111,79 @@ func tokenLimitErrorOptions(err error) []goerr.Option {
 	return nil
 }
 
+// contentsToTraceMessages converts Gemini contents to trace messages.
+func contentsToTraceMessages(contents []*genai.Content) []trace.Message {
+	var messages []trace.Message
+	for _, c := range contents {
+		if c == nil {
+			continue
+		}
+		var blocks []trace.MessageContent
+		for _, p := range c.Parts {
+			if p == nil {
+				continue
+			}
+			switch {
+			case p.Thought && p.Text != "":
+				blocks = append(blocks, trace.NewThinkingContent(p.Text))
+			case p.Text != "":
+				blocks = append(blocks, trace.NewTextContent(p.Text))
+			case p.FunctionCall != nil:
+				blocks = append(blocks, trace.NewToolCallContent(
+					"", p.FunctionCall.Name, p.FunctionCall.Args,
+				))
+			case p.FunctionResponse != nil:
+				var result map[string]any
+				if p.FunctionResponse.Response != nil {
+					result = p.FunctionResponse.Response
+				}
+				blocks = append(blocks, trace.NewToolResponseContent(
+					"", p.FunctionResponse.Name, result,
+				))
+			case p.InlineData != nil:
+				mc := trace.NewMediaContent("image", p.InlineData.MIMEType)
+				if p.InlineData.DisplayName != "" {
+					mc.Title = p.InlineData.DisplayName
+				}
+				blocks = append(blocks, mc)
+			case p.FileData != nil:
+				mc := trace.NewMediaContent("file", p.FileData.MIMEType)
+				mc.URL = p.FileData.FileURI
+				if p.FileData.DisplayName != "" {
+					mc.Title = p.FileData.DisplayName
+				}
+				blocks = append(blocks, mc)
+			case p.ExecutableCode != nil:
+				blocks = append(blocks, trace.MessageContent{
+					Type: "executable_code",
+					Text: p.ExecutableCode.Code,
+				})
+			case p.CodeExecutionResult != nil:
+				blocks = append(blocks, trace.MessageContent{
+					Type: "code_execution_result",
+					Text: p.CodeExecutionResult.Output,
+				})
+			}
+		}
+		if len(blocks) > 0 {
+			messages = append(messages, trace.Message{
+				Role:     c.Role,
+				Contents: blocks,
+			})
+		}
+	}
+	return messages
+}
+
 // buildGeminiTraceData builds trace.LLMCallData from a processed gollem.Response.
-func buildGeminiTraceData(response *gollem.Response, model string, systemPrompt string) *trace.LLMCallData {
+func buildGeminiTraceData(response *gollem.Response, model string, systemPrompt string, contents []*genai.Content) *trace.LLMCallData {
 	data := &trace.LLMCallData{
 		InputTokens:  response.InputToken,
 		OutputTokens: response.OutputToken,
 		Model:        model,
 		Request: &trace.LLMRequest{
 			SystemPrompt: systemPrompt,
+			Messages:     contentsToTraceMessages(contents),
 		},
 		Response: &trace.LLMResponse{},
 	}

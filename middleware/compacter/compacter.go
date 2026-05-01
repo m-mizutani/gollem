@@ -264,7 +264,7 @@ func compactHistory(
 		return nil, goerr.Wrap(err, "failed to create LLM session for summarization")
 	}
 
-	resp, err := session.GenerateContent(ctx, gollem.Text(cfg.summaryPrompt))
+	resp, err := session.Generate(ctx, []gollem.Input{gollem.Text(cfg.summaryPrompt)})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to generate summary")
 	}

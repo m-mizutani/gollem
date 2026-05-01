@@ -23,6 +23,9 @@ type SubAgent struct {
 
 	// Middleware for processing arguments before template rendering
 	middleware func(SubAgentHandler) SubAgentHandler
+
+	// Options to apply to child agents created by agentFactory
+	subAgentOptions []Option
 }
 
 // SubAgentOption is the type for options when creating a SubAgent.
@@ -187,6 +190,21 @@ func WithSubAgentMiddleware(middleware func(SubAgentHandler) SubAgentHandler) Su
 	}
 }
 
+// WithSubAgentOptions sets additional gollem.Option values to apply to child agents
+// created by the factory function. These options are applied after the factory
+// creates the agent but before Execute() is called.
+//
+// This enables the parent agent to inject cross-cutting concerns (such as
+// tool middleware for budget tracking or monitoring) into sub-agent execution,
+// without modifying each sub-agent's factory function.
+//
+// Multiple calls to this option are cumulative - options are appended.
+func WithSubAgentOptions(opts ...Option) SubAgentOption {
+	return func(s *SubAgent) {
+		s.subAgentOptions = append(s.subAgentOptions, opts...)
+	}
+}
+
 // NewSubAgent creates a new SubAgent that wraps a factory function for creating Agent instances.
 // name: Tool name for the subagent (required, used by LLM to invoke)
 // description: Description of what this subagent does (required, helps LLM decide when to use)
@@ -273,6 +291,11 @@ func (s *SubAgent) Run(ctx context.Context, args map[string]any) (_ map[string]a
 		}
 		if agent == nil {
 			return SubAgentResult{}, goerr.New("agent factory returned nil").Wrap(ErrSubAgentFactory)
+		}
+
+		// Apply additional options to the child agent
+		for _, opt := range s.subAgentOptions {
+			opt(&agent.gollemConfig)
 		}
 
 		// Execute the child agent

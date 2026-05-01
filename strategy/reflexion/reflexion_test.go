@@ -30,7 +30,7 @@ type mockSession struct {
 	generateCount int
 }
 
-func (m *mockSession) GenerateContent(ctx context.Context, inputs ...gollem.Input) (*gollem.Response, error) {
+func (m *mockSession) Generate(ctx context.Context, inputs []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 	m.generateCount++
 
 	// First call: generate a brief response that will fail evaluation
@@ -46,8 +46,16 @@ func (m *mockSession) GenerateContent(ctx context.Context, inputs ...gollem.Inpu
 	}, nil
 }
 
-func (m *mockSession) GenerateStream(ctx context.Context, inputs ...gollem.Input) (<-chan *gollem.Response, error) {
+func (m *mockSession) Stream(ctx context.Context, inputs []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
 	return nil, nil
+}
+
+func (m *mockSession) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	return m.Generate(ctx, input)
+}
+
+func (m *mockSession) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+	return m.Stream(ctx, input)
 }
 
 func (m *mockSession) History() (*gollem.History, error) {

@@ -33,14 +33,24 @@ func WithTraceID(id string) Option {
 	}
 }
 
+// WithStackTrace enables capturing call stack traces for each span.
+// Stack traces are useful for debugging but add overhead, so they are
+// disabled by default.
+func WithStackTrace() Option {
+	return func(r *Recorder) {
+		r.stackTrace = true
+	}
+}
+
 // Recorder collects tracing data during agent execution into an in-memory Trace structure.
 // It implements the Handler interface and provides access to the collected Trace via Trace().
 type Recorder struct {
-	trace    *Trace
-	mu       sync.Mutex
-	repo     Repository
-	metadata TraceMetadata
-	traceID  string
+	trace      *Trace
+	mu         sync.Mutex
+	repo       Repository
+	metadata   TraceMetadata
+	traceID    string
+	stackTrace bool
 }
 
 // New creates a new Recorder with the given options.
@@ -84,9 +94,36 @@ func newSpanID() string {
 }
 
 // StartAgentExecute starts the root agent_execute span.
+// If a trace already exists, it falls back to creating a child agent span
+// instead of overwriting the existing trace. This prevents silent data loss
+// when a single Recorder is shared across multiple Agent.Execute calls.
 func (r *Recorder) StartAgentExecute(ctx context.Context) context.Context {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// If a trace already exists, fall back to child agent span
+	if r.trace != nil {
+		parent := currentSpanFrom(ctx)
+		if parent == nil {
+			parent = r.trace.RootSpan
+		}
+
+		spanID := newSpanID()
+		span := &Span{
+			SpanID:    spanID,
+			ParentID:  parent.SpanID,
+			Kind:      SpanKindAgentExecute,
+			Name:      "agent_execute",
+			StartedAt: time.Now(),
+			Status:    SpanStatusOK,
+		}
+		if r.stackTrace {
+			span.StackTrace = captureStackTrace(1)
+		}
+
+		parent.Children = append(parent.Children, span)
+		return withCurrentSpan(ctx, span)
+	}
 
 	now := time.Now()
 	spanID := newSpanID()
@@ -97,6 +134,10 @@ func (r *Recorder) StartAgentExecute(ctx context.Context) context.Context {
 		Name:      "agent_execute",
 		StartedAt: now,
 		Status:    SpanStatusOK,
+	}
+	if r.stackTrace {
+		// skip=1: skip StartAgentExecute to show the caller (e.g., gollem.go)
+		span.StackTrace = captureStackTrace(1)
 	}
 
 	traceID := r.traceID
@@ -187,6 +228,10 @@ func (r *Recorder) StartToolExec(ctx context.Context, toolName string, args map[
 			Args:     args,
 		},
 	}
+	if r.stackTrace {
+		// skip=1: skip StartToolExec to show the caller (e.g., gollem.go)
+		span.StackTrace = captureStackTrace(1)
+	}
 
 	parent.Children = append(parent.Children, span)
 	return withCurrentSpan(ctx, span)
@@ -226,11 +271,26 @@ func (r *Recorder) StartSubAgent(ctx context.Context, name string) context.Conte
 
 // EndSubAgent ends the sub_agent span.
 func (r *Recorder) EndSubAgent(ctx context.Context, err error) {
+	r.endSpanByKind(ctx, SpanKindSubAgent, err)
+}
+
+// StartChildAgent starts a child agent_execute span as a child of the current span.
+func (r *Recorder) StartChildAgent(ctx context.Context, name string) context.Context {
+	return r.startChildSpan(ctx, SpanKindAgentExecute, name)
+}
+
+// EndChildAgent ends a child agent_execute span.
+func (r *Recorder) EndChildAgent(ctx context.Context, err error) {
+	r.endSpanByKind(ctx, SpanKindAgentExecute, err)
+}
+
+// endSpanByKind ends a span of the given kind.
+func (r *Recorder) endSpanByKind(ctx context.Context, kind SpanKind, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	span := currentSpanFrom(ctx)
-	if span == nil || span.Kind != SpanKindSubAgent {
+	if span == nil || span.Kind != kind {
 		return
 	}
 
@@ -272,6 +332,10 @@ func (r *Recorder) AddEvent(ctx context.Context, kind string, data any) {
 			Kind: kind,
 			Data: data,
 		},
+	}
+	if r.stackTrace {
+		// skip=1: skip AddEvent to show the caller (e.g., strategy code)
+		span.StackTrace = captureStackTrace(1)
 	}
 
 	parent.Children = append(parent.Children, span)
@@ -320,6 +384,10 @@ func (r *Recorder) startChildSpan(ctx context.Context, kind SpanKind, name strin
 		Name:      name,
 		StartedAt: time.Now(),
 		Status:    SpanStatusOK,
+	}
+	if r.stackTrace {
+		// skip=2: skip startChildSpan and StartLLMCall/StartSubAgent to show the caller (e.g., llm client code)
+		span.StackTrace = captureStackTrace(2)
 	}
 
 	parent.Children = append(parent.Children, span)

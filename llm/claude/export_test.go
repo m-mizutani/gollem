@@ -7,11 +7,12 @@ import (
 
 // Export convert functions for testing
 var (
-	ConvertTool                 = convertTool
-	ConvertParameterToSchema    = convertParameterToSchema
-	ConvertGollemInputsToClaude = convertGollemInputsToClaude
-	CreateSystemPrompt          = createSystemPrompt
-	TokenLimitErrorOptions      = tokenLimitErrorOptions
+	ConvertTool                   = convertTool
+	ConvertParameterToSchema      = convertParameterToSchema
+	ConvertGollemInputsToClaude   = convertGollemInputsToClaude
+	CreateSystemPrompt            = createSystemPrompt
+	TokenLimitErrorOptions        = tokenLimitErrorOptions
+	ClaudeMessagesToTraceMessages = claudeMessagesToTraceMessages
 )
 
 type JsonSchema = jsonSchema

@@ -16,23 +16,38 @@ jobs:
 
     steps:
       - name: Checkout upstream repo
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ github.head_ref }}
-      - id: scan
-        name: Run Trivy vulnerability scanner in repo mode
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # 0.33.1
+
+      - id: scan-table
+        name: Run Trivy vulnerability scanner (table output)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0 (known-safe SHA after tag compromise incident)
+        with:
+          scan-type: "fs"
+          ignore-unfixed: true
+          format: "table"
+          exit-code: 1
+        env:
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db
+          TRIVY_JAVA_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-java-db
+
+      - id: scan-sarif
+        name: Run Trivy vulnerability scanner (SARIF output)
+        if: failure() && steps.scan-table.outcome == 'failure'
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0 (known-safe SHA after tag compromise incident)
         with:
           scan-type: "fs"
           ignore-unfixed: true
           format: "sarif"
           output: "trivy-results.sarif"
-          exit-code: 1
+          exit-code: 0
         env:
           TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db
+          TRIVY_JAVA_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-java-db
 
       - name: Upload Trivy scan results to GitHub Security tab
-        if: failure() && steps.scan.outcome == 'failure'
-        uses: github/codeql-action/upload-sarif@439137e1b50c27ba9e2f9befc93e43091b449c34 # v3.32.0
+        if: failure() && steps.scan-table.outcome == 'failure'
+        uses: github/codeql-action/upload-sarif@7fc1baf373eb073c686865bd453d412d506a05a2 # v3.35.1
         with:
           sarif_file: "trivy-results.sarif"

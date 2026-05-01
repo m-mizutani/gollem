@@ -33,6 +33,7 @@ go.work.sum
 /.cckiro
 cmd/gollem/frontend/node_modules/
 cmd/gollem/frontend/public/licenses.txt
+.pnpm-store/
 
 .project
 .claude/settings.local.json

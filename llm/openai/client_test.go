@@ -2,16 +2,24 @@ package openai_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/openai"
+	"github.com/m-mizutani/gollem/trace"
 	"github.com/m-mizutani/gt"
 	openaiapi "github.com/sashabaranov/go-openai"
+)
+
+const (
+	testTimeout   = 30 * time.Second
+	maxTestTokens = 2048
 )
 
 func TestOpenAIContentGenerate(t *testing.T) {
@@ -20,7 +28,8 @@ func TestOpenAIContentGenerate(t *testing.T) {
 		t.Skip("TEST_OPENAI_API_KEY is not set")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
 
 	client, err := openai.New(ctx, apiKey)
 	gt.NoError(t, err)
@@ -28,7 +37,7 @@ func TestOpenAIContentGenerate(t *testing.T) {
 	session, err := client.NewSession(ctx)
 	gt.NoError(t, err)
 
-	result, err := session.GenerateContent(ctx, gollem.Text("Say hello in one word"))
+	result, err := session.Generate(ctx, []gollem.Input{gollem.Text("Say hello in one word")}, gollem.WithMaxTokens(maxTestTokens))
 	gt.NoError(t, err)
 	gt.Array(t, result.Texts).Length(1).Required()
 	gt.Value(t, len(result.Texts[0])).NotEqual(0)
@@ -116,7 +125,8 @@ func TestOpenAITokenLimitErrorIntegration(t *testing.T) {
 		t.Skip("TEST_TOKEN_LIMIT_ERROR is not set to true")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
 
 	// Use gpt-5 (default model) which has 128k context limit
 	client, err := openai.New(ctx, apiKey)
@@ -130,7 +140,7 @@ func TestOpenAITokenLimitErrorIntegration(t *testing.T) {
 	// Approximately 1 token = 4 characters, aim for ~300k+ tokens
 	longText := strings.Repeat("This is a test sentence to make the prompt very long. ", 25000)
 
-	_, err = session.GenerateContent(ctx, gollem.Text(longText))
+	_, err = session.Generate(ctx, []gollem.Input{gollem.Text(longText)})
 	gt.Error(t, err)
 
 	// Log error details for debugging
@@ -139,6 +149,48 @@ func TestOpenAITokenLimitErrorIntegration(t *testing.T) {
 
 	// Verify the error has the token exceeded tag
 	gt.True(t, goerr.HasTag(err, gollem.ErrTagTokenExceeded))
+}
+
+// TestPerCallGenerateOptions verifies that per-call GenerateOption overrides
+// actually change the API request. A text-mode session gets a per-call
+// ResponseSchema, and the response must be valid JSON matching the schema.
+func TestPerCallGenerateOptions(t *testing.T) {
+	apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
+	if !ok {
+		t.Skip("TEST_OPENAI_API_KEY is not set")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	client, err := openai.New(ctx, apiKey)
+	gt.NoError(t, err)
+
+	// Create a plain text session — no ContentTypeJSON, no ResponseSchema
+	session, err := client.NewSession(ctx)
+	gt.NoError(t, err)
+
+	schema := &gollem.Parameter{
+		Type:  gollem.TypeObject,
+		Title: "Color",
+		Properties: map[string]*gollem.Parameter{
+			"name": {Type: gollem.TypeString, Description: "color name", Required: true},
+		},
+	}
+
+	// Per-call option should force JSON schema output
+	resp, err := session.Generate(ctx,
+		[]gollem.Input{gollem.Text("Name a color.")},
+		gollem.WithGenerateResponseSchema(schema),
+		gollem.WithMaxTokens(maxTestTokens),
+	)
+	gt.NoError(t, err)
+	gt.True(t, len(resp.Texts) > 0)
+
+	// The response must be valid JSON
+	var parsed map[string]any
+	gt.NoError(t, json.Unmarshal([]byte(resp.Texts[0]), &parsed))
+	gt.True(t, parsed["name"] != nil)
 }
 
 // TestWithBaseURL tests the WithBaseURL option functionality for OpenAI
@@ -170,4 +222,144 @@ func TestWithBaseURL(t *testing.T) {
 		gt.NoError(t, err2)
 		gt.Equal(t, "", openai.GetBaseURL(client2)) // Should be empty, not first URL
 	})
+}
+
+func TestOpenaiMessagesToTraceMessages(t *testing.T) {
+	type testCase struct {
+		messages []openaiapi.ChatCompletionMessage
+		expected []trace.Message
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			result := openai.OpenaiMessagesToTraceMessages(tc.messages)
+			gt.Equal(t, tc.expected, result)
+		}
+	}
+
+	t.Run("user text message", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{
+			{Role: openaiapi.ChatMessageRoleUser, Content: "hello world"},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewTextContent("hello world"),
+			}},
+		},
+	}))
+
+	t.Run("system message", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{
+			{Role: openaiapi.ChatMessageRoleSystem, Content: "you are helpful"},
+		},
+		expected: []trace.Message{
+			{Role: "system", Contents: []trace.MessageContent{
+				trace.NewTextContent("you are helpful"),
+			}},
+		},
+	}))
+
+	t.Run("assistant with tool calls", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{
+			{
+				Role: openaiapi.ChatMessageRoleAssistant,
+				ToolCalls: []openaiapi.ToolCall{
+					{
+						ID:   "call-1",
+						Type: openaiapi.ToolTypeFunction,
+						Function: openaiapi.FunctionCall{
+							Name:      "search",
+							Arguments: `{"q":"test"}`,
+						},
+					},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "assistant", Contents: []trace.MessageContent{
+				trace.NewToolCallContent("call-1", "search", map[string]any{"q": "test"}),
+			}},
+		},
+	}))
+
+	t.Run("tool response", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{
+			{
+				Role:       openaiapi.ChatMessageRoleTool,
+				Content:    "search result",
+				ToolCallID: "call-1",
+			},
+		},
+		expected: []trace.Message{
+			{Role: "tool", Contents: []trace.MessageContent{
+				{Type: "tool_response", ToolCallID: "call-1", Text: "search result"},
+			}},
+		},
+	}))
+
+	t.Run("multi content with image URL", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{
+			{
+				Role: openaiapi.ChatMessageRoleUser,
+				MultiContent: []openaiapi.ChatMessagePart{
+					{Type: openaiapi.ChatMessagePartTypeText, Text: "describe this"},
+					{Type: openaiapi.ChatMessagePartTypeImageURL, ImageURL: &openaiapi.ChatMessageImageURL{URL: "https://example.com/img.png"}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewTextContent("describe this"),
+				{Type: "image", URL: "https://example.com/img.png"},
+			}},
+		},
+	}))
+
+	t.Run("assistant text with tool calls", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{
+			{
+				Role:    openaiapi.ChatMessageRoleAssistant,
+				Content: "Let me search",
+				ToolCalls: []openaiapi.ToolCall{
+					{
+						ID:   "call-1",
+						Type: openaiapi.ToolTypeFunction,
+						Function: openaiapi.FunctionCall{
+							Name:      "search",
+							Arguments: `{"q":"test"}`,
+						},
+					},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "assistant", Contents: []trace.MessageContent{
+				trace.NewTextContent("Let me search"),
+				trace.NewToolCallContent("call-1", "search", map[string]any{"q": "test"}),
+			}},
+		},
+	}))
+
+	t.Run("multiple messages", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{
+			{Role: openaiapi.ChatMessageRoleUser, Content: "hello"},
+			{Role: openaiapi.ChatMessageRoleAssistant, Content: "hi"},
+			{Role: openaiapi.ChatMessageRoleUser, Content: "how are you"},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{trace.NewTextContent("hello")}},
+			{Role: "assistant", Contents: []trace.MessageContent{trace.NewTextContent("hi")}},
+			{Role: "user", Contents: []trace.MessageContent{trace.NewTextContent("how are you")}},
+		},
+	}))
+
+	t.Run("nil messages", runTest(testCase{
+		messages: nil,
+		expected: nil,
+	}))
+
+	t.Run("empty messages", runTest(testCase{
+		messages: []openaiapi.ChatCompletionMessage{},
+		expected: nil,
+	}))
 }

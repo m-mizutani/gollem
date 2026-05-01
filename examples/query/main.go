@@ -13,6 +13,13 @@ import (
 	"github.com/m-mizutani/gollem/llm/openai"
 )
 
+// AnalysisResult is the structured response from the LLM.
+type AnalysisResult struct {
+	Summary  string   `json:"summary" description:"brief summary of the analysis"`
+	Keywords []string `json:"keywords" description:"key terms extracted from the input"`
+	Score    int      `json:"score" description:"relevance score from 1 to 10" min:"1" max:"10"`
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -41,15 +48,15 @@ func main() {
 		panic(err)
 	}
 
-	ssn, err := client.NewSession(ctx)
+	resp, err := gollem.Query[AnalysisResult](ctx, client, prompt,
+		gollem.WithQuerySystemPrompt("You are an expert analyst. Analyze the given text and return structured results."),
+	)
 	if err != nil {
 		panic(err)
 	}
 
-	result, err := ssn.GenerateContent(ctx, gollem.Text(prompt))
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println(result.Texts)
+	fmt.Printf("Summary:  %s\n", resp.Data.Summary)
+	fmt.Printf("Keywords: %v\n", resp.Data.Keywords)
+	fmt.Printf("Score:    %d\n", resp.Data.Score)
+	fmt.Printf("Tokens:   %d input, %d output\n", resp.InputToken, resp.OutputToken)
 }

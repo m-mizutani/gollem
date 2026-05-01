@@ -1,11 +1,82 @@
 package gemini
 
 import (
+	"encoding/json"
+
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/internal/convert"
 	"google.golang.org/genai"
 )
+
+// partMeta is the metadata stored in MessageContent.Meta for Gemini parts.
+// It preserves Gemini-specific fields (e.g., thinking model signatures) across
+// serialization/deserialization without polluting the common message types.
+type partMeta struct {
+	Thought          bool   `json:"thought,omitempty"`
+	ThoughtSignature []byte `json:"thought_signature,omitempty"`
+}
+
+// marshalPartMeta marshals partMeta to JSON for MessageContent.Meta.
+// Returns nil if no metadata needs to be stored.
+func marshalPartMeta(m partMeta) (json.RawMessage, error) {
+	if !m.Thought && len(m.ThoughtSignature) == 0 {
+		return nil, nil
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to marshal part meta")
+	}
+	return data, nil
+}
+
+// unmarshalPartMeta unmarshals partMeta from MessageContent.Meta.
+// Returns zero-value partMeta if meta is nil or empty.
+func unmarshalPartMeta(meta json.RawMessage) (partMeta, error) {
+	if len(meta) == 0 {
+		return partMeta{}, nil
+	}
+	var m partMeta
+	if err := json.Unmarshal(meta, &m); err != nil {
+		return partMeta{}, goerr.Wrap(err, "failed to unmarshal part meta")
+	}
+	return m, nil
+}
+
+// isEmptyPart returns true if a Gemini part has no meaningful content.
+// Some models (e.g., thinking models) may return empty parts that should be skipped.
+func isEmptyPart(part *genai.Part) bool {
+	return part.Text == "" &&
+		!part.Thought &&
+		part.FunctionCall == nil &&
+		part.FunctionResponse == nil &&
+		part.InlineData == nil &&
+		part.FileData == nil &&
+		part.ExecutableCode == nil &&
+		part.CodeExecutionResult == nil &&
+		len(part.ThoughtSignature) == 0
+}
+
+// filterEmptyParts removes empty parts from a Content and returns a new Content.
+// Returns nil if all parts are empty.
+func filterEmptyParts(content *genai.Content) *genai.Content {
+	if content == nil {
+		return nil
+	}
+	filtered := make([]*genai.Part, 0, len(content.Parts))
+	for _, part := range content.Parts {
+		if !isEmptyPart(part) {
+			filtered = append(filtered, part)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return &genai.Content{
+		Role:  content.Role,
+		Parts: filtered,
+	}
+}
 
 // convertGeminiToMessages converts Gemini contents to common Message format
 func convertGeminiToMessages(contents []*genai.Content) ([]gollem.Message, error) {
@@ -31,6 +102,9 @@ func convertGeminiContent(content *genai.Content) (gollem.Message, error) {
 	contents := make([]gollem.MessageContent, 0, len(content.Parts))
 
 	for _, part := range content.Parts {
+		if isEmptyPart(part) {
+			continue
+		}
 		msgContent, err := convertGeminiPart(part)
 		if err != nil {
 			return gollem.Message{}, goerr.Wrap(err, "failed to convert Gemini part")
@@ -49,9 +123,33 @@ func convertGeminiContent(content *genai.Content) (gollem.Message, error) {
 
 // convertGeminiPart converts a Gemini part to MessageContent
 func convertGeminiPart(part *genai.Part) (gollem.MessageContent, error) {
+	// Build metadata from thinking-related fields
+	meta, err := marshalPartMeta(partMeta{
+		Thought:          part.Thought,
+		ThoughtSignature: part.ThoughtSignature,
+	})
+	if err != nil {
+		return gollem.MessageContent{}, err
+	}
+
+	// Thought part (internal reasoning, may have empty text)
+	if part.Thought {
+		mc, err := gollem.NewTextContent(part.Text)
+		if err != nil {
+			return gollem.MessageContent{}, err
+		}
+		mc.Meta = meta
+		return mc, nil
+	}
+
 	// Text part
 	if part.Text != "" {
-		return gollem.NewTextContent(part.Text)
+		mc, err := gollem.NewTextContent(part.Text)
+		if err != nil {
+			return gollem.MessageContent{}, err
+		}
+		mc.Meta = meta
+		return mc, nil
 	}
 
 	// Inline data (image or PDF)
@@ -80,11 +178,16 @@ func convertGeminiPart(part *genai.Part) (gollem.MessageContent, error) {
 
 	// Function call
 	if part.FunctionCall != nil {
-		return gollem.NewToolCallContent(
+		mc, err := gollem.NewToolCallContent(
 			convert.GenerateToolCallID(part.FunctionCall.Name, 0),
 			part.FunctionCall.Name,
 			part.FunctionCall.Args,
 		)
+		if err != nil {
+			return gollem.MessageContent{}, err
+		}
+		mc.Meta = meta
+		return mc, nil
 	}
 
 	// Function response
@@ -95,6 +198,17 @@ func convertGeminiPart(part *genai.Part) (gollem.MessageContent, error) {
 			part.FunctionResponse.Response,
 			false,
 		)
+	}
+
+	// ThoughtSignature-only part (no text, no function call, not marked as thought)
+	// Some Gemini models return parts with only ThoughtSignature set.
+	if len(part.ThoughtSignature) > 0 {
+		mc, err := gollem.NewTextContent("")
+		if err != nil {
+			return gollem.MessageContent{}, err
+		}
+		mc.Meta = meta
+		return mc, nil
 	}
 
 	return gollem.MessageContent{}, goerr.Wrap(convert.ErrUnsupportedContentType, "unknown Gemini part type")
@@ -162,13 +276,23 @@ func convertMessageToGemini(msg gollem.Message) (*genai.Content, error) {
 
 // convertContentToGemini converts MessageContent to Gemini part
 func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) {
+	// Extract provider metadata if present
+	meta, err := unmarshalPartMeta(content.Meta)
+	if err != nil {
+		return nil, err
+	}
+
 	switch content.Type {
 	case gollem.MessageContentTypeText:
 		textContent, err := content.GetTextContent()
 		if err != nil {
 			return nil, err
 		}
-		return &genai.Part{Text: textContent.Text}, nil
+		return &genai.Part{
+			Text:             textContent.Text,
+			Thought:          meta.Thought,
+			ThoughtSignature: meta.ThoughtSignature,
+		}, nil
 
 	case gollem.MessageContentTypeImage:
 		imgContent, err := content.GetImageContent()
@@ -227,6 +351,7 @@ func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) 
 				Name: toolCall.Name,
 				Args: toolCall.Arguments,
 			},
+			ThoughtSignature: meta.ThoughtSignature,
 		}, nil
 
 	case gollem.MessageContentTypeToolResponse:

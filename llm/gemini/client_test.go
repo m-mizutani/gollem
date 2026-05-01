@@ -2,6 +2,7 @@ package gemini_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"os"
@@ -12,8 +13,14 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/gemini"
+	"github.com/m-mizutani/gollem/trace"
 	"github.com/m-mizutani/gt"
 	"google.golang.org/genai"
+)
+
+const (
+	testTimeout   = 30 * time.Second
+	maxTestTokens = 2048
 )
 
 // Tests for client.go functionality
@@ -316,17 +323,23 @@ func TestGeminiContentGenerate(t *testing.T) {
 		testLocation = v
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
 
-	client, err := gemini.New(ctx, testProjectID, testLocation)
+	var opts []gemini.Option
+	if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+		opts = append(opts, gemini.WithModel(model))
+	}
+
+	client, err := gemini.New(ctx, testProjectID, testLocation, opts...)
 	gt.NoError(t, err)
 
 	session, err := client.NewSession(ctx)
 	gt.NoError(t, err)
 
-	result, err := session.GenerateContent(ctx, gollem.Text("Say hello in one word"))
-	gt.NoError(t, err)
-	gt.Array(t, result.Texts).Length(1).Required()
+	result, err := session.Generate(ctx, []gollem.Input{gollem.Text("Say hello in one word")}, gollem.WithMaxTokens(maxTestTokens))
+	gt.NoError(t, err).Required()
+	gt.A(t, result.Texts).Length(1).Required()
 	gt.Value(t, len(result.Texts[0])).NotEqual(0)
 }
 
@@ -393,8 +406,6 @@ func TestThinkingBudgetIntegration(t *testing.T) {
 		t.Skip("TEST_GCP_LOCATION is not set")
 	}
 
-	ctx := context.Background()
-
 	testCases := []struct {
 		name   string
 		model  string
@@ -414,6 +425,9 @@ func TestThinkingBudgetIntegration(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+			defer cancel()
+
 			client, err := gemini.New(ctx, projectID, location,
 				gemini.WithModel(tc.model),
 				gemini.WithThinkingBudget(tc.budget),
@@ -434,7 +448,7 @@ func TestThinkingBudgetIntegration(t *testing.T) {
 			gt.NotNil(t, session)
 
 			// Simple test prompt
-			response, err := session.GenerateContent(ctx, gollem.Text("Say 'Hello' in one word"))
+			response, err := session.Generate(ctx, []gollem.Input{gollem.Text("Say 'Hello' in one word")}, gollem.WithMaxTokens(maxTestTokens))
 			gt.NoError(t, err)
 			gt.NotNil(t, response)
 			gt.Array(t, response.Texts).Length(1).Required()
@@ -534,6 +548,268 @@ func TestTokenLimitErrorOptions(t *testing.T) {
 	}))
 }
 
+func TestThinkingModelAgentLoop(t *testing.T) {
+	// Simulate a thinking model response with ThoughtSignature.
+	// Verify that the second GenerateContent call receives the signatures in history.
+	callCount := 0
+	mock := &apiClientMock{
+		GenerateContentFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+			callCount++
+			if callCount == 1 {
+				// First call: return a thinking model response with thought + function call
+				return &genai.GenerateContentResponse{
+					Candidates: []*genai.Candidate{
+						{
+							Content: &genai.Content{
+								Role: "model",
+								Parts: []*genai.Part{
+									{
+										Text:             "Let me think about this...",
+										Thought:          true,
+										ThoughtSignature: []byte("thought-sig-001"),
+									},
+									{
+										FunctionCall: &genai.FunctionCall{
+											Name: "write_file",
+											Args: map[string]any{"path": "test.txt"},
+										},
+										ThoughtSignature: []byte("fc-sig-002"),
+									},
+								},
+							},
+						},
+					},
+					UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+						PromptTokenCount:     100,
+						CandidatesTokenCount: 50,
+					},
+				}, nil
+			}
+
+			// Second call: verify that the history contains ThoughtSignature
+			// The history should include: user message + model response (with signatures) + user (tool response)
+			foundThoughtSig := false
+			foundFCSig := false
+			for _, content := range contents {
+				for _, part := range content.Parts {
+					if part.Thought && len(part.ThoughtSignature) > 0 {
+						foundThoughtSig = true
+					}
+					if part.FunctionCall != nil && len(part.ThoughtSignature) > 0 {
+						foundFCSig = true
+					}
+				}
+			}
+			gt.Value(t, foundThoughtSig).Equal(true)
+			gt.Value(t, foundFCSig).Equal(true)
+
+			// Return a simple text response
+			return &genai.GenerateContentResponse{
+				Candidates: []*genai.Candidate{
+					{
+						Content: &genai.Content{
+							Role: "model",
+							Parts: []*genai.Part{
+								{Text: "File written successfully."},
+							},
+						},
+					},
+				},
+				UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+					PromptTokenCount:     200,
+					CandidatesTokenCount: 20,
+				},
+			}, nil
+		},
+	}
+
+	cfg := gollem.NewSessionConfig()
+	session, err := gemini.NewSessionWithAPIClient(mock, cfg, "gemini-2.5-flash")
+	gt.NoError(t, err)
+
+	ctx := context.Background()
+
+	// First call: should get a function call
+	resp1, err := session.Generate(ctx, []gollem.Input{gollem.Text("Write a test file")})
+	gt.NoError(t, err)
+	gt.A(t, resp1.FunctionCalls).Length(1)
+	// Thought text should NOT appear in Texts
+	gt.A(t, resp1.Texts).Length(0)
+
+	// Second call: send function response (simulating tool execution result)
+	resp2, err := session.Generate(ctx, []gollem.Input{gollem.FunctionResponse{
+		Name: "write_file",
+		Data: map[string]any{"status": "ok"},
+	}})
+	gt.NoError(t, err)
+	gt.A(t, resp2.Texts).Length(1)
+	gt.Value(t, resp2.Texts[0]).Equal("File written successfully.")
+
+	// Verify both calls were made
+	gt.Value(t, callCount).Equal(2)
+}
+
+func TestThinkingModelHistoryRoundTrip(t *testing.T) {
+	// Simulate a thinking model response, export history, restore it, and continue.
+	mock := &apiClientMock{
+		GenerateContentFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+			return &genai.GenerateContentResponse{
+				Candidates: []*genai.Candidate{
+					{
+						Content: &genai.Content{
+							Role: "model",
+							Parts: []*genai.Part{
+								{
+									Text:             "Reasoning...",
+									Thought:          true,
+									ThoughtSignature: []byte("sig-thought"),
+								},
+								{
+									Text:             "Hello!",
+									ThoughtSignature: []byte("sig-text"),
+								},
+							},
+						},
+					},
+				},
+				UsageMetadata: &genai.GenerateContentResponseUsageMetadata{},
+			}, nil
+		},
+	}
+
+	cfg := gollem.NewSessionConfig()
+	session, err := gemini.NewSessionWithAPIClient(mock, cfg, "gemini-2.5-flash")
+	gt.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Make a call to populate history
+	_, err = session.Generate(ctx, []gollem.Input{gollem.Text("Hi")})
+	gt.NoError(t, err)
+
+	// Export history
+	history, err := session.History()
+	gt.NoError(t, err)
+
+	// Restore into a new session
+	cfg2 := gollem.NewSessionConfig(gollem.WithSessionHistory(history))
+
+	// For the restored session, verify signatures are in the API call
+	mock2 := &apiClientMock{
+		GenerateContentFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+			// Verify that signatures are present in history
+			foundThoughtSig := false
+			foundTextSig := false
+			for _, content := range contents {
+				for _, part := range content.Parts {
+					if part.Thought && string(part.ThoughtSignature) == "sig-thought" {
+						foundThoughtSig = true
+					}
+					if !part.Thought && part.Text == "Hello!" && string(part.ThoughtSignature) == "sig-text" {
+						foundTextSig = true
+					}
+				}
+			}
+			gt.Value(t, foundThoughtSig).Equal(true)
+			gt.Value(t, foundTextSig).Equal(true)
+
+			return &genai.GenerateContentResponse{
+				Candidates: []*genai.Candidate{
+					{
+						Content: &genai.Content{
+							Role:  "model",
+							Parts: []*genai.Part{{Text: "Continued!"}},
+						},
+					},
+				},
+				UsageMetadata: &genai.GenerateContentResponseUsageMetadata{},
+			}, nil
+		},
+	}
+
+	session2, err := gemini.NewSessionWithAPIClient(mock2, cfg2, "gemini-2.5-flash")
+	gt.NoError(t, err)
+
+	resp, err := session2.Generate(ctx, []gollem.Input{gollem.Text("Continue")})
+	gt.NoError(t, err)
+	gt.A(t, resp.Texts).Length(1)
+	gt.Value(t, resp.Texts[0]).Equal("Continued!")
+}
+
+func TestGeminiContentGenerateWithModel(t *testing.T) {
+	projectID := os.Getenv("TEST_GCP_PROJECT_ID")
+	if projectID == "" {
+		t.Skip("TEST_GCP_PROJECT_ID is not set")
+	}
+	location := os.Getenv("TEST_GCP_LOCATION")
+	if location == "" {
+		t.Skip("TEST_GCP_LOCATION is not set")
+	}
+	model := os.Getenv("TEST_GCP_MODEL")
+	if model == "" {
+		t.Skip("TEST_GCP_MODEL is not set")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	client, err := gemini.New(ctx, projectID, location,
+		gemini.WithModel(model),
+		gemini.WithThinkingBudget(-1), // auto thinking budget
+	)
+	gt.NoError(t, err)
+
+	// Simple tool for testing agent loop
+	tool := &writeFileTool{}
+
+	session, err := client.NewSession(ctx,
+		gollem.WithSessionTools(tool),
+	)
+	gt.NoError(t, err)
+
+	// First call: ask the model to use the tool
+	resp1, err := session.Generate(ctx, []gollem.Input{gollem.Text("Please call the write_file tool with path 'test.txt' and content 'hello world'. Just call the tool, don't explain.")}, gollem.WithMaxTokens(maxTestTokens))
+	gt.NoError(t, err).Required()
+
+	if len(resp1.FunctionCalls) > 0 {
+		// Second call: send tool response back
+		fc := resp1.FunctionCalls[0]
+		resp2, err := session.Generate(ctx, []gollem.Input{gollem.FunctionResponse{
+			ID:   fc.ID,
+			Name: fc.Name,
+			Data: map[string]any{"status": "success", "path": "test.txt"},
+		}}, gollem.WithMaxTokens(maxTestTokens))
+		gt.NoError(t, err)
+		gt.A(t, resp2.Texts).Length(1).Required()
+	}
+}
+
+// writeFileTool is a simple tool for integration testing
+type writeFileTool struct{}
+
+func (t *writeFileTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name:        "write_file",
+		Description: "Write content to a file",
+		Parameters: map[string]*gollem.Parameter{
+			"path": {
+				Type:        gollem.TypeString,
+				Description: "File path",
+				Required:    true,
+			},
+			"content": {
+				Type:        gollem.TypeString,
+				Description: "File content",
+				Required:    true,
+			},
+		},
+	}
+}
+
+func (t *writeFileTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	return map[string]any{"status": "success"}, nil
+}
+
 func TestGeminiTokenLimitErrorIntegration(t *testing.T) {
 	projectID, ok := os.LookupEnv("TEST_GEMINI_PROJECT_ID")
 	if !ok {
@@ -550,7 +826,8 @@ func TestGeminiTokenLimitErrorIntegration(t *testing.T) {
 		t.Skip("TEST_TOKEN_LIMIT_ERROR is not set to true")
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
 
 	client, err := gemini.New(ctx, projectID, location)
 	gt.NoError(t, err)
@@ -562,9 +839,283 @@ func TestGeminiTokenLimitErrorIntegration(t *testing.T) {
 	// Repeat a long text many times to ensure we exceed the limit
 	longText := strings.Repeat("This is a test sentence to make the prompt very long. ", 100000)
 
-	_, err = session.GenerateContent(ctx, gollem.Text(longText))
+	_, err = session.Generate(ctx, []gollem.Input{gollem.Text(longText)})
 	gt.Error(t, err)
 
 	// Verify the error has the token exceeded tag
 	gt.True(t, goerr.HasTag(err, gollem.ErrTagTokenExceeded))
+}
+
+// TestPerCallGenerateOptions verifies that per-call GenerateOption overrides
+// actually change the API request. A text-mode session gets a per-call
+// ResponseSchema, and the response must be valid JSON matching the schema.
+func TestPerCallGenerateOptions(t *testing.T) {
+	projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+	if !ok {
+		t.Skip("TEST_GCP_PROJECT_ID is not set")
+	}
+	location, ok := os.LookupEnv("TEST_GCP_LOCATION")
+	if !ok {
+		t.Skip("TEST_GCP_LOCATION is not set")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
+
+	var opts []gemini.Option
+	if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+		opts = append(opts, gemini.WithModel(model))
+	}
+	client, err := gemini.New(ctx, projectID, location, opts...)
+	gt.NoError(t, err)
+
+	// Create a plain text session — no ContentTypeJSON, no ResponseSchema
+	session, err := client.NewSession(ctx)
+	gt.NoError(t, err)
+
+	schema := &gollem.Parameter{
+		Type:  gollem.TypeObject,
+		Title: "Color",
+		Properties: map[string]*gollem.Parameter{
+			"name": {Type: gollem.TypeString, Description: "color name", Required: true},
+		},
+	}
+
+	// Per-call option should force JSON output via ResponseMIMEType + ResponseSchema
+	resp, err := session.Generate(ctx,
+		[]gollem.Input{gollem.Text("Name a color.")},
+		gollem.WithGenerateResponseSchema(schema),
+		gollem.WithMaxTokens(maxTestTokens),
+	)
+	gt.NoError(t, err)
+	gt.True(t, len(resp.Texts) > 0)
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(resp.Texts[0]), &parsed); err != nil {
+		t.Fatalf("response is not valid JSON: %s (raw: %s)", err, resp.Texts[0])
+	}
+	gt.True(t, parsed["name"] != nil)
+}
+
+func TestContentsToTraceMessages(t *testing.T) {
+	type testCase struct {
+		contents []*genai.Content
+		expected []trace.Message
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			result := gemini.ContentsToTraceMessages(tc.contents)
+			gt.Equal(t, tc.expected, result)
+		}
+	}
+
+	t.Run("text message", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role:  "user",
+				Parts: []*genai.Part{{Text: "hello world"}},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewTextContent("hello world"),
+			}},
+		},
+	}))
+
+	t.Run("multiple parts in single content", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{Text: "first"},
+					{Text: "second"},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewTextContent("first"),
+				trace.NewTextContent("second"),
+			}},
+		},
+	}))
+
+	t.Run("function call", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "model",
+				Parts: []*genai.Part{
+					{FunctionCall: &genai.FunctionCall{Name: "search"}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "model", Contents: []trace.MessageContent{
+				trace.NewToolCallContent("", "search", nil),
+			}},
+		},
+	}))
+
+	t.Run("function response", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{FunctionResponse: &genai.FunctionResponse{Name: "search"}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewToolResponseContent("", "search", nil),
+			}},
+		},
+	}))
+
+	t.Run("inline data", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{InlineData: &genai.Blob{MIMEType: "image/png", Data: []byte("data")}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewMediaContent("image", "image/png"),
+			}},
+		},
+	}))
+
+	t.Run("file data with URI", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{FileData: &genai.FileData{FileURI: "gs://bucket/file", MIMEType: "application/pdf", DisplayName: "report.pdf"}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				{Type: "file", MediaType: "application/pdf", URL: "gs://bucket/file", Title: "report.pdf"},
+			}},
+		},
+	}))
+
+	t.Run("multiple contents", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role:  "user",
+				Parts: []*genai.Part{{Text: "hello"}},
+			},
+			{
+				Role:  "model",
+				Parts: []*genai.Part{{Text: "world"}},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{trace.NewTextContent("hello")}},
+			{Role: "model", Contents: []trace.MessageContent{trace.NewTextContent("world")}},
+		},
+	}))
+
+	t.Run("nil contents", runTest(testCase{
+		contents: nil,
+		expected: nil,
+	}))
+
+	t.Run("empty contents", runTest(testCase{
+		contents: []*genai.Content{},
+		expected: nil,
+	}))
+
+	t.Run("nil content entry", runTest(testCase{
+		contents: []*genai.Content{nil},
+		expected: nil,
+	}))
+
+	t.Run("mixed content types", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{Text: "analyze this image"},
+					{InlineData: &genai.Blob{MIMEType: "image/jpeg"}},
+				},
+			},
+			{
+				Role: "model",
+				Parts: []*genai.Part{
+					{Text: "I see an image"},
+					{FunctionCall: &genai.FunctionCall{Name: "describe_image"}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				trace.NewTextContent("analyze this image"),
+				trace.NewMediaContent("image", "image/jpeg"),
+			}},
+			{Role: "model", Contents: []trace.MessageContent{
+				trace.NewTextContent("I see an image"),
+				trace.NewToolCallContent("", "describe_image", nil),
+			}},
+		},
+	}))
+
+	t.Run("thought text", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "model",
+				Parts: []*genai.Part{
+					{Text: "Let me reason about this...", Thought: true},
+					{Text: "The answer is 42"},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "model", Contents: []trace.MessageContent{
+				trace.NewThinkingContent("Let me reason about this..."),
+				trace.NewTextContent("The answer is 42"),
+			}},
+		},
+	}))
+
+	t.Run("executable code and result", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "model",
+				Parts: []*genai.Part{
+					{ExecutableCode: &genai.ExecutableCode{Code: "print('hello')", Language: "PYTHON"}},
+					{CodeExecutionResult: &genai.CodeExecutionResult{Output: "hello", Outcome: "OUTCOME_OK"}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "model", Contents: []trace.MessageContent{
+				{Type: "executable_code", Text: "print('hello')"},
+				{Type: "code_execution_result", Text: "hello"},
+			}},
+		},
+	}))
+
+	t.Run("inline data with display name", runTest(testCase{
+		contents: []*genai.Content{
+			{
+				Role: "user",
+				Parts: []*genai.Part{
+					{InlineData: &genai.Blob{MIMEType: "image/png", Data: []byte("data"), DisplayName: "screenshot.png"}},
+				},
+			},
+		},
+		expected: []trace.Message{
+			{Role: "user", Contents: []trace.MessageContent{
+				{Type: "image", MediaType: "image/png", Title: "screenshot.png"},
+			}},
+		},
+	}))
 }

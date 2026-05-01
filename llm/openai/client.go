@@ -417,15 +417,15 @@ func (s *Session) createRequest(stream bool) (openai.ChatCompletionRequest, erro
 	}
 
 	req := openai.ChatCompletionRequest{
-		Model:            s.defaultModel,
-		Messages:         messages,
-		Tools:            s.tools,
-		Temperature:      s.params.Temperature,
-		TopP:             s.params.TopP,
-		MaxTokens:        s.params.MaxTokens,
-		PresencePenalty:  s.params.PresencePenalty,
-		FrequencyPenalty: s.params.FrequencyPenalty,
-		Stream:           stream,
+		Model:               s.defaultModel,
+		Messages:            messages,
+		Tools:               s.tools,
+		Temperature:         s.params.Temperature,
+		TopP:                s.params.TopP,
+		MaxCompletionTokens: s.params.MaxTokens,
+		PresencePenalty:     s.params.PresencePenalty,
+		FrequencyPenalty:    s.params.FrequencyPenalty,
+		Stream:              stream,
 	}
 
 	if s.params.ReasoningEffort != "" {
@@ -459,9 +459,9 @@ func (s *Session) createRequest(stream bool) (openai.ChatCompletionRequest, erro
 	return req, nil
 }
 
-// GenerateContent processes the input and generates a response.
+// Generate processes the input and generates a response with optional per-call overrides.
 // It handles both text messages and function responses.
-func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	var historyCopy *gollem.History
@@ -499,6 +499,11 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		if err != nil {
 			return nil, err
 		}
+
+		if err := s.applyPerCallOverrides(&openaiReq, opts...); err != nil {
+			return nil, err
+		}
+
 		// Start LLM call trace span
 		var openaiTraceData *trace.LLMCallData
 		var llmErr error
@@ -578,7 +583,7 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 		}
 
 		// Set trace data for defer
-		openaiTraceData = buildOpenAITraceData(resp, s.defaultModel, s.cfg.SystemPrompt())
+		openaiTraceData = buildOpenAITraceData(resp, s.defaultModel, s.cfg.SystemPrompt(), openaiReq.Messages)
 
 		// History is already updated by updateHistoryWithResponse above
 
@@ -612,9 +617,9 @@ func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*
 	}, nil
 }
 
-// GenerateStream processes the input and generates a response stream.
+// Stream processes the input and generates a response stream with optional per-call overrides.
 // It handles both text messages and function responses, and returns a channel for streaming responses.
-func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
 	// Build the content request for middleware
 	var historyCopy *gollem.History
 	var err error
@@ -651,6 +656,11 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 		if err != nil {
 			return nil, err
 		}
+
+		if err := s.applyPerCallOverrides(&openaiReq, opts...); err != nil {
+			return nil, err
+		}
+
 		// Start LLM call trace span
 		traceHandler := trace.HandlerFrom(ctx)
 		if traceHandler != nil {
@@ -838,6 +848,7 @@ func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-
 				Model:        s.defaultModel,
 				Request: &trace.LLMRequest{
 					SystemPrompt: s.cfg.SystemPrompt(),
+					Messages:     openaiMessagesToTraceMessages(openaiReq.Messages),
 				},
 				Response: &trace.LLMResponse{},
 			}
@@ -1018,6 +1029,41 @@ func convertParameterToJSONSchemaWithStrict(param *gollem.Parameter, strict bool
 	return result
 }
 
+// applyPerCallOverrides applies per-call GenerateOption overrides to an API request.
+func (s *Session) applyPerCallOverrides(req *openai.ChatCompletionRequest, opts ...gollem.GenerateOption) error {
+	genCfg := gollem.NewGenerateConfig(opts...)
+	if t := genCfg.Temperature(); t != nil {
+		req.Temperature = float32(*t)
+	}
+	if p := genCfg.TopP(); p != nil {
+		req.TopP = float32(*p)
+	}
+	if m := genCfg.MaxTokens(); m != nil {
+		req.MaxCompletionTokens = *m
+	}
+	if schema := genCfg.ResponseSchema(); schema != nil {
+		jsonSchema, err := convertResponseSchemaToOpenAI(schema, s.strictMode)
+		if err != nil {
+			return goerr.Wrap(err, "failed to convert per-call response schema")
+		}
+		req.ResponseFormat = &openai.ChatCompletionResponseFormat{
+			Type:       openai.ChatCompletionResponseFormatTypeJSONSchema,
+			JSONSchema: jsonSchema,
+		}
+	}
+	return nil
+}
+
+// Deprecated: GenerateContent is deprecated. Use Generate instead.
+func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	return s.Generate(ctx, input)
+}
+
+// Deprecated: GenerateStream is deprecated. Use Stream instead.
+func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+	return s.Stream(ctx, input)
+}
+
 // CountToken calculates the total number of tokens for the given inputs,
 // including system prompt, history messages, and new inputs.
 // This uses tiktoken library for local token counting without API calls.
@@ -1146,14 +1192,65 @@ func tokenLimitErrorOptions(err error) []goerr.Option {
 	return nil
 }
 
+// openaiMessagesToTraceMessages converts OpenAI messages to trace messages.
+func openaiMessagesToTraceMessages(messages []openai.ChatCompletionMessage) []trace.Message {
+	var result []trace.Message
+	for _, msg := range messages {
+		var blocks []trace.MessageContent
+		if msg.ToolCallID != "" {
+			// Tool response message: combine content into the tool_response block
+			tc := trace.NewToolResponseContent(msg.ToolCallID, msg.Name, nil)
+			if msg.Content != "" {
+				tc.Text = msg.Content
+			}
+			blocks = append(blocks, tc)
+		} else {
+			if msg.Content != "" {
+				blocks = append(blocks, trace.NewTextContent(msg.Content))
+			}
+			for _, mc := range msg.MultiContent {
+				switch mc.Type {
+				case openai.ChatMessagePartTypeText:
+					if mc.Text != "" {
+						blocks = append(blocks, trace.NewTextContent(mc.Text))
+					}
+				case openai.ChatMessagePartTypeImageURL:
+					imgBlock := trace.NewMediaContent("image", "")
+					if mc.ImageURL != nil {
+						imgBlock.URL = mc.ImageURL.URL
+					}
+					blocks = append(blocks, imgBlock)
+				}
+			}
+			for _, tc := range msg.ToolCalls {
+				var args map[string]any
+				if tc.Function.Arguments != "" {
+					_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+				}
+				blocks = append(blocks, trace.NewToolCallContent(
+					tc.ID, tc.Function.Name, args,
+				))
+			}
+		}
+		if len(blocks) > 0 {
+			result = append(result, trace.Message{
+				Role:     msg.Role,
+				Contents: blocks,
+			})
+		}
+	}
+	return result
+}
+
 // buildOpenAITraceData builds trace.LLMCallData from an OpenAI API response.
-func buildOpenAITraceData(resp openai.ChatCompletionResponse, model string, systemPrompt string) *trace.LLMCallData {
+func buildOpenAITraceData(resp openai.ChatCompletionResponse, model string, systemPrompt string, messages []openai.ChatCompletionMessage) *trace.LLMCallData {
 	data := &trace.LLMCallData{
 		InputTokens:  resp.Usage.PromptTokens,
 		OutputTokens: resp.Usage.CompletionTokens,
 		Model:        resp.Model,
 		Request: &trace.LLMRequest{
 			SystemPrompt: systemPrompt,
+			Messages:     openaiMessagesToTraceMessages(messages),
 		},
 		Response: &trace.LLMResponse{},
 	}

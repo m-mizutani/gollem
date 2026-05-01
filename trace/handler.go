@@ -26,6 +26,13 @@ type Handler interface {
 	// EndSubAgent ends a sub-agent span.
 	EndSubAgent(ctx context.Context, err error)
 
+	// StartChildAgent starts a child agent execution span.
+	// Unlike StartSubAgent (for gollem-internal sub-agents),
+	// this creates a SpanKindAgentExecute span as a child of the current span.
+	StartChildAgent(ctx context.Context, name string) context.Context
+	// EndChildAgent ends a child agent execution span.
+	EndChildAgent(ctx context.Context, err error)
+
 	// AddEvent adds an event to the current span.
 	AddEvent(ctx context.Context, kind string, data any)
 

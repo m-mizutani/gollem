@@ -23,6 +23,12 @@ export interface TraceMetadata {
   labels?: Record<string, string>;
 }
 
+export interface StackFrame {
+  function: string;
+  file: string;
+  line: number;
+}
+
 export interface Span {
   span_id: string;
   parent_id?: string;
@@ -34,6 +40,7 @@ export interface Span {
   status: SpanStatus;
   error?: string;
   children?: Span[];
+  stack_trace?: StackFrame[];
   llm_call?: LLMCallData;
   tool_exec?: ToolExecData;
   event?: EventData;
@@ -60,7 +67,18 @@ export interface LLMResponse {
 
 export interface Message {
   role: string;
-  content: string;
+  contents: MessageContent[];
+}
+
+export interface MessageContent {
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  arguments?: Record<string, unknown>;
+  tool_call_id?: string;
+  result?: Record<string, unknown>;
+  media_type?: string;
 }
 
 export interface ToolSpec {
