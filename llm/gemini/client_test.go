@@ -1079,7 +1079,7 @@ func TestContentsToTraceMessages(t *testing.T) {
 		},
 		expected: []trace.Message{
 			{Role: "model", Contents: []trace.MessageContent{
-				trace.NewThinkingContent("Let me reason about this..."),
+				trace.NewReasoningContent("Let me reason about this..."),
 				trace.NewTextContent("The answer is 42"),
 			}},
 		},

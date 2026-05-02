@@ -135,13 +135,13 @@ func TestOpenAIMessageRoundTrip(t *testing.T) {
 		// Test reasoning content conversion (OpenAI → gollem)
 		history, err := openai.NewHistory([]openaiSDK.ChatCompletionMessage{
 			{
-				Role:            "user",
-				Content:         "Help me solve this problem",
+				Role:    "user",
+				Content: "Help me solve this problem",
 			},
 			{
-				Role:            "assistant",
+				Role:             "assistant",
 				ReasoningContent: "Let me think through this step by step...",
-				Content:         "Here's the solution",
+				Content:          "Here's the solution",
 			},
 		})
 		gt.NoError(t, err)
@@ -160,9 +160,9 @@ func TestOpenAIMessageRoundTrip(t *testing.T) {
 
 		// First content should be reasoning
 		reasoningContent := assistantMsg.Contents[0]
-		gt.Equal(t, gollem.MessageContentTypeThinking, reasoningContent.Type)
+		gt.Equal(t, gollem.MessageContentTypeReasoning, reasoningContent.Type)
 
-		thinking, err := reasoningContent.GetThinkingContent()
+		thinking, err := reasoningContent.GetReasoningContent()
 		gt.NoError(t, err)
 		gt.Equal(t, "Let me think through this step by step...", thinking.Text)
 

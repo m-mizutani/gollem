@@ -121,11 +121,11 @@ func TestClaudeMessageRoundTrip(t *testing.T) {
 		gt.Equal(t, 1, len(assistantMsg.Contents))
 
 		content := assistantMsg.Contents[0]
-		gt.Equal(t, gollem.MessageContentTypeThinking, content.Type)
+		gt.Equal(t, gollem.MessageContentTypeReasoning, content.Type)
 
-		thinking, err := content.GetThinkingContent()
+		reasoning, err := content.GetReasoningContent()
 		gt.NoError(t, err)
-		gt.Equal(t, "Let me think...", thinking.Text)
+		gt.Equal(t, "Let me think...", reasoning.Text)
 	})
 
 	t.Run("redacted thinking block", func(t *testing.T) {
@@ -151,10 +151,10 @@ func TestClaudeMessageRoundTrip(t *testing.T) {
 		gt.Equal(t, 1, len(assistantMsg.Contents))
 
 		content := assistantMsg.Contents[0]
-		gt.Equal(t, gollem.MessageContentTypeThinking, content.Type)
+		gt.Equal(t, gollem.MessageContentTypeReasoning, content.Type)
 
-		thinking, err := content.GetThinkingContent()
+		reasoning, err := content.GetReasoningContent()
 		gt.NoError(t, err)
-		gt.Equal(t, "Redacted", thinking.Text)
+		gt.Equal(t, "Redacted", reasoning.Text)
 	})
 }

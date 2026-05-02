@@ -42,7 +42,7 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (gollem.Message, err
 	// Handle different content types
 	// Handle reasoning content first (it should come before text content)
 	if msg.ReasoningContent != "" {
-		content, err := gollem.NewThinkingContent(msg.ReasoningContent)
+		content, err := gollem.NewReasoningContent(msg.ReasoningContent)
 		if err != nil {
 			return gollem.Message{}, err
 		}
@@ -249,8 +249,8 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 
 	for _, content := range msg.Contents {
 		switch content.Type {
-		case gollem.MessageContentTypeThinking:
-			thinkingContent, err := content.GetThinkingContent()
+		case gollem.MessageContentTypeReasoning:
+			thinkingContent, err := content.GetReasoningContent()
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to get thinking content")
 			}

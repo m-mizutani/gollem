@@ -1129,7 +1129,7 @@ func contentsToTraceMessages(contents []*genai.Content) []trace.Message {
 			}
 			switch {
 			case p.Thought && p.Text != "":
-				blocks = append(blocks, trace.NewThinkingContent(p.Text))
+				blocks = append(blocks, trace.NewReasoningContent(p.Text))
 			case p.Text != "":
 				blocks = append(blocks, trace.NewTextContent(p.Text))
 			case p.FunctionCall != nil:
