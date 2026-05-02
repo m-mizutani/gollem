@@ -8,6 +8,10 @@ type ExecuteResponse struct {
 	// These will be automatically added to session history as assistant messages.
 	Texts []string
 
+	// Thinkings contains the thinking/reasoning content from the LLM.
+	// This is separate from Texts and represents the model's internal reasoning process.
+	Thinkings []string
+
 	// UserInputs contains the user inputs that this response corresponds to.
 	// When a strategy returns ExecuteResponse without going through GenerateContent,
 	// these inputs need to be added to session history before the response texts.

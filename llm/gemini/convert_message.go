@@ -294,6 +294,17 @@ func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) 
 			ThoughtSignature: meta.ThoughtSignature,
 		}, nil
 
+	case gollem.MessageContentTypeThinking:
+		thinkingContent, err := content.GetThinkingContent()
+		if err != nil {
+			return nil, err
+		}
+		return &genai.Part{
+			Text:             thinkingContent.Text,
+			Thought:          true,
+			ThoughtSignature: meta.ThoughtSignature,
+		}, nil
+
 	case gollem.MessageContentTypeImage:
 		imgContent, err := content.GetImageContent()
 		if err != nil {

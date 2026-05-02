@@ -273,9 +273,8 @@ func TestThoughtSignatureRoundTrip(t *testing.T) {
 }
 
 func TestThoughtPartsExcludedFromResponse(t *testing.T) {
-	// Verify that thought parts (Thought: true) are not included in gollem Response texts.
-	// This is tested indirectly via the convert function - thought parts are stored
-	// as text content with Meta, but processResponse skips them.
+	// Verify that thought parts (Thought: true) are converted to ThinkingContentType.
+	// This ensures proper separation of internal reasoning from visible response.
 
 	// Convert a model message with thought parts to gollem format
 	contents := []*genai.Content{
@@ -299,11 +298,12 @@ func TestThoughtPartsExcludedFromResponse(t *testing.T) {
 	// Both parts should be in the message (for history preservation)
 	gt.A(t, history.Messages[0].Contents).Length(2)
 
-	// But Meta should distinguish them
+	// First part should be ThinkingContentType with Meta
 	thoughtContent := history.Messages[0].Contents[0]
-	gt.Value(t, thoughtContent.Type).Equal(gollem.MessageContentTypeText)
+	gt.Value(t, thoughtContent.Type).Equal(gollem.MessageContentTypeThinking)
 	gt.Value(t, thoughtContent.Meta).NotEqual(json.RawMessage(nil))
 
+	// Second part should be normal TextContentType without Meta
 	normalContent := history.Messages[0].Contents[1]
 	gt.Value(t, normalContent.Type).Equal(gollem.MessageContentTypeText)
 	// Normal text without thought/signature should have nil Meta
