@@ -385,7 +385,7 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 	response := &gollem.Response{
 		Texts:         make([]string, 0),
 		FunctionCalls: make([]*gollem.FunctionCall, 0),
-		Thinkings:     make([]string, 0),
+		Thoughts:     make([]string, 0),
 	}
 
 	// Extract token counts from UsageMetadata if available
@@ -412,7 +412,7 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 			// Extract thought parts (internal reasoning from thinking models)
 			if part.Thought {
 				if part.Text != "" {
-					response.Thinkings = append(response.Thinkings, part.Text)
+					response.Thoughts = append(response.Thoughts, part.Text)
 				}
 				continue
 			}

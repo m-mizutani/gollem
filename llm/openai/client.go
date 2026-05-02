@@ -534,7 +534,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 
 		response := &gollem.Response{
 			Texts:         make([]string, 0),
-			Thinkings:     make([]string, 0),
+			Thoughts:     make([]string, 0),
 			FunctionCalls: make([]*gollem.FunctionCall, 0),
 			InputToken:    resp.Usage.PromptTokens,
 			OutputToken:   resp.Usage.CompletionTokens,
@@ -546,7 +546,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		}
 
 		if message.ReasoningContent != "" {
-			response.Thinkings = append(response.Thinkings, message.ReasoningContent)
+			response.Thoughts = append(response.Thoughts, message.ReasoningContent)
 		}
 
 		if message.ToolCalls != nil {
@@ -594,7 +594,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 
 		return &gollem.ContentResponse{
 			Texts:         response.Texts,
-			Thinkings:     response.Thinkings,
+			Thoughts:     response.Thoughts,
 			FunctionCalls: response.FunctionCalls,
 			InputToken:    response.InputToken,
 			OutputToken:   response.OutputToken,
@@ -617,7 +617,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 	// Convert ContentResponse back to gollem.Response
 	return &gollem.Response{
 		Texts:         contentResp.Texts,
-		Thinkings:     contentResp.Thinkings,
+		Thoughts:     contentResp.Thoughts,
 		FunctionCalls: contentResp.FunctionCalls,
 		InputToken:    contentResp.InputToken,
 		OutputToken:   contentResp.OutputToken,
@@ -755,7 +755,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				if delta.ReasoningContent != "" {
 					reasoningContent += delta.ReasoningContent
 					responseChan <- &gollem.ContentResponse{
-						Thinkings:   []string{delta.ReasoningContent},
+						Thoughts:   []string{delta.ReasoningContent},
 						InputToken:  totalInputTokens,
 						OutputToken: totalOutputTokens,
 					}
@@ -931,7 +931,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			} else {
 				responseChan <- &gollem.Response{
 					Texts:         streamResp.Texts,
-					Thinkings:     streamResp.Thinkings,
+					Thoughts:     streamResp.Thoughts,
 					FunctionCalls: streamResp.FunctionCalls,
 					InputToken:    streamResp.InputToken,
 					OutputToken:   streamResp.OutputToken,

@@ -26,7 +26,7 @@ type FunctionCall struct {
 // Response is a general response type for each gollem.
 type Response struct {
 	Texts         []string
-	Thinkings     []string
+	Thoughts     []string
 	FunctionCalls []*FunctionCall
 	InputToken    int
 	OutputToken   int
@@ -36,7 +36,7 @@ type Response struct {
 }
 
 func (r *Response) HasData() bool {
-	return len(r.Texts) > 0 || len(r.Thinkings) > 0 || len(r.FunctionCalls) > 0 || r.Error != nil
+	return len(r.Texts) > 0 || len(r.Thoughts) > 0 || len(r.FunctionCalls) > 0 || r.Error != nil
 }
 
 type Input interface {

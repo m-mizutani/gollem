@@ -396,7 +396,7 @@ func TestReasoningContentExtraction(t *testing.T) {
 		result, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("Test input")})
 		gt.NoError(t, err)
 		gt.Equal(t, []string{"This is the final answer"}, result.Texts)
-		gt.Equal(t, []string{"Let me think through this step by step..."}, result.Thinkings)
+		gt.Equal(t, []string{"Let me think through this step by step..."}, result.Thoughts)
 		gt.Equal(t, 10, result.InputToken)
 		gt.Equal(t, 20, result.OutputToken)
 	})
@@ -431,7 +431,7 @@ func TestReasoningContentExtraction(t *testing.T) {
 		result, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("Test input")})
 		gt.NoError(t, err)
 		gt.Equal(t, []string{"This is the answer"}, result.Texts)
-		gt.Equal(t, []string{}, result.Thinkings) // Should be empty slice
+		gt.Equal(t, []string{}, result.Thoughts) // Should be empty slice
 		gt.Equal(t, 10, result.InputToken)
 		gt.Equal(t, 15, result.OutputToken)
 	})
