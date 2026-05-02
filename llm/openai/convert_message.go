@@ -254,8 +254,8 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to get thinking content")
 			}
-			// Store reasoning content separately (will be set on the main message)
-			reasoningContent = thinkingContent.Text
+			// Accumulate reasoning content (will be set on the main message)
+			reasoningContent += thinkingContent.Text
 
 		case gollem.MessageContentTypeText:
 			textContent, err := content.GetTextContent()
