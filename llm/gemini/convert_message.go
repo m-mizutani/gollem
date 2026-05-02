@@ -134,7 +134,7 @@ func convertGeminiPart(part *genai.Part) (gollem.MessageContent, error) {
 
 	// Thought part (internal reasoning, may have empty text)
 	if part.Thought {
-		mc, err := gollem.NewReasoningContent(part.Text)
+		mc, err := gollem.NewThinkingContent(part.Text)
 		if err != nil {
 			return gollem.MessageContent{}, err
 		}
@@ -294,8 +294,8 @@ func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) 
 			ThoughtSignature: meta.ThoughtSignature,
 		}, nil
 
-	case gollem.MessageContentTypeReasoning:
-		reasoningContent, err := content.GetReasoningContent()
+	case gollem.MessageContentTypeThinking:
+		reasoningContent, err := content.GetThinkingContent()
 		if err != nil {
 			return nil, err
 		}

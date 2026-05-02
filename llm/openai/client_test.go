@@ -364,7 +364,7 @@ func TestOpenaiMessagesToTraceMessages(t *testing.T) {
 	}))
 }
 
-func TestReasoningContentExtraction(t *testing.T) {
+func TestThinkingContentExtraction(t *testing.T) {
 	t.Run("non-streaming response with reasoning content", func(t *testing.T) {
 		// Create a mock API client that returns reasoning content
 		mockClient := &apiClientMock{

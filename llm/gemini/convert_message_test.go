@@ -300,7 +300,7 @@ func TestThoughtPartsExcludedFromResponse(t *testing.T) {
 
 	// First part should be ThinkingContentType with Meta
 	thoughtContent := history.Messages[0].Contents[0]
-	gt.Value(t, thoughtContent.Type).Equal(gollem.MessageContentTypeReasoning)
+	gt.Value(t, thoughtContent.Type).Equal(gollem.MessageContentTypeThinking)
 	gt.Value(t, thoughtContent.Meta).NotEqual(json.RawMessage(nil))
 
 	// Second part should be normal TextContentType without Meta

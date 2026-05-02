@@ -2,33 +2,33 @@ package gollem
 
 import "testing"
 
-func TestMessageContentTypeReasoning(t *testing.T) {
-	ct := MessageContentTypeReasoning
-	if ct != "reasoning" {
-		t.Errorf("Expected 'reasoning', got '%s'", ct)
+func TestMessageContentTypeThinking(t *testing.T) {
+	ct := MessageContentTypeThinking
+	if ct != "thinking" {
+		t.Errorf("Expected \"thinking\", got '%s'", ct)
 	}
 }
 
 func TestThinkingContent(t *testing.T) {
-	content := ReasoningContent{Text: "Let me think..."}
+	content := ThinkingContent{Text: "Let me think..."}
 	if content.Text != "Let me think..." {
 		t.Errorf("Expected 'Let me think...', got '%s'", content.Text)
 	}
 }
 
 func TestNewThinkingContent(t *testing.T) {
-	mc, err := NewReasoningContent("test thinking")
+	mc, err := NewThinkingContent("test thinking")
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
-	if mc.Type != MessageContentTypeReasoning {
+	if mc.Type != MessageContentTypeThinking {
 		t.Errorf("Expected type 'reasoning', got '%s'", mc.Type)
 	}
 }
 
-func TestGetReasoningContent(t *testing.T) {
-	mc, _ := NewReasoningContent("test thinking")
-	tc, err := mc.GetReasoningContent()
+func TestGetThinkingContent(t *testing.T) {
+	mc, _ := NewThinkingContent("test thinking")
+	tc, err := mc.GetThinkingContent()
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}

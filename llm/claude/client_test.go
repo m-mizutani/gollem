@@ -534,7 +534,7 @@ func TestClaudeMessagesToTraceMessages(t *testing.T) {
 		},
 		expected: []trace.Message{
 			{Role: "assistant", Contents: []trace.MessageContent{
-				trace.NewReasoningContent("Let me think about this..."),
+				trace.NewThinkingContent("Let me think about this..."),
 				trace.NewTextContent("Here is my answer"),
 			}},
 		},
@@ -549,7 +549,7 @@ func TestClaudeMessagesToTraceMessages(t *testing.T) {
 		},
 		expected: []trace.Message{
 			{Role: "assistant", Contents: []trace.MessageContent{
-				trace.NewRedactedReasoningContent(),
+				trace.NewRedactedThinkingContent(),
 				trace.NewTextContent("answer"),
 			}},
 		},

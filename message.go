@@ -43,7 +43,7 @@ const (
 	MessageContentTypePDF          MessageContentType = "pdf"
 	MessageContentTypeToolCall     MessageContentType = "tool_call"
 	MessageContentTypeToolResponse MessageContentType = "tool_response"
-	MessageContentTypeReasoning    MessageContentType = "reasoning"
+	MessageContentTypeThinking    MessageContentType = "thinking"
 )
 
 // TextContent represents text content in a message
@@ -51,8 +51,8 @@ type TextContent struct {
 	Text string `json:"text"`
 }
 
-// ReasoningContent represents thinking/reasoning content
-type ReasoningContent struct {
+// ThinkingContent represents thinking/reasoning content
+type ThinkingContent struct {
 	Text string `json:"text"`
 }
 
@@ -113,9 +113,9 @@ func NewTextContent(text string) (MessageContent, error) {
 	return makeContent(MessageContentTypeText, TextContent{Text: text})
 }
 
-// NewReasoningContent creates a new thinking message content
-func NewReasoningContent(text string) (MessageContent, error) {
-	return makeContent(MessageContentTypeReasoning, ReasoningContent{Text: text})
+// NewThinkingContent creates a new thinking message content
+func NewThinkingContent(text string) (MessageContent, error) {
+	return makeContent(MessageContentTypeThinking, ThinkingContent{Text: text})
 }
 
 // NewImageContent creates a new image message content
@@ -179,7 +179,7 @@ func (mc *MessageContent) GetToolResponseContent() (*ToolResponseContent, error)
 	return decodeContent[ToolResponseContent](MessageContentTypeToolResponse, mc)
 }
 
-// GetReasoningContent extracts thinking content from a MessageContent
-func (mc *MessageContent) GetReasoningContent() (*ReasoningContent, error) {
-	return decodeContent[ReasoningContent](MessageContentTypeReasoning, mc)
+// GetThinkingContent extracts thinking content from a MessageContent
+func (mc *MessageContent) GetThinkingContent() (*ThinkingContent, error) {
+	return decodeContent[ThinkingContent](MessageContentTypeThinking, mc)
 }

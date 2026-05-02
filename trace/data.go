@@ -71,13 +71,13 @@ func NewMediaContent(contentType, mediaType string) MessageContent {
 	return MessageContent{Type: contentType, MediaType: mediaType}
 }
 
-// NewReasoningContent creates a reasoning content block for trace messages.
-func NewReasoningContent(reasoning string) MessageContent {
+// NewThinkingContent creates a reasoning content block for trace messages.
+func NewThinkingContent(reasoning string) MessageContent {
 	return MessageContent{Type: "reasoning", Text: reasoning}
 }
 
-// NewRedactedReasoningContent creates a redacted reasoning content block for trace messages.
-func NewRedactedReasoningContent() MessageContent {
+// NewRedactedThinkingContent creates a redacted reasoning content block for trace messages.
+func NewRedactedThinkingContent() MessageContent {
 	return MessageContent{Type: "redacted_reasoning"}
 }
 

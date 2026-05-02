@@ -160,9 +160,9 @@ func TestOpenAIMessageRoundTrip(t *testing.T) {
 
 		// First content should be reasoning
 		reasoningContent := assistantMsg.Contents[0]
-		gt.Equal(t, gollem.MessageContentTypeReasoning, reasoningContent.Type)
+		gt.Equal(t, gollem.MessageContentTypeThinking, reasoningContent.Type)
 
-		thinking, err := reasoningContent.GetReasoningContent()
+		thinking, err := reasoningContent.GetThinkingContent()
 		gt.NoError(t, err)
 		gt.Equal(t, "Let me think through this step by step...", thinking.Text)
 

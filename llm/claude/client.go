@@ -1162,9 +1162,9 @@ func claudeMessagesToTraceMessages(messages []anthropic.MessageParam) []trace.Me
 				}
 				blocks = append(blocks, mc)
 			case block.OfThinking != nil:
-				blocks = append(blocks, trace.NewReasoningContent(block.OfThinking.Thinking))
+				blocks = append(blocks, trace.NewThinkingContent(block.OfThinking.Thinking))
 			case block.OfRedactedThinking != nil:
-				blocks = append(blocks, trace.NewRedactedReasoningContent())
+				blocks = append(blocks, trace.NewRedactedThinkingContent())
 			}
 		}
 		if len(blocks) > 0 {
