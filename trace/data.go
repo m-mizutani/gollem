@@ -71,14 +71,14 @@ func NewMediaContent(contentType, mediaType string) MessageContent {
 	return MessageContent{Type: contentType, MediaType: mediaType}
 }
 
-// NewThinkingContent creates a thinking content block for trace messages.
-func NewThinkingContent(thinking string) MessageContent {
-	return MessageContent{Type: "thinking", Text: thinking}
+// NewThinkingContent creates a reasoning content block for trace messages.
+func NewThinkingContent(reasoning string) MessageContent {
+	return MessageContent{Type: "reasoning", Text: reasoning}
 }
 
-// NewRedactedThinkingContent creates a redacted thinking content block for trace messages.
+// NewRedactedThinkingContent creates a redacted reasoning content block for trace messages.
 func NewRedactedThinkingContent() MessageContent {
-	return MessageContent{Type: "redacted_thinking"}
+	return MessageContent{Type: "redacted_reasoning"}
 }
 
 // ToolSpec represents a tool specification in the trace (simplified from gollem.ToolSpec).

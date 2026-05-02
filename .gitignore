@@ -38,3 +38,4 @@ cmd/gollem/frontend/public/licenses.txt
 .project
 .claude/settings.local.json
 .knot
+docs/superpowers/

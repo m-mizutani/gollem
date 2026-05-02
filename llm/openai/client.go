@@ -534,6 +534,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 
 		response := &gollem.Response{
 			Texts:         make([]string, 0),
+			Thoughts:     make([]string, 0),
 			FunctionCalls: make([]*gollem.FunctionCall, 0),
 			InputToken:    resp.Usage.PromptTokens,
 			OutputToken:   resp.Usage.CompletionTokens,
@@ -542,6 +543,10 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		message := resp.Choices[0].Message
 		if message.Content != "" {
 			response.Texts = append(response.Texts, message.Content)
+		}
+
+		if message.ReasoningContent != "" {
+			response.Thoughts = append(response.Thoughts, message.ReasoningContent)
 		}
 
 		if message.ToolCalls != nil {
@@ -589,6 +594,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 
 		return &gollem.ContentResponse{
 			Texts:         response.Texts,
+			Thoughts:     response.Thoughts,
 			FunctionCalls: response.FunctionCalls,
 			InputToken:    response.InputToken,
 			OutputToken:   response.OutputToken,
@@ -611,6 +617,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 	// Convert ContentResponse back to gollem.Response
 	return &gollem.Response{
 		Texts:         contentResp.Texts,
+		Thoughts:     contentResp.Thoughts,
 		FunctionCalls: contentResp.FunctionCalls,
 		InputToken:    contentResp.InputToken,
 		OutputToken:   contentResp.OutputToken,
@@ -693,6 +700,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			}
 
 			var textContent string
+			var reasoningContent string
 			var toolCalls []openai.ToolCall
 			var totalInputTokens int
 			var totalOutputTokens int
@@ -738,6 +746,16 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					textContent += delta.Content
 					responseChan <- &gollem.ContentResponse{
 						Texts:       []string{delta.Content},
+						InputToken:  totalInputTokens,
+						OutputToken: totalOutputTokens,
+					}
+				}
+
+				// Handle reasoning content
+				if delta.ReasoningContent != "" {
+					reasoningContent += delta.ReasoningContent
+					responseChan <- &gollem.ContentResponse{
+						Thoughts:   []string{delta.ReasoningContent},
 						InputToken:  totalInputTokens,
 						OutputToken: totalOutputTokens,
 					}
@@ -826,11 +844,12 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					}
 					return
 				}
-			} else if textContent != "" {
-				// Create assistant message with text content
+			} else if textContent != "" || reasoningContent != "" {
+				// Create assistant message with text and/or reasoning content
 				assistantMessage := openai.ChatCompletionMessage{
-					Role:    openai.ChatMessageRoleAssistant,
-					Content: textContent,
+					Role:             openai.ChatMessageRoleAssistant,
+					Content:          textContent,
+					ReasoningContent: reasoningContent,
 				}
 				// Update history with assistant response
 				if err := s.updateHistoryWithResponse(assistantMessage); err != nil {
@@ -912,6 +931,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			} else {
 				responseChan <- &gollem.Response{
 					Texts:         streamResp.Texts,
+					Thoughts:     streamResp.Thoughts,
 					FunctionCalls: streamResp.FunctionCalls,
 					InputToken:    streamResp.InputToken,
 					OutputToken:   streamResp.OutputToken,

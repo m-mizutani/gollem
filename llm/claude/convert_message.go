@@ -11,6 +11,40 @@ import (
 	"github.com/m-mizutani/gollem/internal/convert"
 )
 
+// claudePartMeta is the metadata stored in MessageContent.Meta for Claude content blocks.
+// It preserves Claude-specific fields (e.g., thinking signatures, redacted status) across
+// serialization/deserialization without polluting the common message types.
+type claudePartMeta struct {
+	Signature string `json:"signature,omitempty"` // Signature for thinking blocks
+	Redacted  bool   `json:"redacted,omitempty"`  // Whether this is a redacted thinking block
+}
+
+// marshalClaudePartMeta marshals claudePartMeta to JSON for MessageContent.Meta.
+// Returns nil if no metadata needs to be stored.
+func marshalClaudePartMeta(m claudePartMeta) (json.RawMessage, error) {
+	if !m.Redacted && m.Signature == "" {
+		return nil, nil
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to marshal claude part meta")
+	}
+	return data, nil
+}
+
+// unmarshalClaudePartMeta unmarshals claudePartMeta from MessageContent.Meta.
+// Returns zero-value claudePartMeta if meta is nil or empty.
+func unmarshalClaudePartMeta(meta json.RawMessage) (claudePartMeta, error) {
+	if len(meta) == 0 {
+		return claudePartMeta{}, nil
+	}
+	var m claudePartMeta
+	if err := json.Unmarshal(meta, &m); err != nil {
+		return claudePartMeta{}, goerr.Wrap(err, "failed to unmarshal claude part meta")
+	}
+	return m, nil
+}
+
 // convertClaudeToMessages converts Claude messages to common Message format
 func convertClaudeToMessages(messages []anthropic.MessageParam) ([]gollem.Message, error) {
 	if len(messages) == 0 {
@@ -57,6 +91,43 @@ func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion) (gollem.M
 			return gollem.MessageContent{}, convert.ErrUnsupportedContentType
 		}
 		return gollem.NewTextContent(block.OfText.Text)
+	}
+
+	// Handle thinking blocks
+	if block.OfThinking != nil {
+		mc, err := gollem.NewThinkingContent(block.OfThinking.Thinking)
+		if err != nil {
+			return gollem.MessageContent{}, err
+		}
+		// Store signature in meta for multi-turn conversations
+		if block.OfThinking.Signature != "" {
+			meta, err := marshalClaudePartMeta(claudePartMeta{
+				Signature: block.OfThinking.Signature,
+			})
+			if err != nil {
+				return gollem.MessageContent{}, err
+			}
+			mc.Meta = meta
+		}
+		return mc, nil
+	}
+
+	// Handle redacted thinking blocks
+	if block.OfRedactedThinking != nil {
+		mc, err := gollem.NewThinkingContent("") // Empty text for redacted blocks
+		if err != nil {
+			return gollem.MessageContent{}, err
+		}
+		// Store signature and redacted flag in meta
+		meta, err := marshalClaudePartMeta(claudePartMeta{
+			Signature: block.OfRedactedThinking.Data,
+			Redacted:  true,
+		})
+		if err != nil {
+			return gollem.MessageContent{}, err
+		}
+		mc.Meta = meta
+		return mc, nil
 	}
 
 	// Handle image blocks
@@ -235,6 +306,26 @@ func convertContentToClaude(content gollem.MessageContent, messageRole gollem.Me
 			return anthropic.ContentBlockParamUnion{}, convert.ErrUnsupportedContentType
 		}
 		return anthropic.NewTextBlock(textContent.Text), nil
+
+	case gollem.MessageContentTypeThinking:
+		thinkingContent, err := content.GetThinkingContent()
+		if err != nil {
+			return anthropic.ContentBlockParamUnion{}, err
+		}
+
+		// Extract metadata to determine if this is a redacted block
+		meta, err := unmarshalClaudePartMeta(content.Meta)
+		if err != nil {
+			return anthropic.ContentBlockParamUnion{}, err
+		}
+
+		// Handle redacted thinking blocks
+		if meta.Redacted {
+			return anthropic.NewRedactedThinkingBlock(meta.Signature), nil
+		}
+
+		// Handle normal thinking blocks with signature
+		return anthropic.NewThinkingBlock(meta.Signature, thinkingContent.Text), nil
 
 	case gollem.MessageContentTypeImage:
 		imgContent, err := content.GetImageContent()
