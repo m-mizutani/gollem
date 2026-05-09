@@ -8335,6 +8335,28 @@ function shouldProcessLinkClick(event, target) {
   (!target || target === "_self") && // Let browser handle "target=_blank" etc.
   !isModifiedEvent(event);
 }
+function createSearchParams(init) {
+  if (init === void 0) {
+    init = "";
+  }
+  return new URLSearchParams(typeof init === "string" || Array.isArray(init) || init instanceof URLSearchParams ? init : Object.keys(init).reduce((memo, key) => {
+    let value = init[key];
+    return memo.concat(Array.isArray(value) ? value.map((v) => [key, v]) : [[key, value]]);
+  }, []));
+}
+function getSearchParamsForLocation(locationSearch, defaultSearchParams) {
+  let searchParams = createSearchParams(locationSearch);
+  if (defaultSearchParams) {
+    defaultSearchParams.forEach((_, key) => {
+      if (!searchParams.has(key)) {
+        defaultSearchParams.getAll(key).forEach((value) => {
+          searchParams.append(key, value);
+        });
+      }
+    });
+  }
+  return searchParams;
+}
 const _excluded = ["onClick", "relative", "reloadDocument", "replace", "state", "target", "to", "preventScrollReset", "viewTransition"];
 const REACT_ROUTER_VERSION = "6";
 try {
@@ -8482,6 +8504,24 @@ function useLinkClickHandler(to, _temp) {
       });
     }
   }, [location, navigate, path, replaceProp, state, target, to, preventScrollReset, relative, viewTransition]);
+}
+function useSearchParams(defaultInit) {
+  let defaultSearchParamsRef = reactExports.useRef(createSearchParams(defaultInit));
+  let hasSetSearchParamsRef = reactExports.useRef(false);
+  let location = useLocation();
+  let searchParams = reactExports.useMemo(() => (
+    // Only merge in the defaults if we haven't yet called setSearchParams.
+    // Once we call that we want those to take precedence, otherwise you can't
+    // remove a param with setSearchParams({}) if it has an initial value
+    getSearchParamsForLocation(location.search, hasSetSearchParamsRef.current ? null : defaultSearchParamsRef.current)
+  ), [location.search]);
+  let navigate = useNavigate();
+  let setSearchParams = reactExports.useCallback((nextInit, navigateOptions) => {
+    const newSearchParams = createSearchParams(typeof nextInit === "function" ? nextInit(searchParams) : nextInit);
+    hasSetSearchParamsRef.current = true;
+    navigate("?" + newSearchParams, navigateOptions);
+  }, [navigate, searchParams]);
+  return [searchParams, setSearchParams];
 }
 var Subscribable = class {
   constructor() {
@@ -11065,41 +11105,82 @@ async function fetchJSON(path) {
   }
   return resp.json();
 }
-async function listTraces(pageSize = 20, pageToken = "") {
+function encodeTracePath(path) {
+  return path.split("/").filter((seg) => seg.length > 0).map((seg) => encodeURIComponent(seg)).join("/");
+}
+async function listEntries(path = "", pageSize = 20, pageToken = "") {
   const params = new URLSearchParams();
   params.set("page_size", String(pageSize));
+  if (path) {
+    params.set("path", path);
+  }
   if (pageToken) {
     params.set("page_token", pageToken);
   }
   return fetchJSON(`/traces?${params.toString()}`);
 }
-async function listAllTraces() {
+async function listAllEntries(path = "") {
   const all2 = [];
   let pageToken = "";
   const pageSize = 1e3;
   do {
-    const resp = await listTraces(pageSize, pageToken);
-    all2.push(...resp.traces);
+    const resp = await listEntries(path, pageSize, pageToken);
+    all2.push(...resp.entries);
     pageToken = resp.next_page_token || "";
   } while (pageToken);
   return all2;
 }
-async function getTrace(traceID) {
-  return fetchJSON(`/traces/${encodeURIComponent(traceID)}`);
+async function getTrace(tracePath) {
+  return fetchJSON(`/traces/${encodeTracePath(tracePath)}`);
 }
-function useAllTraces() {
+function useEntries(path) {
   return useQuery({
-    queryKey: ["allTraces"],
-    queryFn: listAllTraces
+    queryKey: ["entries", path],
+    queryFn: () => listAllEntries(path)
   });
 }
-function TraceIDInput() {
+function Breadcrumb({ path }) {
+  const segments = path.split("/").filter((s) => s.length > 0);
+  const linkFor = (depth) => {
+    const sub = segments.slice(0, depth).join("/");
+    return sub === "" ? "/" : `/?path=${encodeURIComponent(sub)}`;
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("nav", { className: "text-sm text-gray-600", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("ol", { className: "flex flex-wrap items-center gap-1", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+      Link,
+      {
+        to: "/",
+        className: "text-blue-600 hover:text-blue-800 hover:underline",
+        children: "root"
+      }
+    ) }),
+    segments.map((seg, idx) => {
+      const isLast = idx === segments.length - 1;
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "flex items-center gap-1", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-gray-400", children: "/" }),
+        isLast ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium text-gray-900", children: seg }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Link,
+          {
+            to: linkFor(idx + 1),
+            className: "text-blue-600 hover:text-blue-800 hover:underline",
+            children: seg
+          }
+        )
+      ] }, idx);
+    })
+  ] }) });
+}
+function TraceIDInput({ currentPath = "" }) {
   const [value, setValue] = reactExports.useState("");
   const navigate = useNavigate();
   const handleSubmit = () => {
     const trimmed = value.trim();
-    if (trimmed) {
-      navigate(`/traces/${trimmed}`);
+    if (!trimmed) return;
+    const isAbsolute = trimmed.startsWith("/");
+    const target = isAbsolute ? trimmed.slice(1) : currentPath ? `${currentPath}/${trimmed}` : trimmed;
+    const encoded = target.split("/").filter((s) => s.length > 0).map((s) => encodeURIComponent(s)).join("/");
+    if (encoded) {
+      navigate(`/traces/${encoded}`);
     }
   };
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
@@ -11111,7 +11192,7 @@ function TraceIDInput() {
         value,
         onChange: (e) => setValue(e.target.value),
         onKeyDown: (e) => {
-          if (e.key === "Enter") handleSubmit();
+          if (e.key === "Enter" && !e.nativeEvent.isComposing) handleSubmit();
         },
         className: "flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
       }
@@ -11193,8 +11274,19 @@ function isJSON(str) {
   }
 }
 const PAGE_SIZE = 20;
+function joinPath(base, name2) {
+  return base ? `${base}/${name2}` : name2;
+}
+function dirHref(base, name2) {
+  return `/?path=${encodeURIComponent(joinPath(base, name2))}`;
+}
+function fileHref(base, name2) {
+  const full = joinPath(base, name2);
+  return `/traces/${full.split("/").map((s) => encodeURIComponent(s)).join("/")}`;
+}
 function TraceListTable({
-  traces,
+  entries,
+  currentPath,
   isLoading
 }) {
   const [filter, setFilter] = reactExports.useState("");
@@ -11203,26 +11295,31 @@ function TraceListTable({
   const [showRelativeTime, setShowRelativeTime] = reactExports.useState(true);
   const [currentPage, setCurrentPage] = reactExports.useState(0);
   const filteredAndSorted = reactExports.useMemo(() => {
-    let result = traces;
+    let result = entries;
     if (filter) {
       const lower = filter.toLowerCase();
-      result = result.filter(
-        (t) => t.trace_id.toLowerCase().includes(lower)
-      );
+      result = result.filter((e) => e.name.toLowerCase().includes(lower));
     }
     return [...result].sort((a, b) => {
+      if (a.kind !== b.kind) {
+        return a.kind === "dir" ? -1 : 1;
+      }
       let cmp = 0;
-      if (sortField === "updated_at") {
-        cmp = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
+      if (sortField === "name" || a.kind === "dir") {
+        cmp = a.name.localeCompare(b.name);
+      } else if (sortField === "updated_at") {
+        const at = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+        const bt = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+        cmp = at - bt;
       } else {
-        cmp = a.size - b.size;
+        cmp = (a.size ?? 0) - (b.size ?? 0);
       }
       return sortOrder === "asc" ? cmp : -cmp;
     });
-  }, [traces, filter, sortField, sortOrder]);
+  }, [entries, filter, sortField, sortOrder]);
   const totalPages = Math.max(1, Math.ceil(filteredAndSorted.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages - 1);
-  const pageTraces = filteredAndSorted.slice(
+  const pageEntries = filteredAndSorted.slice(
     safePage * PAGE_SIZE,
     (safePage + 1) * PAGE_SIZE
   );
@@ -11240,14 +11337,14 @@ function TraceListTable({
     return sortOrder === "asc" ? " ↑" : " ↓";
   };
   if (isLoading) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-white rounded-lg border border-gray-200", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "p-8 text-center text-gray-500", children: "Loading traces..." }) });
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-white rounded-lg border border-gray-200", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "p-8 text-center text-gray-500", children: "Loading entries..." }) });
   }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg border border-gray-200", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "p-3 border-b border-gray-200", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
       "input",
       {
         type: "text",
-        placeholder: "Filter by Trace ID...",
+        placeholder: "Filter by name...",
         value: filter,
         onChange: (e) => {
           setFilter(e.target.value);
@@ -11258,7 +11355,17 @@ function TraceListTable({
     ) }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-sm", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("thead", { className: "bg-gray-50 text-gray-600", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("th", { className: "text-left px-4 py-2 font-medium", children: "Trace ID" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "th",
+          {
+            className: "text-left px-4 py-2 font-medium cursor-pointer select-none hover:text-gray-900",
+            onClick: () => toggleSort("name"),
+            children: [
+              "Name",
+              sortIndicator("name")
+            ]
+          }
+        ),
         /* @__PURE__ */ jsxRuntimeExports.jsxs(
           "th",
           {
@@ -11282,39 +11389,50 @@ function TraceListTable({
           }
         )
       ] }) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("tbody", { children: pageTraces.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("tr", { children: /* @__PURE__ */ jsxRuntimeExports.jsx("td", { colSpan: 3, className: "px-4 py-8 text-center text-gray-500", children: "No traces found" }) }) : pageTraces.map((trace) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-        "tr",
-        {
-          className: "border-t border-gray-100 hover:bg-gray-50",
-          children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-              Link,
-              {
-                to: `/traces/${trace.trace_id}`,
-                className: "text-blue-600 hover:text-blue-800 font-mono",
-                title: trace.trace_id,
-                children: trace.trace_id.length > 36 ? trace.trace_id.slice(0, 8) + "..." : trace.trace_id
-              }
-            ) }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "td",
-              {
-                className: "px-4 py-2 text-gray-600 cursor-pointer",
-                onClick: () => setShowRelativeTime(!showRelativeTime),
-                title: formatDateTime(trace.updated_at),
-                children: showRelativeTime ? formatRelativeTime(trace.updated_at) : formatDateTime(trace.updated_at)
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-2 text-gray-600", children: formatBytes(trace.size) })
-          ]
-        },
-        trace.trace_id
-      )) })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("tbody", { children: pageEntries.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("tr", { children: /* @__PURE__ */ jsxRuntimeExports.jsx("td", { colSpan: 3, className: "px-4 py-8 text-center text-gray-500", children: "No entries found" }) }) : pageEntries.map((entry) => {
+        const isDir = entry.kind === "dir";
+        const href = isDir ? dirHref(currentPath, entry.name) : fileHref(currentPath, entry.name);
+        const displayName = !isDir && entry.name.length > 36 ? entry.name.slice(0, 8) + "..." : entry.name;
+        return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "tr",
+          {
+            className: "border-t border-gray-100 hover:bg-gray-50",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-2", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                Link,
+                {
+                  to: href,
+                  className: "text-blue-600 hover:text-blue-800 font-mono inline-flex items-center gap-1.5",
+                  title: entry.name,
+                  children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { "aria-hidden": true, className: "text-gray-400", children: isDir ? "📁" : "📄" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
+                      displayName,
+                      isDir ? "/" : ""
+                    ] })
+                  ]
+                }
+              ) }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "td",
+                {
+                  className: "px-4 py-2 text-gray-600 cursor-pointer",
+                  onClick: () => setShowRelativeTime(!showRelativeTime),
+                  title: entry.updated_at ? formatDateTime(entry.updated_at) : "",
+                  children: entry.updated_at ? showRelativeTime ? formatRelativeTime(entry.updated_at) : formatDateTime(entry.updated_at) : "-"
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-2 text-gray-600", children: isDir ? "-" : formatBytes(entry.size ?? 0) })
+            ]
+          },
+          `${entry.kind}:${entry.name}`
+        );
+      }) })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-4 py-3 border-t border-gray-200 flex items-center justify-between", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-sm text-gray-500", children: [
         filteredAndSorted.length,
-        " traces — Page ",
+        " entries — Page ",
         safePage + 1,
         " of ",
         totalPages
@@ -11343,17 +11461,21 @@ function TraceListTable({
   ] });
 }
 function TraceListPage() {
-  const { data: traces, isLoading, error } = useAllTraces();
+  const [searchParams] = useSearchParams();
+  const path = searchParams.get("path") || "";
+  const { data: entries, isLoading, error } = useEntries(path);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-6xl mx-auto space-y-6", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx(TraceIDInput, {}),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(TraceIDInput, { currentPath: path }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(Breadcrumb, { path }),
     error && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-red-50 border border-red-200 rounded-lg p-4 text-red-700", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium", children: "Failed to load traces" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium", children: "Failed to load entries" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm mt-1", children: error.message })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       TraceListTable,
       {
-        traces: traces || [],
+        entries: entries || [],
+        currentPath: path,
         isLoading
       }
     )
@@ -11380,7 +11502,7 @@ function collectTokens(span) {
   }
   return { input, output };
 }
-function TraceHeader({ trace }) {
+function TraceHeader({ trace, backHref = "/" }) {
   var _a2, _b2;
   const duration = computeDurationNs(trace.started_at, trace.ended_at);
   const status = ((_a2 = trace.root_span) == null ? void 0 : _a2.status) || "ok";
@@ -11426,7 +11548,7 @@ function TraceHeader({ trace }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           Link,
           {
-            to: "/",
+            to: backHref,
             className: "text-sm text-blue-600 hover:text-blue-800",
             children: "Back to list"
           }
@@ -22434,13 +22556,16 @@ function LLMCallList({ trace }) {
   ] });
 }
 function TraceDetailPage() {
-  const { id } = useParams();
-  const { data: trace, isLoading, error } = useTrace(id || "");
+  const params = useParams();
+  const tracePath = params["*"] || "";
+  const { data: trace, isLoading, error } = useTrace(tracePath);
   const [activeTab, setActiveTab] = reactExports.useState("overview");
   const [selectedSpan, setSelectedSpan] = reactExports.useState(null);
   if (isLoading) {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-w-7xl mx-auto p-8 text-center text-gray-500", children: "Loading trace..." });
   }
+  const parentPath = tracePath.includes("/") ? tracePath.slice(0, tracePath.lastIndexOf("/")) : "";
+  const backHref = parentPath ? `/?path=${encodeURIComponent(parentPath)}` : "/";
   if (error) {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-w-7xl mx-auto", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-red-50 border border-red-200 rounded-lg p-6", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-lg font-medium text-red-800", children: error.message.includes("404") || error.message.includes("not found") ? "Trace not found" : "Failed to load trace" }),
@@ -22448,7 +22573,7 @@ function TraceDetailPage() {
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         Link,
         {
-          to: "/",
+          to: backHref,
           className: "inline-block mt-4 text-sm text-blue-600 hover:text-blue-800",
           children: "Back to list"
         }
@@ -22462,7 +22587,7 @@ function TraceDetailPage() {
     { key: "llm_calls", label: "LLM Calls" }
   ];
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-7xl mx-auto space-y-4", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx(TraceHeader, { trace }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(TraceHeader, { trace, backHref }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "border-b border-gray-200", children: /* @__PURE__ */ jsxRuntimeExports.jsx("nav", { className: "flex gap-6", children: tabs.map((tab2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
       "button",
       {
@@ -22513,7 +22638,7 @@ function LicensePage() {
 function App() {
   return /* @__PURE__ */ jsxRuntimeExports.jsx(Layout, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(Routes, { children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(Route, { path: "/", element: /* @__PURE__ */ jsxRuntimeExports.jsx(TraceListPage, {}) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(Route, { path: "/traces/:id", element: /* @__PURE__ */ jsxRuntimeExports.jsx(TraceDetailPage, {}) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(Route, { path: "/traces/*", element: /* @__PURE__ */ jsxRuntimeExports.jsx(TraceDetailPage, {}) }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(Route, { path: "/license", element: /* @__PURE__ */ jsxRuntimeExports.jsx(LicensePage, {}) })
   ] }) });
 }

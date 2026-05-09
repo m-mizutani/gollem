@@ -4,6 +4,7 @@ import { formatDuration, computeDurationNs } from "../utils/format";
 
 interface TraceHeaderProps {
   trace: Trace;
+  backHref?: string;
 }
 
 function collectTokens(span: Span): { input: number; output: number } {
@@ -21,7 +22,7 @@ function collectTokens(span: Span): { input: number; output: number } {
   return { input, output };
 }
 
-export default function TraceHeader({ trace }: TraceHeaderProps) {
+export default function TraceHeader({ trace, backHref = "/" }: TraceHeaderProps) {
   const duration = computeDurationNs(trace.started_at, trace.ended_at);
   const status = trace.root_span?.status || "ok";
   const errorMsg = trace.root_span?.error;
@@ -62,7 +63,7 @@ export default function TraceHeader({ trace }: TraceHeaderProps) {
             Download JSON
           </button>
           <Link
-            to="/"
+            to={backHref}
             className="text-sm text-blue-600 hover:text-blue-800"
           >
             Back to list

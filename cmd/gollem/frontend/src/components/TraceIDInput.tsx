@@ -1,14 +1,30 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-export default function TraceIDInput() {
+interface TraceIDInputProps {
+  currentPath?: string;
+}
+
+export default function TraceIDInput({ currentPath = "" }: TraceIDInputProps) {
   const [value, setValue] = useState("");
   const navigate = useNavigate();
 
   const handleSubmit = () => {
     const trimmed = value.trim();
-    if (trimmed) {
-      navigate(`/traces/${trimmed}`);
+    if (!trimmed) return;
+    const isAbsolute = trimmed.startsWith("/");
+    const target = isAbsolute
+      ? trimmed.slice(1)
+      : currentPath
+      ? `${currentPath}/${trimmed}`
+      : trimmed;
+    const encoded = target
+      .split("/")
+      .filter((s) => s.length > 0)
+      .map((s) => encodeURIComponent(s))
+      .join("/");
+    if (encoded) {
+      navigate(`/traces/${encoded}`);
     }
   };
 
@@ -20,7 +36,7 @@ export default function TraceIDInput() {
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") handleSubmit();
+          if (e.key === "Enter" && !e.nativeEvent.isComposing) handleSubmit();
         }}
         className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
       />
