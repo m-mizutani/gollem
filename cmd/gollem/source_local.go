@@ -28,14 +28,26 @@ func (s *localSource) List(ctx context.Context, req listRequest) (*listResponse,
 		return nil, goerr.Wrap(err, "invalid path")
 	}
 
-	target := s.dir
-	if rel != "" {
-		target = filepath.Join(s.dir, filepath.FromSlash(rel))
-	}
-
-	entries, err := os.ReadDir(target)
+	// os.Root scopes directory access to s.dir, matching the defense-in-depth
+	// approach used by Get.
+	root, err := os.OpenRoot(s.dir)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to read directory", goerr.Value("dir", target))
+		return nil, goerr.Wrap(err, "failed to open root", goerr.Value("dir", s.dir))
+	}
+	defer func() { _ = root.Close() }()
+
+	relDir := "."
+	if rel != "" {
+		relDir = filepath.FromSlash(rel)
+	}
+	dir, err := root.Open(relDir)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to open directory", goerr.Value("path", rel))
+	}
+	entries, err := dir.ReadDir(-1)
+	_ = dir.Close()
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to read directory", goerr.Value("path", rel))
 	}
 
 	type fileEntry struct {
