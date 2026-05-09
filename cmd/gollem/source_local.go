@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -22,44 +23,71 @@ func newLocalSource(dir string) traceSource {
 }
 
 func (s *localSource) List(ctx context.Context, req listRequest) (*listResponse, error) {
-	entries, err := os.ReadDir(s.dir)
+	rel, err := cleanRelativePath(req.path)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to read directory", goerr.Value("dir", s.dir))
+		return nil, goerr.Wrap(err, "invalid path")
 	}
 
-	// Filter and collect JSON files
+	target := s.dir
+	if rel != "" {
+		target = filepath.Join(s.dir, filepath.FromSlash(rel))
+	}
+
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to read directory", goerr.Value("dir", target))
+	}
+
 	type fileEntry struct {
 		name string
+		kind entryKind
 		info os.FileInfo
 	}
-	var files []fileEntry
+	var collected []fileEntry
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		// Skip hidden entries.
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if e.IsDir() {
+			collected = append(collected, fileEntry{
+				name: e.Name(),
+				kind: entryKindDir,
+			})
+			continue
+		}
+		if !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
 		info, err := e.Info()
 		if err != nil {
 			continue
 		}
-		files = append(files, fileEntry{name: e.Name(), info: info})
+		collected = append(collected, fileEntry{
+			name: strings.TrimSuffix(e.Name(), ".json"),
+			kind: entryKindFile,
+			info: info,
+		})
 	}
 
-	// Sort by name for deterministic ordering
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].name < files[j].name
+	// Sort: directories first, then files; each group alphabetically.
+	sort.Slice(collected, func(i, j int) bool {
+		if collected[i].kind != collected[j].kind {
+			return collected[i].kind == entryKindDir
+		}
+		return collected[i].name < collected[j].name
 	})
 
-	// Find the start position based on pageToken
 	startIdx := 0
 	if req.pageToken != "" {
-		lastFile, err := decodePageToken(req.pageToken)
+		lastKey, err := decodePageToken(req.pageToken)
 		if err != nil {
 			return nil, goerr.Wrap(err, "invalid page token")
 		}
-		startIdx = sort.Search(len(files), func(i int) bool {
-			return files[i].name > lastFile
+		startIdx = sort.Search(len(collected), func(i int) bool {
+			return entrySortKey(collected[i].kind, collected[i].name) > lastKey
 		})
-		if startIdx >= len(files) {
+		if startIdx >= len(collected) {
 			return &listResponse{}, nil
 		}
 	}
@@ -69,49 +97,79 @@ func (s *localSource) List(ctx context.Context, req listRequest) (*listResponse,
 		pageSize = 20
 	}
 
-	endIdx := startIdx + pageSize
-	if endIdx > len(files) {
-		endIdx = len(files)
-	}
+	endIdx := min(startIdx+pageSize, len(collected))
 
 	resp := &listResponse{}
-	for _, f := range files[startIdx:endIdx] {
-		traceID := strings.TrimSuffix(f.name, ".json")
-		resp.traces = append(resp.traces, traceSummary{
-			TraceID:   traceID,
-			Size:      f.info.Size(),
-			UpdatedAt: f.info.ModTime(),
-		})
+	for _, f := range collected[startIdx:endIdx] {
+		entry := entrySummary{
+			Name: f.name,
+			Kind: f.kind,
+		}
+		if f.kind == entryKindFile && f.info != nil {
+			entry.Size = f.info.Size()
+			entry.UpdatedAt = f.info.ModTime()
+		}
+		resp.entries = append(resp.entries, entry)
 	}
 
-	if endIdx < len(files) {
-		resp.nextPageToken = encodePageToken(files[endIdx-1].name)
+	if endIdx < len(collected) {
+		last := collected[endIdx-1]
+		resp.nextPageToken = encodePageToken(entrySortKey(last.kind, last.name))
 	}
 
 	return resp, nil
 }
 
-func (s *localSource) Get(ctx context.Context, traceID string) (*trace.Trace, error) {
-	filePath := filepath.Clean(filepath.Join(s.dir, traceID+".json"))
+func (s *localSource) Get(ctx context.Context, path string) (*trace.Trace, error) {
+	rel, err := cleanRelativePath(path)
+	if err != nil {
+		return nil, goerr.Wrap(err, "invalid path")
+	}
+	if rel == "" {
+		return nil, goerr.New("trace path is required")
+	}
 
-	data, err := os.ReadFile(filePath)
+	// os.Root scopes file access to s.dir, preventing any directory traversal
+	// even if cleanRelativePath were ever bypassed.
+	root, err := os.OpenRoot(s.dir)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to open root", goerr.Value("dir", s.dir))
+	}
+	defer func() { _ = root.Close() }()
+
+	relFile := filepath.FromSlash(rel) + ".json"
+	f, err := root.Open(relFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, goerr.Wrap(err, "trace not found", goerr.Value("traceID", traceID))
+			return nil, goerr.Wrap(err, "trace not found", goerr.Value("path", rel))
 		}
-		return nil, goerr.Wrap(err, "failed to read trace file", goerr.Value("traceID", traceID))
+		return nil, goerr.Wrap(err, "failed to open trace file", goerr.Value("path", rel))
+	}
+	defer func() { _ = f.Close() }()
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to read trace file", goerr.Value("path", rel))
 	}
 
 	var t trace.Trace
 	if err := json.Unmarshal(data, &t); err != nil {
-		return nil, goerr.Wrap(err, "failed to parse trace file", goerr.Value("traceID", traceID))
+		return nil, goerr.Wrap(err, "failed to parse trace file", goerr.Value("path", rel))
 	}
 
 	return &t, nil
 }
 
-func encodePageToken(fileName string) string {
-	return base64.URLEncoding.EncodeToString([]byte(fileName))
+// entrySortKey produces a sort key matching the List ordering: directories first.
+func entrySortKey(kind entryKind, name string) string {
+	if kind == entryKindDir {
+		return "0:" + name
+	}
+	return "1:" + name
+}
+
+func encodePageToken(key string) string {
+	return base64.URLEncoding.EncodeToString([]byte(key))
 }
 
 func decodePageToken(token string) (string, error) {

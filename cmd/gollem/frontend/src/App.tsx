@@ -9,7 +9,7 @@ function App() {
     <Layout>
       <Routes>
         <Route path="/" element={<TraceListPage />} />
-        <Route path="/traces/:id" element={<TraceDetailPage />} />
+        <Route path="/traces/*" element={<TraceDetailPage />} />
         <Route path="/license" element={<LicensePage />} />
       </Routes>
     </Layout>

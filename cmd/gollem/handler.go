@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 type apiError struct {
@@ -27,14 +28,22 @@ func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-type listTracesResponse struct {
-	Traces        []traceSummary `json:"traces"`
+type listEntriesResponse struct {
+	Path          string         `json:"path"`
+	Entries       []entrySummary `json:"entries"`
 	NextPageToken string         `json:"next_page_token,omitempty"`
 }
 
 func (s *server) handleListTraces(w http.ResponseWriter, r *http.Request) {
 	pageSizeStr := r.URL.Query().Get("page_size")
 	pageToken := r.URL.Query().Get("page_token")
+	path := r.URL.Query().Get("path")
+
+	cleaned, err := cleanRelativePath(path)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
 
 	pageSize := 20
 	if pageSizeStr != "" {
@@ -51,36 +60,46 @@ func (s *server) handleListTraces(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp, err := s.source.List(r.Context(), listRequest{
+		path:      cleaned,
 		pageSize:  pageSize,
 		pageToken: pageToken,
 	})
 	if err != nil {
-		slog.Error("failed to list traces", slog.Any("error", err))
+		slog.Error("failed to list traces", slog.Any("error", err), slog.String("path", cleaned))
 		writeError(w, http.StatusInternalServerError, "failed to list traces")
 		return
 	}
 
-	traces := resp.traces
-	if traces == nil {
-		traces = []traceSummary{}
+	entries := resp.entries
+	if entries == nil {
+		entries = []entrySummary{}
 	}
 
-	writeJSON(w, http.StatusOK, listTracesResponse{
-		Traces:        traces,
+	writeJSON(w, http.StatusOK, listEntriesResponse{
+		Path:          cleaned,
+		Entries:       entries,
 		NextPageToken: resp.nextPageToken,
 	})
 }
 
 func (s *server) handleGetTrace(w http.ResponseWriter, r *http.Request) {
-	traceID := r.PathValue("id")
-	if traceID == "" {
-		writeError(w, http.StatusBadRequest, "trace ID is required")
+	// The "{path...}" wildcard path value preserves slashes in the matched portion.
+	tracePath := r.PathValue("path")
+	tracePath = strings.TrimPrefix(tracePath, "/")
+	if tracePath == "" {
+		writeError(w, http.StatusBadRequest, "trace path is required")
 		return
 	}
 
-	t, err := s.source.Get(r.Context(), traceID)
+	cleaned, err := cleanRelativePath(tracePath)
+	if err != nil || cleaned == "" {
+		writeError(w, http.StatusBadRequest, "invalid trace path")
+		return
+	}
+
+	t, err := s.source.Get(r.Context(), cleaned)
 	if err != nil {
-		slog.Error("failed to get trace", slog.Any("error", err), slog.String("traceID", traceID))
+		slog.Error("failed to get trace", slog.Any("error", err), slog.String("path", cleaned))
 		writeError(w, http.StatusNotFound, "trace not found")
 		return
 	}

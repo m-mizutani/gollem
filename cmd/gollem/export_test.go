@@ -7,8 +7,8 @@ import (
 	"github.com/m-mizutani/gollem/trace"
 )
 
-// ListTracesResponse is exported for testing.
-type ListTracesResponse = listTracesResponse
+// ListEntriesResponse is exported for testing.
+type ListEntriesResponse = listEntriesResponse
 
 // Exported constructors for testing
 var NewServer = newServer
@@ -23,12 +23,20 @@ func (s *server) Handler() http.Handler {
 	return s.handler()
 }
 
-// TraceSummaryExported is an exported version of traceSummary for testing.
-type TraceSummaryExported = traceSummary
+// EntrySummaryExported is an exported version of entrySummary for testing.
+type EntrySummaryExported = entrySummary
+
+// EntryKindExported is an exported alias of entryKind for testing.
+type EntryKindExported = entryKind
+
+const (
+	EntryKindFile = entryKindFile
+	EntryKindDir  = entryKindDir
+)
 
 // ListResult holds the exported result of a List call.
 type ListResult struct {
-	Traces        []TraceSummaryExported
+	Entries       []EntrySummaryExported
 	NextPageToken string
 }
 
@@ -43,8 +51,9 @@ func NewLocalSource(dir string) *TestableSource {
 }
 
 // List calls the underlying source's List with exported types.
-func (ts *TestableSource) List(ctx context.Context, pageSize int, pageToken string) (*ListResult, error) {
+func (ts *TestableSource) List(ctx context.Context, path string, pageSize int, pageToken string) (*ListResult, error) {
 	resp, err := ts.src.List(ctx, listRequest{
+		path:      path,
 		pageSize:  pageSize,
 		pageToken: pageToken,
 	})
@@ -52,14 +61,14 @@ func (ts *TestableSource) List(ctx context.Context, pageSize int, pageToken stri
 		return nil, err
 	}
 	return &ListResult{
-		Traces:        resp.traces,
+		Entries:       resp.entries,
 		NextPageToken: resp.nextPageToken,
 	}, nil
 }
 
 // Get calls the underlying source's Get.
-func (ts *TestableSource) Get(ctx context.Context, traceID string) (*trace.Trace, error) {
-	return ts.src.Get(ctx, traceID)
+func (ts *TestableSource) Get(ctx context.Context, path string) (*trace.Trace, error) {
+	return ts.src.Get(ctx, path)
 }
 
 // AsTraceSource returns the underlying traceSource for use with server options.
@@ -74,3 +83,6 @@ func WithTestSource(ts *TestableSource) serverOption {
 
 // ParseGSURI is exported for testing.
 var ParseGSURI = parseGSURI
+
+// CleanRelativePath is exported for testing.
+var CleanRelativePath = cleanRelativePath

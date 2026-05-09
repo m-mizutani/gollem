@@ -105,13 +105,17 @@ export interface EventData {
 }
 
 // API response types
-export interface TraceSummary {
-  trace_id: string;
-  size: number;
-  updated_at: string;
+export type EntryKind = "file" | "dir";
+
+export interface Entry {
+  name: string;
+  kind: EntryKind;
+  size?: number;
+  updated_at?: string;
 }
 
-export interface ListTracesResponse {
-  traces: TraceSummary[];
+export interface ListEntriesResponse {
+  path: string;
+  entries: Entry[];
   next_page_token?: string;
 }

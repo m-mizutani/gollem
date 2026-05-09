@@ -58,7 +58,7 @@ func (s *server) setupRoutes() {
 	// API routes
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/traces", s.handleListTraces)
-	s.mux.HandleFunc("GET /api/traces/{id}", s.handleGetTrace)
+	s.mux.HandleFunc("GET /api/traces/{path...}", s.handleGetTrace)
 
 	// Static files (SPA fallback)
 	s.mux.Handle("/", s.spaHandler())

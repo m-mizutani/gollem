@@ -11,8 +11,10 @@ import LLMCallList from "./LLMCallList";
 type Tab = "overview" | "timeline" | "llm_calls";
 
 export default function TraceDetailPage() {
-  const { id } = useParams<{ id: string }>();
-  const { data: trace, isLoading, error } = useTrace(id || "");
+  // The "/traces/*" route stores the splat under params["*"], preserving slashes.
+  const params = useParams();
+  const tracePath = params["*"] || "";
+  const { data: trace, isLoading, error } = useTrace(tracePath);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [selectedSpan, setSelectedSpan] = useState<Span | null>(null);
 
@@ -23,6 +25,11 @@ export default function TraceDetailPage() {
       </div>
     );
   }
+
+  const parentPath = tracePath.includes("/")
+    ? tracePath.slice(0, tracePath.lastIndexOf("/"))
+    : "";
+  const backHref = parentPath ? `/?path=${encodeURIComponent(parentPath)}` : "/";
 
   if (error) {
     return (
@@ -38,7 +45,7 @@ export default function TraceDetailPage() {
             {(error as Error).message}
           </p>
           <Link
-            to="/"
+            to={backHref}
             className="inline-block mt-4 text-sm text-blue-600 hover:text-blue-800"
           >
             Back to list
@@ -58,7 +65,7 @@ export default function TraceDetailPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-4">
-      <TraceHeader trace={trace} />
+      <TraceHeader trace={trace} backHref={backHref} />
 
       <div className="border-b border-gray-200">
         <nav className="flex gap-6">

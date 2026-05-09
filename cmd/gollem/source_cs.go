@@ -33,20 +33,31 @@ func newCSSource(ctx context.Context, bucket, prefix string) (traceSource, error
 }
 
 func (s *csSource) List(ctx context.Context, req listRequest) (*listResponse, error) {
+	rel, err := cleanRelativePath(req.path)
+	if err != nil {
+		return nil, goerr.Wrap(err, "invalid path")
+	}
+
+	queryPrefix := s.prefix
+	if rel != "" {
+		queryPrefix += rel + "/"
+	}
+
 	query := &storage.Query{
-		Prefix: s.prefix,
+		Prefix:    queryPrefix,
+		Delimiter: "/",
 	}
 
 	bkt := s.client.Bucket(s.bucket)
 	it := bkt.Objects(ctx, query)
 
-	// Collect all matching objects from GCS
-	type objectEntry struct {
+	type collectedEntry struct {
 		name      string
+		kind      entryKind
 		size      int64
 		updatedAt time.Time
 	}
-	var objects []objectEntry
+	var collected []collectedEntry
 
 	for {
 		attr, err := it.Next()
@@ -56,46 +67,58 @@ func (s *csSource) List(ctx context.Context, req listRequest) (*listResponse, er
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to list objects",
 				goerr.Value("bucket", s.bucket),
-				goerr.Value("prefix", s.prefix),
+				goerr.Value("prefix", queryPrefix),
 			)
+		}
+
+		// When Delimiter is set, the iterator yields either an object (attr.Name)
+		// or a synthetic directory marker (attr.Prefix).
+		if attr.Prefix != "" {
+			dirName := strings.TrimSuffix(strings.TrimPrefix(attr.Prefix, queryPrefix), "/")
+			if dirName == "" {
+				continue
+			}
+			collected = append(collected, collectedEntry{
+				name: dirName,
+				kind: entryKindDir,
+			})
+			continue
 		}
 
 		if !strings.HasSuffix(attr.Name, ".json") {
 			continue
 		}
-		name := attr.Name
-		if s.prefix != "" {
-			name = strings.TrimPrefix(name, s.prefix)
-		}
-		traceID := strings.TrimSuffix(name, ".json")
-		// Skip directory-like entries
-		if traceID == "" || strings.Contains(traceID, "/") {
+		// The object's name relative to queryPrefix; should be a single path segment.
+		rel := strings.TrimPrefix(attr.Name, queryPrefix)
+		if rel == "" || strings.Contains(rel, "/") {
 			continue
 		}
-
-		objects = append(objects, objectEntry{
+		traceID := strings.TrimSuffix(rel, ".json")
+		collected = append(collected, collectedEntry{
 			name:      traceID,
+			kind:      entryKindFile,
 			size:      attr.Size,
 			updatedAt: attr.Updated,
 		})
 	}
 
-	// Sort by name for deterministic ordering
-	sort.Slice(objects, func(i, j int) bool {
-		return objects[i].name < objects[j].name
+	sort.Slice(collected, func(i, j int) bool {
+		if collected[i].kind != collected[j].kind {
+			return collected[i].kind == entryKindDir
+		}
+		return collected[i].name < collected[j].name
 	})
 
-	// Find the start position based on pageToken
 	startIdx := 0
 	if req.pageToken != "" {
-		lastFile, err := decodePageToken(req.pageToken)
+		lastKey, err := decodePageToken(req.pageToken)
 		if err != nil {
 			return nil, goerr.Wrap(err, "invalid page token")
 		}
-		startIdx = sort.Search(len(objects), func(i int) bool {
-			return objects[i].name > lastFile
+		startIdx = sort.Search(len(collected), func(i int) bool {
+			return entrySortKey(collected[i].kind, collected[i].name) > lastKey
 		})
-		if startIdx >= len(objects) {
+		if startIdx >= len(collected) {
 			return &listResponse{}, nil
 		}
 	}
@@ -105,29 +128,39 @@ func (s *csSource) List(ctx context.Context, req listRequest) (*listResponse, er
 		pageSize = 20
 	}
 
-	endIdx := startIdx + pageSize
-	if endIdx > len(objects) {
-		endIdx = len(objects)
-	}
+	endIdx := min(startIdx+pageSize, len(collected))
 
 	resp := &listResponse{}
-	for _, obj := range objects[startIdx:endIdx] {
-		resp.traces = append(resp.traces, traceSummary{
-			TraceID:   obj.name,
-			Size:      obj.size,
-			UpdatedAt: obj.updatedAt,
-		})
+	for _, e := range collected[startIdx:endIdx] {
+		entry := entrySummary{
+			Name: e.name,
+			Kind: e.kind,
+		}
+		if e.kind == entryKindFile {
+			entry.Size = e.size
+			entry.UpdatedAt = e.updatedAt
+		}
+		resp.entries = append(resp.entries, entry)
 	}
 
-	if endIdx < len(objects) {
-		resp.nextPageToken = encodePageToken(objects[endIdx-1].name)
+	if endIdx < len(collected) {
+		last := collected[endIdx-1]
+		resp.nextPageToken = encodePageToken(entrySortKey(last.kind, last.name))
 	}
 
 	return resp, nil
 }
 
-func (s *csSource) Get(ctx context.Context, traceID string) (*trace.Trace, error) {
-	objectName := s.prefix + traceID + ".json"
+func (s *csSource) Get(ctx context.Context, path string) (*trace.Trace, error) {
+	rel, err := cleanRelativePath(path)
+	if err != nil {
+		return nil, goerr.Wrap(err, "invalid path")
+	}
+	if rel == "" {
+		return nil, goerr.New("trace path is required")
+	}
+
+	objectName := s.prefix + rel + ".json"
 	reader, err := s.client.Bucket(s.bucket).Object(objectName).NewReader(ctx)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to read trace object",
