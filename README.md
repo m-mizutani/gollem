@@ -3,7 +3,7 @@
 GO for Large LanguagE Model (GOLLEM)
 
 <p align="center">
-  <img src="./doc/images/logo.png" height="128" />
+  <img src="./docs/images/logo.png" height="128" />
 </p>
 
 `gollem` provides:
@@ -22,7 +22,7 @@ GO for Large LanguagE Model (GOLLEM)
 - [x] **Gemini** (see [models](https://ai.google.dev/gemini-api/docs/models?hl=ja))
 - [x] **Anthropic Claude** (see [models](https://docs.anthropic.com/en/docs/about-claude/models/all-models))
   - Direct access via Anthropic API
-  - Via Google Vertex AI (see [LLM Provider Configuration](doc/llm.md#claude-vertex-ai))
+  - Via Google Vertex AI (see [LLM Provider Configuration](docs/llm.md#claude-vertex-ai))
 - [x] **OpenAI** (see [models](https://platform.openai.com/docs/models))
 
 ## Install
@@ -74,7 +74,7 @@ func main() {
 
 ### Agent Framework
 
-Build conversational agents with automatic session management and tool integration. [Learn more →](doc/getting-started.md)
+Build conversational agents with automatic session management and tool integration. [Learn more →](docs/getting-started.md)
 
 ```go
 agent := gollem.New(client,
@@ -89,7 +89,7 @@ agent.Execute(ctx, "What did I just say?") // remembers context
 
 ### Tool Integration
 
-Define custom tools for LLMs to call, or connect external tools via MCP. [Tools →](doc/tools.md) | [MCP →](doc/mcp.md)
+Define custom tools for LLMs to call, or connect external tools via MCP. [Tools →](docs/tools.md) | [MCP →](docs/mcp.md)
 
 ```go
 // Custom tool - implement Spec() and Run()
@@ -119,7 +119,7 @@ agent := gollem.New(client,
 
 ### Multimodal Input
 
-Send images and PDFs alongside text prompts. [Learn more →](doc/llm.md#pdf-input-support)
+Send images and PDFs alongside text prompts. [Learn more →](docs/llm.md#pdf-input-support)
 
 ```go
 img, _ := gollem.NewImage(imageBytes)
@@ -130,7 +130,7 @@ result, _ := session.Generate(ctx, []gollem.Input{img, pdf, gollem.Text("Describ
 
 ### Structured Output
 
-Constrain LLM responses to a JSON Schema. [Learn more →](doc/schema.md)
+Constrain LLM responses to a JSON Schema. [Learn more →](docs/schema.md)
 
 ```go
 schema, _ := gollem.ToSchema(UserProfile{})
@@ -168,7 +168,7 @@ resp, _ := gollem.SessionQuery[UserProfile](ctx, session, "Who am I?")
 
 ### Middleware
 
-Monitor, log, and control agent behavior with composable middleware. [Learn more →](doc/middleware.md)
+Monitor, log, and control agent behavior with composable middleware. [Learn more →](docs/middleware.md)
 
 ```go
 agent := gollem.New(client,
@@ -183,7 +183,7 @@ agent := gollem.New(client,
 
 ### Strategy Pattern
 
-Swap execution strategies: simple, ReAct, or Plan & Execute. [Learn more →](doc/strategy.md)
+Swap execution strategies: simple, ReAct, or Plan & Execute. [Learn more →](docs/strategy.md)
 
 ```go
 import "github.com/m-mizutani/gollem/strategy/planexec"
@@ -196,7 +196,7 @@ agent := gollem.New(client,
 
 ### Tracing
 
-Observe agent execution with pluggable backends (in-memory, OpenTelemetry). [Learn more →](doc/tracing.md)
+Observe agent execution with pluggable backends (in-memory, OpenTelemetry). [Learn more →](docs/tracing.md)
 
 ```go
 import "github.com/m-mizutani/gollem/trace"
@@ -211,7 +211,7 @@ agent := gollem.New(client, gollem.WithTrace(rec))
 
 ### History Management
 
-Portable conversation history for stateless/distributed applications. [Learn more →](doc/history.md)
+Portable conversation history for stateless/distributed applications. [Learn more →](docs/history.md)
 
 ```go
 // Export history for persistence
@@ -251,16 +251,16 @@ See the [examples](https://github.com/m-mizutani/gollem/tree/main/examples) dire
 
 ## Documentation
 
-- **[Getting Started Guide](doc/getting-started.md)**
-- **[Tool Development](doc/tools.md)**
-- **[MCP Integration](doc/mcp.md)**
-- **[Structured Output with JSON Schema](doc/schema.md)**
-- **[Middleware System](doc/middleware.md)**
-- **[Strategy Pattern](doc/strategy.md)**
-- **[Tracing](doc/tracing.md)**
-- **[History Management](doc/history.md)**
-- **[LLM Provider Configuration](doc/llm.md)**
-- **[Debugging](doc/debugging.md)**
+- **[Getting Started Guide](docs/getting-started.md)**
+- **[Tool Development](docs/tools.md)**
+- **[MCP Integration](docs/mcp.md)**
+- **[Structured Output with JSON Schema](docs/schema.md)**
+- **[Middleware System](docs/middleware.md)**
+- **[Strategy Pattern](docs/strategy.md)**
+- **[Tracing](docs/tracing.md)**
+- **[History Management](docs/history.md)**
+- **[LLM Provider Configuration](docs/llm.md)**
+- **[Debugging](docs/debugging.md)**
 - **[API Reference](https://pkg.go.dev/github.com/m-mizutani/gollem)**
 
 ## License

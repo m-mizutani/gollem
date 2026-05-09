@@ -83,4 +83,4 @@ This pattern is particularly useful for:
 ## Related Documentation
 
 - See `CHANGELOG.md` for migration guide from older versions
-- See `doc/architecture.md` for SubAgent architecture details
+- See `docs/architecture.md` for SubAgent architecture details
