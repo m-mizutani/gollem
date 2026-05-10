@@ -385,7 +385,7 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 	response := &gollem.Response{
 		Texts:         make([]string, 0),
 		FunctionCalls: make([]*gollem.FunctionCall, 0),
-		Thoughts:     make([]string, 0),
+		Thoughts:      make([]string, 0),
 	}
 
 	// Extract token counts from UsageMetadata if available
@@ -476,13 +476,17 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			return nil, err
 		}
 
-		// Add current input as a new user message
+		// Add current input as a new user message.
+		// newTurnContents tracks only the contents added in this turn so that
+		// trace data records the delta rather than the full history.
+		var newTurnContents []*genai.Content
 		if len(parts) > 0 {
 			userContent := &genai.Content{
 				Role:  "user",
 				Parts: parts,
 			}
 			contents = append(contents, userContent)
+			newTurnContents = append(newTurnContents, userContent)
 		}
 
 		// Start LLM call trace span
@@ -513,8 +517,10 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			return nil, err
 		}
 
-		// Set trace data for defer
-		geminiTraceData = buildGeminiTraceData(response, s.model, s.cfg.SystemPrompt(), contents)
+		// Set trace data for defer.
+		// Record only contents added in this turn; previous turns are already
+		// captured in earlier trace spans.
+		geminiTraceData = buildGeminiTraceData(response, s.model, s.cfg.SystemPrompt(), newTurnContents)
 
 		// Update history with the input and raw response content.
 		// Use candidate.Content directly to preserve all fields (e.g., ThoughtSignature).
@@ -610,13 +616,17 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			return nil, err
 		}
 
-		// Add current input as a new user message
+		// Add current input as a new user message.
+		// newTurnContents tracks only the contents added in this turn so that
+		// trace data records the delta rather than the full history.
+		var newTurnContents []*genai.Content
 		if len(parts) > 0 {
 			userContent := &genai.Content{
 				Role:  "user",
 				Parts: parts,
 			}
 			contents = append(contents, userContent)
+			newTurnContents = append(newTurnContents, userContent)
 		}
 
 		// Start LLM call trace span
@@ -732,14 +742,16 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				}
 			}
 
-			// Set trace data for defer
+			// Set trace data for defer.
+			// Record only contents added in this turn; previous turns are
+			// already captured in earlier trace spans.
 			streamTraceData = &trace.LLMCallData{
 				InputTokens:  totalInputTokens,
 				OutputTokens: totalOutputTokens,
 				Model:        s.model,
 				Request: &trace.LLMRequest{
 					SystemPrompt: s.cfg.SystemPrompt(),
-					Messages:     contentsToTraceMessages(contents),
+					Messages:     contentsToTraceMessages(newTurnContents),
 				},
 				Response: &trace.LLMResponse{},
 			}
