@@ -20,7 +20,7 @@ set -euo pipefail
 #   206A-206F  Deprecated formatting controls
 #   202A-202E  BiDi formatting (LRE/RLE/PDF/LRO/RLO)
 #   2066-2069  BiDi isolate (Trojan Source: CVE-2021-42574)
-#   FEFF       BOM / Zero-Width No-Break Space (in-line; start-of-file BOM is checked separately)
+#   FEFF       BOM / Zero-Width No-Break Space
 #   180E       Mongolian Vowel Separator
 #   FFF9-FFFB  Interlinear annotations
 #   00A0       No-Break Space (NBSP)
@@ -56,12 +56,14 @@ cd "$(git rev-parse --show-toplevel)"
 findings_file=$(mktemp)
 trap 'rm -f "$findings_file"' EXIT
 
-# --- Check 1: in-line invisible / ambiguous Unicode characters ---
 # ripgrep walks files while respecting .gitignore; binary files are auto-skipped.
+# --encoding none disables BOM-aware encoding auto-detection: without this,
+# ripgrep silently strips a leading BOM (U+FEFF) before searching, which would
+# hide BOM-at-start-of-file from the pattern below.
 # --column reports the column of the first match on each line; that location is
 # sufficient for developers to navigate and inspect adjacent chars.
 set +e
-rg_output=$(rg --pcre2 --column --line-number --no-heading --color=never \
+rg_output=$(rg --pcre2 --encoding none --column --line-number --no-heading --color=never \
   "${EXCLUDES[@]}" -e "$PATTERN" .)
 rg_status=$?
 set -e
@@ -69,13 +71,15 @@ set -e
 case "$rg_status" in
   0)
     while IFS= read -r line; do
-      file=${line%%:*}
-      file=${file#./}
-      rest=${line#*:}
-      lnum=${rest%%:*}
-      rest=${rest#*:}
-      col=${rest%%:*}
-      printf '%s\t%s\t%s\n' "$file" "$lnum" "$col" >> "$findings_file"
+      # Parse ripgrep output of the form `file:line:col:content`. Use a
+      # right-anchored regex so filenames containing colons are handled
+      # correctly (the trailing `:line:col:` is the unambiguous delimiter).
+      if [[ "$line" =~ ^(.*):([0-9]+):([0-9]+): ]]; then
+        file=${BASH_REMATCH[1]#./}
+        lnum=${BASH_REMATCH[2]}
+        col=${BASH_REMATCH[3]}
+        printf '%s\t%s\t%s\n' "$file" "$lnum" "$col" >> "$findings_file"
+      fi
     done <<< "$rg_output"
     ;;
   1) ;;  # no matches
@@ -85,28 +89,6 @@ case "$rg_status" in
     ;;
 esac
 
-# --- Check 2: UTF-8 BOM (U+FEFF) at the start of a file ---
-# ripgrep transparently strips a leading BOM before searching, so a BOM at
-# byte offset 0 is invisible to Check 1. Catch it here by inspecting the
-# first three bytes of each tracked text file.
-BOM=$'\xef\xbb\xbf'
-while IFS= read -r -d '' path; do
-  case "$path" in
-    *.png|*.jpg|*.jpeg|*.gif|*.ico|*.svg|*.webp|*.bmp) continue ;;
-    *.woff|*.woff2|*.ttf|*.eot|*.otf) continue ;;
-    *.pdf|*.zip|*.tar|*.gz|*.tgz|*.bz2|*.xz) continue ;;
-    *.mp4|*.mp3|*.wav|*.ogg|*.webm) continue ;;
-    *.class|*.jar|*.so|*.dll|*.dylib|*.exe) continue ;;
-    cmd/gollem/frontend/dist/*) continue ;;
-  esac
-  [[ -f "$path" ]] || continue
-  first3=$(head -c 3 -- "$path" 2>/dev/null || true)
-  if [[ "$first3" == "$BOM" ]]; then
-    printf '%s\t1\t1\n' "$path" >> "$findings_file"
-  fi
-done < <(git ls-files -z)
-
-# --- Emit findings ---
 if [[ ! -s "$findings_file" ]]; then
   echo "OK: no invisible/ambiguous Unicode characters detected"
   exit 0
