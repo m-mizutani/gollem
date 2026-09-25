@@ -1097,6 +1097,11 @@ func (s *Session) applyPerCallOverrides(req *openai.ChatCompletionRequest, opts 
 			JSONSchema: jsonSchema,
 		}
 	}
+	// The tool definitions stay in the request; "none" only forbids calling
+	// them. Without tools there is nothing to forbid, so tool_choice is not sent.
+	if genCfg.ToolCallsDisabled() && len(req.Tools) > 0 {
+		req.ToolChoice = "none"
+	}
 	return nil
 }
 

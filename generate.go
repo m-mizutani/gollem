@@ -18,6 +18,8 @@ type generateConfig struct {
 	temperature    *float64
 	topP           *float64
 	maxTokens      *int
+
+	toolCallsDisabled bool
 }
 
 // NewGenerateConfig creates a generateConfig from the given options.
@@ -48,6 +50,27 @@ func (c *generateConfig) TopP() *float64 {
 // MaxTokens returns the per-call max tokens override, or nil if not set.
 func (c *generateConfig) MaxTokens() *int {
 	return c.maxTokens
+}
+
+// ToolCallsDisabled reports whether tool calls are disabled for this call.
+func (c *generateConfig) ToolCallsDisabled() bool {
+	return c.toolCallsDisabled
+}
+
+// WithToolCallsDisabled forbids the model from calling tools in a single
+// Generate/Stream call while the session's tool definitions are still sent.
+//
+// Removing the tools instead would change the request prefix. Claude binds
+// thinking blocks to the system prompt and tool list they were produced with,
+// so a history containing them is rejected when either changes; keeping the
+// tools and forbidding their use leaves the prefix intact.
+//
+// Providers receive it as tool_choice "none" (Claude, OpenAI) or the function
+// calling mode NONE (Gemini). It has no effect when the session has no tools.
+func WithToolCallsDisabled() GenerateOption {
+	return func(cfg *generateConfig) {
+		cfg.toolCallsDisabled = true
+	}
 }
 
 // WithGenerateResponseSchema sets the response schema for a single Generate/Stream call.

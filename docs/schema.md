@@ -151,8 +151,21 @@ resp, _ = session.Generate(ctx, inputs, gollem.WithGenerateResponseSchema(schema
 | `WithTopP(float64)` | Override top-p for this call |
 | `WithMaxTokens(int)` | Override max tokens for this call |
 | `WithGenerateResponseSchema(*Parameter)` | Force JSON output with the given schema for this call |
+| `WithToolCallsDisabled()` | Forbid tool calls for this call while still sending the session's tools |
 
-When `WithGenerateResponseSchema` is set, the provider automatically switches to JSON output mode for that call (e.g., OpenAI sets `ResponseFormat` to JSON Schema, Gemini sets `ResponseMIMEType` to `application/json`, Claude injects schema instructions into the system prompt).
+When `WithGenerateResponseSchema` is set, the provider automatically switches to JSON output mode for that call (e.g., OpenAI sets `ResponseFormat` to JSON Schema, Gemini sets `ResponseMIMEType` to `application/json`, Claude sets `output_config.format` on models that support structured outputs; see [Provider-Specific Behavior](#provider-specific-behavior)).
+
+`WithToolCallsDisabled` sends `tool_choice: "none"` to Claude and OpenAI and the function calling mode `NONE` to Gemini. The model cannot call a tool in that call, but the tool definitions are still sent, so the request carries the same tool list as the calls before it. Claude rejects a history containing thinking blocks when the tool list differs from the one they were produced with; removing the tools instead of using this option causes that rejection. When the session has no tools, the option sends nothing.
+
+```go
+// After a tool loop, ask for a structured answer over the same history
+// without letting the model call another tool.
+resp, _ = session.Generate(ctx,
+	[]gollem.Input{gollem.Text("Report the result as JSON.")},
+	gollem.WithToolCallsDisabled(),
+	gollem.WithGenerateResponseSchema(schema),
+)
+```
 
 ## Schema Parameter Types
 
@@ -468,10 +481,11 @@ OpenAI uses Structured Outputs with JSON Schema:
 
 ### Claude
 
-Claude uses the JSON Schema in system instructions:
-- Schema is converted to clear JSON format description
-- Works with all Claude 3+ models
-- Automatically enforces JSON output
+On models that support [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs), Claude receives the schema as `output_config.format`:
+- The API constrains decoding to the schema, so the response text is JSON that matches it. The documented exceptions are a refusal (`stop_reason: "refusal"`), a response cut off by `max_tokens`, and a string `enum` value returned with different capitalization, which the Claude documentation avoids by using lowercase enum values. gollem returns the text as is in each case.
+- The system prompt and tool list are the same as in a call without a schema. Claude accepts thinking blocks from earlier turns only while both stay the same, so a call with a schema can follow a tool loop over the same history.
+- Structured outputs rejects some JSON Schema keywords. gollem removes `minimum`, `maximum`, `minLength`, `maxLength`, `pattern`, `maxItems` and a `minItems` above 1 from the schema and appends them to the field's description, for example `{maxLength: 20}`. The API does not enforce these constraints, and gollem does not validate the response against them. Every object is sent with `additionalProperties: false`.
+- Models that do not support structured outputs (Claude Sonnet 4, Claude Opus 4 and the Claude 3 and Claude 2 models) receive the schema in the system prompt instead, as in earlier gollem versions. The list is `structuredOutputsUnsupported` in `llm/claude/model.go`; any other model ID, including one served through `WithBaseURL`, is sent `output_config.format`.
 
 ### Gemini
 

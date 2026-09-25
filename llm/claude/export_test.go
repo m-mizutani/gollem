@@ -18,6 +18,8 @@ var (
 	NormalizeModelID              = normalizeModelID
 	ResolveMaxOutputTokens        = resolveMaxOutputTokens
 	ToolUseInput                  = toolUseInput
+	OutputSchema                  = outputSchema
+	SupportsStructuredOutputs     = supportsStructuredOutputs
 )
 
 // FallbackMaxOutputTokens is the max tokens used for models absent from the table.
@@ -68,6 +70,15 @@ func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model s
 // GetBaseURL returns the base URL from a Claude client for testing
 func GetBaseURL(client *Client) string {
 	return client.baseURL
+}
+
+// NewVertexClientWithAnthropicClient builds a VertexClient that sends its
+// requests through the given Anthropic client, for tests that point it at a
+// local server instead of Vertex AI.
+func NewVertexClientWithAnthropicClient(client *anthropic.Client, options ...VertexOption) *VertexClient {
+	c := newConfiguredVertexClient(options...)
+	c.client = client
+	return c
 }
 
 // NewVertexClientWithOptions builds a VertexClient through the same defaults

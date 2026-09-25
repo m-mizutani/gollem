@@ -1568,3 +1568,80 @@ func TestClientModel(t *testing.T) {
 		expected: "",
 	}))
 }
+
+func TestToolCallsDisabled(t *testing.T) {
+	tools := []*genai.Tool{{
+		FunctionDeclarations: []*genai.FunctionDeclaration{{Name: "lookup", Description: "Look up a value"}},
+	}}
+
+	type testCase struct {
+		tools    []*genai.Tool
+		opts     []gollem.GenerateOption
+		expected *genai.ToolConfig
+	}
+
+	modeNone := &genai.ToolConfig{
+		FunctionCallingConfig: &genai.FunctionCallingConfig{Mode: genai.FunctionCallingConfigModeNone},
+	}
+
+	runTest := func(stream bool, tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			var sent *genai.GenerateContentConfig
+			mockClient := &apiClientMock{
+				GenerateContentFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+					sent = config
+					return &genai.GenerateContentResponse{
+						Candidates: []*genai.Candidate{{
+							Content: &genai.Content{Parts: []*genai.Part{{Text: "ok"}}, Role: "model"},
+						}},
+					}, nil
+				},
+				GenerateContentStreamFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) <-chan gemini.StreamResponse {
+					sent = config
+					ch := make(chan gemini.StreamResponse)
+					close(ch)
+					return ch
+				},
+			}
+			session, err := gemini.NewSessionWithAPIClient(mockClient, gollem.NewSessionConfig(), "gemini-2.5-flash")
+			gt.NoError(t, err)
+			gemini.SetSessionConfig(session, &genai.GenerateContentConfig{Tools: tc.tools})
+
+			input := []gollem.Input{gollem.Text("question")}
+			if stream {
+				ch, err := session.Stream(context.Background(), input, tc.opts...)
+				gt.NoError(t, err)
+				for resp := range ch {
+					gt.NoError(t, resp.Error)
+				}
+			} else {
+				_, err = session.Generate(context.Background(), input, tc.opts...)
+				gt.NoError(t, err)
+			}
+
+			gt.NotNil(t, sent)
+			gt.Equal(t, tc.tools, sent.Tools)
+			gt.Equal(t, tc.expected, sent.ToolConfig)
+		}
+	}
+
+	for _, stream := range []bool{false, true} {
+		name := "Generate"
+		if stream {
+			name = "Stream"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Run("sends mode NONE with the tools unchanged", runTest(stream, testCase{
+				tools:    tools,
+				opts:     []gollem.GenerateOption{gollem.WithToolCallsDisabled()},
+				expected: modeNone,
+			}))
+			t.Run("sends no tool config without the option", runTest(stream, testCase{
+				tools: tools,
+			}))
+			t.Run("sends no tool config when the session has no tools", runTest(stream, testCase{
+				opts: []gollem.GenerateOption{gollem.WithToolCallsDisabled()},
+			}))
+		})
+	}
+}

@@ -31,6 +31,50 @@ var maxOutputTokens = map[string]int64{
 // by the API; callers in that situation must pass WithMaxTokens explicitly.
 const fallbackMaxOutputTokens int64 = 64000
 
+// structuredOutputsUnsupported lists normalized IDs of the Claude models that
+// reject output_config.format with a 400. A response schema for these models is
+// written into the system prompt instead.
+//
+// The list names the models that lack the feature rather than the ones that
+// have it, because every model released since structured outputs shipped
+// supports it: a model absent from this list, including one released after it
+// was written, is sent output_config.format.
+//
+// Sources: https://platform.claude.com/docs/en/build-with-claude/structured-outputs
+// (supported models) and https://platform.claude.com/docs/en/about-claude/models/overview
+// (deprecated and retired models), retrieved 2026-09-26. Retired models are
+// listed as well so that a request to them fails with the API's retirement
+// error rather than with an unrelated schema error.
+var structuredOutputsUnsupported = map[string]struct{}{
+	"claude-sonnet-4":          {},
+	"claude-sonnet-4-0":        {},
+	"claude-opus-4":            {},
+	"claude-opus-4-0":          {},
+	"claude-3-7-sonnet":        {},
+	"claude-3-7-sonnet-latest": {},
+	"claude-3-5-sonnet":        {},
+	"claude-3-5-sonnet-latest": {},
+	"claude-3-5-sonnet-v2":     {},
+	"claude-3-5-haiku":         {},
+	"claude-3-5-haiku-latest":  {},
+	"claude-3-opus":            {},
+	"claude-3-opus-latest":     {},
+	"claude-3-sonnet":          {},
+	"claude-3-haiku":           {},
+	"claude-2.1":               {},
+	"claude-2.0":               {},
+}
+
+// supportsStructuredOutputs reports whether output_config.format can be sent to
+// the given model.
+func supportsStructuredOutputs(model string) bool {
+	if _, ok := structuredOutputsUnsupported[model]; ok {
+		return false
+	}
+	_, ok := structuredOutputsUnsupported[normalizeModelID(model)]
+	return !ok
+}
+
 // normalizeModelID reduces the Claude API dated form, the alias form and the
 // Vertex AI form of a model ID to a single key. Only an 8 digit date suffix is
 // stripped, so a suffix that carries some other meaning keeps the ID distinct
