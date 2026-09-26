@@ -1761,6 +1761,41 @@ func TestStreamingUsageNotMultiplied(t *testing.T) {
 	gt.Equal(t, 50, strat.got.CacheReadInputToken)
 }
 
+func TestStreamingAccumulatesThoughts(t *testing.T) {
+	// Reasoning text arrives in chunks like any other content, so the response
+	// handed to the strategy must carry it as the blocking mode does.
+	mockClient := &mock.LLMClientMock{
+		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				StreamFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
+					ch := make(chan *gollem.Response)
+					go func() {
+						defer close(ch)
+						ch <- &gollem.Response{Thoughts: []string{"first thought"}}
+						ch <- &gollem.Response{Thoughts: []string{"second thought"}}
+						ch <- &gollem.Response{Texts: []string{"answer"}}
+					}()
+					return ch, nil
+				},
+			}, nil
+		},
+	}
+
+	strat := &captureStrategy{}
+	s := gollem.New(mockClient,
+		gollem.WithResponseMode(gollem.ResponseModeStreaming),
+		gollem.WithStrategy(strat),
+		gollem.WithLoopLimit(3),
+	)
+	_, err := s.Execute(t.Context(), gollem.Text("hi"))
+	gt.NoError(t, err)
+	gt.Value(t, strat.got).NotNil().Required()
+
+	gt.A(t, strat.got.Thoughts).Length(2).Required()
+	gt.Equal(t, "first thought", strat.got.Thoughts[0])
+	gt.Equal(t, "second thought", strat.got.Thoughts[1])
+}
+
 // TestToolOrderIsDeterministic pins the order of the tools handed to the session
 // to be sorted by name and identical between executions. The tool definitions
 // are the first element of the request prefix that Anthropic matches the prompt

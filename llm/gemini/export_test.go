@@ -14,6 +14,8 @@ var (
 	GeminiFallbackToolCallID   = geminiFallbackToolCallID
 	IsGeminiFallbackToolCallID = isGeminiFallbackToolCallID
 	ProcessResponse            = processResponse
+	MergeStreamedParts         = mergeStreamedParts
+	NewHistoryContent          = newHistoryContent
 )
 
 // GetGenerationConfig returns the generationConfig for testing

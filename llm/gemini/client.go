@@ -17,9 +17,7 @@ import (
 
 const (
 	// DefaultModel is the Gemini model used when no WithModel option is given.
-	// gemini-3.5-flash is chosen so the default ThinkingLevelLow configuration
-	// is accepted; Gemini 2.x callers should pass WithModel + WithThinkingBudget.
-	DefaultModel          = "gemini-3.5-flash"
+	DefaultModel          = "gemini-3.8-flash"
 	DefaultEmbeddingModel = "text-embedding-004"
 )
 
@@ -58,7 +56,7 @@ type Client struct {
 type Option func(*Client)
 
 // WithModel sets the model to use for text generation.
-// Default: "gemini-3.5-flash"
+// Default: "gemini-3.8-flash"
 func WithModel(model string) Option {
 	return func(c *Client) {
 		c.defaultModel = model
@@ -163,11 +161,12 @@ func WithThinkingBudget(budget int32) Option {
 // Introduced in Gemini 3.x as the replacement for WithThinkingBudget.
 //
 // Valid values: genai.ThinkingLevelMinimal, ThinkingLevelLow,
-// ThinkingLevelMedium, ThinkingLevelHigh.
+// ThinkingLevelMedium, ThinkingLevelHigh. Not every model accepts every level
+// (gemini-3.7-flash and gemini-3.8-flash reject ThinkingLevelMinimal); without
+// this option the model's own default applies.
 //
 // Vertex AI rejects requests that carry both thinking_budget and thinking_level
-// (HTTP 400), so calling this clears any thinking budget previously set,
-// including the zero-value default established by gemini.New.
+// (HTTP 400), so calling this clears any thinking budget previously set.
 func WithThinkingLevel(level genai.ThinkingLevel) Option {
 	return func(c *Client) {
 		if c.generationConfig == nil {
@@ -178,6 +177,24 @@ func WithThinkingLevel(level genai.ThinkingLevel) Option {
 		}
 		c.generationConfig.ThinkingConfig.ThinkingLevel = level
 		c.generationConfig.ThinkingConfig.ThinkingBudget = nil
+	}
+}
+
+// WithIncludeThoughts requests thought summaries in the response.
+// Gemini returns thought parts only when this is enabled, so Response.Thoughts
+// stays empty without it. Default: disabled.
+//
+// This controls the reasoning text only. The thought signatures that Gemini 3.x
+// requires for multi-turn tool use are returned regardless of this setting.
+func WithIncludeThoughts(include bool) Option {
+	return func(c *Client) {
+		if c.generationConfig == nil {
+			c.generationConfig = &genai.GenerateContentConfig{}
+		}
+		if c.generationConfig.ThinkingConfig == nil {
+			c.generationConfig.ThinkingConfig = &genai.ThinkingConfig{}
+		}
+		c.generationConfig.ThinkingConfig.IncludeThoughts = include
 	}
 }
 
@@ -196,28 +213,18 @@ func WithContentType(contentType gollem.ContentType) Option {
 	}
 }
 
-// New creates a new client for the Gemini API.
-// It requires a project ID and location, and can be configured with additional options.
-//
-// The default thinking configuration is ThinkingLevelLow, which works with
-// Gemini 3.x models. Callers using Gemini 2.x models that do not support
-// thinking_level should override this via WithThinkingBudget.
 // newConfiguredClient builds a Client from the defaults and the given options,
 // stopping short of the parts that need GCP credentials. It is split out of New
 // so that tests can exercise the real defaults and option handling without
 // reaching Vertex AI.
 func newConfiguredClient(projectID, location string, options ...Option) *Client {
 	client := &Client{
-		projectID:      projectID,
-		location:       location,
-		defaultModel:   DefaultModel,
-		embeddingModel: DefaultEmbeddingModel,
-		contentType:    gollem.ContentTypeText,
-		generationConfig: &genai.GenerateContentConfig{
-			ThinkingConfig: &genai.ThinkingConfig{
-				ThinkingLevel: genai.ThinkingLevelLow,
-			},
-		},
+		projectID:        projectID,
+		location:         location,
+		defaultModel:     DefaultModel,
+		embeddingModel:   DefaultEmbeddingModel,
+		contentType:      gollem.ContentTypeText,
+		generationConfig: &genai.GenerateContentConfig{},
 	}
 
 	for _, option := range options {
@@ -227,6 +234,14 @@ func newConfiguredClient(projectID, location string, options ...Option) *Client 
 	return client
 }
 
+// New creates a new client for the Gemini API.
+// It requires a project ID and location, and can be configured with additional options.
+//
+// No thinking configuration is sent unless WithThinkingLevel or
+// WithThinkingBudget is given, so each model applies its own default. Sending a
+// fixed level instead would break models that accept only a subset of the
+// levels (gemini-3-pro-preview takes LOW and HIGH) and models that do not
+// accept thinking_level at all (Gemini 2.x).
 func New(ctx context.Context, projectID, location string, options ...Option) (*Client, error) {
 	if projectID == "" {
 		return nil, goerr.New("projectID is required")
@@ -244,12 +259,12 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 		Backend:  genai.BackendVertexAI,
 	}
 
-	newClient, err := genai.NewClient(ctx, config)
+	genaiClient, err := genai.NewClient(ctx, config)
 	if err != nil {
 		return nil, err
 	}
 
-	client.client = newClient
+	client.client = genaiClient
 	return client, nil
 }
 
@@ -591,8 +606,8 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		// captured in earlier trace spans.
 		geminiTraceData = buildGeminiTraceData(response, s.model, s.cfg.SystemPrompt(), newTurnContents)
 
-		// Update history with the input and raw response content.
-		// Use candidate.Content directly to preserve all fields (e.g., ThoughtSignature).
+		// Update history with the input and the response content. The parts are
+		// taken from the candidate itself so that ThoughtSignature survives.
 		var newContents []*genai.Content
 		// Add current input as a new user message
 		if len(parts) > 0 {
@@ -602,11 +617,11 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			}
 			newContents = append(newContents, userContent)
 		}
-		// Add raw assistant response content from candidates.
-		// Filter out empty parts that some models (e.g., thinking models) may return.
+		// Add the assistant response content from candidates, normalized for
+		// storage (thought text dropped, signatures kept).
 		for _, candidate := range result.Candidates {
-			if filtered := filterEmptyParts(candidate.Content); filtered != nil {
-				newContents = append(newContents, filtered)
+			if stored := newHistoryContent(candidate.Content); stored != nil {
+				newContents = append(newContents, stored)
 			}
 		}
 
@@ -617,6 +632,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 
 		return &gollem.ContentResponse{
 			Texts:               response.Texts,
+			Thoughts:            response.Thoughts,
 			FunctionCalls:       response.FunctionCalls,
 			InputToken:          response.InputToken,
 			OutputToken:         response.OutputToken,
@@ -639,6 +655,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 	// Convert ContentResponse back to gollem.Response
 	return &gollem.Response{
 		Texts:               contentResp.Texts,
+		Thoughts:            contentResp.Thoughts,
 		FunctionCalls:       contentResp.FunctionCalls,
 		InputToken:          contentResp.InputToken,
 		OutputToken:         contentResp.OutputToken,
@@ -732,6 +749,9 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			// Accumulate response data for history
 			var accumulatedTexts []string
 			var accumulatedFunctionCalls []*gollem.FunctionCall
+			// accumulatedParts keeps the raw parts as returned by the API so
+			// that ThoughtSignature and FunctionCall.ID survive into history.
+			var accumulatedParts []*genai.Part
 			var totalInputTokens, totalOutputTokens int
 			var totalCacheRead int
 
@@ -760,6 +780,12 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				// latest non-zero value instead of summing.
 				accumulatedTexts = append(accumulatedTexts, response.Texts...)
 				accumulatedFunctionCalls = append(accumulatedFunctionCalls, response.FunctionCalls...)
+				for _, candidate := range streamResp.Resp.Candidates {
+					if candidate.Content == nil {
+						continue
+					}
+					accumulatedParts = append(accumulatedParts, candidate.Content.Parts...)
+				}
 				if response.InputToken > 0 {
 					totalInputTokens = response.InputToken
 				}
@@ -773,6 +799,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				// Send streaming response with the running totals
 				streamChan <- &gollem.ContentResponse{
 					Texts:               response.Texts,
+					Thoughts:            response.Thoughts,
 					FunctionCalls:       response.FunctionCalls,
 					InputToken:          totalInputTokens,
 					OutputToken:         totalOutputTokens,
@@ -780,11 +807,23 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				}
 			}
 
-			// Update history with accumulated response.
-			// Note: Streaming chunks don't reliably contain ThoughtSignature,
-			// so we reconstruct parts from accumulated data here.
-			// ThoughtSignature preservation is handled in non-streaming GenerateContent.
-			if len(accumulatedTexts) > 0 || len(accumulatedFunctionCalls) > 0 {
+			// Update history from the raw streamed parts. Rebuilding the parts
+			// from accumulated texts and function calls would drop
+			// ThoughtSignature and FunctionCall.ID, and Gemini 3.x rejects a
+			// later turn whose function call parts lost their signature.
+			//
+			// The user turn is stored only together with a model turn: a
+			// history ending on two consecutive user contents is rejected by
+			// models that require alternating roles.
+			// Normalize before merging so that text separated only by a dropped
+			// part still collapses into a single history part.
+			assistantContent := newHistoryContent(&genai.Content{
+				Role:  "model",
+				Parts: accumulatedParts,
+			})
+			if assistantContent != nil {
+				assistantContent.Parts = mergeStreamedParts(assistantContent.Parts)
+
 				var newContents []*genai.Content
 
 				// Convert inputs to Gemini content
@@ -796,32 +835,9 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					}
 					newContents = append(newContents, userContent)
 				}
+				newContents = append(newContents, assistantContent)
 
-				// Convert accumulated response to Gemini content
-				var assistantParts []*genai.Part
-				for _, text := range accumulatedTexts {
-					assistantParts = append(assistantParts, &genai.Part{Text: text})
-				}
-				for _, fc := range accumulatedFunctionCalls {
-					assistantParts = append(assistantParts, &genai.Part{
-						FunctionCall: &genai.FunctionCall{
-							Name: fc.Name,
-							Args: fc.Arguments,
-						},
-					})
-				}
-				if len(assistantParts) > 0 {
-					assistantContent := &genai.Content{
-						Role:  "model",
-						Parts: assistantParts,
-					}
-					newContents = append(newContents, assistantContent)
-				}
-
-				// Append new contents to history
-				if len(newContents) > 0 {
-					s.historyContents = append(s.historyContents, newContents...)
-				}
+				s.historyContents = append(s.historyContents, newContents...)
 			}
 
 			// Set trace data for defer.
@@ -872,13 +888,17 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 
 		for contentResp := range streamChan {
 			if contentResp.Error != nil {
-				// Log error and continue (don't break the stream)
+				// Forward the error: dropping it here would end the stream with
+				// no output and no error, which the caller cannot distinguish
+				// from a model that simply said nothing.
+				respChan <- &gollem.Response{Error: contentResp.Error}
 				continue
 			}
 
 			// Convert ContentResponse to Response
 			resp := &gollem.Response{
 				Texts:               contentResp.Texts,
+				Thoughts:            contentResp.Thoughts,
 				FunctionCalls:       contentResp.FunctionCalls,
 				InputToken:          contentResp.InputToken,
 				OutputToken:         contentResp.OutputToken,
