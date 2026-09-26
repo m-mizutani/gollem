@@ -1366,7 +1366,7 @@ func TestVertexStructuredOutputsDisabled(t *testing.T) {
 			)
 			client := claude.NewVertexClientWithAnthropicClient(&anthropicClient,
 				claude.WithVertexModel("claude-opus-5-5"),
-				claude.WithVertexStructuredOutputs(false))
+				claude.WithVertexStructuredOutputsDisabled())
 			session, err := client.NewSession(context.Background(), gollem.WithSessionSystemPrompt(systemPrompt))
 			gt.NoError(t, err).Required()
 

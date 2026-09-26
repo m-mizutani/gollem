@@ -246,7 +246,7 @@ By default, a response schema is sent as structured outputs (`output_config.form
 
 ```go
 client, err := claude.NewWithVertex(ctx, region, projectID,
-    claude.WithVertexStructuredOutputs(false),
+    claude.WithVertexStructuredOutputsDisabled(),
 )
 ```
 

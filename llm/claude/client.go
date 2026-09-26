@@ -835,7 +835,7 @@ func applyPerCallOverrides(request *anthropic.MessageNewParams, opts ...gollem.G
 // output_config does not invalidate them.
 //
 // Without structuredOutputs (a model listed in structuredOutputsUnsupported, or
-// a Vertex AI client configured with WithVertexStructuredOutputs(false)) the
+// a Vertex AI client configured with WithVertexStructuredOutputsDisabled) the
 // schema is written into the system prompt as before. createSystemPrompt has
 // already done so for the session schema; a per-call schema is appended here.
 func applyResponseSchema(request *anthropic.MessageNewParams, cfg gollem.SessionConfig, structuredOutputs bool, opts ...gollem.GenerateOption) error {

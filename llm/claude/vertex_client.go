@@ -86,21 +86,57 @@ func WithVertexSystemPrompt(prompt string) VertexOption {
 	}
 }
 
-// WithVertexStructuredOutputs selects how a response schema is sent. When
-// enabled, which is the default, a model that supports structured outputs
-// receives the schema as output_config.format and the system prompt is sent as
-// written. When disabled, every model receives the schema and a JSON
-// instruction appended to the system prompt, as models without structured
-// outputs do.
+// WithVertexStructuredOutputsDisabled stops sending response schemas as
+// structured outputs (output_config.format), so that every model receives them
+// in the system prompt instead.
 //
-// Disable it when the Google Cloud project's organization policy
+// Use it when the Google Cloud project's organization policy
 // (constraints/vertexai.allowedPartnerModelFeatures) does not allow the
-// structured_outputs feature, which Vertex AI reports with a 400. The system
-// prompt then changes with the schema, so Claude rejects a history whose
-// thinking blocks were produced under a different system prompt.
-func WithVertexStructuredOutputs(enabled bool) VertexOption {
+// structured_outputs feature for the model. Vertex AI then rejects any request
+// carrying output_config.format with a 400 naming that constraint.
+//
+// # How a response schema is sent
+//
+// The schema in effect for a call is the per-call schema
+// (gollem.WithGenerateResponseSchema) if given, otherwise the session schema
+// (gollem.WithSessionResponseSchema). The session schema is used only when the
+// session content type is gollem.ContentTypeJSON; without it the session schema
+// is ignored, with or without this option.
+//
+// Without this option, on a model that supports structured outputs:
+//   - The schema in effect is sent as output_config.format. Keywords structured
+//     outputs rejects (minimum, maximum, minLength, maxLength, pattern,
+//     maxItems, minItems above 1) are moved into the field description.
+//   - The system prompt is sent exactly as configured. Nothing is appended for
+//     the schema or for ContentTypeJSON, including ContentTypeJSON without a
+//     schema, where the caller's own prompt has to ask for JSON.
+//
+// With this option, and on models without structured outputs (Claude Sonnet 4,
+// Claude Opus 4, Claude 3 and Claude 2) regardless of it:
+//   - No output_config.format is sent.
+//   - With ContentTypeJSON, "Please format your response as valid JSON." is
+//     appended to the first system prompt block, followed by the session schema
+//     as JSON text when one is set.
+//   - A per-call schema appends the same instruction and that schema once more.
+//     A ContentTypeJSON session with its own schema therefore carries both
+//     schemas in one call.
+//
+// In every case the JSON is extracted from the response text when the content
+// type in effect is JSON (ContentTypeJSON, or any call with a per-call schema).
+//
+// # Effect on thinking blocks
+//
+// Claude accepts thinking blocks from earlier turns only while the system
+// prompt and tool list are the ones they were produced with. With this option
+// the system prompt of a call with a schema differs from that of a call
+// without one, so a history containing thinking blocks from a call without a
+// schema is rejected with a 400 by the call that adds one, on models that bind
+// thinking blocks this way such as claude-opus-5-5. Without this option,
+// on models that support structured outputs, the system prompt stays the same
+// and such a history is accepted.
+func WithVertexStructuredOutputsDisabled() VertexOption {
 	return func(c *VertexClient) {
-		c.structuredOutputs = enabled
+		c.structuredOutputs = false
 	}
 }
 
