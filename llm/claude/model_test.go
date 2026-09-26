@@ -144,3 +144,26 @@ func TestResolveMaxOutputTokens(t *testing.T) {
 		gt.Equal(t, int64(64000), claude.FallbackMaxOutputTokens)
 	})
 }
+
+func TestSupportsStructuredOutputs(t *testing.T) {
+	runTest := func(model string, expected bool) func(t *testing.T) {
+		return func(t *testing.T) {
+			gt.Equal(t, expected, claude.SupportsStructuredOutputs(model))
+		}
+	}
+
+	t.Run("current model", runTest("claude-opus-5-5", true))
+	t.Run("dated supported model", runTest("claude-sonnet-4-5-20250929", true))
+	t.Run("Vertex AI form of a supported model", runTest("claude-haiku-4-5@20251001", true))
+	t.Run("model absent from the list", runTest("claude-future-9", true))
+
+	t.Run("dated Claude Sonnet 4", runTest("claude-sonnet-4-20250514", false))
+	t.Run("alias of Claude Sonnet 4", runTest("claude-sonnet-4-0", false))
+	t.Run("Vertex AI form of Claude Sonnet 4", runTest("claude-sonnet-4@20250514", false))
+	t.Run("dated Claude Opus 4", runTest("claude-opus-4-20250514", false))
+	t.Run("Vertex AI form of Claude Opus 4", runTest("claude-opus-4@20250514", false))
+	t.Run("Claude Haiku 3", runTest("claude-3-haiku-20240307", false))
+	t.Run("Claude Sonnet 3.7 alias", runTest("claude-3-7-sonnet-latest", false))
+	t.Run("Vertex AI form of Claude Sonnet 3.5 v2", runTest("claude-3-5-sonnet-v2@20241022", false))
+	t.Run("Claude 2.1", runTest("claude-2.1", false))
+}

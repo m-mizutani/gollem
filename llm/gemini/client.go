@@ -1108,6 +1108,15 @@ func (s *Session) buildEffectiveConfig(opts ...gollem.GenerateOption) (*genai.Ge
 		}
 		effectiveConfig.ResponseSchema = genaiSchema
 	}
+	// The tool declarations stay in the request; mode NONE only forbids calling
+	// them. Without tools there is nothing to forbid, so no ToolConfig is sent.
+	if genCfg.ToolCallsDisabled() && len(effectiveConfig.Tools) > 0 {
+		effectiveConfig.ToolConfig = &genai.ToolConfig{
+			FunctionCallingConfig: &genai.FunctionCallingConfig{
+				Mode: genai.FunctionCallingConfigModeNone,
+			},
+		}
+	}
 	return &effectiveConfig, nil
 }
 

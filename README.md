@@ -166,6 +166,15 @@ resp, _ := gollem.SessionQuery[UserProfile](ctx, session, "Who am I?")
 // The session's history (including this exchange) is preserved
 ```
 
+Each provider receives the schema through its own schema parameter. For Claude models that support structured outputs, the schema is sent as `output_config.format`, and the system prompt and tool list are the same as in a call without a schema; older Claude models receive the schema in the system prompt ([details](docs/schema.md#claude)). After a tool loop, `WithToolCallsDisabled()` keeps the tools in the request but forbids calling them, so a structured answer can be requested over the same history:
+
+```go
+resp, _ := session.Generate(ctx, []gollem.Input{gollem.Text("Report the result as JSON.")},
+	gollem.WithToolCallsDisabled(),
+	gollem.WithGenerateResponseSchema(schema),
+)
+```
+
 ### Middleware
 
 Monitor, log, and control agent behavior with composable middleware. [Learn more →](docs/middleware.md)

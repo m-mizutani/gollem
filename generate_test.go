@@ -16,6 +16,14 @@ func TestGenerateConfigDefaults(t *testing.T) {
 	gt.Value(t, cfg.Temperature()).Equal((*float64)(nil))
 	gt.Value(t, cfg.TopP()).Equal((*float64)(nil))
 	gt.Value(t, cfg.MaxTokens()).Equal((*int)(nil))
+	gt.False(t, cfg.ToolCallsDisabled())
+}
+
+func TestGenerateConfigWithToolCallsDisabled(t *testing.T) {
+	cfg := gollem.NewGenerateConfig(gollem.WithToolCallsDisabled())
+
+	gt.True(t, cfg.ToolCallsDisabled())
+	gt.Value(t, cfg.ResponseSchema()).Equal((*gollem.Parameter)(nil))
 }
 
 func TestGenerateConfigWithTemperature(t *testing.T) {

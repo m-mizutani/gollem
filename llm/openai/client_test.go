@@ -672,3 +672,93 @@ func TestClientModel(t *testing.T) {
 		expected: "",
 	}))
 }
+
+// lookupTool is a minimal tool for inspecting how tool settings are sent.
+type lookupTool struct{}
+
+func (t *lookupTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name:        "lookup",
+		Description: "Look up a value",
+		Parameters:  map[string]*gollem.Parameter{"key": {Type: gollem.TypeString}},
+	}
+}
+
+func (t *lookupTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	return map[string]any{"value": "ok"}, nil
+}
+
+func TestToolCallsDisabled(t *testing.T) {
+	type testCase struct {
+		tools    []gollem.Tool
+		opts     []gollem.GenerateOption
+		expected any
+	}
+
+	errStreamNotServed := errors.New("stream is not served by this mock")
+
+	runTest := func(stream bool, tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			var sent *openaiapi.ChatCompletionRequest
+			mockClient := &apiClientMock{
+				CreateChatCompletionFunc: func(ctx context.Context, req openaiapi.ChatCompletionRequest) (openaiapi.ChatCompletionResponse, error) {
+					sent = &req
+					return openaiapi.ChatCompletionResponse{
+						Choices: []openaiapi.ChatCompletionChoice{{
+							Message: openaiapi.ChatCompletionMessage{Content: "ok", Role: openaiapi.ChatMessageRoleAssistant},
+						}},
+					}, nil
+				},
+				// The request is inspected before the stream would be read, so the
+				// mock records it and fails instead of building a stream.
+				CreateChatCompletionStreamFunc: func(ctx context.Context, req openaiapi.ChatCompletionRequest) (*openaiapi.ChatCompletionStream, error) {
+					sent = &req
+					return nil, errStreamNotServed
+				},
+			}
+			cfg := gollem.NewSessionConfig(gollem.WithSessionTools(tc.tools...))
+			session, err := openai.NewSessionWithAPIClient(mockClient, cfg, "gpt-5-nano")
+			gt.NoError(t, err)
+
+			input := []gollem.Input{gollem.Text("question")}
+			if stream {
+				_, err = session.Stream(context.Background(), input, tc.opts...)
+				gt.True(t, errors.Is(err, errStreamNotServed))
+			} else {
+				_, err = session.Generate(context.Background(), input, tc.opts...)
+				gt.NoError(t, err)
+			}
+
+			var expectedTools []openaiapi.Tool
+			for _, tool := range tc.tools {
+				expectedTools = append(expectedTools, openai.ConvertTool(tool))
+			}
+			gt.NotNil(t, sent)
+			gt.A(t, sent.Tools).Length(len(expectedTools)).Required()
+			for i := range expectedTools {
+				gt.Equal(t, expectedTools[i], sent.Tools[i])
+			}
+			gt.Equal(t, tc.expected, sent.ToolChoice)
+		}
+	}
+
+	for _, stream := range []bool{false, true} {
+		name := "Generate"
+		if stream {
+			name = "Stream"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Run("sends tool_choice none with the tools unchanged", runTest(stream, testCase{
+				tools:    []gollem.Tool{&lookupTool{}},
+				opts:     []gollem.GenerateOption{gollem.WithToolCallsDisabled()},
+				expected: "none",
+			}))
+			t.Run("sends no tool_choice without the option", runTest(stream, testCase{
+				tools: []gollem.Tool{&lookupTool{}},
+			}))
+			t.Run("sends no tool_choice when the session has no tools", runTest(stream, testCase{
+				opts: []gollem.GenerateOption{gollem.WithToolCallsDisabled()},
+			}))
+		})
+	}
+}

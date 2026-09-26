@@ -32,6 +32,9 @@ type VertexClient struct {
 
 	// systemPrompt is the system prompt to use for chat completions.
 	systemPrompt string
+
+	// structuredOutputs allows sending response schemas as output_config.format.
+	structuredOutputs bool
 }
 
 // VertexOption is a function that configures a VertexClient.
@@ -83,14 +86,69 @@ func WithVertexSystemPrompt(prompt string) VertexOption {
 	}
 }
 
+// WithVertexStructuredOutputsDisabled stops sending response schemas as
+// structured outputs (output_config.format), so that every model receives them
+// in the system prompt instead.
+//
+// Use it when the Google Cloud project's organization policy
+// (constraints/vertexai.allowedPartnerModelFeatures) does not allow the
+// structured_outputs feature for the model. Vertex AI then rejects any request
+// carrying output_config.format with a 400 naming that constraint.
+//
+// # How a response schema is sent
+//
+// The schema in effect for a call is the per-call schema
+// (gollem.WithGenerateResponseSchema) if given, otherwise the session schema
+// (gollem.WithSessionResponseSchema). The session schema is used only when the
+// session content type is gollem.ContentTypeJSON; without it the session schema
+// is ignored, with or without this option.
+//
+// Without this option, on a model that supports structured outputs:
+//   - The schema in effect is sent as output_config.format. Keywords structured
+//     outputs rejects (minimum, maximum, minLength, maxLength, pattern,
+//     maxItems, minItems above 1) are moved into the field description.
+//   - The system prompt is sent exactly as configured. Nothing is appended for
+//     the schema or for ContentTypeJSON, including ContentTypeJSON without a
+//     schema, where the caller's own prompt has to ask for JSON.
+//
+// With this option, and on models without structured outputs (Claude Sonnet 4,
+// Claude Opus 4, Claude 3 and Claude 2) regardless of it:
+//   - No output_config.format is sent.
+//   - With ContentTypeJSON, "Please format your response as valid JSON." is
+//     appended to the first system prompt block, followed by the session schema
+//     as JSON text when one is set.
+//   - A per-call schema appends the same instruction and that schema once more.
+//     A ContentTypeJSON session with its own schema therefore carries both
+//     schemas in one call.
+//
+// In every case the JSON is extracted from the response text when the content
+// type in effect is JSON (ContentTypeJSON, or any call with a per-call schema).
+//
+// # Effect on thinking blocks
+//
+// Claude accepts thinking blocks from earlier turns only while the system
+// prompt and tool list are the ones they were produced with. With this option
+// the system prompt of a call with a schema differs from that of a call
+// without one, so a history containing thinking blocks from a call without a
+// schema is rejected with a 400 by the call that adds one, on models that bind
+// thinking blocks this way such as claude-opus-5-5. Without this option,
+// on models that support structured outputs, the system prompt stays the same
+// and such a history is accepted.
+func WithVertexStructuredOutputsDisabled() VertexOption {
+	return func(c *VertexClient) {
+		c.structuredOutputs = false
+	}
+}
+
 // newConfiguredVertexClient builds a VertexClient from the defaults and the
 // given options, stopping short of the parts that need GCP credentials. It is
 // split out of NewWithVertex so that tests can exercise the real defaults and
 // option handling without reaching Vertex AI.
 func newConfiguredVertexClient(options ...VertexOption) *VertexClient {
 	client := &VertexClient{
-		defaultModel:   DefaultVertexClaudeModel,
-		embeddingModel: "text-embedding-004",
+		defaultModel:      DefaultVertexClaudeModel,
+		embeddingModel:    "text-embedding-004",
+		structuredOutputs: true,
 		params: generationParameters{
 			Temperature: -1.0, // -1 indicates not set (0.0 is valid)
 			TopP:        -1.0, // -1 indicates not set (0.0 is valid)
@@ -140,6 +198,8 @@ type VertexAnthropicSession struct {
 	params       generationParameters
 	cfg          gollem.SessionConfig
 	messages     []anthropic.MessageParam
+
+	structuredOutputs bool
 }
 
 // Model returns the model name this client generates through. It is the name
@@ -166,6 +226,8 @@ func (c *VertexClient) NewSession(ctx context.Context, options ...gollem.Session
 		params:       c.params,
 		cfg:          cfg,
 		messages:     messages,
+
+		structuredOutputs: c.structuredOutputs,
 	}
 
 	return session, nil
@@ -213,10 +275,9 @@ func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.In
 		}
 	}
 
-	// Build system prompt
-	systemPrompt, err := createSystemPrompt(ctx, s.cfg)
+	msgParams, err := buildMessageParams(ctx, s.defaultModel, s.params, apiMessages, tools, s.cfg, s.structuredOutputs, opts...)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create system prompt")
+		return nil, err
 	}
 
 	// Start LLM call trace span
@@ -227,41 +288,11 @@ func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.In
 		defer func() { h.EndLLMCall(ctx, traceData, llmErr) }()
 	}
 
-	// Build request
-	msgParams := anthropic.MessageNewParams{
-		Model:     anthropic.Model(s.defaultModel),
-		MaxTokens: s.params.MaxTokens,
-		Messages:  apiMessages,
-	}
-	if err := setTemperatureAndTopP(&msgParams, s.params.Temperature, s.params.TopP); err != nil {
-		return nil, goerr.Wrap(err, "failed to set generation parameters")
-	}
-	if len(tools) > 0 {
-		msgParams.Tools = tools
-	}
-	if len(systemPrompt) > 0 {
-		msgParams.System = systemPrompt
-	}
-
-	// Apply per-call overrides
-	if err := applyPerCallOverrides(&msgParams, opts...); err != nil {
-		return nil, err
-	}
-
-	// Inject prompt-cache breakpoints on the stable prefix and tail
-	if s.cfg.PromptCache() {
-		applyPromptCacheBreakpoints(&msgParams)
-	}
-
 	resp, err := s.client.Messages.New(ctx, msgParams, option.WithRequestTimeout(defaultNonStreamingTimeout))
 	if err != nil {
 		llmErr = err
 		opts := tokenLimitErrorOptions(err)
 		return nil, goerr.Wrap(err, "failed to create message via Claude Vertex", opts...)
-	}
-	if err != nil {
-		llmErr = err
-		return nil, err
 	}
 
 	// Set trace data for defer.
@@ -278,9 +309,7 @@ func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.In
 		s.messages = append(s.messages, respParam)
 	}
 
-	// Use JSON content type if per-call schema is set
-	effectiveCT, hasSchema := effectiveContentType(s.cfg.ContentType(), s.cfg.ResponseSchema(), opts...)
-	return processResponseWithContentType(ctx, resp, effectiveCT, hasSchema), nil
+	return processResponseWithContentType(ctx, resp, needsJSONExtraction(s.cfg, opts...)), nil
 }
 
 // Stream processes the input and generates a response stream with optional per-call overrides.
@@ -290,7 +319,8 @@ func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Inpu
 		return nil, err
 	}
 
-	s.messages = append(s.messages, messages...)
+	apiMessages := append([]anthropic.MessageParam{}, s.messages...)
+	apiMessages = append(apiMessages, messages...)
 
 	// Convert gollem tools to anthropic tools
 	var tools []anthropic.ToolUnionParam
@@ -301,25 +331,10 @@ func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Inpu
 		}
 	}
 
-	// Build a temporary request to compute the system prompt override via applyPerCallOverrides
-	var systemPromptOverride []anthropic.TextBlockParam
+	// Per-call Temperature/TopP are folded into the generation parameters before
+	// the request is built, so that setTemperatureAndTopP rejects a per-call
+	// value combined with the other session value instead of sending both.
 	genCfg := gollem.NewGenerateConfig(opts...)
-	if genCfg.ResponseSchema() != nil {
-		tmpRequest := anthropic.MessageNewParams{}
-		systemPrompt, err := createSystemPrompt(ctx, s.cfg)
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to create system prompt")
-		}
-		if len(systemPrompt) > 0 {
-			tmpRequest.System = systemPrompt
-		}
-		if err := applyPerCallOverrides(&tmpRequest, opts...); err != nil {
-			return nil, err
-		}
-		systemPromptOverride = tmpRequest.System
-	}
-
-	// Apply per-call overrides to a copy of params for Temperature/TopP/MaxTokens
 	params := s.params
 	if t := genCfg.Temperature(); t != nil {
 		params.Temperature = *t
@@ -327,8 +342,10 @@ func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Inpu
 	if p := genCfg.TopP(); p != nil {
 		params.TopP = *p
 	}
-	if m := genCfg.MaxTokens(); m != nil {
-		params.MaxTokens = int64(*m)
+
+	msgParams, err := buildMessageParams(ctx, s.defaultModel, params, apiMessages, tools, s.cfg, s.structuredOutputs, opts...)
+	if err != nil {
+		return nil, err
 	}
 
 	// Start LLM call trace span
@@ -340,13 +357,10 @@ func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Inpu
 	ch, err := generateClaudeStream(
 		ctx,
 		s.client,
-		s.messages,
-		s.defaultModel,
-		params,
-		tools,
-		s.cfg,
+		msgParams,
+		needsJSONExtraction(s.cfg, opts...),
 		&s.messages,
-		systemPromptOverride,
+		messages,
 	)
 	if err != nil {
 		if traceHandler != nil {
