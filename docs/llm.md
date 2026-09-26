@@ -46,7 +46,7 @@ client, err := gemini.New(ctx, projectID, location,
 )
 ```
 
-Available models (default: `gemini-3.5-flash`):
+Available models (default: `gemini-3.8-flash`):
 - `gemini-3.8-flash` - Latest Flash model for long-horizon agentic and coding tasks (uses thinking levels; does not accept `MINIMAL`)
 - `gemini-3.5-flash` - Flash model with improved agent execution and coding (uses thinking levels)
 - `gemini-2.5-pro` - Advanced model with state-of-the-art thinking capabilities
@@ -70,7 +70,7 @@ client, err := gemini.New(ctx, projectID, location,
 
 // Use higher levels for harder reasoning tasks
 client, err := gemini.New(ctx, projectID, location,
-    gemini.WithModel("gemini-3.5-flash"),
+    gemini.WithModel("gemini-3.8-flash"),
     gemini.WithThinkingLevel(genai.ThinkingLevelHigh),
 )
 ```
