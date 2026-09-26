@@ -596,3 +596,169 @@ func TestOpenAIStreamUsageLive(t *testing.T) {
 	gt.Value(t, lastInput > 0).Equal(true)
 	gt.Value(t, lastOutput > 0).Equal(true)
 }
+
+// TestConvertResponseSchemaToOpenAIIsByteStable pins the response schema JSON to
+// be byte-identical between conversions. In strict mode every property name is
+// copied into the required array, which is the array most exposed to Go map
+// iteration order.
+func TestConvertResponseSchemaToOpenAIIsByteStable(t *testing.T) {
+	param := &gollem.Parameter{
+		Type: gollem.TypeObject,
+		Properties: map[string]*gollem.Parameter{
+			"zulu":  {Type: gollem.TypeString, Required: true},
+			"alpha": {Type: gollem.TypeString, Required: true},
+			"mike":  {Type: gollem.TypeString},
+			"bravo": {Type: gollem.TypeString},
+		},
+	}
+
+	runTest := func(strict bool, expectedRequired string) func(t *testing.T) {
+		return func(t *testing.T) {
+			first, err := openai.ConvertResponseSchemaToOpenAI(param, strict)
+			gt.NoError(t, err)
+			gt.S(t, string(first.Schema.(json.RawMessage))).Contains(expectedRequired)
+
+			for i := 0; i < 100; i++ {
+				actual, err := openai.ConvertResponseSchemaToOpenAI(param, strict)
+				gt.NoError(t, err)
+				gt.Equal(t,
+					string(first.Schema.(json.RawMessage)),
+					string(actual.Schema.(json.RawMessage)))
+			}
+		}
+	}
+
+	t.Run("strict mode requires every property", runTest(true, `"required":["alpha","bravo","mike","zulu"]`))
+	t.Run("non-strict mode requires the marked properties", runTest(false, `"required":["alpha","zulu"]`))
+}
+
+var _ gollem.ModelNamer = (*openai.Client)(nil)
+
+// TestClientModel verifies that the client reports the model name it was
+// configured with, without consulting the API.
+func TestClientModel(t *testing.T) {
+	type testCase struct {
+		options  []openai.Option
+		expected string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			client, err := openai.New(context.Background(), "test-key", tc.options...)
+			gt.NoError(t, err).Required()
+			gt.Equal(t, tc.expected, client.Model())
+		}
+	}
+
+	t.Run("configured model", runTest(testCase{
+		options:  []openai.Option{openai.WithModel("gpt-5-mini")},
+		expected: "gpt-5-mini",
+	}))
+
+	t.Run("default model when no option is given", runTest(testCase{
+		expected: openai.DefaultModel,
+	}))
+
+	t.Run("last option wins", runTest(testCase{
+		options: []openai.Option{
+			openai.WithModel("gpt-5-mini"),
+			openai.WithModel("gpt-5-nano"),
+		},
+		expected: "gpt-5-nano",
+	}))
+
+	t.Run("empty model is reported as configured", runTest(testCase{
+		options:  []openai.Option{openai.WithModel("")},
+		expected: "",
+	}))
+}
+
+// lookupTool is a minimal tool for inspecting how tool settings are sent.
+type lookupTool struct{}
+
+func (t *lookupTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name:        "lookup",
+		Description: "Look up a value",
+		Parameters:  map[string]*gollem.Parameter{"key": {Type: gollem.TypeString}},
+	}
+}
+
+func (t *lookupTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	return map[string]any{"value": "ok"}, nil
+}
+
+func TestToolCallsDisabled(t *testing.T) {
+	type testCase struct {
+		tools    []gollem.Tool
+		opts     []gollem.GenerateOption
+		expected any
+	}
+
+	errStreamNotServed := errors.New("stream is not served by this mock")
+
+	runTest := func(stream bool, tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			var sent *openaiapi.ChatCompletionRequest
+			mockClient := &apiClientMock{
+				CreateChatCompletionFunc: func(ctx context.Context, req openaiapi.ChatCompletionRequest) (openaiapi.ChatCompletionResponse, error) {
+					sent = &req
+					return openaiapi.ChatCompletionResponse{
+						Choices: []openaiapi.ChatCompletionChoice{{
+							Message: openaiapi.ChatCompletionMessage{Content: "ok", Role: openaiapi.ChatMessageRoleAssistant},
+						}},
+					}, nil
+				},
+				// The request is inspected before the stream would be read, so the
+				// mock records it and fails instead of building a stream.
+				CreateChatCompletionStreamFunc: func(ctx context.Context, req openaiapi.ChatCompletionRequest) (*openaiapi.ChatCompletionStream, error) {
+					sent = &req
+					return nil, errStreamNotServed
+				},
+			}
+			cfg := gollem.NewSessionConfig(gollem.WithSessionTools(tc.tools...))
+			session, err := openai.NewSessionWithAPIClient(mockClient, cfg, "gpt-5-nano")
+			gt.NoError(t, err)
+
+			input := []gollem.Input{gollem.Text("question")}
+			if stream {
+				_, err = session.Stream(context.Background(), input, tc.opts...)
+				gt.True(t, errors.Is(err, errStreamNotServed))
+			} else {
+				_, err = session.Generate(context.Background(), input, tc.opts...)
+				gt.NoError(t, err)
+			}
+
+			var expectedTools []openaiapi.Tool
+			for _, tool := range tc.tools {
+				expectedTools = append(expectedTools, openai.ConvertTool(tool))
+			}
+			gt.NotNil(t, sent)
+			gt.A(t, sent.Tools).Length(len(expectedTools)).Required()
+			for i := range expectedTools {
+				gt.Equal(t, expectedTools[i], sent.Tools[i])
+			}
+			gt.Equal(t, tc.expected, sent.ToolChoice)
+		}
+	}
+
+	for _, stream := range []bool{false, true} {
+		name := "Generate"
+		if stream {
+			name = "Stream"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Run("sends tool_choice none with the tools unchanged", runTest(stream, testCase{
+				tools:    []gollem.Tool{&lookupTool{}},
+				opts:     []gollem.GenerateOption{gollem.WithToolCallsDisabled()},
+				expected: "none",
+			}))
+			t.Run("sends no tool_choice without the option", runTest(stream, testCase{
+				tools: []gollem.Tool{&lookupTool{}},
+			}))
+			t.Run("sends no tool_choice when the session has no tools", runTest(stream, testCase{
+				opts: []gollem.GenerateOption{gollem.WithToolCallsDisabled()},
+			}))
+		})
+	}
+}

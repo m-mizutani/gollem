@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"time"
 
+	"github.com/gollem-dev/gollem/internal/jsonutil"
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
@@ -307,11 +309,19 @@ func setupTools(ctx context.Context, cfg *gollemConfig) (map[string]Tool, []Tool
 		return nil, nil, err
 	}
 
-	toolList := make([]Tool, 0, len(toolMap))
+	// Order the tools by name instead of by map iteration order. The tool
+	// definitions are the first element of the request prefix that Anthropic
+	// matches the prompt cache against, so a list that is shuffled on every
+	// execution invalidates the cache for every session.
 	toolNames := make([]string, 0, len(toolMap))
-	for _, tool := range toolMap {
-		toolList = append(toolList, tool)
-		toolNames = append(toolNames, tool.Spec().Name)
+	for name := range toolMap {
+		toolNames = append(toolNames, name)
+	}
+	slices.Sort(toolNames)
+
+	toolList := make([]Tool, 0, len(toolMap))
+	for _, name := range toolNames {
+		toolList = append(toolList, toolMap[name])
 	}
 	cfg.logger.Debug("gollem tool list", "names", toolNames)
 
@@ -715,13 +725,16 @@ func executeToolCall(ctx context.Context, logger *slog.Logger, toolCall *Functio
 	logger.Debug("gollem tool result", "tool", toolCall.Name, "result", toolResult, "duration_ms", resp.Duration)
 
 	// Sanitize result to ensure a generic JSON-compatible structure for LLM processing.
+	// Decoding keeps numbers as json.Number: a plain decode into map[string]any would
+	// turn every number into a float64, so an ID or timestamp wider than 53 bits would
+	// reach the model rounded to a different value than the tool returned.
 	if toolResult != nil {
 		marshaled, err := json.Marshal(toolResult)
 		if err != nil {
 			return FunctionResponse{}, goerr.Wrap(err, "failed to marshal result", goerr.V("result", toolResult))
 		}
-		var unmarshaled map[string]any
-		if err := json.Unmarshal(marshaled, &unmarshaled); err != nil {
+		unmarshaled, err := jsonutil.DecodeObject(marshaled)
+		if err != nil {
 			return FunctionResponse{}, goerr.Wrap(err, "failed to unmarshal result", goerr.V("marshaled", string(marshaled)))
 		}
 		toolResult = unmarshaled

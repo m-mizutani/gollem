@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/internal/jsonutil"
 	"github.com/gollem-dev/gollem/internal/schema"
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
@@ -234,6 +236,11 @@ type Session struct {
 	// strictMode enables OpenAI's strict schema adherence (default: false)
 	strictMode bool
 }
+
+// Model returns the model name this client generates through. It is the name
+// the client was configured with, so a caller can key its own tables by the
+// same string it passed to WithModel.
+func (c *Client) Model() string { return c.defaultModel }
 
 // NewSession creates a new session for the OpenAI API.
 // It converts the provided tools to OpenAI's tool format and initializes a new chat session.
@@ -559,8 +566,8 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 
 		if message.ToolCalls != nil {
 			for _, toolCall := range message.ToolCalls {
-				var args map[string]any
-				if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+				args, err := jsonutil.DecodeObject([]byte(toolCall.Function.Arguments))
+				if err != nil {
 					return nil, goerr.Wrap(err, "failed to unmarshal tool arguments")
 				}
 
@@ -822,8 +829,8 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				var functionCalls []*gollem.FunctionCall
 				for _, toolCall := range toolCalls {
 					if toolCall.ID != "" && toolCall.Function.Name != "" && toolCall.Function.Arguments != "" {
-						var args map[string]any
-						if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+						args, err := jsonutil.DecodeObject([]byte(toolCall.Function.Arguments))
+						if err != nil {
 							responseChan <- &gollem.ContentResponse{
 								Error: goerr.Wrap(err, "failed to unmarshal function call arguments"),
 							}
@@ -894,10 +901,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			}
 			for _, tc := range toolCalls {
 				if tc.ID != "" && tc.Function.Name != "" {
-					var args map[string]any
-					if tc.Function.Arguments != "" {
-						_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-					}
+					args := traceArguments(tc.Function.Arguments)
 					streamTraceData.Response.FunctionCalls = append(streamTraceData.Response.FunctionCalls, &trace.FunctionCall{
 						ID:        tc.ID,
 						Name:      tc.Function.Name,
@@ -1032,6 +1036,8 @@ func convertParameterToJSONSchemaWithStrict(param *gollem.Parameter, strict bool
 		for key := range param.Properties {
 			allKeys = append(allKeys, key)
 		}
+		// Sort so the emitted schema is byte-identical between identical requests
+		slices.Sort(allKeys)
 		result["required"] = allKeys
 	}
 
@@ -1090,6 +1096,11 @@ func (s *Session) applyPerCallOverrides(req *openai.ChatCompletionRequest, opts 
 			Type:       openai.ChatCompletionResponseFormatTypeJSONSchema,
 			JSONSchema: jsonSchema,
 		}
+	}
+	// The tool definitions stay in the request; "none" only forbids calling
+	// them. Without tools there is nothing to forbid, so tool_choice is not sent.
+	if genCfg.ToolCallsDisabled() && len(req.Tools) > 0 {
+		req.ToolChoice = "none"
 	}
 	return nil
 }
@@ -1232,6 +1243,20 @@ func tokenLimitErrorOptions(err error) []goerr.Option {
 	return nil
 }
 
+// traceArguments decodes a function call's arguments for trace output. Trace data is
+// diagnostic and must never fail the request that produced it, so arguments that do not
+// parse as a JSON object are recorded verbatim under "arguments" rather than dropped.
+func traceArguments(arguments string) map[string]any {
+	if arguments == "" {
+		return nil
+	}
+	args, err := jsonutil.DecodeObject([]byte(arguments))
+	if err != nil {
+		return map[string]any{rawArgumentsKey: arguments}
+	}
+	return args
+}
+
 // openaiMessagesToTraceMessages converts OpenAI messages to trace messages.
 func openaiMessagesToTraceMessages(messages []openai.ChatCompletionMessage) []trace.Message {
 	var result []trace.Message
@@ -1263,10 +1288,7 @@ func openaiMessagesToTraceMessages(messages []openai.ChatCompletionMessage) []tr
 				}
 			}
 			for _, tc := range msg.ToolCalls {
-				var args map[string]any
-				if tc.Function.Arguments != "" {
-					_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-				}
+				args := traceArguments(tc.Function.Arguments)
 				blocks = append(blocks, trace.NewToolCallContent(
 					tc.ID, tc.Function.Name, args,
 				))

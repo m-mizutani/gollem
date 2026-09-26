@@ -14,6 +14,7 @@ import (
 	"github.com/gollem-dev/gollem/llm/claude"
 	"github.com/gollem-dev/gollem/llm/gemini"
 	"github.com/gollem-dev/gollem/llm/openai"
+	"github.com/gollem-dev/gollem/mock"
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/gt"
 )
@@ -645,4 +646,200 @@ func countSpansByKind(span *trace.Span, kind trace.SpanKind) int {
 		count += countSpansByKind(child, kind)
 	}
 	return count
+}
+
+// TestModelNamer pins that reporting the model name is optional: a client that
+// implements it answers through the LLMClient a caller already holds, and one
+// that does not is reported as unable rather than failing the caller.
+func TestModelNamer(t *testing.T) {
+	t.Run("implementing client reports its configured model", func(t *testing.T) {
+		client, err := openai.New(context.Background(), "test-key", openai.WithModel("gpt-5-mini"))
+		gt.NoError(t, err).Required()
+
+		var llm gollem.LLMClient = client
+		namer, ok := llm.(gollem.ModelNamer)
+		gt.True(t, ok).Required()
+		gt.Equal(t, "gpt-5-mini", namer.Model())
+	})
+
+	t.Run("non-implementing client reports nothing", func(t *testing.T) {
+		var llm gollem.LLMClient = &mock.LLMClientMock{}
+		_, ok := llm.(gollem.ModelNamer)
+		gt.False(t, ok)
+	})
+}
+
+// weatherLookupTool returns a fixed observation so that the final JSON can be
+// checked against known values.
+type weatherLookupTool struct{}
+
+func (t *weatherLookupTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name:        "get_weather",
+		Description: "Returns the current weather observation for a city.",
+		Parameters: map[string]*gollem.Parameter{
+			"city": {Type: gollem.TypeString, Description: "City name", Required: true},
+		},
+	}
+}
+
+func (t *weatherLookupTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	return map[string]any{"city": args["city"], "temperature_celsius": 21.5, "condition": "sunny"}, nil
+}
+
+// TestSchemaCallAfterToolUseWithRealLLM reproduces an agent that first runs a
+// tool loop and then asks for a structured answer over the same history, with
+// the same system prompt and tool list, tool calls disabled and a per-call
+// response schema. On Claude the history carries signed thinking blocks, which
+// the API accepts only while the system prompt and tool list are unchanged.
+func TestSchemaCallAfterToolUseWithRealLLM(t *testing.T) {
+	t.Parallel()
+
+	const systemPrompt = "You are a weather assistant. Always use the get_weather tool to answer questions about the weather."
+
+	answerSchema := &gollem.Parameter{
+		Type: gollem.TypeObject,
+		Properties: map[string]*gollem.Parameter{
+			"city":                {Type: gollem.TypeString, Required: true},
+			"temperature_celsius": {Type: gollem.TypeNumber, Required: true},
+			"summary":             {Type: gollem.TypeString, Required: true},
+		},
+	}
+
+	testFn := func(t *testing.T, client gollem.LLMClient, expectThinking bool) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
+		tool := &weatherLookupTool{}
+		sessionOpts := []gollem.SessionOption{
+			gollem.WithSessionSystemPrompt(systemPrompt),
+			gollem.WithSessionTools(tool),
+		}
+
+		// 1. Call with tools and obtain a tool call.
+		session, err := client.NewSession(ctx, sessionOpts...)
+		gt.NoError(t, err).Required()
+		// Claude uses adaptive thinking and skips it for simple requests; the
+		// puzzle makes it reason before choosing the tool argument, so that the
+		// history carries a signed thinking block.
+		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text(
+			"I will visit exactly one city. Candidates: Tokyo, Osaka, Sapporo, Fukuoka. " +
+				"Rule 1: the city's name must not contain the letter 'k' unless it has exactly five letters. " +
+				"Rule 2: among the remaining cities, pick the one whose name has the most vowels; break ties alphabetically. " +
+				"Work out the city carefully, then get its weather with the tool.")})
+		gt.NoError(t, err).Required()
+		gt.A(t, resp.FunctionCalls).Longer(0).Required()
+
+		if expectThinking {
+			history, err := session.History()
+			gt.NoError(t, err).Required()
+			var signedThinking int
+			for _, msg := range history.Messages {
+				for _, c := range msg.Contents {
+					t.Logf("history: role=%s type=%s meta=%dB", msg.Role, c.Type, len(c.Meta))
+					if c.Type == gollem.MessageContentTypeThinking && len(c.Meta) > 0 {
+						signedThinking++
+					}
+				}
+			}
+			gt.N(t, signedThinking).Greater(0).Required()
+		}
+
+		// 2. Return the tool results.
+		var results []gollem.Input
+		for _, fc := range resp.FunctionCalls {
+			out, err := tool.Run(ctx, fc.Arguments)
+			gt.NoError(t, err).Required()
+			results = append(results, gollem.FunctionResponse{ID: fc.ID, Name: fc.Name, Data: out})
+		}
+		_, err = session.Generate(ctx, results)
+		gt.NoError(t, err).Required()
+
+		// 3. Same system prompt and tool list over the recorded history, with
+		// tool calls disabled and a response schema.
+		history, err := session.History()
+		gt.NoError(t, err).Required()
+		next, err := client.NewSession(ctx, append(sessionOpts, gollem.WithSessionHistory(history))...)
+		gt.NoError(t, err).Required()
+		resp, err = next.Generate(ctx,
+			[]gollem.Input{gollem.Text("Report the observation you obtained as JSON.")},
+			gollem.WithToolCallsDisabled(),
+			gollem.WithGenerateResponseSchema(answerSchema),
+		)
+
+		// 4. The call succeeds with schema-conforming JSON and no tool call.
+		gt.NoError(t, err).Required()
+		gt.A(t, resp.FunctionCalls).Length(0)
+		gt.A(t, resp.Texts).Longer(0).Required()
+		var answer struct {
+			City               *string  `json:"city"`
+			TemperatureCelsius *float64 `json:"temperature_celsius"`
+			Summary            *string  `json:"summary"`
+		}
+		gt.NoError(t, json.Unmarshal([]byte(strings.Join(resp.Texts, "")), &answer)).Required()
+		gt.NotNil(t, answer.City)
+		gt.NotNil(t, answer.Summary)
+		gt.NotNil(t, answer.TemperatureCelsius)
+		if answer.TemperatureCelsius != nil {
+			gt.Equal(t, 21.5, *answer.TemperatureCelsius)
+		}
+	}
+
+	t.Run("Claude", func(t *testing.T) {
+		t.Parallel()
+		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
+		if !ok {
+			t.Skip("TEST_CLAUDE_API_KEY is not set")
+		}
+		client, err := claude.New(context.Background(), apiKey,
+			claude.WithModel("claude-opus-5-5"), claude.WithTimeout(5*time.Minute))
+		gt.NoError(t, err).Required()
+		testFn(t, client, true)
+	})
+
+	t.Run("ClaudeVertex", func(t *testing.T) {
+		t.Parallel()
+		projectID, ok := os.LookupEnv("TEST_CLAUDE_VERTEX_AI_PROJECT_ID")
+		if !ok {
+			t.Skip("TEST_CLAUDE_VERTEX_AI_PROJECT_ID is not set")
+		}
+		location := os.Getenv("TEST_CLAUDE_VERTEX_AI_LOCATION")
+		if location == "" {
+			location = "us-east5"
+		}
+		client, err := claude.NewWithVertex(context.Background(), location, projectID,
+			claude.WithVertexModel("claude-opus-5-5"))
+		gt.NoError(t, err).Required()
+		testFn(t, client, true)
+	})
+
+	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
+		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
+		if !ok {
+			t.Skip("TEST_OPENAI_API_KEY is not set")
+		}
+		client, err := openai.New(context.Background(), apiKey)
+		gt.NoError(t, err).Required()
+		testFn(t, client, false)
+	})
+
+	t.Run("Gemini", func(t *testing.T) {
+		t.Parallel()
+		projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+		if !ok {
+			t.Skip("TEST_GCP_PROJECT_ID is not set")
+		}
+		location, ok := os.LookupEnv("TEST_GCP_LOCATION")
+		if !ok {
+			t.Skip("TEST_GCP_LOCATION is not set")
+		}
+		var opts []gemini.Option
+		if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
+		client, err := gemini.New(context.Background(), projectID, location, opts...)
+		gt.NoError(t, err).Required()
+		testFn(t, client, false)
+	})
 }

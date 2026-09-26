@@ -5,12 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/llm/claude"
 	"github.com/gollem-dev/gollem/trace"
@@ -50,7 +55,7 @@ func TestCreateSystemPrompt(t *testing.T) {
 
 	t.Run("empty config returns empty slice", func(t *testing.T) {
 		cfg := gollem.NewSessionConfig()
-		result, err := claude.CreateSystemPrompt(ctx, cfg)
+		result, err := claude.CreateSystemPrompt(ctx, cfg, false)
 		gt.NoError(t, err)
 
 		// Should return empty slice when no system prompt
@@ -59,7 +64,7 @@ func TestCreateSystemPrompt(t *testing.T) {
 
 	t.Run("result is correct type", func(t *testing.T) {
 		cfg := gollem.NewSessionConfig()
-		result, err := claude.CreateSystemPrompt(ctx, cfg)
+		result, err := claude.CreateSystemPrompt(ctx, cfg, false)
 		gt.NoError(t, err)
 
 		// Empty slice can be nil in this implementation
@@ -71,7 +76,7 @@ func TestCreateSystemPrompt(t *testing.T) {
 		cfg := gollem.NewSessionConfig()
 		// Manually set content type since we can't use WithContentType in test
 		// The actual functionality is tested in integration tests
-		result, err := claude.CreateSystemPrompt(ctx, cfg)
+		result, err := claude.CreateSystemPrompt(ctx, cfg, false)
 		gt.NoError(t, err)
 
 		// At minimum, should not panic and return valid type
@@ -89,7 +94,7 @@ func TestSystemPromptSDKCompliance(t *testing.T) {
 
 		// Create empty config
 		cfg := gollem.NewSessionConfig()
-		result, err := claude.CreateSystemPrompt(ctx, cfg)
+		result, err := claude.CreateSystemPrompt(ctx, cfg, false)
 		gt.NoError(t, err)
 
 		// Empty case should return empty slice
@@ -121,12 +126,10 @@ func TestSystemPromptComment(t *testing.T) {
 	// in the format: []anthropic.TextBlockParam{{Text: "..."}}
 
 	t.Run("comment accuracy", func(t *testing.T) {
-		// The function is documented as:
-		// "Returns []anthropic.TextBlockParam as per anthropic-sdk-go v1.5.0 specification"
-		// This test verifies that claim
+		// The function returns []anthropic.TextBlockParam, the SDK's system prompt type.
 
 		cfg := gollem.NewSessionConfig()
-		result, err := claude.CreateSystemPrompt(ctx, cfg)
+		result, err := claude.CreateSystemPrompt(ctx, cfg, false)
 		gt.NoError(t, err)
 
 		// Should handle empty case correctly
@@ -1011,4 +1014,446 @@ func TestGenerateWithResolvedMaxTokens(t *testing.T) {
 		gt.Error(t, err).Required()
 		gt.False(t, strings.Contains(err.Error(), guardMessage))
 	})
+}
+
+// claudeDefaultModel is the model claude.New falls back to when WithModel is
+// not given. It is written out here instead of being read back from the
+// client, so that changing the default has to be a deliberate edit.
+const claudeDefaultModel = "claude-sonnet-4-5-20250929"
+
+var _ gollem.ModelNamer = (*claude.Client)(nil)
+
+// TestClientModel verifies that the client reports the model name it was
+// configured with, without consulting the API.
+func TestClientModel(t *testing.T) {
+	type testCase struct {
+		options  []claude.Option
+		expected string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			client, err := claude.New(context.Background(), "test-key", tc.options...)
+			gt.NoError(t, err).Required()
+			gt.Equal(t, tc.expected, client.Model())
+		}
+	}
+
+	t.Run("configured model", runTest(testCase{
+		options:  []claude.Option{claude.WithModel("claude-opus-4-1-20250805")},
+		expected: "claude-opus-4-1-20250805",
+	}))
+
+	t.Run("default model when no option is given", runTest(testCase{
+		expected: claudeDefaultModel,
+	}))
+
+	t.Run("last option wins", runTest(testCase{
+		options: []claude.Option{
+			claude.WithModel("claude-opus-4-1-20250805"),
+			claude.WithModel("claude-haiku-4-5-20251001"),
+		},
+		expected: "claude-haiku-4-5-20251001",
+	}))
+
+	t.Run("empty model is reported as configured", runTest(testCase{
+		options:  []claude.Option{claude.WithModel("")},
+		expected: "",
+	}))
+}
+
+// recordingServer is a local Messages API endpoint that records every request
+// body and answers with a single text block, in SSE form when the request asks
+// for streaming.
+type recordingServer struct {
+	srv          *httptest.Server
+	mu           sync.Mutex
+	bodies       []map[string]json.RawMessage
+	responseText string
+}
+
+func newRecordingServer(t *testing.T, responseText string) *recordingServer {
+	t.Helper()
+	rs := &recordingServer{responseText: responseText}
+	rs.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		rs.mu.Lock()
+		rs.bodies = append(rs.bodies, body)
+		rs.mu.Unlock()
+
+		text, err := json.Marshal(rs.responseText)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if string(body["stream"]) == "true" {
+			w.Header().Set("Content-Type", "text/event-stream")
+			events := [][2]string{
+				{"message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}}`},
+				{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+				{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":` + string(text) + `}}`},
+				{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+				{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`},
+				{"message_stop", `{"type":"message_stop"}`},
+			}
+			for _, ev := range events {
+				_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev[0], ev[1])
+			}
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[{"type":"text","text":%s}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`, text)
+	}))
+	t.Cleanup(rs.srv.Close)
+	return rs
+}
+
+func (rs *recordingServer) lastBody(t *testing.T) map[string]json.RawMessage {
+	t.Helper()
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	gt.A(t, rs.bodies).Longer(0).Required()
+	return rs.bodies[len(rs.bodies)-1]
+}
+
+// requestPath is one of the four ways a Claude session sends a request: the
+// Claude API or Vertex AI client, through Generate or Stream.
+type requestPath struct {
+	name       string
+	stream     bool
+	newSession func(t *testing.T, baseURL, model string, opts ...gollem.SessionOption) gollem.Session
+}
+
+var requestPaths = []requestPath{
+	{name: "API Generate", stream: false, newSession: newAPISession},
+	{name: "API Stream", stream: true, newSession: newAPISession},
+	{name: "Vertex Generate", stream: false, newSession: newVertexSession},
+	{name: "Vertex Stream", stream: true, newSession: newVertexSession},
+}
+
+func newAPISession(t *testing.T, baseURL, model string, opts ...gollem.SessionOption) gollem.Session {
+	t.Helper()
+	client, err := claude.New(context.Background(), "test-key",
+		claude.WithBaseURL(baseURL), claude.WithModel(model))
+	gt.NoError(t, err)
+	session, err := client.NewSession(context.Background(), opts...)
+	gt.NoError(t, err)
+	return session
+}
+
+func newVertexSession(t *testing.T, baseURL, model string, opts ...gollem.SessionOption) gollem.Session {
+	t.Helper()
+	anthropicClient := anthropic.NewClient(
+		option.WithAPIKey("test-key"),
+		option.WithBaseURL(baseURL),
+		option.WithMaxRetries(0),
+	)
+	client := claude.NewVertexClientWithAnthropicClient(&anthropicClient, claude.WithVertexModel(model))
+	session, err := client.NewSession(context.Background(), opts...)
+	gt.NoError(t, err)
+	return session
+}
+
+// send calls Generate or Stream and returns the concatenated response text.
+func (p requestPath) send(t *testing.T, session gollem.Session, opts ...gollem.GenerateOption) string {
+	t.Helper()
+	ctx := context.Background()
+	input := []gollem.Input{gollem.Text("question")}
+	if !p.stream {
+		resp, err := session.Generate(ctx, input, opts...)
+		gt.NoError(t, err)
+		return strings.Join(resp.Texts, "")
+	}
+	ch, err := session.Stream(ctx, input, opts...)
+	gt.NoError(t, err)
+	var texts []string
+	for resp := range ch {
+		gt.NoError(t, resp.Error)
+		texts = append(texts, resp.Texts...)
+	}
+	return strings.Join(texts, "")
+}
+
+// structuredOutputTestSchema carries constraints that structured outputs does
+// not accept, so the tests also observe how they are moved to the description.
+func structuredOutputTestSchema() *gollem.Parameter {
+	maxLength := 20
+	minimum := 1.0
+	return &gollem.Parameter{
+		Type: gollem.TypeObject,
+		Properties: map[string]*gollem.Parameter{
+			"answer": {Type: gollem.TypeString, Description: "The answer", Required: true, MaxLength: &maxLength},
+			"count":  {Type: gollem.TypeInteger, Minimum: &minimum},
+		},
+	}
+}
+
+const structuredOutputTestFormat = `{
+	"type": "json_schema",
+	"schema": {
+		"type": "object",
+		"additionalProperties": false,
+		"required": ["answer"],
+		"properties": {
+			"answer": {"type": "string", "description": "The answer\n\n{maxLength: 20}"},
+			"count": {"type": "integer", "description": "{minimum: 1}"}
+		}
+	}
+}`
+
+func assertJSONEqual(t *testing.T, expected string, actual json.RawMessage) {
+	t.Helper()
+	var want, got any
+	gt.NoError(t, json.Unmarshal([]byte(expected), &want))
+	gt.NoError(t, json.Unmarshal(actual, &got))
+	gt.Equal(t, want, got)
+}
+
+func TestResponseSchemaIsSentAsOutputFormat(t *testing.T) {
+	const model = "claude-opus-5-5"
+	const systemPrompt = "You are a test assistant."
+
+	for _, p := range requestPaths {
+		t.Run(p.name, func(t *testing.T) {
+			t.Run("per-call schema leaves system and tools unchanged", func(t *testing.T) {
+				rs := newRecordingServer(t, "{}")
+				session := p.newSession(t, rs.srv.URL, model,
+					gollem.WithSessionSystemPrompt(systemPrompt),
+					gollem.WithSessionTools(&cachePromptTestTool{}))
+
+				p.send(t, session)
+				without := rs.lastBody(t)
+				p.send(t, session, gollem.WithGenerateResponseSchema(structuredOutputTestSchema()))
+				with := rs.lastBody(t)
+
+				gt.Equal(t, string(without["system"]), string(with["system"]))
+				gt.Equal(t, string(without["tools"]), string(with["tools"]))
+				_, hasOutputConfig := without["output_config"]
+				gt.False(t, hasOutputConfig)
+				assertJSONEqual(t, `{"format":`+structuredOutputTestFormat+`}`, with["output_config"])
+			})
+
+			t.Run("session schema leaves system unchanged", func(t *testing.T) {
+				rs := newRecordingServer(t, "{}")
+				plain := p.newSession(t, rs.srv.URL, model,
+					gollem.WithSessionSystemPrompt(systemPrompt))
+				p.send(t, plain)
+				without := rs.lastBody(t)
+
+				structured := p.newSession(t, rs.srv.URL, model,
+					gollem.WithSessionSystemPrompt(systemPrompt),
+					gollem.WithSessionContentType(gollem.ContentTypeJSON),
+					gollem.WithSessionResponseSchema(structuredOutputTestSchema()))
+				p.send(t, structured)
+				with := rs.lastBody(t)
+
+				gt.Equal(t, string(without["system"]), string(with["system"]))
+				assertJSONEqual(t, `{"format":`+structuredOutputTestFormat+`}`, with["output_config"])
+			})
+
+			t.Run("per-call schema overrides session schema", func(t *testing.T) {
+				rs := newRecordingServer(t, "{}")
+				session := p.newSession(t, rs.srv.URL, model,
+					gollem.WithSessionContentType(gollem.ContentTypeJSON),
+					gollem.WithSessionResponseSchema(&gollem.Parameter{
+						Type:       gollem.TypeObject,
+						Properties: map[string]*gollem.Parameter{"other": {Type: gollem.TypeBoolean}},
+					}))
+				p.send(t, session, gollem.WithGenerateResponseSchema(structuredOutputTestSchema()))
+				assertJSONEqual(t, `{"format":`+structuredOutputTestFormat+`}`, rs.lastBody(t)["output_config"])
+			})
+
+			t.Run("model without structured outputs gets the schema in the system prompt", func(t *testing.T) {
+				rs := newRecordingServer(t, "{}")
+				session := p.newSession(t, rs.srv.URL, "claude-sonnet-4-20250514",
+					gollem.WithSessionSystemPrompt(systemPrompt))
+				p.send(t, session, gollem.WithGenerateResponseSchema(structuredOutputTestSchema()))
+				body := rs.lastBody(t)
+
+				_, hasOutputConfig := body["output_config"]
+				gt.False(t, hasOutputConfig)
+				var system []anthropic.TextBlockParam
+				gt.NoError(t, json.Unmarshal(body["system"], &system))
+				gt.A(t, system).Length(1).Required()
+				gt.S(t, system[0].Text).HasPrefix(systemPrompt)
+				gt.S(t, system[0].Text).Contains("Your response must conform to this JSON Schema")
+				gt.S(t, system[0].Text).Contains(`"maxLength": 20`)
+			})
+		})
+	}
+}
+
+func TestJSONIsExtractedHoweverTheSchemaIsSent(t *testing.T) {
+	// JSON extraction re-marshals the value, which sorts keys and drops
+	// whitespace, so the compact form shows that extraction took place.
+	const responseText = "```json\n{\"count\": 2, \"answer\": \"yes\"}\n```"
+	const expected = `{"answer":"yes","count":2}`
+
+	runTest := func(p requestPath, model string) func(t *testing.T) {
+		return func(t *testing.T) {
+			rs := newRecordingServer(t, responseText)
+			session := p.newSession(t, rs.srv.URL, model)
+			actual := p.send(t, session, gollem.WithGenerateResponseSchema(structuredOutputTestSchema()))
+			gt.Equal(t, expected, actual)
+		}
+	}
+
+	t.Run("API Generate with structured outputs", runTest(requestPaths[0], "claude-opus-5-5"))
+	t.Run("Vertex Generate with structured outputs", runTest(requestPaths[2], "claude-opus-5-5"))
+	t.Run("API Generate with the schema in the system prompt", runTest(requestPaths[0], "claude-sonnet-4-20250514"))
+	t.Run("Vertex Generate with the schema in the system prompt", runTest(requestPaths[2], "claude-sonnet-4-20250514"))
+}
+
+func TestJSONContentTypeWithoutSchema(t *testing.T) {
+	const systemPrompt = "You are a test assistant."
+
+	for _, p := range requestPaths {
+		t.Run(p.name, func(t *testing.T) {
+			t.Run("supported model gets the system prompt as written", func(t *testing.T) {
+				rs := newRecordingServer(t, "{}")
+				session := p.newSession(t, rs.srv.URL, "claude-opus-5-5",
+					gollem.WithSessionSystemPrompt(systemPrompt),
+					gollem.WithSessionContentType(gollem.ContentTypeJSON))
+				p.send(t, session)
+				body := rs.lastBody(t)
+
+				assertJSONEqual(t, `[{"type":"text","text":"`+systemPrompt+`"}]`, body["system"])
+				_, hasOutputConfig := body["output_config"]
+				gt.False(t, hasOutputConfig)
+			})
+
+			t.Run("model without structured outputs gets the JSON instruction", func(t *testing.T) {
+				rs := newRecordingServer(t, "{}")
+				session := p.newSession(t, rs.srv.URL, "claude-sonnet-4-20250514",
+					gollem.WithSessionSystemPrompt(systemPrompt),
+					gollem.WithSessionContentType(gollem.ContentTypeJSON))
+				p.send(t, session)
+
+				var system []anthropic.TextBlockParam
+				gt.NoError(t, json.Unmarshal(rs.lastBody(t)["system"], &system))
+				gt.A(t, system).Length(1).Required()
+				gt.Equal(t, systemPrompt+"\nPlease format your response as valid JSON.", system[0].Text)
+			})
+		})
+	}
+}
+
+func TestVertexStructuredOutputsDisabled(t *testing.T) {
+	const systemPrompt = "You are a test assistant."
+
+	for _, stream := range []bool{false, true} {
+		p := requestPath{name: "Vertex Generate", stream: stream}
+		if stream {
+			p.name = "Vertex Stream"
+		}
+		t.Run(p.name, func(t *testing.T) {
+			rs := newRecordingServer(t, "{}")
+			anthropicClient := anthropic.NewClient(
+				option.WithAPIKey("test-key"),
+				option.WithBaseURL(rs.srv.URL),
+				option.WithMaxRetries(0),
+			)
+			client := claude.NewVertexClientWithAnthropicClient(&anthropicClient,
+				claude.WithVertexModel("claude-opus-5-5"),
+				claude.WithVertexStructuredOutputsDisabled())
+			session, err := client.NewSession(context.Background(), gollem.WithSessionSystemPrompt(systemPrompt))
+			gt.NoError(t, err).Required()
+
+			p.send(t, session, gollem.WithGenerateResponseSchema(structuredOutputTestSchema()))
+			body := rs.lastBody(t)
+
+			_, hasOutputConfig := body["output_config"]
+			gt.False(t, hasOutputConfig)
+			var system []anthropic.TextBlockParam
+			gt.NoError(t, json.Unmarshal(body["system"], &system))
+			gt.A(t, system).Length(1).Required()
+			gt.S(t, system[0].Text).HasPrefix(systemPrompt)
+			gt.S(t, system[0].Text).Contains("Your response must conform to this JSON Schema")
+		})
+	}
+}
+
+func TestAPIErrorReachesCaller(t *testing.T) {
+	const apiMessage = "attempting to use a disallowed feature structured_outputs"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprintf(w, `{"type":"error","error":{"type":"invalid_request_error","message":%q}}`, apiMessage)
+	}))
+	t.Cleanup(srv.Close)
+
+	for _, p := range requestPaths {
+		t.Run(p.name, func(t *testing.T) {
+			session := p.newSession(t, srv.URL, "claude-opus-5-5")
+			input := []gollem.Input{gollem.Text("question")}
+			opts := []gollem.GenerateOption{gollem.WithGenerateResponseSchema(structuredOutputTestSchema())}
+
+			var err error
+			if p.stream {
+				ch, startErr := session.Stream(context.Background(), input, opts...)
+				err = startErr
+				if startErr == nil {
+					for resp := range ch {
+						if resp.Error != nil {
+							err = resp.Error
+						}
+					}
+				}
+			} else {
+				_, err = session.Generate(context.Background(), input, opts...)
+			}
+
+			gt.Error(t, err).Required()
+			gt.S(t, err.Error()).Contains(apiMessage)
+
+			// A failed call must not leave the question in the history.
+			history, histErr := session.History()
+			gt.NoError(t, histErr).Required()
+			gt.A(t, history.Messages).Length(0)
+		})
+	}
+}
+
+func TestToolCallsDisabled(t *testing.T) {
+	const model = "claude-opus-5-5"
+
+	for _, p := range requestPaths {
+		t.Run(p.name, func(t *testing.T) {
+			t.Run("sends tool_choice none with the tools unchanged", func(t *testing.T) {
+				rs := newRecordingServer(t, "{}")
+				session := p.newSession(t, rs.srv.URL, model,
+					gollem.WithSessionTools(&cachePromptTestTool{}))
+
+				p.send(t, session)
+				without := rs.lastBody(t)
+				p.send(t, session, gollem.WithToolCallsDisabled())
+				with := rs.lastBody(t)
+
+				gt.Equal(t, string(without["tools"]), string(with["tools"]))
+				_, hasToolChoice := without["tool_choice"]
+				gt.False(t, hasToolChoice)
+				assertJSONEqual(t, `{"type":"none"}`, with["tool_choice"])
+			})
+
+			t.Run("sends no tool_choice when the session has no tools", func(t *testing.T) {
+				rs := newRecordingServer(t, "{}")
+				session := p.newSession(t, rs.srv.URL, model)
+				p.send(t, session, gollem.WithToolCallsDisabled())
+				_, hasToolChoice := rs.lastBody(t)["tool_choice"]
+				gt.False(t, hasToolChoice)
+			})
+		})
+	}
 }

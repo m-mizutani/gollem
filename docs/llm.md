@@ -254,6 +254,18 @@ client, err := claude.NewWithVertex(ctx, region, projectID,
 )
 ```
 
+#### Structured Outputs
+
+By default, a response schema is sent as structured outputs (`output_config.format`) to models that support it. If your Google Cloud organization policy does not allow the `structured_outputs` feature for the model, Vertex AI rejects those calls with a 400 naming `constraints/vertexai.allowedPartnerModelFeatures`. Either have an administrator add `publishers/anthropic/models/<model>:structured_outputs` to the policy's allowed values, or disable structured outputs so that the schema is written into the system prompt instead:
+
+```go
+client, err := claude.NewWithVertex(ctx, region, projectID,
+    claude.WithVertexStructuredOutputsDisabled(),
+)
+```
+
+With structured outputs disabled, the system prompt changes with the schema, so Claude rejects a history whose thinking blocks were produced under a different system prompt. See [Provider-Specific Behavior](schema.md#claude).
+
 ### Authentication
 
 Uses Google Cloud credentials (same as Gemini):
@@ -442,6 +454,47 @@ embeddings, err := client.GenerateEmbedding(ctx,
     },
 )
 ```
+
+### Reporting the Configured Model Name
+
+A caller that meters, prices, or audits generations needs to record which model
+produced a response. `gollem.ModelNamer` is an optional interface that reports
+it, so the caller no longer has to mirror its own client-construction settings:
+
+```go
+type ModelNamer interface {
+    Model() string
+}
+```
+
+All clients shipped with gollem implement it — `claude.Client`,
+`claude.VertexClient`, `gemini.Client` and `openai.Client`. Obtain the name with
+a type assertion on the `gollem.LLMClient` you already hold:
+
+```go
+client, err := openai.New(ctx, apiKey, openai.WithModel("gpt-5-mini"))
+if err != nil {
+    return err
+}
+
+var llm gollem.LLMClient = client
+
+model := "unknown"
+if namer, ok := llm.(gollem.ModelNamer); ok {
+    model = namer.Model() // "gpt-5-mini"
+}
+```
+
+The interface is optional: `LLMClient` itself is unchanged, so a custom client
+or a mock that does not implement `ModelNamer` keeps working, and the assertion
+simply reports `false`.
+
+`Model()` returns the name the client was **configured** with — the value passed
+to `WithModel` (or `WithVertexModel`), or the provider default when no option
+was given. It is not the model id an API response may report: an alias can
+resolve to a dated snapshot, and returning that would break a caller keying a
+price table by the name it configured. The value is fixed at construction time,
+so calling `Model()` performs no API request and is safe to call concurrently.
 
 ### Error Handling
 

@@ -200,6 +200,49 @@ func TestObservationPhase(t *testing.T) {
 			t.Error("Expected result to have items")
 		}
 	})
+
+	// The encoded tool result becomes the observation the model reasons about. An encoding
+	// failure used to be ignored, leaving the observation empty instead of reporting it.
+	t.Run("reports a tool result that cannot be encoded", func(t *testing.T) {
+		mockClient := &mock.LLMClientMock{}
+		strategy := react.New(mockClient)
+
+		gt.NoError(t, strategy.Init(ctx, nil))
+
+		state0 := &gollem.StrategyState{
+			InitInput: []gollem.Input{gollem.Text("test")},
+			Iteration: 0,
+		}
+		_, _, _ = strategy.Handle(ctx, state0)
+
+		state1 := &gollem.StrategyState{
+			InitInput: []gollem.Input{gollem.Text("test")},
+			NextInput: []gollem.Input{},
+			Iteration: 1,
+			LastResponse: &gollem.Response{
+				FunctionCalls: []*gollem.FunctionCall{
+					{ID: "call-1", Name: "search"},
+				},
+			},
+		}
+		_, _, _ = strategy.Handle(ctx, state1)
+
+		state2 := &gollem.StrategyState{
+			InitInput: []gollem.Input{gollem.Text("test")},
+			NextInput: []gollem.Input{
+				gollem.FunctionResponse{
+					ID:   "call-1",
+					Name: "search",
+					// A channel cannot be encoded as JSON.
+					Data: map[string]any{"result": make(chan int)},
+				},
+			},
+			Iteration: 2,
+		}
+
+		_, _, err := strategy.Handle(ctx, state2)
+		gt.Error(t, err)
+	})
 }
 
 func TestToolExecutionError(t *testing.T) {
@@ -679,12 +722,14 @@ func TestReActWithRealLLM(t *testing.T) {
 		// Test: Multi-step reasoning task requiring chained tool usage
 		ctx := context.Background()
 		resp, err := agent.Execute(ctx, gollem.Text(`Find the secret code hidden in the filesystem. You must use the list_directory tool to explore directories and the read_file tool to read file contents. Start from the root directory "/" and systematically explore until you find the secret code.`))
-		gt.NoError(t, err)
-		gt.NotNil(t, resp)
+		// Stop here on failure: the assertions below dereference resp, so continuing
+		// would panic and abort every other test in this package.
+		gt.NoError(t, err).Required()
+		gt.V(t, resp).NotNil().Required()
 
 		// Export and verify trace
 		trace := strategy.ExportTrace()
-		gt.NotNil(t, trace)
+		gt.V(t, trace).NotNil().Required()
 
 		// Verify response exists
 		gt.N(t, len(resp.Texts)).Greater(0)

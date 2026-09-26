@@ -16,12 +16,17 @@ var (
 	ProcessResponse            = processResponse
 	MergeStreamedParts         = mergeStreamedParts
 	NewHistoryContent          = newHistoryContent
-	NewClient                  = newClient
 )
 
 // GetGenerationConfig returns the generationConfig for testing
 func (c *Client) GetGenerationConfig() *genai.GenerateContentConfig {
 	return c.generationConfig
+}
+
+// NewClientWithOptions builds a Client through the same defaults and option
+// handling New uses, for tests that must not reach GCP.
+func NewClientWithOptions(options ...Option) *Client {
+	return newConfiguredClient("test-project", "test-location", options...)
 }
 
 // Export for testing

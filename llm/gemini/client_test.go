@@ -481,20 +481,20 @@ func TestWithThinkingLevel(t *testing.T) {
 func TestDefaultThinkingConfig(t *testing.T) {
 	// No thinking configuration is sent by default, so each model applies its
 	// own default instead of a fixed level some models reject.
-	cfg := gemini.NewClient("test-project", "us-central1").GetGenerationConfig()
+	cfg := gemini.NewClientWithOptions().GetGenerationConfig()
 	gt.Nil(t, cfg.ThinkingConfig)
 }
 
 func TestWithIncludeThoughts(t *testing.T) {
 	t.Run("enabled", func(t *testing.T) {
-		cfg := gemini.NewClient("test-project", "us-central1",
+		cfg := gemini.NewClientWithOptions(
 			gemini.WithIncludeThoughts(true),
 		).GetGenerationConfig()
 		gt.Equal(t, true, cfg.ThinkingConfig.IncludeThoughts)
 	})
 
 	t.Run("survives thinking level option", func(t *testing.T) {
-		cfg := gemini.NewClient("test-project", "us-central1",
+		cfg := gemini.NewClientWithOptions(
 			gemini.WithIncludeThoughts(true),
 			gemini.WithThinkingLevel(genai.ThinkingLevelHigh),
 		).GetGenerationConfig()
@@ -504,7 +504,7 @@ func TestWithIncludeThoughts(t *testing.T) {
 	})
 
 	t.Run("survives thinking budget option", func(t *testing.T) {
-		cfg := gemini.NewClient("test-project", "us-central1",
+		cfg := gemini.NewClientWithOptions(
 			gemini.WithIncludeThoughts(true),
 			gemini.WithThinkingBudget(1000),
 		).GetGenerationConfig()
@@ -2010,4 +2010,123 @@ func TestGeminiStreamUsageNotSummed(t *testing.T) {
 	// Not 200 / 100.
 	gt.Equal(t, 100, lastInput)
 	gt.Equal(t, 50, lastCacheRead)
+}
+
+var _ gollem.ModelNamer = (*gemini.Client)(nil)
+
+// TestClientModel verifies that the client reports the model name it was
+// configured with, without consulting the API. The client is built through
+// NewClientWithOptions, which runs the same defaults and option handling as
+// gemini.New but stops before the GCP credential lookup that New performs.
+func TestClientModel(t *testing.T) {
+	type testCase struct {
+		options  []gemini.Option
+		expected string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			client := gemini.NewClientWithOptions(tc.options...)
+			gt.Equal(t, tc.expected, client.Model())
+		}
+	}
+
+	t.Run("configured model", runTest(testCase{
+		options:  []gemini.Option{gemini.WithModel("gemini-3-pro-preview")},
+		expected: "gemini-3-pro-preview",
+	}))
+
+	t.Run("default model when no option is given", runTest(testCase{
+		expected: gemini.DefaultModel,
+	}))
+
+	t.Run("last option wins", runTest(testCase{
+		options: []gemini.Option{
+			gemini.WithModel("gemini-3-pro-preview"),
+			gemini.WithModel("gemini-3.5-flash-lite"),
+		},
+		expected: "gemini-3.5-flash-lite",
+	}))
+
+	t.Run("empty model is reported as configured", runTest(testCase{
+		options:  []gemini.Option{gemini.WithModel("")},
+		expected: "",
+	}))
+}
+
+func TestToolCallsDisabled(t *testing.T) {
+	tools := []*genai.Tool{{
+		FunctionDeclarations: []*genai.FunctionDeclaration{{Name: "lookup", Description: "Look up a value"}},
+	}}
+
+	type testCase struct {
+		tools    []*genai.Tool
+		opts     []gollem.GenerateOption
+		expected *genai.ToolConfig
+	}
+
+	modeNone := &genai.ToolConfig{
+		FunctionCallingConfig: &genai.FunctionCallingConfig{Mode: genai.FunctionCallingConfigModeNone},
+	}
+
+	runTest := func(stream bool, tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			var sent *genai.GenerateContentConfig
+			mockClient := &apiClientMock{
+				GenerateContentFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+					sent = config
+					return &genai.GenerateContentResponse{
+						Candidates: []*genai.Candidate{{
+							Content: &genai.Content{Parts: []*genai.Part{{Text: "ok"}}, Role: "model"},
+						}},
+					}, nil
+				},
+				GenerateContentStreamFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) <-chan gemini.StreamResponse {
+					sent = config
+					ch := make(chan gemini.StreamResponse)
+					close(ch)
+					return ch
+				},
+			}
+			session, err := gemini.NewSessionWithAPIClient(mockClient, gollem.NewSessionConfig(), "gemini-2.5-flash")
+			gt.NoError(t, err)
+			gemini.SetSessionConfig(session, &genai.GenerateContentConfig{Tools: tc.tools})
+
+			input := []gollem.Input{gollem.Text("question")}
+			if stream {
+				ch, err := session.Stream(context.Background(), input, tc.opts...)
+				gt.NoError(t, err)
+				for resp := range ch {
+					gt.NoError(t, resp.Error)
+				}
+			} else {
+				_, err = session.Generate(context.Background(), input, tc.opts...)
+				gt.NoError(t, err)
+			}
+
+			gt.NotNil(t, sent)
+			gt.Equal(t, tc.tools, sent.Tools)
+			gt.Equal(t, tc.expected, sent.ToolConfig)
+		}
+	}
+
+	for _, stream := range []bool{false, true} {
+		name := "Generate"
+		if stream {
+			name = "Stream"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Run("sends mode NONE with the tools unchanged", runTest(stream, testCase{
+				tools:    tools,
+				opts:     []gollem.GenerateOption{gollem.WithToolCallsDisabled()},
+				expected: modeNone,
+			}))
+			t.Run("sends no tool config without the option", runTest(stream, testCase{
+				tools: tools,
+			}))
+			t.Run("sends no tool config when the session has no tools", runTest(stream, testCase{
+				opts: []gollem.GenerateOption{gollem.WithToolCallsDisabled()},
+			}))
+		})
+	}
 }

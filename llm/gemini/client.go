@@ -212,6 +212,27 @@ func WithContentType(contentType gollem.ContentType) Option {
 	}
 }
 
+// newConfiguredClient builds a Client from the defaults and the given options,
+// stopping short of the parts that need GCP credentials. It is split out of New
+// so that tests can exercise the real defaults and option handling without
+// reaching Vertex AI.
+func newConfiguredClient(projectID, location string, options ...Option) *Client {
+	client := &Client{
+		projectID:        projectID,
+		location:         location,
+		defaultModel:     DefaultModel,
+		embeddingModel:   DefaultEmbeddingModel,
+		contentType:      gollem.ContentTypeText,
+		generationConfig: &genai.GenerateContentConfig{},
+	}
+
+	for _, option := range options {
+		option(client)
+	}
+
+	return client
+}
+
 // New creates a new client for the Gemini API.
 // It requires a project ID and location, and can be configured with additional options.
 //
@@ -228,7 +249,7 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 		return nil, goerr.New("location is required")
 	}
 
-	client := newClient(projectID, location, options...)
+	client := newConfiguredClient(projectID, location, options...)
 
 	// Create client configuration for Vertex AI backend
 	config := &genai.ClientConfig{
@@ -246,24 +267,10 @@ func New(ctx context.Context, projectID, location string, options ...Option) (*C
 	return client, nil
 }
 
-// newClient builds the configured Client without contacting Vertex AI, so the
-// option handling and its defaults can be exercised without credentials.
-func newClient(projectID, location string, options ...Option) *Client {
-	client := &Client{
-		projectID:        projectID,
-		location:         location,
-		defaultModel:     DefaultModel,
-		embeddingModel:   DefaultEmbeddingModel,
-		contentType:      gollem.ContentTypeText,
-		generationConfig: &genai.GenerateContentConfig{},
-	}
-
-	for _, option := range options {
-		option(client)
-	}
-
-	return client
-}
+// Model returns the model name this client generates through. It is the name
+// the client was configured with, so a caller can key its own tables by the
+// same string it passed to WithModel.
+func (c *Client) Model() string { return c.defaultModel }
 
 // NewSession creates a new session for the Gemini API.
 // It converts the provided tools to Gemini's tool format and initializes a new chat session.
@@ -1119,6 +1126,15 @@ func (s *Session) buildEffectiveConfig(opts ...gollem.GenerateOption) (*genai.Ge
 			return nil, goerr.Wrap(err, "failed to convert per-call response schema")
 		}
 		effectiveConfig.ResponseSchema = genaiSchema
+	}
+	// The tool declarations stay in the request; mode NONE only forbids calling
+	// them. Without tools there is nothing to forbid, so no ToolConfig is sent.
+	if genCfg.ToolCallsDisabled() && len(effectiveConfig.Tools) > 0 {
+		effectiveConfig.ToolConfig = &genai.ToolConfig{
+			FunctionCallingConfig: &genai.FunctionCallingConfig{
+				Mode: genai.FunctionCallingConfigModeNone,
+			},
+		}
 	}
 	return &effectiveConfig, nil
 }

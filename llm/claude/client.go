@@ -12,6 +12,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/internal/jsonutil"
 	"github.com/gollem-dev/gollem/internal/schema"
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
@@ -225,6 +226,11 @@ type Session struct {
 	cfg gollem.SessionConfig
 }
 
+// Model returns the model name this client generates through. It is the name
+// the client was configured with, so a caller can key its own tables by the
+// same string it passed to WithModel.
+func (c *Client) Model() string { return c.defaultModel }
+
 // NewSession creates a new session for the Claude API.
 // It converts the provided tools to Claude's tool format and initializes a new chat session.
 func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
@@ -371,14 +377,25 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 
 // createSystemPrompt creates system prompt with content type handling
 // This is a shared helper function used by both standard Claude client and Vertex AI Claude client.
-// Returns []anthropic.TextBlockParam as per anthropic-sdk-go v1.5.0 specification.
-// This implementation follows the official SDK format: []anthropic.TextBlockParam{{Text: "..."}}
-func createSystemPrompt(ctx context.Context, cfg gollem.SessionConfig) ([]anthropic.TextBlockParam, error) {
+//
+// With structuredOutputs the system prompt is returned as the caller wrote it,
+// whatever the content type: a schema goes to output_config.format (see
+// applyResponseSchema). Claude accepts thinking blocks from earlier turns only
+// while the system prompt is the one they were produced with, so text added
+// here per session or per call would invalidate them.
+//
+// Without structuredOutputs, a JSON content type appends a JSON instruction
+// and the session schema to the system prompt.
+func createSystemPrompt(ctx context.Context, cfg gollem.SessionConfig, structuredOutputs bool) ([]anthropic.TextBlockParam, error) {
 	var systemPrompt []anthropic.TextBlockParam
 	if cfg.SystemPrompt() != "" {
 		systemPrompt = []anthropic.TextBlockParam{
 			{Text: cfg.SystemPrompt()},
 		}
+	}
+
+	if structuredOutputs {
+		return systemPrompt, nil
 	}
 
 	// Add content type instruction to system prompt
@@ -426,56 +443,77 @@ func extractJSON(ctx context.Context, text string) string {
 	return string(jsonBytes)
 }
 
-// generateClaudeStream is a shared helper function that handles the core logic for generating streaming content
-// This function is used by both the standard Claude client and the Vertex AI Claude client.
-// If systemPromptOverride is non-nil, it replaces the system prompt derived from cfg.
-func generateClaudeStream(
+// buildMessageParams builds the Messages request shared by the Claude API and
+// Vertex AI sessions: generation parameters, system prompt, tools, response
+// schema, per-call overrides and prompt-cache breakpoints, in that order.
+//
+// allowStructuredOutputs is false when the client is configured not to send
+// output_config.format; structured outputs are then used for no model.
+func buildMessageParams(
 	ctx context.Context,
-	client *anthropic.Client,
-	messages []anthropic.MessageParam,
 	model string,
 	params generationParameters,
+	messages []anthropic.MessageParam,
 	tools []anthropic.ToolUnionParam,
 	cfg gollem.SessionConfig,
-	messageHistory *[]anthropic.MessageParam,
-	systemPromptOverride []anthropic.TextBlockParam,
-) (<-chan *gollem.Response, error) {
-	// Prepare message parameters
-	msgParams := anthropic.MessageNewParams{
+	allowStructuredOutputs bool,
+	opts ...gollem.GenerateOption,
+) (anthropic.MessageNewParams, error) {
+	structuredOutputs := allowStructuredOutputs && supportsStructuredOutputs(model)
+
+	request := anthropic.MessageNewParams{
 		Model:     anthropic.Model(model),
 		MaxTokens: params.MaxTokens,
 		Messages:  messages,
 	}
 
 	// Set temperature and/or top_p (mutually exclusive for Claude)
-	if err := setTemperatureAndTopP(&msgParams, params.Temperature, params.TopP); err != nil {
-		return nil, goerr.Wrap(err, "failed to set generation parameters")
+	if err := setTemperatureAndTopP(&request, params.Temperature, params.TopP); err != nil {
+		return anthropic.MessageNewParams{}, goerr.Wrap(err, "failed to set generation parameters")
+	}
+
+	systemPrompt, err := createSystemPrompt(ctx, cfg, structuredOutputs)
+	if err != nil {
+		return anthropic.MessageNewParams{}, goerr.Wrap(err, "failed to create system prompt")
+	}
+	if len(systemPrompt) > 0 {
+		request.System = systemPrompt
 	}
 
 	if len(tools) > 0 {
-		msgParams.Tools = tools
+		request.Tools = tools
 	}
 
-	// Add system prompt (use override if provided, otherwise derive from cfg)
-	var systemPrompt []anthropic.TextBlockParam
-	if systemPromptOverride != nil {
-		systemPrompt = systemPromptOverride
-	} else {
-		var err error
-		systemPrompt, err = createSystemPrompt(ctx, cfg)
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to create system prompt")
-		}
+	if err := applyResponseSchema(&request, cfg, structuredOutputs, opts...); err != nil {
+		return anthropic.MessageNewParams{}, err
 	}
-	if len(systemPrompt) > 0 {
-		msgParams.System = systemPrompt
-	}
+
+	applyPerCallOverrides(&request, opts...)
 
 	// Inject prompt-cache breakpoints on the stable prefix and tail
 	if cfg.PromptCache() {
-		applyPromptCacheBreakpoints(&msgParams)
+		applyPromptCacheBreakpoints(&request)
 	}
 
+	return request, nil
+}
+
+// generateClaudeStream is a shared helper function that handles the core logic for generating streaming content
+// This function is used by both the standard Claude client and the Vertex AI Claude client.
+// extractJSONText selects whether JSON is extracted from the text recorded in
+// messageHistory; see needsJSONExtraction.
+//
+// newMessages are the inputs of this call. They are appended to messageHistory
+// together with the response only when the stream completes without error, so
+// a failed call leaves the history as it was and can be retried as is.
+func generateClaudeStream(
+	ctx context.Context,
+	client *anthropic.Client,
+	msgParams anthropic.MessageNewParams,
+	extractJSONText bool,
+	messageHistory *[]anthropic.MessageParam,
+	newMessages []anthropic.MessageParam,
+) (<-chan *gollem.Response, error) {
 	stream := client.Messages.NewStreaming(ctx, msgParams)
 	if stream == nil {
 		return nil, goerr.New("failed to create message stream")
@@ -494,16 +532,29 @@ func generateClaudeStream(
 
 	go func() {
 		defer close(responseChan)
+		// Close only releases the response body. By the time it runs, every
+		// result, including a stream error, has been sent on responseChan, so a
+		// failure to close cannot change what the caller received.
+		defer func() { _ = stream.Close() }()
 
 		for {
 			if !stream.Next() {
+				// An API error such as a 400 ends the stream before any event;
+				// without this check the caller would see an empty response.
+				if err := stream.Err(); err != nil {
+					responseChan <- &gollem.Response{
+						Error: goerr.Wrap(err, "failed to stream message", tokenLimitErrorOptions(err)...),
+					}
+					return
+				}
+
+				*messageHistory = append(*messageHistory, newMessages...)
 				// Add accumulated message to history when stream ends
 				if textContent.Len() > 0 || len(toolCalls) > 0 {
 					var content []anthropic.ContentBlockParamUnion
 					if textContent.Len() > 0 {
 						finalText := textContent.String()
-						// Apply JSON extraction for Claude when ContentTypeJSON is specified
-						if cfg.ContentType() == gollem.ContentTypeJSON {
+						if extractJSONText {
 							finalText = extractJSON(ctx, finalText)
 						}
 						content = append(content, anthropic.NewTextBlock(finalText))
@@ -573,7 +624,14 @@ func generateClaudeStream(
 					response.OutputToken = totalOutputTokens
 					response.CacheCreationInputToken = totalCacheCreation
 					response.CacheReadInputToken = totalCacheRead
-					toolCalls = append(toolCalls, anthropic.NewToolUseBlock(funcCall.ID, funcCall.Arguments, funcCall.Name))
+					input, err := toolUseInput(funcCall.Arguments)
+					if err != nil {
+						response.Error = goerr.Wrap(err, "failed to encode tool call arguments",
+							goerr.V("tool", funcCall.Name))
+						responseChan <- response
+						return
+					}
+					toolCalls = append(toolCalls, anthropic.NewToolUseBlock(funcCall.ID, input, funcCall.Name))
 					acc = newFunctionCallAccumulator()
 				}
 			}
@@ -587,8 +645,10 @@ func generateClaudeStream(
 	return responseChan, nil
 }
 
-// processResponseWithContentType converts Claude response to gollem.Response with content type handling
-func processResponseWithContentType(ctx context.Context, resp *anthropic.Message, contentType gollem.ContentType, hasResponseSchema bool) *gollem.Response {
+// processResponseWithContentType converts Claude response to gollem.Response.
+// extractJSONText selects whether JSON is extracted from text blocks; see
+// needsJSONExtraction.
+func processResponseWithContentType(ctx context.Context, resp *anthropic.Message, extractJSONText bool) *gollem.Response {
 	if len(resp.Content) == 0 {
 		return &gollem.Response{}
 	}
@@ -609,17 +669,15 @@ func processResponseWithContentType(ctx context.Context, resp *anthropic.Message
 			textBlock := content.AsText()
 			text := textBlock.Text
 
-			// Apply JSON extraction for Claude when ContentTypeJSON is specified
-			// Even with ResponseSchema and prefill, Claude may still wrap JSON in markdown code blocks
-			if contentType == gollem.ContentTypeJSON {
+			if extractJSONText {
 				text = extractJSON(ctx, text)
 			}
 
 			response.Texts = append(response.Texts, text)
 		case "tool_use":
 			toolUseBlock := content.AsToolUse()
-			var args map[string]any
-			if err := json.Unmarshal(toolUseBlock.Input, &args); err != nil {
+			args, err := jsonutil.DecodeObject(toolUseBlock.Input)
+			if err != nil {
 				response.Error = goerr.Wrap(err, "failed to unmarshal function arguments")
 				return response
 			}
@@ -676,38 +734,9 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		apiMessages = append(apiMessages, s.historyMessages...)
 		apiMessages = append(apiMessages, messages...)
 
-		// Create the request and call the API
-		systemPrompt, err := createSystemPrompt(ctx, s.cfg)
+		request, err := buildMessageParams(ctx, s.defaultModel, s.params, apiMessages, s.tools, s.cfg, true, opts...)
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to create system prompt")
-		}
-		request := anthropic.MessageNewParams{
-			Model:     anthropic.Model(s.defaultModel),
-			Messages:  apiMessages,
-			MaxTokens: s.params.MaxTokens,
-		}
-
-		// Set temperature and/or top_p (mutually exclusive for Claude)
-		if err := setTemperatureAndTopP(&request, s.params.Temperature, s.params.TopP); err != nil {
-			return nil, goerr.Wrap(err, "failed to set generation parameters")
-		}
-
-		if len(systemPrompt) > 0 {
-			request.System = systemPrompt
-		}
-
-		if len(s.tools) > 0 {
-			request.Tools = s.tools
-		}
-
-		// Apply per-call overrides
-		if err := applyPerCallOverrides(&request, opts...); err != nil {
 			return nil, err
-		}
-
-		// Inject prompt-cache breakpoints on the stable prefix and tail
-		if s.cfg.PromptCache() {
-			applyPromptCacheBreakpoints(&request)
 		}
 
 		// Start LLM call trace span
@@ -726,8 +755,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		}
 
 		// Process response and extract content
-		effectiveCT, hasSchema := effectiveContentType(s.cfg.ContentType(), s.cfg.ResponseSchema(), opts...)
-		processedResp := processResponseWithContentType(ctx, resp, effectiveCT, hasSchema)
+		processedResp := processResponseWithContentType(ctx, resp, needsJSONExtraction(s.cfg, opts...))
 
 		// Set trace data for defer.
 		// Record only messages added in this turn; previous turns are already
@@ -776,8 +804,10 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 	}, nil
 }
 
-// applyPerCallOverrides applies per-call GenerateOption overrides to Claude request params.
-func applyPerCallOverrides(request *anthropic.MessageNewParams, opts ...gollem.GenerateOption) error {
+// applyPerCallOverrides applies per-call GenerateOption overrides to Claude
+// request params. The per-call response schema is applied by
+// applyResponseSchema.
+func applyPerCallOverrides(request *anthropic.MessageNewParams, opts ...gollem.GenerateOption) {
 	genCfg := gollem.NewGenerateConfig(opts...)
 	if t := genCfg.Temperature(); t != nil {
 		request.Temperature = anthropic.Float(*t)
@@ -788,22 +818,70 @@ func applyPerCallOverrides(request *anthropic.MessageNewParams, opts ...gollem.G
 	if m := genCfg.MaxTokens(); m != nil {
 		request.MaxTokens = int64(*m)
 	}
-	if perCallSchema := genCfg.ResponseSchema(); perCallSchema != nil {
-		jsonInstruction := "\nPlease format your response as valid JSON."
-		schemaText, err := schema.ConvertParameterToJSONString(perCallSchema)
+	// tool_choice is only meaningful with tools; without them there is nothing
+	// to forbid, so the field is left unset rather than sent on its own.
+	if genCfg.ToolCallsDisabled() && len(request.Tools) > 0 {
+		request.ToolChoice = anthropic.ToolChoiceUnionParam{OfNone: &anthropic.ToolChoiceNoneParam{}}
+	}
+}
+
+// applyResponseSchema sends the response schema in effect for this call: the
+// per-call schema if one is given, otherwise the session schema when the
+// session content type is JSON.
+//
+// With structuredOutputs the schema goes to output_config.format, and the
+// system prompt and tool list are not touched: the API accepts thinking blocks
+// from earlier turns only while both are unchanged, whereas changing
+// output_config does not invalidate them.
+//
+// Without structuredOutputs (a model listed in structuredOutputsUnsupported, or
+// a Vertex AI client configured with WithVertexStructuredOutputsDisabled) the
+// schema is written into the system prompt as before. createSystemPrompt has
+// already done so for the session schema; a per-call schema is appended here.
+func applyResponseSchema(request *anthropic.MessageNewParams, cfg gollem.SessionConfig, structuredOutputs bool, opts ...gollem.GenerateOption) error {
+	genCfg := gollem.NewGenerateConfig(opts...)
+	perCallSchema := genCfg.ResponseSchema()
+
+	if structuredOutputs {
+		responseSchema := perCallSchema
+		if responseSchema == nil && cfg.ContentType() == gollem.ContentTypeJSON {
+			responseSchema = cfg.ResponseSchema()
+		}
+		if responseSchema == nil {
+			return nil
+		}
+		format, err := outputFormat(responseSchema)
 		if err != nil {
-			return goerr.Wrap(err, "failed to convert per-call response schema")
+			return goerr.Wrap(err, "failed to convert response schema", goerr.V("model", request.Model))
 		}
-		if schemaText != "" {
-			jsonInstruction += "\n\nYour response must conform to this JSON Schema:\n" + schemaText
-		}
-		if len(request.System) > 0 {
-			request.System[0].Text += jsonInstruction
-		} else {
-			request.System = []anthropic.TextBlockParam{{Text: jsonInstruction}}
-		}
+		request.OutputConfig.Format = format
+		return nil
+	}
+
+	if perCallSchema == nil {
+		return nil
+	}
+	jsonInstruction := "\nPlease format your response as valid JSON."
+	schemaText, err := schema.ConvertParameterToJSONString(perCallSchema)
+	if err != nil {
+		return goerr.Wrap(err, "failed to convert per-call response schema", goerr.V("model", request.Model))
+	}
+	if schemaText != "" {
+		jsonInstruction += "\n\nYour response must conform to this JSON Schema:\n" + schemaText
+	}
+	if len(request.System) > 0 {
+		request.System[0].Text += jsonInstruction
+	} else {
+		request.System = []anthropic.TextBlockParam{{Text: jsonInstruction}}
 	}
 	return nil
+}
+
+// needsJSONExtraction reports whether JSON is extracted from the response text:
+// whenever the content type in effect for this call is JSON, however the
+// schema was sent.
+func needsJSONExtraction(cfg gollem.SessionConfig, opts ...gollem.GenerateOption) bool {
+	return effectiveContentType(cfg.ContentType(), opts...) == gollem.ContentTypeJSON
 }
 
 // applyPromptCacheBreakpoints marks the stable prefix (system prompt, tools) and
@@ -895,12 +973,12 @@ func cacheTokensFromUsage(u anthropic.Usage) (totalInput, creation, read int) {
 }
 
 // effectiveContentType returns the content type considering per-call schema override.
-func effectiveContentType(sessionContentType gollem.ContentType, sessionSchema *gollem.Parameter, opts ...gollem.GenerateOption) (gollem.ContentType, bool) {
+func effectiveContentType(sessionContentType gollem.ContentType, opts ...gollem.GenerateOption) gollem.ContentType {
 	genCfg := gollem.NewGenerateConfig(opts...)
 	if genCfg.ResponseSchema() != nil {
-		return gollem.ContentTypeJSON, true
+		return gollem.ContentTypeJSON
 	}
-	return sessionContentType, sessionSchema != nil
+	return sessionContentType
 }
 
 // Deprecated: GenerateContent is deprecated. Use Generate instead.
@@ -933,9 +1011,11 @@ func (a *FunctionCallAccumulator) accumulate() (*gollem.FunctionCall, error) {
 
 	var args map[string]any
 	if a.Arguments != "" {
-		if err := json.Unmarshal([]byte(a.Arguments), &args); err != nil {
+		decoded, err := jsonutil.DecodeObject([]byte(a.Arguments))
+		if err != nil {
 			return nil, goerr.Wrap(err, "failed to unmarshal function call arguments", goerr.V("accumulator", a))
 		}
+		args = decoded
 	}
 
 	return &gollem.FunctionCall{
@@ -986,38 +1066,9 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		allMessages = append(allMessages, s.historyMessages...)
 		allMessages = append(allMessages, messages...)
 
-		// Create request params
-		systemPrompt, err := createSystemPrompt(ctx, s.cfg)
+		request, err := buildMessageParams(ctx, s.defaultModel, s.params, allMessages, s.tools, s.cfg, true, opts...)
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to create system prompt")
-		}
-		request := anthropic.MessageNewParams{
-			Model:     anthropic.Model(s.defaultModel),
-			Messages:  allMessages,
-			MaxTokens: s.params.MaxTokens,
-		}
-
-		// Set temperature and/or top_p (mutually exclusive for Claude)
-		if err := setTemperatureAndTopP(&request, s.params.Temperature, s.params.TopP); err != nil {
-			return nil, goerr.Wrap(err, "failed to set generation parameters")
-		}
-
-		if len(systemPrompt) > 0 {
-			request.System = systemPrompt
-		}
-
-		if len(s.tools) > 0 {
-			request.Tools = s.tools
-		}
-
-		// Apply per-call overrides
-		if err := applyPerCallOverrides(&request, opts...); err != nil {
 			return nil, err
-		}
-
-		// Inject prompt-cache breakpoints on the stable prefix and tail
-		if s.cfg.PromptCache() {
-			applyPromptCacheBreakpoints(&request)
 		}
 
 		// Start LLM call trace span
@@ -1268,8 +1319,17 @@ func claudeMessagesToTraceMessages(messages []anthropic.MessageParam) []trace.Me
 			case block.OfText != nil:
 				blocks = append(blocks, trace.NewTextContent(block.OfText.Text))
 			case block.OfToolUse != nil:
+				// The input is a json.RawMessage for every block this package builds (see
+				// toolUseInput); a map only reaches here from a caller that assembled the
+				// message itself. Trace data is diagnostic, so a value that fits neither
+				// shape is recorded as no arguments rather than failing the request.
 				var args map[string]any
-				if input, ok := block.OfToolUse.Input.(map[string]any); ok {
+				switch input := block.OfToolUse.Input.(type) {
+				case json.RawMessage:
+					if decoded, err := jsonutil.DecodeObject(input); err == nil {
+						args = decoded
+					}
+				case map[string]any:
 					args = input
 				}
 				blocks = append(blocks, trace.NewToolCallContent(

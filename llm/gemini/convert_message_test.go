@@ -454,3 +454,113 @@ func TestFunctionCallIDBackwardCompatNoID(t *testing.T) {
 	gt.Value(t, restored[0].Parts[0].FunctionCall.ID).Equal("")
 	gt.Value(t, restored[1].Parts[0].FunctionResponse.ID).Equal("")
 }
+
+func TestToContentsLeavesHistoryUnchanged(t *testing.T) {
+	sys, err := gollem.NewTextContent("be brief")
+	gt.NoError(t, err)
+	user, err := gollem.NewTextContent("hello")
+	gt.NoError(t, err)
+	assistant, err := gollem.NewTextContent("hi")
+	gt.NoError(t, err)
+	resp1, err := gollem.NewToolResponseContent("c1", "alpha", map[string]any{"ok": true}, false)
+	gt.NoError(t, err)
+	resp2, err := gollem.NewToolResponseContent("c2", "beta", map[string]any{"ok": true}, false)
+	gt.NoError(t, err)
+
+	history := &gollem.History{
+		LLType:  gollem.LLMTypeGemini,
+		Version: gollem.HistoryVersion,
+		Messages: []gollem.Message{
+			{Role: gollem.RoleSystem, Contents: []gollem.MessageContent{sys}},
+			{Role: gollem.RoleUser, Contents: []gollem.MessageContent{user}},
+			{Role: gollem.RoleAssistant, Contents: []gollem.MessageContent{assistant}},
+			{Role: gollem.RoleTool, Contents: []gollem.MessageContent{resp1}},
+			{Role: gollem.RoleTool, Contents: []gollem.MessageContent{resp2}},
+		},
+	}
+	before := append([]gollem.Message(nil), history.Messages...)
+
+	first, err := gemini.ToContents(history)
+	gt.NoError(t, err)
+
+	// The same History is converted again on every later request, so a conversion must not
+	// consume the system message or duplicate the trailing message.
+	gt.Equal(t, before, history.Messages)
+
+	second, err := gemini.ToContents(history)
+	gt.NoError(t, err)
+	gt.Equal(t, first, second)
+}
+
+func TestToolResponsesInSeparateMessagesBecomeOneContent(t *testing.T) {
+	text, err := gollem.NewTextContent("go")
+	gt.NoError(t, err)
+	call1, err := gollem.NewToolCallContent("c1", "alpha", map[string]any{"x": 1})
+	gt.NoError(t, err)
+	call2, err := gollem.NewToolCallContent("c2", "beta", map[string]any{"y": 2})
+	gt.NoError(t, err)
+	resp1, err := gollem.NewToolResponseContent("c1", "alpha", map[string]any{"ok": true}, false)
+	gt.NoError(t, err)
+	resp2, err := gollem.NewToolResponseContent("c2", "beta", map[string]any{"ok": true}, false)
+	gt.NoError(t, err)
+
+	history := &gollem.History{
+		LLType:  gollem.LLMTypeGemini,
+		Version: gollem.HistoryVersion,
+		Messages: []gollem.Message{
+			{Role: gollem.RoleUser, Contents: []gollem.MessageContent{text}},
+			{Role: gollem.RoleAssistant, Contents: []gollem.MessageContent{call1, call2}},
+			// A runtime that runs the calls one at a time appends one message per result.
+			{Role: gollem.RoleTool, Contents: []gollem.MessageContent{resp1}},
+			{Role: gollem.RoleTool, Contents: []gollem.MessageContent{resp2}},
+		},
+	}
+
+	contents, err := gemini.ToContents(history)
+	gt.NoError(t, err)
+
+	// Gemini requires the answering turn to carry as many functionResponse parts as the
+	// call turn carried functionCall parts.
+	gt.Equal(t, 3, len(contents))
+	gt.Equal(t, "user", contents[2].Role)
+	gt.Equal(t, 2, len(contents[2].Parts))
+	gt.Value(t, contents[2].Parts[0].FunctionResponse.Name).Equal("alpha")
+	gt.Value(t, contents[2].Parts[1].FunctionResponse.Name).Equal("beta")
+}
+
+// This package's own conversion carries an integer wider than float64 through unchanged.
+//
+// It does not survive the request, and cannot be made to from here: genai's
+// Models.generateContent passes the whole request through InternalDeepMarshal
+// (common.go:371-378 in v1.53.0), which is json.Marshal followed by a plain json.Unmarshal
+// into map[string]any, so every number becomes a float64 before the body is built. The
+// inbound direction has the same shape. The test therefore pins the boundary this package
+// controls; the Gemini limitation is recorded in docs/tools.md.
+func TestGeminiHistoryPreservesWideIntegers(t *testing.T) {
+	const wide = "9007199254740993"
+
+	call, err := gollem.NewToolCallContent("call_1", "lookup", map[string]any{"id": json.Number(wide)})
+	gt.NoError(t, err)
+	resp, err := gollem.NewToolResponseContent("call_1", "lookup", map[string]any{"account": json.Number(wide)}, false)
+	gt.NoError(t, err)
+
+	history := &gollem.History{
+		LLType:  gollem.LLMTypeGemini,
+		Version: gollem.HistoryVersion,
+		Messages: []gollem.Message{
+			{Role: gollem.RoleAssistant, Contents: []gollem.MessageContent{call}},
+			{Role: gollem.RoleTool, Contents: []gollem.MessageContent{resp}},
+		},
+	}
+
+	contents, err := gemini.ToContents(history)
+	gt.NoError(t, err)
+
+	encodedArgs, err := json.Marshal(contents[0].Parts[0].FunctionCall.Args)
+	gt.NoError(t, err)
+	gt.Equal(t, `{"id":`+wide+`}`, string(encodedArgs))
+
+	encodedResp, err := json.Marshal(contents[1].Parts[0].FunctionResponse.Response)
+	gt.NoError(t, err)
+	gt.Equal(t, `{"account":`+wide+`}`, string(encodedResp))
+}
