@@ -16,8 +16,7 @@ import (
 // With output_config.format the API decodes the response under the schema, so
 // the text is valid JSON matching it. The documented exceptions are a refusal
 // (stop_reason "refusal"), a response cut off by max_tokens, and a string enum
-// value returned with different capitalization. None is repaired here, because
-// rewriting such text would hand the caller a value the model did not produce.
+// value returned with different capitalization.
 func outputFormat(param *gollem.Parameter) (anthropic.JSONOutputFormatParam, error) {
 	if err := param.Validate(); err != nil {
 		return anthropic.JSONOutputFormatParam{}, goerr.Wrap(err, "invalid response schema")

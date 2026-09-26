@@ -32,6 +32,9 @@ type VertexClient struct {
 
 	// systemPrompt is the system prompt to use for chat completions.
 	systemPrompt string
+
+	// structuredOutputs allows sending response schemas as output_config.format.
+	structuredOutputs bool
 }
 
 // VertexOption is a function that configures a VertexClient.
@@ -83,14 +86,33 @@ func WithVertexSystemPrompt(prompt string) VertexOption {
 	}
 }
 
+// WithVertexStructuredOutputs selects how a response schema is sent. When
+// enabled, which is the default, a model that supports structured outputs
+// receives the schema as output_config.format and the system prompt is sent as
+// written. When disabled, every model receives the schema and a JSON
+// instruction appended to the system prompt, as models without structured
+// outputs do.
+//
+// Disable it when the Google Cloud project's organization policy
+// (constraints/vertexai.allowedPartnerModelFeatures) does not allow the
+// structured_outputs feature, which Vertex AI reports with a 400. The system
+// prompt then changes with the schema, so Claude rejects a history whose
+// thinking blocks were produced under a different system prompt.
+func WithVertexStructuredOutputs(enabled bool) VertexOption {
+	return func(c *VertexClient) {
+		c.structuredOutputs = enabled
+	}
+}
+
 // newConfiguredVertexClient builds a VertexClient from the defaults and the
 // given options, stopping short of the parts that need GCP credentials. It is
 // split out of NewWithVertex so that tests can exercise the real defaults and
 // option handling without reaching Vertex AI.
 func newConfiguredVertexClient(options ...VertexOption) *VertexClient {
 	client := &VertexClient{
-		defaultModel:   DefaultVertexClaudeModel,
-		embeddingModel: "text-embedding-004",
+		defaultModel:      DefaultVertexClaudeModel,
+		embeddingModel:    "text-embedding-004",
+		structuredOutputs: true,
 		params: generationParameters{
 			Temperature: -1.0, // -1 indicates not set (0.0 is valid)
 			TopP:        -1.0, // -1 indicates not set (0.0 is valid)
@@ -140,6 +162,8 @@ type VertexAnthropicSession struct {
 	params       generationParameters
 	cfg          gollem.SessionConfig
 	messages     []anthropic.MessageParam
+
+	structuredOutputs bool
 }
 
 // Model returns the model name this client generates through. It is the name
@@ -166,6 +190,8 @@ func (c *VertexClient) NewSession(ctx context.Context, options ...gollem.Session
 		params:       c.params,
 		cfg:          cfg,
 		messages:     messages,
+
+		structuredOutputs: c.structuredOutputs,
 	}
 
 	return session, nil
@@ -213,7 +239,7 @@ func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.In
 		}
 	}
 
-	msgParams, err := buildMessageParams(ctx, s.defaultModel, s.params, apiMessages, tools, s.cfg, opts...)
+	msgParams, err := buildMessageParams(ctx, s.defaultModel, s.params, apiMessages, tools, s.cfg, s.structuredOutputs, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +273,7 @@ func (s *VertexAnthropicSession) Generate(ctx context.Context, input []gollem.In
 		s.messages = append(s.messages, respParam)
 	}
 
-	return processResponseWithContentType(ctx, resp, needsJSONExtraction(&msgParams, s.cfg, opts...)), nil
+	return processResponseWithContentType(ctx, resp, needsJSONExtraction(s.cfg, opts...)), nil
 }
 
 // Stream processes the input and generates a response stream with optional per-call overrides.
@@ -281,7 +307,7 @@ func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Inpu
 		params.TopP = *p
 	}
 
-	msgParams, err := buildMessageParams(ctx, s.defaultModel, params, apiMessages, tools, s.cfg, opts...)
+	msgParams, err := buildMessageParams(ctx, s.defaultModel, params, apiMessages, tools, s.cfg, s.structuredOutputs, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +322,7 @@ func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Inpu
 		ctx,
 		s.client,
 		msgParams,
-		needsJSONExtraction(&msgParams, s.cfg, opts...),
+		needsJSONExtraction(s.cfg, opts...),
 		&s.messages,
 		messages,
 	)

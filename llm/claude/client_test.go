@@ -55,7 +55,7 @@ func TestCreateSystemPrompt(t *testing.T) {
 
 	t.Run("empty config returns empty slice", func(t *testing.T) {
 		cfg := gollem.NewSessionConfig()
-		result, err := claude.CreateSystemPrompt(ctx, cfg, "claude-sonnet-4-5")
+		result, err := claude.CreateSystemPrompt(ctx, cfg, false)
 		gt.NoError(t, err)
 
 		// Should return empty slice when no system prompt
@@ -64,7 +64,7 @@ func TestCreateSystemPrompt(t *testing.T) {
 
 	t.Run("result is correct type", func(t *testing.T) {
 		cfg := gollem.NewSessionConfig()
-		result, err := claude.CreateSystemPrompt(ctx, cfg, "claude-sonnet-4-5")
+		result, err := claude.CreateSystemPrompt(ctx, cfg, false)
 		gt.NoError(t, err)
 
 		// Empty slice can be nil in this implementation
@@ -76,7 +76,7 @@ func TestCreateSystemPrompt(t *testing.T) {
 		cfg := gollem.NewSessionConfig()
 		// Manually set content type since we can't use WithContentType in test
 		// The actual functionality is tested in integration tests
-		result, err := claude.CreateSystemPrompt(ctx, cfg, "claude-sonnet-4-5")
+		result, err := claude.CreateSystemPrompt(ctx, cfg, false)
 		gt.NoError(t, err)
 
 		// At minimum, should not panic and return valid type
@@ -94,7 +94,7 @@ func TestSystemPromptSDKCompliance(t *testing.T) {
 
 		// Create empty config
 		cfg := gollem.NewSessionConfig()
-		result, err := claude.CreateSystemPrompt(ctx, cfg, "claude-sonnet-4-5")
+		result, err := claude.CreateSystemPrompt(ctx, cfg, false)
 		gt.NoError(t, err)
 
 		// Empty case should return empty slice
@@ -129,7 +129,7 @@ func TestSystemPromptComment(t *testing.T) {
 		// The function returns []anthropic.TextBlockParam, the SDK's system prompt type.
 
 		cfg := gollem.NewSessionConfig()
-		result, err := claude.CreateSystemPrompt(ctx, cfg, "claude-sonnet-4-5")
+		result, err := claude.CreateSystemPrompt(ctx, cfg, false)
 		gt.NoError(t, err)
 
 		// Should handle empty case correctly
@@ -1294,12 +1294,13 @@ func TestResponseSchemaIsSentAsOutputFormat(t *testing.T) {
 	}
 }
 
-func TestStructuredOutputTextIsReturnedVerbatim(t *testing.T) {
+func TestJSONIsExtractedHoweverTheSchemaIsSent(t *testing.T) {
 	// JSON extraction re-marshals the value, which sorts keys and drops
-	// whitespace; the verbatim text shows that no extraction took place.
-	const responseText = `{"count": 2, "answer": "yes"}`
+	// whitespace, so the compact form shows that extraction took place.
+	const responseText = "```json\n{\"count\": 2, \"answer\": \"yes\"}\n```"
+	const expected = `{"answer":"yes","count":2}`
 
-	runTest := func(p requestPath, model, expected string) func(t *testing.T) {
+	runTest := func(p requestPath, model string) func(t *testing.T) {
 		return func(t *testing.T) {
 			rs := newRecordingServer(t, responseText)
 			session := p.newSession(t, rs.srv.URL, model)
@@ -1308,10 +1309,79 @@ func TestStructuredOutputTextIsReturnedVerbatim(t *testing.T) {
 		}
 	}
 
-	t.Run("API Generate with structured outputs", runTest(requestPaths[0], "claude-opus-5-5", responseText))
-	t.Run("Vertex Generate with structured outputs", runTest(requestPaths[2], "claude-opus-5-5", responseText))
-	t.Run("API Generate with the schema in the system prompt", runTest(requestPaths[0], "claude-sonnet-4-20250514", `{"answer":"yes","count":2}`))
-	t.Run("Vertex Generate with the schema in the system prompt", runTest(requestPaths[2], "claude-sonnet-4-20250514", `{"answer":"yes","count":2}`))
+	t.Run("API Generate with structured outputs", runTest(requestPaths[0], "claude-opus-5-5"))
+	t.Run("Vertex Generate with structured outputs", runTest(requestPaths[2], "claude-opus-5-5"))
+	t.Run("API Generate with the schema in the system prompt", runTest(requestPaths[0], "claude-sonnet-4-20250514"))
+	t.Run("Vertex Generate with the schema in the system prompt", runTest(requestPaths[2], "claude-sonnet-4-20250514"))
+}
+
+func TestJSONContentTypeWithoutSchema(t *testing.T) {
+	const systemPrompt = "You are a test assistant."
+
+	for _, p := range requestPaths {
+		t.Run(p.name, func(t *testing.T) {
+			t.Run("supported model gets the system prompt as written", func(t *testing.T) {
+				rs := newRecordingServer(t, "{}")
+				session := p.newSession(t, rs.srv.URL, "claude-opus-5-5",
+					gollem.WithSessionSystemPrompt(systemPrompt),
+					gollem.WithSessionContentType(gollem.ContentTypeJSON))
+				p.send(t, session)
+				body := rs.lastBody(t)
+
+				assertJSONEqual(t, `[{"type":"text","text":"`+systemPrompt+`"}]`, body["system"])
+				_, hasOutputConfig := body["output_config"]
+				gt.False(t, hasOutputConfig)
+			})
+
+			t.Run("model without structured outputs gets the JSON instruction", func(t *testing.T) {
+				rs := newRecordingServer(t, "{}")
+				session := p.newSession(t, rs.srv.URL, "claude-sonnet-4-20250514",
+					gollem.WithSessionSystemPrompt(systemPrompt),
+					gollem.WithSessionContentType(gollem.ContentTypeJSON))
+				p.send(t, session)
+
+				var system []anthropic.TextBlockParam
+				gt.NoError(t, json.Unmarshal(rs.lastBody(t)["system"], &system))
+				gt.A(t, system).Length(1).Required()
+				gt.Equal(t, systemPrompt+"\nPlease format your response as valid JSON.", system[0].Text)
+			})
+		})
+	}
+}
+
+func TestVertexStructuredOutputsDisabled(t *testing.T) {
+	const systemPrompt = "You are a test assistant."
+
+	for _, stream := range []bool{false, true} {
+		p := requestPath{name: "Vertex Generate", stream: stream}
+		if stream {
+			p.name = "Vertex Stream"
+		}
+		t.Run(p.name, func(t *testing.T) {
+			rs := newRecordingServer(t, "{}")
+			anthropicClient := anthropic.NewClient(
+				option.WithAPIKey("test-key"),
+				option.WithBaseURL(rs.srv.URL),
+				option.WithMaxRetries(0),
+			)
+			client := claude.NewVertexClientWithAnthropicClient(&anthropicClient,
+				claude.WithVertexModel("claude-opus-5-5"),
+				claude.WithVertexStructuredOutputs(false))
+			session, err := client.NewSession(context.Background(), gollem.WithSessionSystemPrompt(systemPrompt))
+			gt.NoError(t, err).Required()
+
+			p.send(t, session, gollem.WithGenerateResponseSchema(structuredOutputTestSchema()))
+			body := rs.lastBody(t)
+
+			_, hasOutputConfig := body["output_config"]
+			gt.False(t, hasOutputConfig)
+			var system []anthropic.TextBlockParam
+			gt.NoError(t, json.Unmarshal(body["system"], &system))
+			gt.A(t, system).Length(1).Required()
+			gt.S(t, system[0].Text).HasPrefix(systemPrompt)
+			gt.S(t, system[0].Text).Contains("Your response must conform to this JSON Schema")
+		})
+	}
 }
 
 func TestAPIErrorReachesCaller(t *testing.T) {

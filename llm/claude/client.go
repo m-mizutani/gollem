@@ -378,12 +378,15 @@ func convertGollemInputsToClaude(ctx context.Context, input ...gollem.Input) ([]
 // createSystemPrompt creates system prompt with content type handling
 // This is a shared helper function used by both standard Claude client and Vertex AI Claude client.
 //
-// When the session has a response schema and the model supports structured
-// outputs, the schema is sent as output_config.format (see applyResponseSchema)
-// and nothing is added here, so the system prompt is the same with and without
-// a schema. Claude binds thinking blocks to the system prompt they were
-// produced with; a schema written into it would invalidate them.
-func createSystemPrompt(ctx context.Context, cfg gollem.SessionConfig, model string) ([]anthropic.TextBlockParam, error) {
+// With structuredOutputs the system prompt is returned as the caller wrote it,
+// whatever the content type: a schema goes to output_config.format (see
+// applyResponseSchema). Claude accepts thinking blocks from earlier turns only
+// while the system prompt is the one they were produced with, so text added
+// here per session or per call would invalidate them.
+//
+// Without structuredOutputs, a JSON content type appends a JSON instruction
+// and the session schema to the system prompt.
+func createSystemPrompt(ctx context.Context, cfg gollem.SessionConfig, structuredOutputs bool) ([]anthropic.TextBlockParam, error) {
 	var systemPrompt []anthropic.TextBlockParam
 	if cfg.SystemPrompt() != "" {
 		systemPrompt = []anthropic.TextBlockParam{
@@ -391,7 +394,7 @@ func createSystemPrompt(ctx context.Context, cfg gollem.SessionConfig, model str
 		}
 	}
 
-	if cfg.ContentType() == gollem.ContentTypeJSON && cfg.ResponseSchema() != nil && supportsStructuredOutputs(model) {
+	if structuredOutputs {
 		return systemPrompt, nil
 	}
 
@@ -422,11 +425,8 @@ func createSystemPrompt(ctx context.Context, cfg gollem.SessionConfig, model str
 	return systemPrompt, nil
 }
 
-// extractJSON extracts JSON from noisy text using jsonex library.
-// It is applied only when JSON was requested through the system prompt, where
-// the model may still wrap the JSON in prose or a markdown code block. A
-// response decoded under output_config.format is already the JSON itself and
-// is returned unchanged (see needsJSONExtraction).
+// extractJSON extracts JSON from noisy text using jsonex library
+// It handles both JSON objects and arrays, with proper error handling and logging
 func extractJSON(ctx context.Context, text string) string {
 	var jsonResult any
 	if err := jsonex.Unmarshal([]byte(text), &jsonResult); err != nil {
@@ -446,6 +446,9 @@ func extractJSON(ctx context.Context, text string) string {
 // buildMessageParams builds the Messages request shared by the Claude API and
 // Vertex AI sessions: generation parameters, system prompt, tools, response
 // schema, per-call overrides and prompt-cache breakpoints, in that order.
+//
+// allowStructuredOutputs is false when the client is configured not to send
+// output_config.format; structured outputs are then used for no model.
 func buildMessageParams(
 	ctx context.Context,
 	model string,
@@ -453,8 +456,11 @@ func buildMessageParams(
 	messages []anthropic.MessageParam,
 	tools []anthropic.ToolUnionParam,
 	cfg gollem.SessionConfig,
+	allowStructuredOutputs bool,
 	opts ...gollem.GenerateOption,
 ) (anthropic.MessageNewParams, error) {
+	structuredOutputs := allowStructuredOutputs && supportsStructuredOutputs(model)
+
 	request := anthropic.MessageNewParams{
 		Model:     anthropic.Model(model),
 		MaxTokens: params.MaxTokens,
@@ -466,7 +472,7 @@ func buildMessageParams(
 		return anthropic.MessageNewParams{}, goerr.Wrap(err, "failed to set generation parameters")
 	}
 
-	systemPrompt, err := createSystemPrompt(ctx, cfg, model)
+	systemPrompt, err := createSystemPrompt(ctx, cfg, structuredOutputs)
 	if err != nil {
 		return anthropic.MessageNewParams{}, goerr.Wrap(err, "failed to create system prompt")
 	}
@@ -478,7 +484,7 @@ func buildMessageParams(
 		request.Tools = tools
 	}
 
-	if err := applyResponseSchema(&request, cfg, opts...); err != nil {
+	if err := applyResponseSchema(&request, cfg, structuredOutputs, opts...); err != nil {
 		return anthropic.MessageNewParams{}, err
 	}
 
@@ -728,7 +734,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		apiMessages = append(apiMessages, s.historyMessages...)
 		apiMessages = append(apiMessages, messages...)
 
-		request, err := buildMessageParams(ctx, s.defaultModel, s.params, apiMessages, s.tools, s.cfg, opts...)
+		request, err := buildMessageParams(ctx, s.defaultModel, s.params, apiMessages, s.tools, s.cfg, true, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -749,7 +755,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		}
 
 		// Process response and extract content
-		processedResp := processResponseWithContentType(ctx, resp, needsJSONExtraction(&request, s.cfg, opts...))
+		processedResp := processResponseWithContentType(ctx, resp, needsJSONExtraction(s.cfg, opts...))
 
 		// Set trace data for defer.
 		// Record only messages added in this turn; previous turns are already
@@ -823,19 +829,20 @@ func applyPerCallOverrides(request *anthropic.MessageNewParams, opts ...gollem.G
 // per-call schema if one is given, otherwise the session schema when the
 // session content type is JSON.
 //
-// For a model that supports structured outputs the schema goes to
-// output_config.format, and the system prompt and tool list are not touched:
-// the API accepts thinking blocks from earlier turns only while both are
-// unchanged, whereas changing output_config does not invalidate them.
+// With structuredOutputs the schema goes to output_config.format, and the
+// system prompt and tool list are not touched: the API accepts thinking blocks
+// from earlier turns only while both are unchanged, whereas changing
+// output_config does not invalidate them.
 //
-// For a model listed in structuredOutputsUnsupported the schema is written into
-// the system prompt as before. createSystemPrompt has already done so for the
-// session schema; a per-call schema is appended here.
-func applyResponseSchema(request *anthropic.MessageNewParams, cfg gollem.SessionConfig, opts ...gollem.GenerateOption) error {
+// Without structuredOutputs (a model listed in structuredOutputsUnsupported, or
+// a Vertex AI client configured with WithVertexStructuredOutputs(false)) the
+// schema is written into the system prompt as before. createSystemPrompt has
+// already done so for the session schema; a per-call schema is appended here.
+func applyResponseSchema(request *anthropic.MessageNewParams, cfg gollem.SessionConfig, structuredOutputs bool, opts ...gollem.GenerateOption) error {
 	genCfg := gollem.NewGenerateConfig(opts...)
 	perCallSchema := genCfg.ResponseSchema()
 
-	if supportsStructuredOutputs(string(request.Model)) {
+	if structuredOutputs {
 		responseSchema := perCallSchema
 		if responseSchema == nil && cfg.ContentType() == gollem.ContentTypeJSON {
 			responseSchema = cfg.ResponseSchema()
@@ -870,13 +877,10 @@ func applyResponseSchema(request *anthropic.MessageNewParams, cfg gollem.Session
 	return nil
 }
 
-// needsJSONExtraction reports whether JSON has to be extracted from the
-// response text. It is true only when JSON was requested through the system
-// prompt; a response decoded under output_config.format is used as is.
-func needsJSONExtraction(request *anthropic.MessageNewParams, cfg gollem.SessionConfig, opts ...gollem.GenerateOption) bool {
-	if request.OutputConfig.Format.Schema != nil {
-		return false
-	}
+// needsJSONExtraction reports whether JSON is extracted from the response text:
+// whenever the content type in effect for this call is JSON, however the
+// schema was sent.
+func needsJSONExtraction(cfg gollem.SessionConfig, opts ...gollem.GenerateOption) bool {
 	return effectiveContentType(cfg.ContentType(), opts...) == gollem.ContentTypeJSON
 }
 
@@ -1062,7 +1066,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		allMessages = append(allMessages, s.historyMessages...)
 		allMessages = append(allMessages, messages...)
 
-		request, err := buildMessageParams(ctx, s.defaultModel, s.params, allMessages, s.tools, s.cfg, opts...)
+		request, err := buildMessageParams(ctx, s.defaultModel, s.params, allMessages, s.tools, s.cfg, true, opts...)
 		if err != nil {
 			return nil, err
 		}
