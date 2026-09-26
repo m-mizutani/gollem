@@ -161,8 +161,9 @@ func WithThinkingBudget(budget int32) Option {
 // Introduced in Gemini 3.x as the replacement for WithThinkingBudget.
 //
 // Valid values: genai.ThinkingLevelMinimal, ThinkingLevelLow,
-// ThinkingLevelMedium, ThinkingLevelHigh. Not every model accepts every level;
-// without this option the model's own default applies.
+// ThinkingLevelMedium, ThinkingLevelHigh. Not every model accepts every level
+// (gemini-3.7-flash and gemini-3.8-flash reject ThinkingLevelMinimal); without
+// this option the model's own default applies.
 //
 // Vertex AI rejects requests that carry both thinking_budget and thinking_level
 // (HTTP 400), so calling this clears any thinking budget previously set.

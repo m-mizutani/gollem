@@ -47,7 +47,8 @@ client, err := gemini.New(ctx, projectID, location,
 ```
 
 Available models (default: `gemini-3.5-flash`):
-- `gemini-3.5-flash` - Latest Flash model with improved agent execution and coding (uses thinking levels)
+- `gemini-3.8-flash` - Latest Flash model for long-horizon agentic and coding tasks (uses thinking levels; does not accept `MINIMAL`)
+- `gemini-3.5-flash` - Flash model with improved agent execution and coding (uses thinking levels)
 - `gemini-2.5-pro` - Advanced model with state-of-the-art thinking capabilities
 - `gemini-2.5-flash` - Strong price-performance model with well-rounded capabilities
 - `gemini-2.5-flash-lite` - Optimized for cost efficiency and low latency
@@ -76,7 +77,7 @@ client, err := gemini.New(ctx, projectID, location,
 
 Available levels (lowest → highest): `ThinkingLevelMinimal`, `ThinkingLevelLow`, `ThinkingLevelMedium`, `ThinkingLevelHigh`.
 
-Without `WithThinkingLevel` (or `WithThinkingBudget`), gollem sends no thinking configuration at all and each model applies its own default — `MEDIUM` for Gemini 3.5 / 3.6 Flash, `HIGH` for Gemini 3 Pro, `MINIMAL` for Gemini 3.5 Flash Lite. Not every model accepts every level (`gemini-3-pro-preview` takes only `LOW` and `HIGH`), so set the level only when you know the model supports it.
+Without `WithThinkingLevel` (or `WithThinkingBudget`), gollem sends no thinking configuration at all and each model applies its own default — `MEDIUM` for Gemini 3.5 / 3.6 / 3.7 / 3.8 Flash, `HIGH` for Gemini 3 Pro, `MINIMAL` for Gemini 3.5 Flash Lite. Not every model accepts every level (`gemini-3.7-flash` and `gemini-3.8-flash` reject `MINIMAL` with HTTP 400, and `gemini-3-pro-preview` takes only `LOW` and `HIGH`), so set the level only when you know the model supports it.
 
 Note: Gemini 3.x also deprecates `temperature`, `top_p`, and `top_k` — omit those options when using 3.x models.
 
