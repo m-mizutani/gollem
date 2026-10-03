@@ -72,6 +72,10 @@ var (
 	// ErrSubAgentFactory is returned when the subagent factory fails to create an agent.
 	ErrSubAgentFactory = errors.New("subagent factory failed")
 
+	// ErrUnsupportedOperation is returned when the provider has no way to perform
+	// the requested operation, such as CountToken on Ollama.
+	ErrUnsupportedOperation = errors.New("operation is not supported by the provider")
+
 	// ErrTagTokenExceeded is a tag for errors caused by token limit exceeded
 	ErrTagTokenExceeded = goerr.NewTag("token_exceeded")
 )

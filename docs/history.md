@@ -1,6 +1,6 @@
 # History Management
 
-History represents a conversation history that can be used across different LLM sessions. It stores messages in a format specific to each LLM type (OpenAI, Claude, or Gemini).
+History represents a conversation history that can be used across different LLM sessions. It stores messages in a format specific to each LLM type (OpenAI, Claude, Gemini, or Ollama).
 
 ## Automatic vs Manual History Management
 
@@ -102,7 +102,7 @@ History can be easily serialized/deserialized using standard JSON marshaling. Th
 
 ## LLM Type Compatibility
 
-Each History instance is tied to a specific LLM type (OpenAI, Claude, or Gemini). Important notes:
+Each History instance is tied to a specific LLM type (OpenAI, Claude, Gemini, or Ollama). Important notes:
 
 - Direct conversion between different LLM types is not supported
 - Each LLM type has its own message format and capabilities

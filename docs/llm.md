@@ -8,6 +8,7 @@ This document provides detailed configuration options for each LLM provider supp
 - [Claude (Anthropic)](#claude-anthropic)
 - [Claude (Vertex AI)](#claude-vertex-ai)
 - [OpenAI](#openai)
+- [Ollama](#ollama)
 
 ## Gemini
 
@@ -349,6 +350,110 @@ client, err := openai.New(ctx, apiKey,
 - `GOLLEM_LOGGING_OPENAI_PROMPT` - Enable prompt logging
 - `GOLLEM_LOGGING_OPENAI_RESPONSE` - Enable response logging
 
+## Ollama
+
+The Ollama client talks to an Ollama server through its native API (`/api/chat` and `/api/embed`). It works with a local server, a server elsewhere on the network, and Ollama Cloud.
+
+### Basic Setup
+
+```go
+import (
+    "context"
+    "github.com/gollem-dev/gollem/llm/ollama"
+)
+
+// The model must already be pulled to the server: ollama pull qwen3:8b
+client, err := ollama.New(ctx, "qwen3:8b")
+```
+
+The model name is a required argument because no model is available on every server. The client connects to `http://localhost:11434` (`ollama.DefaultBaseURL`) unless `WithBaseURL` is given.
+
+### Configuration Options
+
+#### Server and Authentication
+
+```go
+// A server on another host
+client, err := ollama.New(ctx, "qwen3:8b",
+    ollama.WithBaseURL("http://gpu-box.internal:11434"),
+)
+
+// Ollama Cloud: create an API key on ollama.com
+client, err := ollama.New(ctx, "gemma4:31b",
+    ollama.WithBaseURL("https://ollama.com"),
+    ollama.WithAPIKey(apiKey), // sent as "Authorization: Bearer <apiKey>"
+)
+
+// A custom HTTP client (proxy, TLS settings)
+client, err := ollama.New(ctx, "qwen3:8b",
+    ollama.WithHTTPClient(&http.Client{Transport: transport}),
+)
+```
+
+The default HTTP client has no timeout, so a long streamed response is not cut off. Cancel a request through its context instead.
+
+#### Context Window
+
+```go
+client, err := ollama.New(ctx, "qwen3:8b",
+    ollama.WithNumCtx(32768),
+)
+```
+
+Set `WithNumCtx` to the context size your conversations need. The server default is often much smaller than what the model supports. By default Ollama drops the oldest messages without reporting it when a prompt exceeds the context size; gollem disables that (`truncate: false`, `shift: false`), so the request fails instead and the error is tagged with `gollem.ErrTagTokenExceeded`. The `middleware/compacter` middleware uses that tag to summarize the history and retry, the same as with the other providers.
+
+#### Generation Parameters
+
+```go
+client, err := ollama.New(ctx, "qwen3:8b",
+    ollama.WithTemperature(0.7), // options.temperature
+    ollama.WithTopP(0.9),        // options.top_p
+    ollama.WithTopK(40),         // options.top_k
+    ollama.WithMaxTokens(2048),  // options.num_predict
+)
+```
+
+Parameters that are not set are not sent, so the model defaults apply. `gollem.WithTemperature`, `gollem.WithTopP` and `gollem.WithMaxTokens` override them for a single `Generate` or `Stream` call.
+
+#### Thinking
+
+```go
+// Turn thinking on or off for models that support it
+client, err := ollama.New(ctx, "qwen3:8b", ollama.WithThink(false))
+
+// Or pick a named level, for a model that defines levels
+client, err := ollama.New(ctx, modelWithLevels, ollama.WithThinkLevel("high"))
+```
+
+The level must match one the model defines in the model information returned by the server's `/api/show` endpoint. Without either option the model default applies. Thinking output is returned in `Response.Thoughts`.
+
+#### Keep Alive, System Prompt and Embeddings
+
+```go
+client, err := ollama.New(ctx, "qwen3:8b",
+    ollama.WithKeepAlive(30*time.Minute),        // a negative value keeps the model loaded indefinitely
+    ollama.WithSystemPrompt("You are concise."),  // used when the session sets no system prompt
+    ollama.WithEmbeddingModel("nomic-embed-text"), // required for GenerateEmbedding
+)
+```
+
+### Differences from Other Providers
+
+- **Token counting**: Ollama has no API that counts tokens, so `Session.CountToken` returns an error wrapping `gollem.ErrUnsupportedOperation`.
+- **`gollem.WithToolCallsDisabled`**: Ollama has no parameter that forbids tool calls, so the tool definitions are left out of that call.
+- **Tool parameter constraints**: the server reads only `type`, `description`, `enum`, `items`, `properties`, `required` and `anyOf` of each tool parameter. Constraints such as `minimum`, `pattern` or `additionalProperties` are sent but ignored.
+- **Structured outputs**: a response schema is sent as `format`. Ollama Cloud does not support structured outputs.
+- **Input types**: images are sent as base64 data. An image given only by URL and PDF input return `gollem.ErrInvalidParameter`.
+- **Prompt caching**: `gollem.WithSessionPromptCache` has no effect. The server reuses its own KV cache, and the cached prompt tokens are reported in `Response.CacheReadInputToken`.
+
+### Environment Variables
+
+The client reads no environment variables. The integration tests use:
+
+- `TEST_OLLAMA_MODEL` - Chat model to test with; the tests are skipped when it is not set
+- `TEST_OLLAMA_BASE_URL` - Server address (optional, default `http://localhost:11434`)
+- `TEST_OLLAMA_EMBEDDING_MODEL` - Embedding model for the embedding test (optional)
+
 ## PDF Input Support
 
 gollem supports sending PDF documents to LLMs as input, enabling document analysis, extraction, and summarization.
@@ -402,6 +507,7 @@ fmt.Println(result.Texts)
 | Claude (Vertex AI) | Yes | Document block with base64-encoded data |
 | Gemini | Yes | Inline data with `application/pdf` MIME type |
 | OpenAI | No | OpenAI API does not accept PDF via the image_url field |
+| Ollama | No | Ollama has no PDF input; a PDF input or a history containing one returns `gollem.ErrInvalidParameter` |
 
 ### Validation and Safety
 
@@ -444,7 +550,7 @@ See [Per-Call Generate Options](schema.md#per-call-generate-options) for details
 
 ### Embedding Generation
 
-Providers that support embeddings (OpenAI and Gemini):
+Providers that support embeddings (OpenAI, Gemini and Ollama):
 
 ```go
 embeddings, err := client.GenerateEmbedding(ctx, 

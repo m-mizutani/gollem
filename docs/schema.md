@@ -446,6 +446,8 @@ A map can be sent to an LLM in some ways but not in others:
 | Where the schema is sent | Map |
 |---|---|
 | Tool definitions (Claude, OpenAI, Gemini) | Sent |
+| Tool definitions (Ollama) | Sent, but the server ignores `additionalProperties` |
+| Response schema, Ollama | Sent (as `format`) |
 | Response schema, OpenAI without strict mode (the default) | Sent |
 | Response schema, Gemini | Sent (as `responseJsonSchema`) |
 | Response schema, Claude models or configurations without structured outputs (schema in the system prompt) | Sent |

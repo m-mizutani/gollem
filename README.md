@@ -9,7 +9,7 @@ GO for Large LanguagE Model (GOLLEM)
 `gollem` provides:
 - **Common interface** to query prompt to Large Language Model (LLM) services
   - Generate / Stream: Generate text content from prompt (with per-call option overrides)
-  - GenerateEmbedding: Generate embedding vector from text (OpenAI and Gemini)
+  - GenerateEmbedding: Generate embedding vector from text (OpenAI, Gemini and Ollama)
 - **Framework for building agentic applications** of LLMs with
   - Tools by MCP (Model Context Protocol) server and your built-in tools
   - Automatic session management for continuous conversations
@@ -24,6 +24,7 @@ GO for Large LanguagE Model (GOLLEM)
   - Direct access via Anthropic API
   - Via Google Vertex AI (see [LLM Provider Configuration](docs/llm.md#claude-vertex-ai))
 - [x] **OpenAI** (see [models](https://platform.openai.com/docs/models))
+- [x] **Ollama** (local or remote Ollama server, and Ollama Cloud; see [LLM Provider Configuration](docs/llm.md#ollama))
 
 ## Install
 
