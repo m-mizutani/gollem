@@ -1163,14 +1163,6 @@ func convertResponseSchemaToGenai(param *gollem.Parameter) (*genai.Schema, error
 func (s *Session) buildEffectiveConfig(opts ...gollem.GenerateOption) (*genai.GenerateContentConfig, error) {
 	genCfg := gollem.NewGenerateConfig(opts...)
 	effectiveConfig := *s.config
-	if t := genCfg.Temperature(); t != nil {
-		temp := float32(*t)
-		effectiveConfig.Temperature = &temp
-	}
-	if p := genCfg.TopP(); p != nil {
-		topP := float32(*p)
-		effectiveConfig.TopP = &topP
-	}
 	if m := genCfg.MaxTokens(); m != nil {
 		if *m > math.MaxInt32 || *m < 0 {
 			return nil, goerr.New("maxTokens out of int32 range", goerr.V("maxTokens", *m))

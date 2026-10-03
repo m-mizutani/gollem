@@ -308,16 +308,16 @@ func TestGenerate(t *testing.T) {
 		})
 
 		_, err = session.Generate(ctx, []gollem.Input{gollem.Text("hi")},
-			gollem.WithTemperature(0.2), gollem.WithTopP(0.5), gollem.WithMaxTokens(64))
+			gollem.WithMaxTokens(64))
 		gt.NoError(t, err).Required()
 		options := optionsOf(fs.Last(t))
-		gt.Equal(t, options["temperature"], any(0.2))
-		gt.Equal(t, options["top_p"], any(0.5))
+		gt.Equal(t, options["temperature"], any(float64(0)))
+		gt.Equal(t, options["top_p"], any(0.9))
 		gt.Equal(t, options["num_predict"], any(float64(64)))
 
 		_, err = session.Generate(ctx, []gollem.Input{gollem.Text("hi")})
 		gt.NoError(t, err).Required()
-		gt.Equal(t, optionsOf(fs.Last(t))["temperature"], any(float64(0)))
+		gt.Equal(t, optionsOf(fs.Last(t))["num_predict"], any(float64(128)))
 	})
 
 	t.Run("no generation options", func(t *testing.T) {

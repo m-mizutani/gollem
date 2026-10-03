@@ -8,7 +8,7 @@ import "context"
 type Session interface {
 	// Generate sends input to the LLM and returns the complete response.
 	// Optional GenerateOption values override session-level defaults
-	// (e.g. temperature, response schema) for this single call only.
+	// (e.g. max tokens, response schema) for this single call only.
 	Generate(ctx context.Context, input []Input, opts ...GenerateOption) (*Response, error)
 
 	// Stream sends input to the LLM and returns a channel that yields

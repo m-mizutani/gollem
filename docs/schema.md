@@ -135,8 +135,8 @@ Internally, `SessionQuery` passes a per-call `GenerateOption` with the response 
 // Session created with default text mode
 session, _ := client.NewSession(ctx)
 
-// Override temperature for one call
-resp, _ := session.Generate(ctx, inputs, gollem.WithTemperature(0.2))
+// Limit the output length for one call
+resp, _ := session.Generate(ctx, inputs, gollem.WithMaxTokens(256))
 
 // Force JSON output with a schema for one call
 schema, _ := gollem.ToSchema(MyStruct{})
@@ -147,11 +147,11 @@ resp, _ = session.Generate(ctx, inputs, gollem.WithGenerateResponseSchema(schema
 
 | Option | Description |
 |--------|-------------|
-| `WithTemperature(float64)` | Override temperature for this call |
-| `WithTopP(float64)` | Override top-p for this call |
 | `WithMaxTokens(int)` | Override max tokens for this call |
 | `WithGenerateResponseSchema(*Parameter)` | Force JSON output with the given schema for this call |
 | `WithToolCallsDisabled()` | Forbid tool calls for this call while still sending the session's tools |
+
+There is no per-call option for temperature or top-p. Recent Claude, OpenAI, and Gemini models reject these parameters or no longer support them. To set them for a model that accepts them, use the client option of each provider, such as `ollama.WithTemperature` (see [LLM Providers](llm.md)).
 
 When `WithGenerateResponseSchema` is set, the provider automatically switches to JSON output mode for that call (e.g., OpenAI sets `ResponseFormat` to JSON Schema, Gemini sets `ResponseMIMEType` to `application/json`, Claude sets `output_config.format` on models that support structured outputs; see [Provider-Specific Behavior](#provider-specific-behavior)).
 

@@ -187,6 +187,29 @@ client, err := claude.New(ctx, apiKey,
 
 **Note**: Claude Sonnet 4.5 does not allow both `temperature` and `top_p` to be specified simultaneously. Use one or the other.
 
+**Note**: Recent Claude models return HTTP 400 when `temperature` or `top_p` is set to a non-default value. On those models, control the depth of the response with `WithEffort` instead.
+
+#### Effort
+
+`WithEffort` sends `output_config.effort` on every request of the client's sessions. The effort level controls how many tokens Claude spends on a response, including text, tool calls, and thinking.
+
+```go
+client, err := claude.New(ctx, apiKey,
+    claude.WithModel("claude-opus-5-5"),
+    claude.WithEffort(claude.EffortHigh),
+)
+```
+
+| Constant | Value sent |
+| --- | --- |
+| `claude.EffortLow` | `low` |
+| `claude.EffortMedium` | `medium` |
+| `claude.EffortHigh` | `high` |
+| `claude.EffortXHigh` | `xhigh` |
+| `claude.EffortMax` | `max` |
+
+When `WithEffort` is not called, gollem does not send `effort`, and the model default applies. The default model, `claude-sonnet-4-5-20250929`, does not support effort, so select a model that supports it with `WithModel`. Which levels a model accepts depends on the model; see the [Anthropic effort documentation](https://platform.claude.com/docs/en/build-with-claude/effort). gollem does not check the level against the model, so the API rejects a level the model does not support. For Vertex AI, use `claude.WithVertexEffort` with the same constants.
+
 #### Max tokens
 
 The Anthropic Messages API requires `max_tokens` on every request, so gollem always sends a value. When `WithMaxTokens` is not called, gollem sends the model's documented maximum output tokens:
@@ -251,6 +274,17 @@ client, err := claude.NewWithVertex(ctx, region, projectID,
 ```
 
 `WithVertexMaxTokens` follows the same rules as `claude.WithMaxTokens` — see [Max tokens](#max-tokens) above. Vertex AI model IDs use `@` as the version separator (`claude-sonnet-4-5@20250929`) and are matched against the same table.
+
+#### Effort
+
+```go
+client, err := claude.NewWithVertex(ctx, region, projectID,
+    claude.WithVertexModel(modelID), // a Vertex AI model ID of a model that supports effort
+    claude.WithVertexEffort(claude.EffortMedium),
+)
+```
+
+`WithVertexEffort` follows the same rules as `claude.WithEffort` — see [Effort](#effort) above. The default Vertex AI model, `claude-sonnet-4@20250514`, does not support effort, so select a model that supports it with `WithVertexModel`.
 
 #### System Prompt
 
@@ -417,7 +451,7 @@ client, err := ollama.New(ctx, "qwen3:8b",
 )
 ```
 
-Parameters that are not set are not sent, so the model defaults apply. `gollem.WithTemperature`, `gollem.WithTopP` and `gollem.WithMaxTokens` override them for a single `Generate` or `Stream` call.
+Parameters that are not set are not sent, so the model defaults apply. `gollem.WithMaxTokens` overrides `num_predict` for a single `Generate` or `Stream` call. Temperature and top-p cannot be changed per call; to use different values, create another client with different options.
 
 #### Thinking
 
@@ -544,7 +578,6 @@ Override session defaults for a single `Generate` or `Stream` call:
 
 ```go
 resp, err := session.Generate(ctx, inputs,
-    gollem.WithTemperature(0.2),
     gollem.WithMaxTokens(256),
     gollem.WithGenerateResponseSchema(schema), // forces JSON output for this call
 )
