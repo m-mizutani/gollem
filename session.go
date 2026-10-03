@@ -176,7 +176,8 @@ func WithSessionResponseSchema(schema *Parameter) SessionOption {
 // ephemeral cache_control breakpoints on the stable prefix (system prompt and
 // tools) and on the growing conversation tail, so repeated prefixes are served
 // from Claude's prompt cache. OpenAI and Gemini cache automatically regardless
-// of this flag; it does not change their requests. Default: disabled.
+// of this flag, and the Ollama server reuses its own KV cache; it does not
+// change their requests. Default: disabled.
 //
 // Usage:
 // session, err := client.NewSession(ctx, gollem.WithSessionPromptCache(true))

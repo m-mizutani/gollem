@@ -22,7 +22,7 @@ type HistoryRepository interface {
 }
 
 // History represents a conversation history that can be used across different LLM sessions.
-// It stores messages in a format specific to each LLM type (OpenAI, Claude, or Gemini).
+// It stores messages in a format specific to each LLM type (OpenAI, Claude, Gemini, or Ollama).
 //
 // For detailed documentation, see docs/history.md
 type LLMType string
@@ -31,6 +31,7 @@ const (
 	LLMTypeOpenAI LLMType = "OpenAI"
 	LLMTypeGemini LLMType = "gemini"
 	LLMTypeClaude LLMType = "claude"
+	LLMTypeOllama LLMType = "ollama"
 )
 
 const (

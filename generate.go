@@ -66,7 +66,9 @@ func (c *generateConfig) ToolCallsDisabled() bool {
 // tools and forbidding their use leaves the prefix intact.
 //
 // Providers receive it as tool_choice "none" (Claude, OpenAI) or the function
-// calling mode NONE (Gemini). It has no effect when the session has no tools.
+// calling mode NONE (Gemini). Ollama has no equivalent parameter, so the
+// Ollama client omits the tool definitions for that call instead. It has no
+// effect when the session has no tools.
 func WithToolCallsDisabled() GenerateOption {
 	return func(cfg *generateConfig) {
 		cfg.toolCallsDisabled = true

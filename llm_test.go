@@ -13,6 +13,7 @@ import (
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/llm/claude"
 	"github.com/gollem-dev/gollem/llm/gemini"
+	"github.com/gollem-dev/gollem/llm/ollama"
 	"github.com/gollem-dev/gollem/llm/openai"
 	"github.com/gollem-dev/gollem/mock"
 	"github.com/gollem-dev/gollem/trace"
@@ -67,6 +68,11 @@ func TestToolExecution(t *testing.T) {
 		gt.N(t, llmCallCount).Greater(0)
 		fmt.Printf("[TEST] LLM call spans recorded: %d\n", llmCallCount)
 	}
+
+	t.Run("Ollama", func(t *testing.T) {
+		t.Parallel()
+		testFn(t, newOllamaClient)
+	})
 
 	t.Run("OpenAI", func(t *testing.T) {
 		t.Parallel()
@@ -163,6 +169,11 @@ func TestContentMiddleware(t *testing.T) {
 			t.Fatalf("response should mention %s, got: %s", userName, combined)
 		}
 	}
+
+	t.Run("Ollama", func(t *testing.T) {
+		t.Parallel()
+		testFn(t, newOllamaClient)
+	})
 
 	t.Run("OpenAI", func(t *testing.T) {
 		t.Parallel()
@@ -277,6 +288,11 @@ func TestStreamMiddleware(t *testing.T) {
 			gt.True(t, strings.Contains(content["text"], "Modified:"))
 		}
 	}
+
+	t.Run("Ollama", func(t *testing.T) {
+		t.Parallel()
+		testFn(t, newOllamaClient)
+	})
 
 	t.Run("OpenAI", func(t *testing.T) {
 		t.Parallel()
@@ -592,6 +608,11 @@ func TestSessionQueryWithRealLLM(t *testing.T) {
 		gt.V(t, strings.Contains(resp.Data.Name, "Quetzalcoatl")).Equal(true)
 	}
 
+	t.Run("Ollama", func(t *testing.T) {
+		t.Parallel()
+		testFn(t, newOllamaClient)
+	})
+
 	t.Run("OpenAI", func(t *testing.T) {
 		t.Parallel()
 		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
@@ -633,6 +654,22 @@ func TestSessionQueryWithRealLLM(t *testing.T) {
 	})
 }
 
+// newOllamaClient creates an Ollama client for the model named by
+// TEST_OLLAMA_MODEL, skipping the test when it is not set. TEST_OLLAMA_BASE_URL
+// overrides the server address.
+func newOllamaClient(t *testing.T) (gollem.LLMClient, error) {
+	t.Helper()
+	model, ok := os.LookupEnv("TEST_OLLAMA_MODEL")
+	if !ok {
+		t.Skip("TEST_OLLAMA_MODEL is not set")
+	}
+	var opts []ollama.Option
+	if baseURL, ok := os.LookupEnv("TEST_OLLAMA_BASE_URL"); ok {
+		opts = append(opts, ollama.WithBaseURL(baseURL))
+	}
+	return ollama.New(context.Background(), model, opts...)
+}
+
 // countSpansByKind recursively counts spans of a given kind in the trace tree.
 func countSpansByKind(span *trace.Span, kind trace.SpanKind) int {
 	if span == nil {
@@ -660,6 +697,16 @@ func TestModelNamer(t *testing.T) {
 		namer, ok := llm.(gollem.ModelNamer)
 		gt.True(t, ok).Required()
 		gt.Equal(t, "gpt-5-mini", namer.Model())
+	})
+
+	t.Run("Ollama client reports its configured model", func(t *testing.T) {
+		client, err := ollama.New(context.Background(), "qwen3:8b")
+		gt.NoError(t, err).Required()
+
+		var llm gollem.LLMClient = client
+		namer, ok := llm.(gollem.ModelNamer)
+		gt.True(t, ok).Required()
+		gt.Equal(t, "qwen3:8b", namer.Model())
 	})
 
 	t.Run("non-implementing client reports nothing", func(t *testing.T) {
@@ -839,6 +886,13 @@ func TestSchemaCallAfterToolUseWithRealLLM(t *testing.T) {
 			opts = append(opts, gemini.WithModel(model))
 		}
 		client, err := gemini.New(context.Background(), projectID, location, opts...)
+		gt.NoError(t, err).Required()
+		testFn(t, client, false)
+	})
+
+	t.Run("Ollama", func(t *testing.T) {
+		t.Parallel()
+		client, err := newOllamaClient(t)
 		gt.NoError(t, err).Required()
 		testFn(t, client, false)
 	})

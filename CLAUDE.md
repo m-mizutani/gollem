@@ -42,6 +42,7 @@ Tests may require API keys for integration testing:
 - OpenAI: `OPENAI_API_KEY`
 - Anthropic: `ANTHROPIC_API_KEY`
 - Gemini: `GEMINI_PROJECT_ID`, `GEMINI_LOCATION`
+- Ollama: `TEST_OLLAMA_MODEL` (a model pulled to the server), optionally `TEST_OLLAMA_BASE_URL` and `TEST_OLLAMA_EMBEDDING_MODEL`
 
 When debugging tests, use the `trace/logger` package to enable LLM logging programmatically, or use `zenv` for environment-based configuration:
 ```bash
@@ -62,7 +63,7 @@ zenv -p debug go test -v ./strategy/planexec/ -run TestName
 
 **Agent** (`gollem.go`) - Central orchestrator managing conversation loops, tool execution, and session management. Entry point: `gollem.New(llmClient, options...)`
 
-**LLM Clients** (`llm/`) - Provider-specific implementations (OpenAI, Claude, Gemini) that all implement the `LLMClient` interface with `NewSession()` and `GenerateEmbedding()` methods.
+**LLM Clients** (`llm/`) - Provider-specific implementations (OpenAI, Claude, Gemini, Ollama) that all implement the `LLMClient` interface with `NewSession()` and `GenerateEmbedding()` methods.
 
 **Session Management** (`session.go`) - Handles conversation state and message processing for each LLM interaction.
 
@@ -118,6 +119,7 @@ Each provider in `llm/` handles format conversion between gollem's unified inter
 - **OpenAI**: GPT models with function calling
 - **Claude**: Anthropic models with tool use
 - **Gemini**: Google Vertex AI models with function calling
+- **Ollama**: Models served by an Ollama server through its native API (`/api/chat`, `/api/embed`), over plain `net/http`
 
 ### Testing Patterns
 
