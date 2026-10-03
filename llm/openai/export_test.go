@@ -12,6 +12,8 @@ var (
 	ConvertResponseSchemaToOpenAI = convertResponseSchemaToOpenAI
 	TokenLimitErrorOptions        = tokenLimitErrorOptions
 	OpenaiMessagesToTraceMessages = openaiMessagesToTraceMessages
+	ToMessages                    = toMessages
+	NewHistory                    = newHistory
 )
 
 // Export for testing
@@ -28,7 +30,7 @@ func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model s
 	var historyMessages []openai.ChatCompletionMessage
 	if cfg.History() != nil {
 		var err error
-		historyMessages, err = ToMessages(cfg.History())
+		historyMessages, err = toMessages(cfg.History())
 		if err != nil {
 			return nil, err
 		}

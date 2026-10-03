@@ -7,9 +7,7 @@ import (
 
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/llm/ollama"
-	"github.com/gollem-dev/gollem/llm/openai"
 	"github.com/m-mizutani/gt"
-	goopenai "github.com/sashabaranov/go-openai"
 )
 
 // mustContent returns a function that unwraps the result of a
@@ -144,15 +142,19 @@ func TestHistoryConversion(t *testing.T) {
 	})
 
 	t.Run("history from another provider", func(t *testing.T) {
-		openaiHistory, err := openai.NewHistory([]goopenai.ChatCompletionMessage{
-			{Role: goopenai.ChatMessageRoleUser, Content: "from openai"},
-			{Role: goopenai.ChatMessageRoleAssistant, Content: "openai reply"},
-		})
-		gt.NoError(t, err).Required()
+		// The History the OpenAI client produces for a user and an assistant text message.
+		openaiHistory := &gollem.History{
+			LLType:  gollem.LLMTypeOpenAI,
+			Version: gollem.HistoryVersion,
+			Messages: []gollem.Message{
+				{Role: gollem.RoleUser, Contents: []gollem.MessageContent{mustContent(t)(gollem.NewTextContent("from openai"))}},
+				{Role: gollem.RoleAssistant, Contents: []gollem.MessageContent{mustContent(t)(gollem.NewTextContent("openai reply"))}},
+			},
+		}
 
 		fs := newFakeServer(t, replyText("ok", ""))
 		session := newTestSession(t, newTestClient(t, fs), gollem.WithSessionHistory(openaiHistory))
-		_, err = session.Generate(context.Background(), []gollem.Input{gollem.Text("next")})
+		_, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("next")})
 		gt.NoError(t, err).Required()
 
 		msgs := messagesOf(t, fs.Last(t))

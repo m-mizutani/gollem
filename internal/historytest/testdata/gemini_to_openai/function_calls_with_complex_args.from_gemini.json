@@ -1,0 +1,73 @@
+{
+  "type": "gemini",
+  "version": 3,
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Search for Python tutorials"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "tool_call",
+          "data": {
+            "id": "gemini-fallback-search-0",
+            "name": "search",
+            "arguments": {
+              "filter": {
+                "language": "en",
+                "level": "beginner"
+              },
+              "limit": 10,
+              "query": "Python tutorials"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "tool_response",
+          "data": {
+            "tool_call_id": "gemini-fallback-search-0",
+            "name": "search",
+            "response": {
+              "results": [
+                {
+                  "title": "Python Basics",
+                  "url": "https://example.com/1"
+                },
+                {
+                  "title": "Learn Python",
+                  "url": "https://example.com/2"
+                }
+              ],
+              "total": 2
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "I found 2 Python tutorials for beginners."
+          }
+        }
+      ]
+    }
+  ]
+}

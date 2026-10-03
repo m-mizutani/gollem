@@ -1,0 +1,35 @@
+{
+  "type": "claude",
+  "version": 3,
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Analyze this image"
+          }
+        },
+        {
+          "type": "image",
+          "data": {
+            "media_type": "image/jpeg",
+            "data": "/9j/4AAQSkZJRg=="
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "This appears to be a landscape photo."
+          }
+        }
+      ]
+    }
+  ]
+}

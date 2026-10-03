@@ -246,7 +246,7 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 	var historyMessages []anthropic.MessageParam
 	if cfg.History() != nil {
 		var err error
-		historyMessages, err = ToMessages(cfg.History())
+		historyMessages, err = toMessages(cfg.History())
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history to Claude format")
 		}
@@ -265,14 +265,14 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 }
 
 func (s *Session) History() (*gollem.History, error) {
-	return NewHistory(s.historyMessages)
+	return newHistory(s.historyMessages)
 }
 
 func (s *Session) AppendHistory(h *gollem.History) error {
 	if h == nil {
 		return nil
 	}
-	messages, err := ToMessages(h)
+	messages, err := toMessages(h)
 	if err != nil {
 		return goerr.Wrap(err, "failed to convert history to Claude format")
 	}
@@ -701,7 +701,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 	var historyCopy *gollem.History
 	if len(s.historyMessages) > 0 {
 		var err error
-		historyCopy, err = NewHistory(s.historyMessages)
+		historyCopy, err = newHistory(s.historyMessages)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history from Claude format")
 		}
@@ -718,7 +718,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
 			var err error
-			s.historyMessages, err = ToMessages(req.History)
+			s.historyMessages, err = toMessages(req.History)
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to convert history from middleware")
 			}
@@ -1033,7 +1033,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 	var historyCopy *gollem.History
 	if len(s.historyMessages) > 0 {
 		var err error
-		historyCopy, err = NewHistory(s.historyMessages)
+		historyCopy, err = newHistory(s.historyMessages)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history from Claude format")
 		}
@@ -1050,7 +1050,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		// Update history if modified by middleware
 		if req.History != nil {
 			var err error
-			s.historyMessages, err = ToMessages(req.History)
+			s.historyMessages, err = toMessages(req.History)
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to convert history from middleware")
 			}

@@ -1,0 +1,60 @@
+{
+  "type": "gemini",
+  "version": 3,
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Search Python"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "tool_call",
+          "data": {
+            "id": "gemini-fallback-search-0",
+            "name": "search",
+            "arguments": {
+              "query": "Python"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "tool_response",
+          "data": {
+            "tool_call_id": "gemini-fallback-search-0",
+            "name": "search",
+            "response": {
+              "results": [
+                "Python tutorial"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Found Python tutorial."
+          }
+        }
+      ]
+    }
+  ]
+}

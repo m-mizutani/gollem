@@ -401,16 +401,16 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 	return result, nil
 }
 
-// ToMessages converts gollem.History to OpenAI messages
-func ToMessages(h *gollem.History) ([]openai.ChatCompletionMessage, error) {
+// toMessages converts gollem.History to OpenAI messages
+func toMessages(h *gollem.History) ([]openai.ChatCompletionMessage, error) {
 	if h == nil || len(h.Messages) == 0 {
 		return []openai.ChatCompletionMessage{}, nil
 	}
 	return convertMessagesToOpenAI(h.Messages)
 }
 
-// NewHistory creates gollem.History from OpenAI messages
-func NewHistory(messages []openai.ChatCompletionMessage) (*gollem.History, error) {
+// newHistory creates gollem.History from OpenAI messages
+func newHistory(messages []openai.ChatCompletionMessage) (*gollem.History, error) {
 	commonMessages, err := convertOpenAIToMessages(messages)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to convert OpenAI messages to common format")

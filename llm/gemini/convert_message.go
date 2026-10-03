@@ -523,16 +523,16 @@ func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) 
 	}
 }
 
-// ToContents converts gollem.History to Gemini contents
-func ToContents(h *gollem.History) ([]*genai.Content, error) {
+// toContents converts gollem.History to Gemini contents
+func toContents(h *gollem.History) ([]*genai.Content, error) {
 	if h == nil || len(h.Messages) == 0 {
 		return []*genai.Content{}, nil
 	}
 	return convertMessagesToGemini(h.Messages)
 }
 
-// NewHistory creates gollem.History from Gemini contents
-func NewHistory(contents []*genai.Content) (*gollem.History, error) {
+// newHistory creates gollem.History from Gemini contents
+func newHistory(contents []*genai.Content) (*gollem.History, error) {
 	commonMessages, err := convertGeminiToMessages(contents)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to convert Gemini messages to common format")
