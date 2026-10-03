@@ -23,11 +23,10 @@ func TestAPIErrors(t *testing.T) {
 		gt.Error(t, err).Contains("status=404")
 		gt.Error(t, err).Contains("model 'test-model' not found")
 
-		// The input stays in the history and no assistant message is added.
+		// Neither the input nor an assistant message is added to the history.
 		history, err := session.History()
 		gt.NoError(t, err).Required()
-		gt.A(t, history.Messages).Length(1).Required()
-		gt.Equal(t, history.Messages[0].Role, gollem.RoleUser)
+		gt.A(t, history.Messages).Length(0)
 	})
 
 	t.Run("body that is not JSON", func(t *testing.T) {

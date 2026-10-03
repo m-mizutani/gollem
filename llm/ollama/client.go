@@ -280,9 +280,10 @@ func (s *Session) historyForMiddleware() (*gollem.History, error) {
 	return h, nil
 }
 
-// prepareTurn applies the history returned by the middleware chain, then
-// converts the inputs and appends them to the history. It returns the newly
-// added messages for the trace.
+// prepareTurn applies the history returned by the middleware chain and
+// converts the inputs. The converted inputs are not added to the history
+// until the call succeeds (see commitTurn), so a failed call leaves the
+// history as it was and a retry sends the inputs only once.
 func (s *Session) prepareTurn(req *gollem.ContentRequest) ([]message, error) {
 	if req.History != nil {
 		messages, err := toMessages(req.History)
@@ -292,24 +293,29 @@ func (s *Session) prepareTurn(req *gollem.ContentRequest) ([]message, error) {
 		s.historyMessages = messages
 	}
 
-	newMessages, err := convertInputs(req.Inputs)
-	if err != nil {
-		return nil, err
-	}
-	s.historyMessages = append(s.historyMessages, newMessages...)
-	return newMessages, nil
+	return convertInputs(req.Inputs)
 }
 
-// buildRequest builds a chat request from the session state and the per-call
-// overrides.
-func (s *Session) buildRequest(stream bool, opts ...gollem.GenerateOption) (*chatRequest, error) {
+// commitTurn adds the inputs of a successful call and the assistant reply to
+// the history.
+func (s *Session) commitTurn(newMessages []message, assistant message) {
+	s.historyMessages = append(s.historyMessages, newMessages...)
+	if hasContent(assistant) {
+		s.historyMessages = append(s.historyMessages, assistant)
+	}
+}
+
+// buildRequest builds a chat request from the session state, the inputs of
+// this turn and the per-call overrides.
+func (s *Session) buildRequest(stream bool, newMessages []message, opts ...gollem.GenerateOption) (*chatRequest, error) {
 	genCfg := gollem.NewGenerateConfig(opts...)
 
-	messages := make([]message, 0, len(s.historyMessages)+1)
+	messages := make([]message, 0, len(s.historyMessages)+len(newMessages)+1)
 	if s.systemPrompt != "" {
 		messages = append(messages, message{Role: roleSystem, Content: s.systemPrompt})
 	}
 	messages = append(messages, s.historyMessages...)
+	messages = append(messages, newMessages...)
 
 	format, err := responseFormat(s.cfg.ContentType(), s.cfg.ResponseSchema(), genCfg.ResponseSchema())
 	if err != nil {
@@ -387,7 +393,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			return nil, err
 		}
 
-		chatReq, err := s.buildRequest(false, opts...)
+		chatReq, err := s.buildRequest(false, newMessages, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -411,9 +417,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			llmErr = err
 			return nil, err
 		}
-		if hasContent(assistant) {
-			s.historyMessages = append(s.historyMessages, assistant)
-		}
+		s.commitTurn(newMessages, assistant)
 
 		traceData = buildTraceData(resp.Model, resp.PromptEvalCount, resp.EvalCount, resp.PromptEvalCachedCount,
 			s.systemPrompt, newMessages, assistant)
@@ -474,7 +478,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			return nil, err
 		}
 
-		chatReq, err := s.buildRequest(true, opts...)
+		chatReq, err := s.buildRequest(true, newMessages, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -570,9 +574,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					CacheReadInputToken: cachedTokens,
 				}
 			}
-			if hasContent(assistant) {
-				s.historyMessages = append(s.historyMessages, assistant)
-			}
+			s.commitTurn(newMessages, assistant)
 
 			traceData = buildTraceData(s.model, inputTokens, outputTokens, cachedTokens,
 				s.systemPrompt, newMessages, assistant)

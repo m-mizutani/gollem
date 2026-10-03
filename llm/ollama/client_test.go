@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -515,10 +516,10 @@ func TestGenerate(t *testing.T) {
 		_, err := session.Generate(ctx, []gollem.Input{gollem.Text("weather?")})
 		gt.Error(t, err)
 
+		// The call failed, so the input is not added to the history.
 		history, err := session.History()
 		gt.NoError(t, err).Required()
-		gt.A(t, history.Messages).Length(1)
-		gt.Equal(t, history.Messages[0].Role, gollem.RoleUser)
+		gt.A(t, history.Messages).Length(0)
 	})
 
 	t.Run("JSON content type without schema", func(t *testing.T) {
@@ -705,6 +706,41 @@ func TestGenerate(t *testing.T) {
 		gt.True(t, spans[0].Error != "")
 	})
 
+	t.Run("failed call leaves the history unchanged and a retry sends the input once", func(t *testing.T) {
+		var calls atomic.Int32
+		fs := newFakeServer(t, func(w http.ResponseWriter, req recordedRequest) {
+			if calls.Add(1) == 2 {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "server busy"})
+				return
+			}
+			replyText("ok", "")(w, req)
+		})
+		session := newTestSession(t, newTestClient(t, fs))
+
+		_, err := session.Generate(ctx, []gollem.Input{gollem.Text("first")})
+		gt.NoError(t, err).Required()
+		before, err := session.History()
+		gt.NoError(t, err).Required()
+
+		_, err = session.Generate(ctx, []gollem.Input{gollem.Text("second")})
+		gt.Error(t, err)
+		after, err := session.History()
+		gt.NoError(t, err).Required()
+		gt.Equal(t, after.Messages, before.Messages)
+
+		_, err = session.Generate(ctx, []gollem.Input{gollem.Text("second")})
+		gt.NoError(t, err).Required()
+		msgs := messagesOf(t, fs.Last(t))
+		gt.A(t, msgs).Length(3).Required()
+		gt.Equal(t, msgs[0]["content"], any("first"))
+		gt.Equal(t, msgs[1]["content"], any("ok"))
+		gt.Equal(t, msgs[2]["content"], any("second"))
+
+		history, err := session.History()
+		gt.NoError(t, err).Required()
+		gt.A(t, history.Messages).Length(4)
+	})
+
 	t.Run("deprecated GenerateContent", func(t *testing.T) {
 		fs := newFakeServer(t, replyText("ok", ""))
 		session, err := newTestClient(t, fs).NewSession(ctx)
@@ -835,9 +871,10 @@ func TestStream(t *testing.T) {
 			gt.Error(t, lastResp.Error)
 			gt.Equal(t, goerr.HasTag(lastResp.Error, gollem.ErrTagTokenExceeded), expectedTag)
 
+			// Neither the input nor the partial reply is kept.
 			history, err := session.History()
 			gt.NoError(t, err).Required()
-			gt.A(t, history.Messages).Length(1)
+			gt.A(t, history.Messages).Length(0)
 		}
 	}
 	t.Run("error line", runStreamError([]string{
