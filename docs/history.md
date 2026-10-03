@@ -64,6 +64,7 @@ History includes version information to ensure compatibility. The current versio
 - If you have persisted v1/v2 histories, discard them or re-create the conversations with the current library version.
 - Version is stored in the `"version"` JSON field of the serialized `History` struct. When deserializing, callers should verify that the version matches `gollem.HistoryVersion` before use.
 - Future versions will document migration paths when feasible.
+- The serialized format is not covered by semver guarantees. See [Compatibility Policy](compatibility.md#serialized-history-format).
 
 ## Session Persistence
 
