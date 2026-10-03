@@ -11,6 +11,7 @@ import (
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/internal/convert"
 	"github.com/gollem-dev/gollem/internal/jsonutil"
+	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 )
 
@@ -124,7 +125,11 @@ func toMessages(h *gollem.History) ([]message, error) {
 }
 
 // convertMessage converts one common message. Tool responses become separate
-// tool messages placed after the message that holds the other contents.
+// tool messages. They follow an assistant message, whose tool calls they
+// answer, and precede a message of any other role: Claude histories put the
+// tool results and the next user text in one user message, and the server
+// expects the tool messages right after the assistant message that called
+// the tools.
 func convertMessage(msg gollem.Message) ([]message, error) {
 	main := message{Role: ollamaRole(msg.Role)}
 	var toolMessages []message
@@ -202,11 +207,13 @@ func convertMessage(msg gollem.Message) ([]message, error) {
 	}
 
 	hasMain := main.Content != "" || main.Thinking != "" || len(main.Images) > 0 || len(main.ToolCalls) > 0
-	result := make([]message, 0, 1+len(toolMessages))
-	if hasMain || len(toolMessages) == 0 {
-		result = append(result, main)
+	if !hasMain && len(toolMessages) > 0 {
+		return toolMessages, nil
 	}
-	return append(result, toolMessages...), nil
+	if main.Role == roleAssistant {
+		return append([]message{main}, toolMessages...), nil
+	}
+	return append(toolMessages, main), nil
 }
 
 func marshalArguments(args map[string]any) (json.RawMessage, error) {
@@ -327,9 +334,13 @@ func decodeArguments(raw json.RawMessage) (map[string]any, error) {
 }
 
 // convertResponseMessage extracts the function calls from an assistant
-// message returned by the server. A call without an ID gets one from
-// convert.GenerateToolCallID, and the returned message carries the same ID so
-// the history matches the IDs given to the caller.
+// message returned by the server. A call without an ID (servers that predate
+// tool call IDs) gets a random one, and the returned message carries the same
+// ID so the history matches the IDs given to the caller.
+//
+// convert.GenerateToolCallID is not used: it derives the ID from the name and
+// position only, so the same tool called in two turns would get the same ID,
+// and providers such as Claude reject a history with duplicate tool call IDs.
 func convertResponseMessage(msg message) ([]*gollem.FunctionCall, message, error) {
 	assistant := msg
 	assistant.Role = roleAssistant
@@ -346,7 +357,7 @@ func convertResponseMessage(msg message) ([]*gollem.FunctionCall, message, error
 				goerr.V("name", call.Function.Name))
 		}
 		if call.ID == "" {
-			call.ID = convert.GenerateToolCallID(call.Function.Name, i)
+			call.ID = "call_" + uuid.NewString()
 		}
 		call.Function.Index = i
 		assistant.ToolCalls[i] = call

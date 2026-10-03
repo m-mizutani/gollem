@@ -454,29 +454,51 @@ func TestGenerate(t *testing.T) {
 		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("weather?")})
 		gt.NoError(t, err).Required()
 		gt.A(t, resp.FunctionCalls).Length(2).Required()
-		gt.Equal(t, resp.FunctionCalls[0].ID, "call_get_weather_0")
-		gt.Equal(t, resp.FunctionCalls[1].ID, "call_get_weather_1")
+		id0, id1 := resp.FunctionCalls[0].ID, resp.FunctionCalls[1].ID
+		gt.True(t, strings.HasPrefix(id0, "call_"))
+		gt.True(t, strings.HasPrefix(id1, "call_"))
+		gt.NotEqual(t, id0, id1)
 
 		_, err = session.Generate(ctx, []gollem.Input{
-			gollem.FunctionResponse{ID: "call_get_weather_0", Name: "get_weather", Data: map[string]any{"weather": "sunny"}},
-			gollem.FunctionResponse{ID: "call_get_weather_1", Name: "get_weather", Error: errors.New("timeout")},
+			gollem.FunctionResponse{ID: id0, Name: "get_weather", Data: map[string]any{"weather": "sunny"}},
+			gollem.FunctionResponse{ID: id1, Name: "get_weather", Error: errors.New("timeout")},
 		})
 		gt.NoError(t, err).Required()
 
 		msgs := messagesOf(t, fs.Last(t))
 		gt.A(t, msgs).Length(4).Required()
 		assistantCalls := msgs[1]["tool_calls"].([]any)
-		gt.Equal(t, assistantCalls[0].(map[string]any)["id"], any("call_get_weather_0"))
-		gt.Equal(t, assistantCalls[1].(map[string]any)["id"], any("call_get_weather_1"))
+		gt.Equal(t, assistantCalls[0].(map[string]any)["id"], any(id0))
+		gt.Equal(t, assistantCalls[1].(map[string]any)["id"], any(id1))
 
 		gt.Equal(t, msgs[2], map[string]any{
 			"role":         "tool",
 			"content":      `{"weather":"sunny"}`,
 			"tool_name":    "get_weather",
-			"tool_call_id": "call_get_weather_0",
+			"tool_call_id": id0,
 		})
 		gt.Equal(t, msgs[3]["content"], any("Error message: timeout"))
-		gt.Equal(t, msgs[3]["tool_call_id"], any("call_get_weather_1"))
+		gt.Equal(t, msgs[3]["tool_call_id"], any(id1))
+	})
+
+	t.Run("tool call IDs differ across turns", func(t *testing.T) {
+		fs := newFakeServer(t, func(w http.ResponseWriter, req recordedRequest) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"message": map[string]any{
+					"role":       "assistant",
+					"tool_calls": []any{map[string]any{"function": map[string]any{"name": "get_weather", "arguments": map[string]any{"city": "Tokyo"}}}},
+				},
+				"done": true,
+			})
+		})
+		session := newTestSession(t, newTestClient(t, fs), gollem.WithSessionTools(weatherTool{}))
+		first, err := session.Generate(ctx, []gollem.Input{gollem.Text("weather?")})
+		gt.NoError(t, err).Required()
+		second, err := session.Generate(ctx, []gollem.Input{
+			gollem.FunctionResponse{ID: first.FunctionCalls[0].ID, Name: "get_weather", Data: map[string]any{"weather": "sunny"}},
+		})
+		gt.NoError(t, err).Required()
+		gt.NotEqual(t, first.FunctionCalls[0].ID, second.FunctionCalls[0].ID)
 	})
 
 	t.Run("tool call arguments that are not an object", func(t *testing.T) {

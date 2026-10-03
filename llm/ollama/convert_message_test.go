@@ -98,6 +98,29 @@ func TestHistoryConversion(t *testing.T) {
 		gt.Equal(t, msgs[0]["role"], any("tool"))
 	})
 
+	t.Run("tool responses precede the user text of the same message", func(t *testing.T) {
+		// Claude histories put the tool results and the next user text in one
+		// user message, in this order.
+		history := &gollem.History{Messages: []gollem.Message{
+			{Role: gollem.RoleAssistant, Contents: []gollem.MessageContent{
+				mustContent(t)(gollem.NewToolCallContent("c1", "a", map[string]any{})),
+			}},
+			{Role: gollem.RoleUser, Contents: []gollem.MessageContent{
+				mustContent(t)(gollem.NewToolResponseContent("c1", "a", map[string]any{"v": 1}, false)),
+				mustContent(t)(gollem.NewTextContent("and next?")),
+			}},
+		}}
+		wire, _, err := ollama.HistoryRoundTrip(history)
+		gt.NoError(t, err).Required()
+		msgs := wireMessages(t, wire)
+		gt.A(t, msgs).Length(3).Required()
+		gt.Equal(t, msgs[0]["role"], any("assistant"))
+		gt.Equal(t, msgs[1]["role"], any("tool"))
+		gt.Equal(t, msgs[1]["tool_call_id"], any("c1"))
+		gt.Equal(t, msgs[2]["role"], any("user"))
+		gt.Equal(t, msgs[2]["content"], any("and next?"))
+	})
+
 	runRejected := func(content gollem.MessageContent) func(t *testing.T) {
 		return func(t *testing.T) {
 			history := &gollem.History{Messages: []gollem.Message{{
