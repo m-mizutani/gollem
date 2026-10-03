@@ -616,7 +616,7 @@ func TestGenerate(t *testing.T) {
 		var goErr *goerr.Error
 		gt.True(t, errors.As(err, &goErr))
 		for _, v := range goErr.Values() {
-			gt.False(t, strings.Contains(stringify(v), "secret-key"))
+			gt.False(t, strings.Contains(stringify(t, v), "secret-key"))
 		}
 	})
 
@@ -997,11 +997,10 @@ func llmCallSpans(span *trace.Span) []*trace.Span {
 	return result
 }
 
-func stringify(v any) string {
+func stringify(t *testing.T, v any) string {
+	t.Helper()
 	data, err := json.Marshal(v)
-	if err != nil {
-		return ""
-	}
+	gt.NoError(t, err).Required()
 	return string(data)
 }
 

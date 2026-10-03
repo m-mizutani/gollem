@@ -137,8 +137,10 @@ func WithThink(enabled bool) Option {
 }
 
 // WithThinkLevel sets a named thinking level such as "low", "medium", "high"
-// or "max". The accepted levels are defined by each model and validated by the
-// server. The later of WithThink and WithThinkLevel wins.
+// or "max". Use a value listed in thinking.values of the server's /api/show
+// response for the model. The client does not validate the level; depending on
+// the model, the server either rejects an unsupported level or applies the
+// model default instead. The later of WithThink and WithThinkLevel wins.
 func WithThinkLevel(level string) Option {
 	return func(c *Client) {
 		c.think = &thinkValue{level: level}
@@ -449,7 +451,11 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 
 // Stream sends the input and returns a channel that yields the response as it
 // arrives. Texts and thoughts are sent as they are received; function calls
-// and the final token counts are sent after the server finishes.
+// and the final token counts are sent after the server finishes. An error,
+// including cancellation of ctx, is sent as the last response before the
+// channel is closed. Read the channel until it is closed: if the caller stops
+// reading, the goroutines producing the responses block and are not released
+// even when ctx is cancelled.
 func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
 	historyCopy, err := s.historyForMiddleware()
 	if err != nil {
@@ -490,6 +496,8 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		responseChan := make(chan *gollem.ContentResponse)
 		go func() {
 			defer close(responseChan)
+			// Every chunk and any error have already been sent when this runs,
+			// so a Close failure has no effect on what the caller received.
 			defer func() { _ = stream.close() }()
 
 			var traceData *trace.LLMCallData

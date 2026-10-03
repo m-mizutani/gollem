@@ -425,7 +425,7 @@ client, err := ollama.New(ctx, "qwen3:8b", ollama.WithThink(false))
 client, err := ollama.New(ctx, modelWithLevels, ollama.WithThinkLevel("high"))
 ```
 
-The level must match one the model defines in the model information returned by the server's `/api/show` endpoint. Without either option the model default applies. Thinking output is returned in `Response.Thoughts`.
+Use a level listed in `thinking.values` of the server's `/api/show` response for the model. The client does not validate the level. Depending on the model, the server either rejects an unsupported level with an error or silently applies the model default, so check the value against `/api/show` before using it. Without either option the model default applies. Thinking output is returned in `Response.Thoughts`.
 
 #### Keep Alive, System Prompt and Embeddings
 

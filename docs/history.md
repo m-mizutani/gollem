@@ -1,6 +1,6 @@
 # History Management
 
-History represents a conversation history that can be used across different LLM sessions. It stores messages in a format specific to each LLM type (OpenAI, Claude, Gemini, or Ollama).
+History represents a conversation history that can be used across different LLM sessions. It stores messages in a provider-independent format (`Message` with typed `MessageContent`), and its `LLType` field records the provider that created it (OpenAI, Claude, Gemini, or Ollama).
 
 ## Automatic vs Manual History Management
 
@@ -102,11 +102,10 @@ History can be easily serialized/deserialized using standard JSON marshaling. Th
 
 ## LLM Type Compatibility
 
-Each History instance is tied to a specific LLM type (OpenAI, Claude, Gemini, or Ollama). Important notes:
+A session accepts a History created by any provider; the clients do not check `LLType`. Each client converts the messages to its own API format, so the content must be something the destination can send:
 
-- Direct conversion between different LLM types is not supported
-- Each LLM type has its own message format and capabilities
-- History format is optimized for each LLM's specific requirements
+- A client can reject content its API cannot represent. For example, the Ollama client returns an error from `NewSession` when the history contains a PDF or an image given only by URL.
+- Provider-specific metadata, such as Claude thinking signatures and Gemini thought signatures, is kept in the history but only the provider that issued it can use it. A thinking block created by another provider reaches Claude without a signature.
 
 ## Usage Guidelines
 
@@ -278,9 +277,9 @@ return &h, nil
 
 `HistoryRepository.Load` implementations should apply the same pattern.
 
-### Do not mix LLM providers for the same history
+### Check the content before switching providers
 
-Each `History` is tied to the LLM type that created it. Restoring a history serialized from an OpenAI session into a Claude agent (or vice versa) is not supported and will produce incorrect results.
+A history can be restored into a session of another provider, but only the content that provider supports can be sent (see [LLM Type Compatibility](#llm-type-compatibility)). Test the switch with histories that contain the content types your application uses, such as images, PDFs, and thinking blocks.
 
 ## Next Steps
 

@@ -156,6 +156,8 @@ func (c *apiClient) chat(ctx context.Context, req *chatRequest) (*chatResponse, 
 	if err != nil {
 		return nil, err
 	}
+	// The result is decided by the decoded body or the decode error; a Close
+	// failure only means the connection is not reused, so it is ignored.
 	defer func() { _ = resp.Body.Close() }()
 
 	var out chatResponse
@@ -184,6 +186,7 @@ func (c *apiClient) embed(ctx context.Context, req *embedRequest) (*embedRespons
 	if err != nil {
 		return nil, err
 	}
+	// Same as chat: a Close failure does not change the decoded result.
 	defer func() { _ = resp.Body.Close() }()
 
 	var out embedResponse
@@ -219,6 +222,8 @@ func (c *apiClient) post(ctx context.Context, path string, body any, accept stri
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		// This path always returns the API error, which is what the caller
+		// needs; a Close failure would only hide it.
 		defer func() { _ = resp.Body.Close() }()
 		apiErr, err := readAPIError(resp)
 		if err != nil {
