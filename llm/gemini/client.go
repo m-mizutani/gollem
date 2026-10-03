@@ -461,9 +461,12 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 	// PromptTokenCount already includes cached-content tokens, so InputToken
 	// stays total; the cached portion is surfaced for observability. Gemini
 	// implicit caching does not report cache writes (creation stays 0).
+	// OutputToken adds ThoughtsTokenCount to CandidatesTokenCount because Gemini
+	// bills thinking tokens as output tokens; CandidatesTokenCount alone would
+	// under-report the billed output of thinking models.
 	if resp.UsageMetadata != nil {
 		response.InputToken = int(resp.UsageMetadata.PromptTokenCount)
-		response.OutputToken = int(resp.UsageMetadata.CandidatesTokenCount)
+		response.OutputToken = int(resp.UsageMetadata.CandidatesTokenCount) + int(resp.UsageMetadata.ThoughtsTokenCount)
 		response.CacheReadInputToken = int(resp.UsageMetadata.CachedContentTokenCount)
 	}
 

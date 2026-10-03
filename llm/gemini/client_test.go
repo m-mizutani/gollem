@@ -1791,6 +1791,59 @@ func TestProcessResponseFunctionCallIDPreserved(t *testing.T) {
 	})
 }
 
+// TestProcessResponseTokenUsage verifies that OutputToken counts thinking
+// tokens, because Gemini bills them as output tokens.
+func TestProcessResponseTokenUsage(t *testing.T) {
+	type testCase struct {
+		usage               *genai.GenerateContentResponseUsageMetadata
+		expectInput         int
+		expectOutput        int
+		expectCacheRead     int
+		expectCacheCreation int
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			resp, err := gemini.ProcessResponse(&genai.GenerateContentResponse{
+				Candidates: []*genai.Candidate{{
+					Content: &genai.Content{Role: "model", Parts: []*genai.Part{{Text: "ok"}}},
+				}},
+				UsageMetadata: tc.usage,
+			})
+			gt.NoError(t, err)
+			gt.Equal(t, tc.expectInput, resp.InputToken)
+			gt.Equal(t, tc.expectOutput, resp.OutputToken)
+			gt.Equal(t, tc.expectCacheRead, resp.CacheReadInputToken)
+			gt.Equal(t, tc.expectCacheCreation, resp.CacheCreationInputToken)
+		}
+	}
+
+	t.Run("thinking tokens are added to output tokens", runTest(testCase{
+		usage: &genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount:        1000,
+			CandidatesTokenCount:    100,
+			ThoughtsTokenCount:      50,
+			CachedContentTokenCount: 200,
+		},
+		expectInput:     1000,
+		expectOutput:    150,
+		expectCacheRead: 200,
+	}))
+
+	t.Run("no thinking tokens keeps candidates count", runTest(testCase{
+		usage: &genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount:     1000,
+			CandidatesTokenCount: 100,
+		},
+		expectInput:  1000,
+		expectOutput: 100,
+	}))
+
+	t.Run("nil usage metadata leaves all counts zero", runTest(testCase{
+		usage: nil,
+	}))
+}
+
 // TestSessionFunctionResponseIDPropagation verifies that gollem.FunctionResponse
 // ids passed to Generate flow through to genai.FunctionResponse.ID on the wire
 // (with the gollem-internal fallback prefix stripped, since Gemini did not
@@ -2128,6 +2181,7 @@ func TestGeminiStreamUsageNotSummed(t *testing.T) {
 			UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
 				PromptTokenCount:        100,
 				CandidatesTokenCount:    8,
+				ThoughtsTokenCount:      4,
 				CachedContentTokenCount: 50,
 			},
 		}
@@ -2149,18 +2203,23 @@ func TestGeminiStreamUsageNotSummed(t *testing.T) {
 	ch, err := session.Stream(context.Background(), []gollem.Input{gollem.Text("hi")})
 	gt.NoError(t, err)
 
-	var lastInput, lastCacheRead int
+	var lastInput, lastOutput, lastCacheRead int
 	for resp := range ch {
 		gt.NoError(t, resp.Error)
 		if resp.InputToken > 0 {
 			lastInput = resp.InputToken
 		}
+		if resp.OutputToken > 0 {
+			lastOutput = resp.OutputToken
+		}
 		if resp.CacheReadInputToken > 0 {
 			lastCacheRead = resp.CacheReadInputToken
 		}
 	}
-	// Not 200 / 100.
+	// Not 200 / 24 / 100.
 	gt.Equal(t, 100, lastInput)
+	// Streaming reports thinking tokens as output too: 8 candidates + 4 thoughts.
+	gt.Equal(t, 12, lastOutput)
 	gt.Equal(t, 50, lastCacheRead)
 }
 

@@ -43,7 +43,10 @@ type Response struct {
 	Thoughts      []string
 	FunctionCalls []*FunctionCall
 	InputToken    int
-	OutputToken   int
+	// OutputToken is the total number of output tokens billed for this call,
+	// including thinking or reasoning tokens. Every provider reports the same
+	// quantity so that cost calculations do not depend on the provider.
+	OutputToken int
 
 	// CacheCreationInputToken is the number of input tokens written to the
 	// prompt cache on this call. Only Claude reports writes; 0 elsewhere.
