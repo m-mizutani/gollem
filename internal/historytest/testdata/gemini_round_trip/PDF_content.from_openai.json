@@ -1,0 +1,34 @@
+{
+  "type": "OpenAI",
+  "version": 3,
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Analyze this PDF"
+          }
+        },
+        {
+          "type": "pdf",
+          "data": {
+            "data": "JVBERi0xLjQgdGVzdA=="
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "This PDF contains test data."
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -66,17 +66,17 @@ Gemini 3.x replaces the numeric `thinking_budget` with a discrete `thinking_leve
 // Use minimal thinking for fast, simple responses
 client, err := gemini.New(ctx, projectID, location,
     gemini.WithModel("gemini-3.5-flash"),
-    gemini.WithThinkingLevel(genai.ThinkingLevelMinimal),
+    gemini.WithThinkingLevel(gemini.ThinkingLevelMinimal),
 )
 
 // Use higher levels for harder reasoning tasks
 client, err := gemini.New(ctx, projectID, location,
     gemini.WithModel("gemini-3.8-flash"),
-    gemini.WithThinkingLevel(genai.ThinkingLevelHigh),
+    gemini.WithThinkingLevel(gemini.ThinkingLevelHigh),
 )
 ```
 
-Available levels (lowest → highest): `ThinkingLevelMinimal`, `ThinkingLevelLow`, `ThinkingLevelMedium`, `ThinkingLevelHigh`.
+Available levels (lowest → highest): `gemini.ThinkingLevelMinimal`, `gemini.ThinkingLevelLow`, `gemini.ThinkingLevelMedium`, `gemini.ThinkingLevelHigh`. Each value is sent to the API unchanged, so a level that the API adds later can be passed as `gemini.ThinkingLevel("NEW_LEVEL")`.
 
 Without `WithThinkingLevel` (or `WithThinkingBudget`), gollem sends no thinking configuration at all and each model applies its own default — `MEDIUM` for Gemini 3.5 / 3.6 / 3.7 / 3.8 Flash, `HIGH` for Gemini 3 Pro, `MINIMAL` for Gemini 3.5 Flash Lite. Not every model accepts every level (`gemini-3.7-flash` and `gemini-3.8-flash` reject `MINIMAL` with HTTP 400, and `gemini-3-pro-preview` takes only `LOW` and `HIGH`), so set the level only when you know the model supports it.
 

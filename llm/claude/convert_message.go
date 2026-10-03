@@ -467,16 +467,16 @@ func convertContentToClaude(content gollem.MessageContent, messageRole gollem.Me
 	}
 }
 
-// ToMessages converts gollem.History to Claude messages
-func ToMessages(h *gollem.History) ([]anthropic.MessageParam, error) {
+// toMessages converts gollem.History to Claude messages
+func toMessages(h *gollem.History) ([]anthropic.MessageParam, error) {
 	if h == nil || len(h.Messages) == 0 {
 		return []anthropic.MessageParam{}, nil
 	}
 	return convertMessagesToClaude(h.Messages)
 }
 
-// NewHistory creates gollem.History from Claude messages
-func NewHistory(messages []anthropic.MessageParam) (*gollem.History, error) {
+// newHistory creates gollem.History from Claude messages
+func newHistory(messages []anthropic.MessageParam) (*gollem.History, error) {
 	commonMessages, err := convertClaudeToMessages(messages)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to convert Claude messages to common format")

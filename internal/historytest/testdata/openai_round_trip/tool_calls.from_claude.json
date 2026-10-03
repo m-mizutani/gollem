@@ -1,0 +1,58 @@
+{
+  "type": "claude",
+  "version": 3,
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "What's the weather?"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "tool_call",
+          "data": {
+            "id": "call_123",
+            "name": "get_weather",
+            "arguments": {
+              "location": "Tokyo"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "tool_response",
+          "data": {
+            "tool_call_id": "call_123",
+            "name": "get_weather",
+            "response": {
+              "temperature": 25
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "It's 25°C in Tokyo."
+          }
+        }
+      ]
+    }
+  ]
+}

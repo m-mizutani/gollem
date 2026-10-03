@@ -213,7 +213,7 @@ func (c *VertexClient) NewSession(ctx context.Context, options ...gollem.Session
 
 	var messages []anthropic.MessageParam
 	if cfg.History() != nil {
-		history, err := ToMessages(cfg.History())
+		history, err := toMessages(cfg.History())
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history to anthropic.MessageParam")
 		}
@@ -235,14 +235,14 @@ func (c *VertexClient) NewSession(ctx context.Context, options ...gollem.Session
 
 // History returns the conversation history
 func (s *VertexAnthropicSession) History() (*gollem.History, error) {
-	return NewHistory(s.messages)
+	return newHistory(s.messages)
 }
 
 func (s *VertexAnthropicSession) AppendHistory(h *gollem.History) error {
 	if h == nil {
 		return nil
 	}
-	messages, err := ToMessages(h)
+	messages, err := toMessages(h)
 	if err != nil {
 		return goerr.Wrap(err, "failed to convert history to Claude format")
 	}

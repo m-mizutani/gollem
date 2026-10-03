@@ -1,0 +1,63 @@
+{
+  "type": "claude",
+  "version": 3,
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Tell me a joke and check the time"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Here's a joke: Why did the chicken cross the road?"
+          }
+        },
+        {
+          "type": "tool_call",
+          "data": {
+            "id": "toolu_789",
+            "name": "get_current_time",
+            "arguments": {}
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "tool_response",
+          "data": {
+            "tool_call_id": "toolu_789",
+            "name": "get_current_time",
+            "response": {
+              "time": "14:30:00",
+              "timezone": "UTC"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "It's currently 14:30 UTC."
+          }
+        }
+      ]
+    }
+  ]
+}

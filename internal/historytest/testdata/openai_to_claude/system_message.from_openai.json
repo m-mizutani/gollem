@@ -1,0 +1,39 @@
+{
+  "type": "OpenAI",
+  "version": 3,
+  "messages": [
+    {
+      "role": "system",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "You are a helpful assistant."
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Hello"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Hi! How can I help you?"
+          }
+        }
+      ]
+    }
+  ]
+}

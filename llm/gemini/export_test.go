@@ -18,6 +18,8 @@ var (
 	NewHistoryContent          = newHistoryContent
 	ConvertToolToNewSDK        = convertToolToNewSDK
 	SetResponseSchema          = setResponseSchema
+	ToContents                 = toContents
+	NewHistory                 = newHistory
 )
 
 // GetGenerationConfig returns the generationConfig for testing
@@ -40,7 +42,7 @@ func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model s
 	var historyContents []*genai.Content
 	if cfg.History() != nil {
 		var err error
-		historyContents, err = ToContents(cfg.History())
+		historyContents, err = toContents(cfg.History())
 		if err != nil {
 			return nil, err
 		}

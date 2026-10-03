@@ -396,83 +396,41 @@ func TestWithThinkingBudget(t *testing.T) {
 }
 
 func TestWithThinkingLevel(t *testing.T) {
-	projectID := os.Getenv("TEST_GCP_PROJECT_ID")
-	if projectID == "" {
-		t.Skip("TEST_GCP_PROJECT_ID is not set")
-	}
-
-	location := os.Getenv("TEST_GCP_LOCATION")
-	if location == "" {
-		t.Skip("TEST_GCP_LOCATION is not set")
-	}
-
-	ctx := context.Background()
-
-	testCases := []struct {
-		name        string
-		level       genai.ThinkingLevel
-		expectLevel genai.ThinkingLevel
-	}{
-		{
-			name:        "minimal",
-			level:       genai.ThinkingLevelMinimal,
-			expectLevel: genai.ThinkingLevelMinimal,
-		},
-		{
-			name:        "low",
-			level:       genai.ThinkingLevelLow,
-			expectLevel: genai.ThinkingLevelLow,
-		},
-		{
-			name:        "medium",
-			level:       genai.ThinkingLevelMedium,
-			expectLevel: genai.ThinkingLevelMedium,
-		},
-		{
-			name:        "high",
-			level:       genai.ThinkingLevelHigh,
-			expectLevel: genai.ThinkingLevelHigh,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			client, err := gemini.New(ctx, projectID, location,
-				gemini.WithThinkingLevel(tc.level),
-			)
-			gt.NoError(t, err)
-			gt.NotNil(t, client)
-
-			generationConfig := client.GetGenerationConfig()
+	runTest := func(level gemini.ThinkingLevel, expected genai.ThinkingLevel) func(t *testing.T) {
+		return func(t *testing.T) {
+			generationConfig := gemini.NewClientWithOptions(
+				gemini.WithThinkingLevel(level),
+			).GetGenerationConfig()
 			gt.NotNil(t, generationConfig)
 			gt.NotNil(t, generationConfig.ThinkingConfig)
-			gt.Equal(t, tc.expectLevel, generationConfig.ThinkingConfig.ThinkingLevel)
+			gt.Equal(t, expected, generationConfig.ThinkingConfig.ThinkingLevel)
 			// Vertex AI rejects requests that carry both fields.
 			gt.Nil(t, generationConfig.ThinkingConfig.ThinkingBudget)
-		})
+		}
 	}
 
-	t.Run("budget overrides level", func(t *testing.T) {
-		client, err := gemini.New(ctx, projectID, location,
-			gemini.WithThinkingLevel(genai.ThinkingLevelHigh),
-			gemini.WithThinkingBudget(500),
-		)
-		gt.NoError(t, err)
+	t.Run("minimal", runTest(gemini.ThinkingLevelMinimal, genai.ThinkingLevelMinimal))
+	t.Run("low", runTest(gemini.ThinkingLevelLow, genai.ThinkingLevelLow))
+	t.Run("medium", runTest(gemini.ThinkingLevelMedium, genai.ThinkingLevelMedium))
+	t.Run("high", runTest(gemini.ThinkingLevelHigh, genai.ThinkingLevelHigh))
 
-		cfg := client.GetGenerationConfig()
+	t.Run("budget overrides level", func(t *testing.T) {
+		cfg := gemini.NewClientWithOptions(
+			gemini.WithThinkingLevel(gemini.ThinkingLevelHigh),
+			gemini.WithThinkingBudget(500),
+		).GetGenerationConfig()
+
 		gt.NotNil(t, cfg.ThinkingConfig.ThinkingBudget)
 		gt.Equal(t, int32(500), *cfg.ThinkingConfig.ThinkingBudget)
 		gt.Equal(t, genai.ThinkingLevel(""), cfg.ThinkingConfig.ThinkingLevel)
 	})
 
 	t.Run("level overrides budget", func(t *testing.T) {
-		client, err := gemini.New(ctx, projectID, location,
+		cfg := gemini.NewClientWithOptions(
 			gemini.WithThinkingBudget(500),
-			gemini.WithThinkingLevel(genai.ThinkingLevelLow),
-		)
-		gt.NoError(t, err)
+			gemini.WithThinkingLevel(gemini.ThinkingLevelLow),
+		).GetGenerationConfig()
 
-		cfg := client.GetGenerationConfig()
 		gt.Nil(t, cfg.ThinkingConfig.ThinkingBudget)
 		gt.Equal(t, genai.ThinkingLevelLow, cfg.ThinkingConfig.ThinkingLevel)
 	})
@@ -496,7 +454,7 @@ func TestWithIncludeThoughts(t *testing.T) {
 	t.Run("survives thinking level option", func(t *testing.T) {
 		cfg := gemini.NewClientWithOptions(
 			gemini.WithIncludeThoughts(true),
-			gemini.WithThinkingLevel(genai.ThinkingLevelHigh),
+			gemini.WithThinkingLevel(gemini.ThinkingLevelHigh),
 		).GetGenerationConfig()
 
 		gt.Equal(t, true, cfg.ThinkingConfig.IncludeThoughts)
@@ -1379,7 +1337,7 @@ func TestGemini35FlashStrictMatchIntegration(t *testing.T) {
 
 	client, err := gemini.New(ctx, projectID, location,
 		gemini.WithModel("gemini-3.5-flash"),
-		gemini.WithThinkingLevel(genai.ThinkingLevelMinimal),
+		gemini.WithThinkingLevel(gemini.ThinkingLevelMinimal),
 	)
 	gt.NoError(t, err)
 
