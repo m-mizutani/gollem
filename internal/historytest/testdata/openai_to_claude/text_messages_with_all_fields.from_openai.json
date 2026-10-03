@@ -1,0 +1,30 @@
+{
+  "type": "OpenAI",
+  "version": 3,
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Hello"
+          }
+        }
+      ],
+      "name": "user1"
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Hi there!"
+          }
+        }
+      ],
+      "name": "assistant1"
+    }
+  ]
+}

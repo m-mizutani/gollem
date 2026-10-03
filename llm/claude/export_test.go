@@ -20,6 +20,8 @@ var (
 	ToolUseInput                  = toolUseInput
 	OutputSchema                  = outputSchema
 	SupportsStructuredOutputs     = supportsStructuredOutputs
+	ToMessages                    = toMessages
+	NewHistory                    = newHistory
 )
 
 // FallbackMaxOutputTokens is the max tokens used for models absent from the table.
@@ -47,7 +49,7 @@ func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model s
 	var historyMessages []anthropic.MessageParam
 	if cfg.History() != nil {
 		var err error
-		historyMessages, err = ToMessages(cfg.History())
+		historyMessages, err = toMessages(cfg.History())
 		if err != nil {
 			return nil, err
 		}

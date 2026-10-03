@@ -1,0 +1,78 @@
+{
+  "type": "claude",
+  "version": 3,
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Calculate 5+3 and 10*2"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "tool_call",
+          "data": {
+            "id": "toolu_123",
+            "name": "calculate",
+            "arguments": {
+              "expression": "5+3"
+            }
+          }
+        },
+        {
+          "type": "tool_call",
+          "data": {
+            "id": "toolu_456",
+            "name": "calculate",
+            "arguments": {
+              "expression": "10*2"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "tool_response",
+          "data": {
+            "tool_call_id": "toolu_123",
+            "name": "calculate",
+            "response": {
+              "result": 8
+            }
+          }
+        },
+        {
+          "type": "tool_response",
+          "data": {
+            "tool_call_id": "toolu_456",
+            "name": "calculate",
+            "response": {
+              "result": 20
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "5+3 equals 8, and 10*2 equals 20."
+          }
+        }
+      ]
+    }
+  ]
+}

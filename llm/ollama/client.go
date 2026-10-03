@@ -326,7 +326,7 @@ func (s *Session) buildRequest(stream bool, newMessages []message, opts ...golle
 		Model:    s.model,
 		Messages: messages,
 		Format:   format,
-		Options:  s.buildOptions(genCfg.Temperature(), genCfg.TopP(), genCfg.MaxTokens()),
+		Options:  s.buildOptions(genCfg.MaxTokens()),
 		Stream:   stream,
 		Think:    s.think,
 		Truncate: false,
@@ -343,13 +343,13 @@ func (s *Session) buildRequest(stream bool, newMessages []message, opts ...golle
 	return req, nil
 }
 
-func (s *Session) buildOptions(temperature, topP *float64, maxTokens *int) map[string]any {
+func (s *Session) buildOptions(maxTokens *int) map[string]any {
 	options := make(map[string]any)
-	if v := pick(temperature, s.params.temperature); v != nil {
-		options["temperature"] = *v
+	if s.params.temperature != nil {
+		options["temperature"] = *s.params.temperature
 	}
-	if v := pick(topP, s.params.topP); v != nil {
-		options["top_p"] = *v
+	if s.params.topP != nil {
+		options["top_p"] = *s.params.topP
 	}
 	if s.params.topK != nil {
 		options["top_k"] = *s.params.topK

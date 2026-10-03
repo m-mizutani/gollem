@@ -157,17 +157,29 @@ func WithThinkingBudget(budget int32) Option {
 	}
 }
 
+// ThinkingLevel is the amount of reasoning a Gemini model performs before it
+// answers. It is passed to WithThinkingLevel.
+type ThinkingLevel string
+
+// Thinking levels accepted by Gemini 3.x. Each value is sent to the API as is.
+const (
+	ThinkingLevelMinimal ThinkingLevel = "MINIMAL"
+	ThinkingLevelLow     ThinkingLevel = "LOW"
+	ThinkingLevelMedium  ThinkingLevel = "MEDIUM"
+	ThinkingLevelHigh    ThinkingLevel = "HIGH"
+)
+
 // WithThinkingLevel sets the thinking level for text generation.
 // Introduced in Gemini 3.x as the replacement for WithThinkingBudget.
 //
-// Valid values: genai.ThinkingLevelMinimal, ThinkingLevelLow,
-// ThinkingLevelMedium, ThinkingLevelHigh. Not every model accepts every level
-// (gemini-3.7-flash and gemini-3.8-flash reject ThinkingLevelMinimal); without
-// this option the model's own default applies.
+// Valid values: ThinkingLevelMinimal, ThinkingLevelLow, ThinkingLevelMedium,
+// ThinkingLevelHigh. Not every model accepts every level (gemini-3.7-flash and
+// gemini-3.8-flash reject ThinkingLevelMinimal); without this option the
+// model's own default applies.
 //
 // Vertex AI rejects requests that carry both thinking_budget and thinking_level
 // (HTTP 400), so calling this clears any thinking budget previously set.
-func WithThinkingLevel(level genai.ThinkingLevel) Option {
+func WithThinkingLevel(level ThinkingLevel) Option {
 	return func(c *Client) {
 		if c.generationConfig == nil {
 			c.generationConfig = &genai.GenerateContentConfig{}
@@ -175,7 +187,10 @@ func WithThinkingLevel(level genai.ThinkingLevel) Option {
 		if c.generationConfig.ThinkingConfig == nil {
 			c.generationConfig.ThinkingConfig = &genai.ThinkingConfig{}
 		}
-		c.generationConfig.ThinkingConfig.ThinkingLevel = level
+		// The level is converted rather than mapped through a table so that a level
+		// the API adds later can be sent without a gollem release; an Option cannot
+		// return an error, so a table would have to drop unknown levels silently.
+		c.generationConfig.ThinkingConfig.ThinkingLevel = genai.ThinkingLevel(level)
 		c.generationConfig.ThinkingConfig.ThinkingBudget = nil
 	}
 }
@@ -331,7 +346,7 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 	var historyContents []*genai.Content
 	if cfg.History() != nil {
 		var err error
-		historyContents, err = ToContents(cfg.History())
+		historyContents, err = toContents(cfg.History())
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history to Gemini format")
 		}
@@ -368,14 +383,14 @@ type Session struct {
 }
 
 func (s *Session) History() (*gollem.History, error) {
-	return NewHistory(s.historyContents)
+	return newHistory(s.historyContents)
 }
 
 func (s *Session) AppendHistory(h *gollem.History) error {
 	if h == nil {
 		return nil
 	}
-	contents, err := ToContents(h)
+	contents, err := toContents(h)
 	if err != nil {
 		return goerr.Wrap(err, "failed to convert history to Gemini format")
 	}
@@ -525,7 +540,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	// Always create history (even if empty) to maintain consistency with middleware
-	historyCopy, err := NewHistory(s.historyContents)
+	historyCopy, err := newHistory(s.historyContents)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to convert history from Gemini format")
 	}
@@ -541,7 +556,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
 			var err error
-			s.historyContents, err = ToContents(req.History)
+			s.historyContents, err = toContents(req.History)
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to convert history to Gemini format")
 			}
@@ -669,7 +684,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	// Always create history (even if empty) to maintain consistency with middleware
-	historyCopy, err := NewHistory(s.historyContents)
+	historyCopy, err := newHistory(s.historyContents)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to convert history from Gemini format")
 	}
@@ -685,7 +700,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
 			var err error
-			s.historyContents, err = ToContents(req.History)
+			s.historyContents, err = toContents(req.History)
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to convert history to Gemini format")
 			}
@@ -1148,14 +1163,6 @@ func convertResponseSchemaToGenai(param *gollem.Parameter) (*genai.Schema, error
 func (s *Session) buildEffectiveConfig(opts ...gollem.GenerateOption) (*genai.GenerateContentConfig, error) {
 	genCfg := gollem.NewGenerateConfig(opts...)
 	effectiveConfig := *s.config
-	if t := genCfg.Temperature(); t != nil {
-		temp := float32(*t)
-		effectiveConfig.Temperature = &temp
-	}
-	if p := genCfg.TopP(); p != nil {
-		topP := float32(*p)
-		effectiveConfig.TopP = &topP
-	}
 	if m := genCfg.MaxTokens(); m != nil {
 		if *m > math.MaxInt32 || *m < 0 {
 			return nil, goerr.New("maxTokens out of int32 range", goerr.V("maxTokens", *m))
