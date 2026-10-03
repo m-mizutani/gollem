@@ -20,7 +20,7 @@ There are two independent capabilities:
 type Response struct {
     // ...
     InputToken              int // total input tokens (includes cached reads)
-    OutputToken             int
+    OutputToken             int // billed output tokens (includes thinking/reasoning)
     CacheCreationInputToken int // input tokens written to the cache (Claude only)
     CacheReadInputToken     int // input tokens served from the cache (cache hits)
 }

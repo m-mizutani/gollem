@@ -93,6 +93,10 @@ client, err := gemini.New(ctx, projectID, location,
 
 This affects the reasoning text only. The thought signatures that Gemini 3.x requires for multi-turn tool calling are returned and stored in history regardless of this setting, in both blocking and streaming modes.
 
+#### Thinking Tokens in `OutputToken`
+
+Gemini bills thinking tokens at the output token price (see [Gemini thinking](https://ai.google.dev/gemini-api/docs/thinking)). `Response.OutputToken` therefore reports `candidatesTokenCount + thoughtsTokenCount` from the response's usage metadata, which matches the billed output and the `OutputToken` of the other providers. Calls with thinking enabled report a larger `OutputToken` than the visible response text alone.
+
 #### Thinking Budget (Gemini 2.x)
 
 For Gemini 2.x models, control thinking via a numeric token budget:
