@@ -23,6 +23,7 @@ gollem is a Go framework for building applications with Large Language Models (L
 ### Reference
 - [Debugging](debugging.md) - LLM request/response logging and troubleshooting
 - [Examples](examples.md) - Practical examples and use cases
+- [Compatibility Policy](compatibility.md) - What v1 guarantees and how interface changes are released
 - [API Reference](https://pkg.go.dev/github.com/gollem-dev/gollem)
 
 ## Support and Community

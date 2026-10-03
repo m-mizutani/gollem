@@ -271,6 +271,7 @@ See the [examples](https://github.com/gollem-dev/gollem/tree/main/examples) dire
 - **[History Management](docs/history.md)**
 - **[LLM Provider Configuration](docs/llm.md)**
 - **[Debugging](docs/debugging.md)**
+- **[Compatibility Policy](docs/compatibility.md)**
 - **[API Reference](https://pkg.go.dev/github.com/gollem-dev/gollem)**
 
 ## License
