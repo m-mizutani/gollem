@@ -17,11 +17,6 @@ type Session interface {
 	// The channel is closed when the response is complete.
 	Stream(ctx context.Context, input []Input, opts ...GenerateOption) (<-chan *Response, error)
 
-	// Deprecated: Use Generate instead.
-	GenerateContent(ctx context.Context, input ...Input) (*Response, error)
-	// Deprecated: Use Stream instead.
-	GenerateStream(ctx context.Context, input ...Input) (<-chan *Response, error)
-
 	History() (*History, error)
 	AppendHistory(*History) error
 	CountToken(ctx context.Context, input ...Input) (int, error)

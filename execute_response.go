@@ -13,7 +13,7 @@ type ExecuteResponse struct {
 	Thoughts []string
 
 	// UserInputs contains the user inputs that this response corresponds to.
-	// When a strategy returns ExecuteResponse without going through GenerateContent,
+	// When a strategy returns ExecuteResponse without going through Generate,
 	// these inputs need to be added to session history before the response texts.
 	// This prevents user input from being lost when strategies return direct responses.
 	UserInputs []Input

@@ -619,16 +619,6 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 	return responseChan, nil
 }
 
-// Deprecated: GenerateContent is deprecated. Use Generate instead.
-func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-	return s.Generate(ctx, input)
-}
-
-// Deprecated: GenerateStream is deprecated. Use Stream instead.
-func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
-	return s.Stream(ctx, input)
-}
-
 // CountToken is not supported: Ollama has no API that counts tokens, and the
 // tokenizer differs by model, so a local estimate would not match the count
 // the server applies against num_ctx. It always returns an error wrapping

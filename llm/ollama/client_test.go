@@ -740,16 +740,6 @@ func TestGenerate(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.A(t, history.Messages).Length(4)
 	})
-
-	t.Run("deprecated GenerateContent", func(t *testing.T) {
-		fs := newFakeServer(t, replyText("ok", ""))
-		session, err := newTestClient(t, fs).NewSession(ctx)
-		gt.NoError(t, err).Required()
-		resp, err := session.GenerateContent(ctx, gollem.Text("hi")) //nolint:staticcheck // the deprecated wrapper is under test
-		gt.NoError(t, err).Required()
-		gt.Equal(t, resp.Texts, []string{"ok"})
-		gt.Equal(t, messagesOf(t, fs.Last(t))[0]["content"], any("hi"))
-	})
 }
 
 func TestGenerateTokenLimit(t *testing.T) {

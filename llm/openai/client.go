@@ -1118,16 +1118,6 @@ func (s *Session) applyPerCallOverrides(req *openai.ChatCompletionRequest, opts 
 	return nil
 }
 
-// Deprecated: GenerateContent is deprecated. Use Generate instead.
-func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-	return s.Generate(ctx, input)
-}
-
-// Deprecated: GenerateStream is deprecated. Use Stream instead.
-func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
-	return s.Stream(ctx, input)
-}
-
 // CountToken calculates the total number of tokens for the given inputs,
 // including system prompt, history messages, and new inputs.
 // This uses tiktoken library for local token counting without API calls.
