@@ -16,6 +16,8 @@ var (
 	ProcessResponse            = processResponse
 	MergeStreamedParts         = mergeStreamedParts
 	NewHistoryContent          = newHistoryContent
+	ConvertToolToNewSDK        = convertToolToNewSDK
+	SetResponseSchema          = setResponseSchema
 )
 
 // GetGenerationConfig returns the generationConfig for testing

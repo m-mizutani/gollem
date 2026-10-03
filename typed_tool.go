@@ -16,8 +16,9 @@ import (
 // the need for manual type assertions in Run.
 //
 // In must be a struct (its schema is a JSON "object" with declared properties).
-// A map is rejected: it would yield a property-less schema that gives the LLM no
-// argument information while providing none of the type safety this API exists for.
+// A map is rejected: tool arguments are a fixed set of named parameters
+// (ToolSpec.Parameters), which a map cannot describe. A map field of the struct
+// is supported.
 // Out must be a struct or map (it must encode to a JSON object); see toResultMap.
 // If either type is unfit, an error is returned rather than a panic, so callers
 // decide how to handle a malformed definition. Use MustNewTool for static
@@ -147,7 +148,7 @@ func buildToolSchema[In, Out any]() (*Parameter, error) {
 
 // assertObjectKind verifies that t (after unwrapping pointers) describes a JSON
 // object. Structs always qualify; maps qualify only when allowMap is set (Out can
-// be a map[string]any result, but a map In would produce a property-less schema).
+// be a map[string]any result, but a map In has no named parameters to declare).
 func assertObjectKind(t reflect.Type, role string, allowMap bool) error {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()

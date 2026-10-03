@@ -29,21 +29,24 @@ func convertTool(tool gollem.Tool) anthropic.ToolUnionParam {
 }
 
 type jsonSchema struct {
-	Type        string                `json:"type"`
-	Properties  map[string]jsonSchema `json:"properties,omitempty"`
-	Required    []string              `json:"required,omitempty"`
-	Items       *jsonSchema           `json:"items,omitempty"`
-	Minimum     *float64              `json:"minimum,omitempty"`
-	Maximum     *float64              `json:"maximum,omitempty"`
-	MinLength   *int                  `json:"minLength,omitempty"`
-	MaxLength   *int                  `json:"maxLength,omitempty"`
-	Pattern     string                `json:"pattern,omitempty"`
-	MinItems    *int                  `json:"minItems,omitempty"`
-	MaxItems    *int                  `json:"maxItems,omitempty"`
-	Default     interface{}           `json:"default,omitempty"`
-	Enum        []interface{}         `json:"enum,omitempty"`
-	Description string                `json:"description,omitempty"`
-	Title       string                `json:"title,omitempty"`
+	Type       string                `json:"type"`
+	Properties map[string]jsonSchema `json:"properties,omitempty"`
+	Required   []string              `json:"required,omitempty"`
+	Items      *jsonSchema           `json:"items,omitempty"`
+	// AdditionalProperties is the value schema of a map. Tool input schemas
+	// accept it because tools here are not sent with strict: true.
+	AdditionalProperties *jsonSchema   `json:"additionalProperties,omitempty"`
+	Minimum              *float64      `json:"minimum,omitempty"`
+	Maximum              *float64      `json:"maximum,omitempty"`
+	MinLength            *int          `json:"minLength,omitempty"`
+	MaxLength            *int          `json:"maxLength,omitempty"`
+	Pattern              string        `json:"pattern,omitempty"`
+	MinItems             *int          `json:"minItems,omitempty"`
+	MaxItems             *int          `json:"maxItems,omitempty"`
+	Default              interface{}   `json:"default,omitempty"`
+	Enum                 []interface{} `json:"enum,omitempty"`
+	Description          string        `json:"description,omitempty"`
+	Title                string        `json:"title,omitempty"`
 }
 
 func convertParametersToJSONSchema(params map[string]*gollem.Parameter) jsonSchema {
@@ -95,6 +98,11 @@ func convertParameterToSchema(param *gollem.Parameter) jsonSchema {
 	if param.Items != nil {
 		items := convertParameterToSchema(param.Items)
 		schema.Items = &items
+	}
+
+	if param.Type == gollem.TypeObject && param.AdditionalProperties != nil {
+		value := convertParameterToSchema(param.AdditionalProperties)
+		schema.AdditionalProperties = &value
 	}
 
 	// Add number constraints

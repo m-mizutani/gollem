@@ -315,14 +315,268 @@ func TestToSchemaWithTitleAndDescription(t *testing.T) {
 	gt.True(t, schema.Properties["email"].Required)
 }
 
+// textKey can be both encoded and decoded as a JSON object key.
+type textKey struct{ a, b string }
+
+func (k textKey) MarshalText() ([]byte, error) { return []byte(k.a + "/" + k.b), nil }
+
+func (k *textKey) UnmarshalText(b []byte) error {
+	k.a, k.b, _ = strings.Cut(string(b), "/")
+	return nil
+}
+
+// marshalOnlyKey can be encoded but not decoded as a JSON object key.
+type marshalOnlyKey struct{ v string }
+
+func (k marshalOnlyKey) MarshalText() ([]byte, error) { return []byte(k.v), nil }
+
+// pointerMarshalKey implements MarshalText only on its pointer, which
+// encoding/json does not use for map keys.
+type pointerMarshalKey struct{ v string }
+
+func (k *pointerMarshalKey) MarshalText() ([]byte, error) { return []byte(k.v), nil }
+
+func (k *pointerMarshalKey) UnmarshalText(b []byte) error {
+	k.v = string(b)
+	return nil
+}
+
+type mapItem struct {
+	Name string `json:"name" required:"true"`
+}
+
 func TestToSchemaMapType(t *testing.T) {
-	type Config struct {
-		Settings map[string]string `json:"settings"`
+	t.Run("map field becomes an object with a value schema", func(t *testing.T) {
+		type Config struct {
+			Settings map[string]string `json:"settings" description:"key-value settings"`
+		}
+
+		param, err := gollem.ToSchema(Config{})
+		gt.NoError(t, err)
+		settings := param.Properties["settings"]
+		gt.Equal(t, settings.Type, gollem.TypeObject)
+		gt.Nil(t, settings.Properties)
+		gt.Equal(t, settings.AdditionalProperties.Type, gollem.TypeString)
+		gt.Equal(t, settings.Description, "key-value settings")
+		gt.NoError(t, param.Validate())
+	})
+
+	t.Run("value types", func(t *testing.T) {
+		type Values struct {
+			Ints    map[string]int             `json:"ints"`
+			Items   map[string]mapItem         `json:"items"`
+			Lists   map[string][]string        `json:"lists"`
+			Nested  map[string]map[string]bool `json:"nested"`
+			Pointer map[string]*mapItem        `json:"pointer"`
+		}
+
+		param, err := gollem.ToSchema(Values{})
+		gt.NoError(t, err)
+		gt.NoError(t, param.Validate())
+
+		gt.Equal(t, param.Properties["ints"].AdditionalProperties.Type, gollem.TypeInteger)
+
+		item := param.Properties["items"].AdditionalProperties
+		gt.Equal(t, item.Type, gollem.TypeObject)
+		gt.Equal(t, item.Properties["name"].Type, gollem.TypeString)
+		gt.True(t, item.Properties["name"].Required)
+
+		list := param.Properties["lists"].AdditionalProperties
+		gt.Equal(t, list.Type, gollem.TypeArray)
+		gt.Equal(t, list.Items.Type, gollem.TypeString)
+
+		nested := param.Properties["nested"].AdditionalProperties
+		gt.Equal(t, nested.Type, gollem.TypeObject)
+		gt.Equal(t, nested.AdditionalProperties.Type, gollem.TypeBoolean)
+
+		pointer := param.Properties["pointer"].AdditionalProperties
+		gt.Equal(t, pointer.Type, gollem.TypeObject)
+		gt.Equal(t, pointer.Properties["name"].Type, gollem.TypeString)
+	})
+
+	t.Run("key types that encoding/json accepts", func(t *testing.T) {
+		type Keys struct {
+			Int   map[int]string     `json:"int"`
+			Uint8 map[uint8]string   `json:"uint8"`
+			Text  map[textKey]string `json:"text"`
+		}
+
+		param, err := gollem.ToSchema(Keys{})
+		gt.NoError(t, err)
+		for _, name := range []string{"int", "uint8", "text"} {
+			gt.Equal(t, param.Properties[name].AdditionalProperties.Type, gollem.TypeString)
+		}
+
+		// The accepted key types round-trip through encoding/json.
+		in := Keys{
+			Int:   map[int]string{10: "a"},
+			Uint8: map[uint8]string{1: "b"},
+			Text:  map[textKey]string{{a: "x", b: "y"}: "c"},
+		}
+		raw, err := json.Marshal(in)
+		gt.NoError(t, err)
+		var out Keys
+		gt.NoError(t, json.Unmarshal(raw, &out))
+		gt.Equal(t, in, out)
+	})
+
+	t.Run("key types that encoding/json cannot both encode and decode", func(t *testing.T) {
+		type testCase struct {
+			value any
+		}
+		runTest := func(tc testCase) func(t *testing.T) {
+			return func(t *testing.T) {
+				_, err := gollem.ToSchema(tc.value)
+				gt.True(t, errors.Is(err, gollem.ErrUnsupportedType))
+				gt.S(t, err.Error()).Contains(`failed to convert field "values"`)
+				gt.S(t, err.Error()).Contains("map key type must be a string or integer type")
+			}
+		}
+
+		t.Run("float key", runTest(testCase{value: struct {
+			Values map[float64]string `json:"values"`
+		}{}}))
+		t.Run("struct key without TextMarshaler", runTest(testCase{value: struct {
+			Values map[mapItem]string `json:"values"`
+		}{}}))
+		t.Run("key with MarshalText but no UnmarshalText", runTest(testCase{value: struct {
+			Values map[marshalOnlyKey]string `json:"values"`
+		}{}}))
+		t.Run("key with MarshalText only on its pointer", runTest(testCase{value: struct {
+			Values map[pointerMarshalKey]string `json:"values"`
+		}{}}))
+	})
+
+	t.Run("top-level map", func(t *testing.T) {
+		param, err := gollem.ToSchema(map[string]int{})
+		gt.NoError(t, err)
+		gt.Equal(t, param.Type, gollem.TypeObject)
+		gt.Equal(t, param.AdditionalProperties.Type, gollem.TypeInteger)
+	})
+
+	t.Run("unsupported value types", func(t *testing.T) {
+		type AnyValue struct {
+			Values map[string]any `json:"values"`
+		}
+		_, err := gollem.ToSchema(AnyValue{})
+		gt.True(t, errors.Is(err, gollem.ErrUnsupportedType))
+
+		type ChanValue struct {
+			Values map[string]chan int `json:"values"`
+		}
+		_, err = gollem.ToSchema(ChanValue{})
+		gt.True(t, errors.Is(err, gollem.ErrUnsupportedType))
+	})
+
+	t.Run("cyclic reference through a map value", func(t *testing.T) {
+		type Node struct {
+			Children map[string]Node `json:"children"`
+		}
+		_, err := gollem.ToSchema(Node{})
+		gt.True(t, errors.Is(err, gollem.ErrCyclicReference))
+	})
+
+	t.Run("map type that refers to itself", func(t *testing.T) {
+		type Tree map[string]Tree
+		_, err := gollem.ToSchema(Tree{})
+		gt.True(t, errors.Is(err, gollem.ErrCyclicReference))
+	})
+
+	t.Run("map type that refers to itself through a slice", func(t *testing.T) {
+		type Forest map[string][]Forest
+		_, err := gollem.ToSchema(Forest{})
+		gt.True(t, errors.Is(err, gollem.ErrCyclicReference))
+	})
+
+	t.Run("same map type used twice side by side is not a cycle", func(t *testing.T) {
+		type Labels map[string]string
+		type Pair struct {
+			A Labels `json:"a"`
+			B Labels `json:"b"`
+		}
+		param, err := gollem.ToSchema(Pair{})
+		gt.NoError(t, err)
+		gt.Equal(t, gollem.TypeString, param.Properties["a"].AdditionalProperties.Type)
+		gt.Equal(t, gollem.TypeString, param.Properties["b"].AdditionalProperties.Type)
+	})
+
+	t.Run("MustToSchema accepts a map field", func(t *testing.T) {
+		type Config struct {
+			Settings map[string]string `json:"settings"`
+		}
+		param := gollem.MustToSchema(Config{})
+		gt.Equal(t, param.Properties["settings"].AdditionalProperties.Type, gollem.TypeString)
+	})
+}
+
+func TestToSchemaInvalidTagCombination(t *testing.T) {
+	type testCase struct {
+		value  any
+		field  string
+		reason string
 	}
 
-	param, err := gollem.ToSchema(Config{})
-	gt.NoError(t, err)
-	gt.Equal(t, param.Properties["settings"].Type, gollem.TypeObject)
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			_, err := gollem.ToSchema(tc.value)
+			gt.True(t, errors.Is(err, gollem.ErrInvalidParameter))
+			gt.S(t, err.Error()).Contains("generated schema is invalid")
+			gt.S(t, err.Error()).Contains(fmt.Sprintf("invalid property %q", tc.field))
+			gt.S(t, err.Error()).Contains(tc.reason)
+		}
+	}
+
+	t.Run("pattern that does not compile", runTest(testCase{
+		value: struct {
+			Name string `json:"name" pattern:"[a-"`
+		}{},
+		field:  "name",
+		reason: "invalid pattern",
+	}))
+
+	t.Run("min greater than max", runTest(testCase{
+		value: struct {
+			Age int `json:"age" min:"10" max:"1"`
+		}{},
+		field:  "age",
+		reason: "minimum must be less than or equal to maximum",
+	}))
+
+	t.Run("minLength greater than maxLength", runTest(testCase{
+		value: struct {
+			Code string `json:"code" minLength:"5" maxLength:"1"`
+		}{},
+		field:  "code",
+		reason: "minLength must be less than or equal to maxLength",
+	}))
+
+	t.Run("minItems greater than maxItems", runTest(testCase{
+		value: struct {
+			Tags []string `json:"tags" minItems:"3" maxItems:"1"`
+		}{},
+		field:  "tags",
+		reason: "minItems must be less than or equal to maxItems",
+	}))
+
+	t.Run("equal bounds are accepted", func(t *testing.T) {
+		type Bounds struct {
+			Age  int      `json:"age" min:"5" max:"5"`
+			Code string   `json:"code" minLength:"3" maxLength:"3"`
+			Tags []string `json:"tags" minItems:"2" maxItems:"2"`
+		}
+		param, err := gollem.ToSchema(Bounds{})
+		gt.NoError(t, err)
+		gt.NoError(t, param.Validate())
+	})
+
+	t.Run("struct without exported fields is valid", func(t *testing.T) {
+		type Empty struct {
+			hidden string //nolint:unused
+		}
+		param, err := gollem.ToSchema(Empty{})
+		gt.NoError(t, err)
+		gt.NoError(t, param.Validate())
+	})
 }
 
 func TestToSchemaAllIntegerTypes(t *testing.T) {
@@ -692,6 +946,72 @@ func validateParameter(t *testing.T, path string, value any, param *gollem.Param
 }
 
 // TestSchemaIntegration tests JSON schema functionality with real LLM clients
+type mapIntegrationResult struct {
+	Capitals map[string]string `json:"capitals" description:"capital city keyed by country name" required:"true"`
+}
+
+// TestMapSchemaIntegration checks against the real APIs that a response schema
+// with a map is sent where the provider accepts it (OpenAI without strict mode,
+// Gemini through ResponseJsonSchema) and rejected before the call where it
+// does not (Claude structured outputs).
+func TestMapSchemaIntegration(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "Return the capital cities of Japan and France, keyed by country name."
+
+	querySucceeds := func(t *testing.T, client gollem.LLMClient) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+
+		resp, err := gollem.Query[mapIntegrationResult](ctx, client, prompt)
+		gt.NoError(t, err).Required()
+		t.Logf("capitals: %v", resp.Data.Capitals)
+		gt.True(t, len(resp.Data.Capitals) >= 2)
+	}
+
+	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
+		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
+		if !ok {
+			t.Skip("TEST_OPENAI_API_KEY is not set")
+		}
+		client, err := openai.New(context.Background(), apiKey)
+		gt.NoError(t, err).Required()
+		querySucceeds(t, client)
+	})
+
+	t.Run("Gemini", func(t *testing.T) {
+		t.Parallel()
+		projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+		if !ok {
+			t.Skip("TEST_GCP_PROJECT_ID is not set")
+		}
+		location, ok := os.LookupEnv("TEST_GCP_LOCATION")
+		if !ok {
+			t.Skip("TEST_GCP_LOCATION is not set")
+		}
+		var opts []gemini.Option
+		if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
+		client, err := gemini.New(context.Background(), projectID, location, opts...)
+		gt.NoError(t, err).Required()
+		querySucceeds(t, client)
+	})
+
+	t.Run("Claude structured outputs rejects the map", func(t *testing.T) {
+		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
+		if !ok {
+			t.Skip("TEST_CLAUDE_API_KEY is not set")
+		}
+		client, err := claude.New(context.Background(), apiKey)
+		gt.NoError(t, err).Required()
+
+		_, err = gollem.Query[mapIntegrationResult](context.Background(), client, prompt)
+		gt.True(t, errors.Is(err, gollem.ErrUnsupportedSchema))
+	})
+}
+
 func TestSchemaIntegration(t *testing.T) {
 	t.Parallel()
 

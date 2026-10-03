@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -75,14 +76,16 @@ func (s *ToolSpec) Validate() error {
 	}
 
 	paramNames := make(map[string]struct{})
-	for name, param := range s.Parameters {
+	for _, name := range slices.Sorted(maps.Keys(s.Parameters)) {
 		if _, ok := paramNames[name]; ok {
 			return eb.Wrap(ErrInvalidTool, "duplicate parameter name", goerr.V("name", name))
 		}
 		paramNames[name] = struct{}{}
 
-		if err := param.Validate(); err != nil {
-			return eb.Wrap(ErrInvalidTool, "invalid parameter")
+		if err := s.Parameters[name].Validate(); err != nil {
+			// goerr keeps a single cause, so ErrInvalidTool is joined with the
+			// cause; wrapping only err would break errors.Is(err, ErrInvalidTool).
+			return eb.Wrap(fmt.Errorf("%w: %w", ErrInvalidTool, err), fmt.Sprintf("invalid parameter %q", name))
 		}
 	}
 
@@ -124,6 +127,20 @@ type Parameter struct {
 	// Items is the items of the parameter. It's used for array type.
 	Items *Parameter
 
+	// AdditionalProperties is the schema of the values of keys that are not
+	// listed in Properties. It is used for object type and represents a Go map,
+	// e.g. map[string]int is {Type: object, AdditionalProperties: {Type: integer}}.
+	//
+	// Not every way of sending a schema to an LLM accepts it:
+	//   - Tool definitions: accepted by Claude, OpenAI and Gemini.
+	//   - Response schemas: accepted by OpenAI without strict mode, by Gemini,
+	//     and by Claude when the schema is written into the system prompt
+	//     (models or configurations without structured outputs).
+	//   - Rejected with ErrUnsupportedSchema before calling the API by Claude
+	//     structured outputs and OpenAI strict mode, because both require
+	//     additionalProperties to be false on every object.
+	AdditionalProperties *Parameter
+
 	// Number constraints
 	Minimum *float64
 	Maximum *float64
@@ -158,10 +175,11 @@ func (p *Parameter) Validate() error {
 		return eb.Wrap(ErrInvalidParameter, "invalid parameter type", goerr.V("type", p.Type))
 	}
 
-	// Properties is required for object type
+	// An object needs named properties, a value schema for its other keys
+	// (a map), or both.
 	if p.Type == TypeObject {
-		if p.Properties == nil {
-			return eb.Wrap(ErrInvalidParameter, "properties is required for object type")
+		if p.Properties == nil && p.AdditionalProperties == nil {
+			return eb.Wrap(ErrInvalidParameter, "properties or additionalProperties is required for object type")
 		}
 
 		// Check for duplicate property names
@@ -173,10 +191,17 @@ func (p *Parameter) Validate() error {
 			propNames[name] = struct{}{}
 		}
 
-		// Validate nested properties
-		for _, prop := range p.Properties {
-			if err := prop.Validate(); err != nil {
-				return eb.Wrap(ErrInvalidParameter, "invalid property")
+		// Validate nested properties in name order so that the reported
+		// property does not depend on map iteration order.
+		for _, name := range slices.Sorted(maps.Keys(p.Properties)) {
+			if err := p.Properties[name].Validate(); err != nil {
+				return eb.Wrap(err, fmt.Sprintf("invalid property %q", name))
+			}
+		}
+
+		if p.AdditionalProperties != nil {
+			if err := p.AdditionalProperties.Validate(); err != nil {
+				return eb.Wrap(err, "invalid additionalProperties")
 			}
 		}
 	}
@@ -188,7 +213,7 @@ func (p *Parameter) Validate() error {
 		}
 		// Validate items
 		if err := p.Items.Validate(); err != nil {
-			return eb.Wrap(ErrInvalidParameter, "invalid items")
+			return eb.Wrap(err, "invalid items")
 		}
 	}
 
@@ -358,10 +383,25 @@ func (p *Parameter) ValidateValue(name string, value any) error {
 			return eb.Wrap(ErrInvalidParameter, "expected object type", goerr.V("actual", value))
 		}
 		// Validate each property if Properties schema is defined
-		if p.Properties != nil {
-			for propName, propParam := range p.Properties {
-				propValue := obj[propName]
-				if err := propParam.ValidateValue(name+"."+propName, propValue); err != nil {
+		for _, propName := range slices.Sorted(maps.Keys(p.Properties)) {
+			if err := p.Properties[propName].ValidateValue(name+"."+propName, obj[propName]); err != nil {
+				return err
+			}
+		}
+		// Validate the values of the other keys against the map value schema
+		if p.AdditionalProperties != nil {
+			for _, key := range slices.Sorted(maps.Keys(obj)) {
+				if _, listed := p.Properties[key]; listed {
+					continue
+				}
+				// A present key holds a value, so null does not mean "omitted"
+				// here; the value schema has no null type, and decoding null into
+				// a non-pointer Go value would silently yield the zero value.
+				if obj[key] == nil {
+					return goerr.Wrap(ErrInvalidParameter, "map value must not be null",
+						goerr.V("parameter", name+"."+key))
+				}
+				if err := p.AdditionalProperties.ValidateValue(name+"."+key, obj[key]); err != nil {
 					return err
 				}
 			}

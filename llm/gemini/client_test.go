@@ -1965,6 +1965,158 @@ func TestGeminiCacheTokenObservation(t *testing.T) {
 	gt.Equal(t, 0, resp.CacheCreationInputToken)
 }
 
+type mapArgsTool struct{}
+
+func (mapArgsTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name:        "set_labels",
+		Description: "Set labels",
+		Parameters: map[string]*gollem.Parameter{
+			"id": {Type: gollem.TypeString, Required: true},
+			"labels": {
+				Type:                 gollem.TypeObject,
+				AdditionalProperties: &gollem.Parameter{Type: gollem.TypeString},
+			},
+		},
+	}
+}
+
+func (mapArgsTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	return nil, nil
+}
+
+type plainArgsTool struct{}
+
+func (plainArgsTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name: "lookup",
+		Parameters: map[string]*gollem.Parameter{
+			"id": {Type: gollem.TypeString, Required: true},
+		},
+	}
+}
+
+func (plainArgsTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	return nil, nil
+}
+
+func TestConvertToolToNewSDKMap(t *testing.T) {
+	t.Run("tool with a map is sent as JSON Schema", func(t *testing.T) {
+		decl := gemini.ConvertToolToNewSDK(mapArgsTool{})
+		gt.Nil(t, decl.Parameters)
+		raw, err := json.Marshal(decl.ParametersJsonSchema)
+		gt.NoError(t, err)
+		gt.Equal(t,
+			`{"additionalProperties":false,"properties":{"id":{"type":"string"},"labels":{"additionalProperties":{"type":"string"},"type":"object"}},"required":["id"],"type":"object"}`,
+			string(raw))
+		gt.Equal(t, "set_labels", decl.Name)
+		gt.Equal(t, "Set labels", decl.Description)
+	})
+
+	t.Run("tool without a map keeps genai.Schema", func(t *testing.T) {
+		decl := gemini.ConvertToolToNewSDK(plainArgsTool{})
+		gt.Nil(t, decl.ParametersJsonSchema)
+		gt.NotNil(t, decl.Parameters)
+		gt.Equal(t, genai.TypeString, decl.Parameters.Properties["id"].Type)
+	})
+}
+
+func mapResponseSchema() *gollem.Parameter {
+	return &gollem.Parameter{
+		Type: gollem.TypeObject,
+		Properties: map[string]*gollem.Parameter{
+			"answer": {Type: gollem.TypeString, Required: true},
+			"labels": {
+				Type:                 gollem.TypeObject,
+				AdditionalProperties: &gollem.Parameter{Type: gollem.TypeString},
+			},
+		},
+	}
+}
+
+func plainResponseSchema() *gollem.Parameter {
+	return &gollem.Parameter{
+		Type: gollem.TypeObject,
+		Properties: map[string]*gollem.Parameter{
+			"answer": {Type: gollem.TypeString, Required: true},
+		},
+	}
+}
+
+func TestSetResponseSchemaMap(t *testing.T) {
+	t.Run("schema with a map uses ResponseJsonSchema", func(t *testing.T) {
+		config := &genai.GenerateContentConfig{ResponseSchema: &genai.Schema{Type: genai.TypeObject}}
+		gt.NoError(t, gemini.SetResponseSchema(config, mapResponseSchema()))
+		gt.Nil(t, config.ResponseSchema)
+		raw, err := json.Marshal(config.ResponseJsonSchema)
+		gt.NoError(t, err)
+		gt.S(t, string(raw)).Contains(`"labels":{"additionalProperties":{"type":"string"},"type":"object"}`)
+	})
+
+	t.Run("schema without a map uses ResponseSchema", func(t *testing.T) {
+		config := &genai.GenerateContentConfig{ResponseJsonSchema: map[string]any{"type": "object"}}
+		gt.NoError(t, gemini.SetResponseSchema(config, plainResponseSchema()))
+		gt.Nil(t, config.ResponseJsonSchema)
+		gt.Equal(t, genai.TypeObject, config.ResponseSchema.Type)
+	})
+
+	t.Run("invalid schema with a map is rejected", func(t *testing.T) {
+		param := &gollem.Parameter{
+			Type:                 gollem.TypeObject,
+			AdditionalProperties: &gollem.Parameter{},
+		}
+		err := gemini.SetResponseSchema(&genai.GenerateContentConfig{}, param)
+		gt.True(t, errors.Is(err, gollem.ErrInvalidParameter))
+	})
+}
+
+func TestPerCallResponseSchemaFormMix(t *testing.T) {
+	type testCase struct {
+		session     *genai.GenerateContentConfig
+		perCall     *gollem.Parameter
+		expectJSON  bool
+		expectGenai bool
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			var captured *genai.GenerateContentConfig
+			mock := &apiClientMock{
+				GenerateContentFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+					captured = config
+					return &genai.GenerateContentResponse{
+						Candidates: []*genai.Candidate{
+							{Content: &genai.Content{Role: "model", Parts: []*genai.Part{{Text: `{"answer":"ok"}`}}}},
+						},
+					}, nil
+				},
+			}
+			session, err := gemini.NewSessionWithAPIClient(mock, gollem.NewSessionConfig(), "gemini-2.5-flash")
+			gt.NoError(t, err)
+			gemini.SetSessionConfig(session, tc.session)
+
+			_, err = session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")},
+				gollem.WithGenerateResponseSchema(tc.perCall))
+			gt.NoError(t, err)
+			gt.Value(t, captured).NotNil().Required()
+			gt.Equal(t, tc.expectJSON, captured.ResponseJsonSchema != nil)
+			gt.Equal(t, tc.expectGenai, captured.ResponseSchema != nil)
+		}
+	}
+
+	t.Run("session genai.Schema and per-call map", runTest(testCase{
+		session:    &genai.GenerateContentConfig{ResponseSchema: &genai.Schema{Type: genai.TypeObject}},
+		perCall:    mapResponseSchema(),
+		expectJSON: true,
+	}))
+
+	t.Run("session JSON Schema and per-call without a map", runTest(testCase{
+		session:     &genai.GenerateContentConfig{ResponseJsonSchema: map[string]any{"type": "object"}},
+		perCall:     plainResponseSchema(),
+		expectGenai: true,
+	}))
+}
+
 func TestGeminiStreamUsageNotSummed(t *testing.T) {
 	// Two stream chunks both carry usage (Gemini reports the running total, not a
 	// per-chunk delta). The session must report the single total, not the sum.

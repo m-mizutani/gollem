@@ -17,9 +17,22 @@ import (
 // the text is valid JSON matching it. The documented exceptions are a refusal
 // (stop_reason "refusal"), a response cut off by max_tokens, and a string enum
 // value returned with different capitalization.
+//
+// Structured outputs accepts additionalProperties only as false, so a schema
+// that contains a map (gollem.Parameter.AdditionalProperties) cannot be sent
+// this way and is rejected with gollem.ErrUnsupportedSchema before the request
+// is sent. See https://platform.claude.com/docs/en/build-with-claude/structured-outputs
+// To send such a schema, use a configuration without structured outputs (e.g.
+// WithVertexStructuredOutputsDisabled), in which the schema is written into
+// the system prompt.
 func outputFormat(param *gollem.Parameter) (anthropic.JSONOutputFormatParam, error) {
 	if err := param.Validate(); err != nil {
 		return anthropic.JSONOutputFormatParam{}, goerr.Wrap(err, "invalid response schema")
+	}
+	if path, found := gollemschema.FindAdditionalProperties(param); found {
+		return anthropic.JSONOutputFormatParam{}, goerr.Wrap(gollem.ErrUnsupportedSchema,
+			fmt.Sprintf("map at %q cannot be sent as Claude structured outputs, which require additionalProperties to be false", path),
+			goerr.V("path", path))
 	}
 	return anthropic.JSONOutputFormatParam{Schema: outputSchema(param)}, nil
 }

@@ -3,6 +3,7 @@ package gollem_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/gollem-dev/gollem"
@@ -335,4 +336,95 @@ func TestQuerySchemaValidationSuccess(t *testing.T) {
 	gt.NoError(t, err)
 	gt.Value(t, resp.Data.Status).Equal("active")
 	gt.Value(t, resp.Data.Score).Equal(80)
+}
+
+type testQueryResultWithMap struct {
+	Query  string            `json:"query" required:"true"`
+	Labels map[string]string `json:"labels"`
+}
+
+func TestQueryWithMap(t *testing.T) {
+	t.Run("schema keeps the map and the response decodes into it", func(t *testing.T) {
+		var capturedOpts []gollem.SessionOption
+		sessionMock := &mock.SessionMock{
+			GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+				return &gollem.Response{Texts: []string{`{"query":"q","labels":{"a":"x","b":"y"}}`}}, nil
+			},
+		}
+		client := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				capturedOpts = options
+				return sessionMock, nil
+			},
+		}
+
+		resp, err := gollem.Query[testQueryResultWithMap](context.Background(), client, "test")
+		gt.NoError(t, err)
+		gt.Equal(t, map[string]string{"a": "x", "b": "y"}, resp.Data.Labels)
+
+		cfg := buildSessionConfig(capturedOpts)
+		labels := cfg.ResponseSchema().Properties["labels"]
+		gt.Equal(t, gollem.TypeObject, labels.Type)
+		gt.Nil(t, labels.Properties)
+		gt.Equal(t, gollem.TypeString, labels.AdditionalProperties.Type)
+	})
+
+	t.Run("map value that breaks the value schema is fed back for a retry", func(t *testing.T) {
+		type item struct {
+			Name string `json:"name" required:"true"`
+		}
+		type result struct {
+			Items map[string]item `json:"items"`
+		}
+
+		var retryInput string
+		callCount := 0
+		client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+			callCount++
+			if callCount == 1 {
+				// Decodes into result, but the value of "a" lacks the required name.
+				return &gollem.Response{Texts: []string{`{"items":{"a":{}}}`}}, nil
+			}
+			retryInput = string(input[0].(gollem.Text))
+			return &gollem.Response{Texts: []string{`{"items":{"a":{"name":"x"}}}`}}, nil
+		})
+
+		resp, err := gollem.Query[result](context.Background(), client, "test")
+		gt.NoError(t, err)
+		gt.Equal(t, 2, callCount)
+		gt.Equal(t, "x", resp.Data.Items["a"].Name)
+		gt.S(t, retryInput).Contains("did not match the schema constraints")
+		gt.S(t, retryInput).Contains("required parameter missing")
+	})
+
+	t.Run("null map value is fed back for a retry", func(t *testing.T) {
+		var retryInput string
+		callCount := 0
+		client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+			callCount++
+			if callCount == 1 {
+				// Decodes into "" for map[string]string, so only validation catches it.
+				return &gollem.Response{Texts: []string{`{"query":"q","labels":{"a":null}}`}}, nil
+			}
+			retryInput = string(input[0].(gollem.Text))
+			return &gollem.Response{Texts: []string{`{"query":"q","labels":{"a":"x"}}`}}, nil
+		})
+
+		resp, err := gollem.Query[testQueryResultWithMap](context.Background(), client, "test")
+		gt.NoError(t, err)
+		gt.Equal(t, 2, callCount)
+		gt.Equal(t, map[string]string{"a": "x"}, resp.Data.Labels)
+		gt.S(t, retryInput).Contains("map value must not be null")
+	})
+
+	t.Run("unsupported schema error from the provider reaches the caller", func(t *testing.T) {
+		client := &mock.LLMClientMock{
+			NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+				return nil, fmt.Errorf("convert response schema: %w", gollem.ErrUnsupportedSchema)
+			},
+		}
+
+		_, err := gollem.Query[testQueryResultWithMap](context.Background(), client, "test")
+		gt.True(t, errors.Is(err, gollem.ErrUnsupportedSchema))
+	})
 }

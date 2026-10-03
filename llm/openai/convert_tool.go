@@ -61,6 +61,12 @@ func convertParameterToSchema(param *gollem.Parameter) map[string]interface{} {
 		schema["items"] = convertParameterToSchema(param.Items)
 	}
 
+	// The value schema of a map. Tool definitions accept it because tools are
+	// not sent with strict: true.
+	if param.Type == gollem.TypeObject && param.AdditionalProperties != nil {
+		schema["additionalProperties"] = convertParameterToSchema(param.AdditionalProperties)
+	}
+
 	// Add number constraints
 	if param.Type == gollem.TypeNumber || param.Type == gollem.TypeInteger {
 		if param.Minimum != nil {

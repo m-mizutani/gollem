@@ -68,8 +68,10 @@ if err != nil {
 ```
 
 - `In` must be a **struct**. The handler argument is fully typed — no assertions,
-  no panics. (A map is rejected: it would produce a property-less schema that tells
-  the LLM nothing about the arguments, while giving none of the type safety.)
+  no panics. (A map `In` is rejected: tool arguments are a fixed set of named
+  parameters, which a map cannot describe. A map **field** of the struct is
+  supported and is sent to every provider as an object with
+  `additionalProperties`; see [Maps](schema.md#maps).)
 - `Out` must encode to a JSON object (a struct, or `map[string]any`). A
   `map[string]any` result is passed through unchanged, so existing tools can adopt
   `NewTool` incrementally by keeping their map output.
