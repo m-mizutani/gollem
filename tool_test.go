@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 )
 
@@ -133,6 +134,66 @@ func TestParameterValidation(t *testing.T) {
 			}
 			gt.Error(t, p.Validate())
 		})
+
+		t.Run("additionalProperties only", func(t *testing.T) {
+			p := &gollem.Parameter{
+				Type:                 gollem.TypeObject,
+				AdditionalProperties: &gollem.Parameter{Type: gollem.TypeString},
+			}
+			gt.NoError(t, p.Validate())
+		})
+
+		t.Run("neither properties nor additionalProperties", func(t *testing.T) {
+			p := &gollem.Parameter{Type: gollem.TypeObject}
+			err := p.Validate()
+			gt.True(t, errors.Is(err, gollem.ErrInvalidParameter))
+			gt.S(t, err.Error()).Contains("properties or additionalProperties is required for object type")
+		})
+
+		t.Run("invalid additionalProperties", func(t *testing.T) {
+			p := &gollem.Parameter{
+				Type:                 gollem.TypeObject,
+				AdditionalProperties: &gollem.Parameter{},
+			}
+			err := p.Validate()
+			gt.True(t, errors.Is(err, gollem.ErrInvalidParameter))
+			gt.S(t, err.Error()).Contains("invalid additionalProperties: type is required")
+		})
+	})
+
+	t.Run("error keeps the path to the invalid property", func(t *testing.T) {
+		p := &gollem.Parameter{
+			Type: gollem.TypeObject,
+			Properties: map[string]*gollem.Parameter{
+				"user": {
+					Type: gollem.TypeObject,
+					Properties: map[string]*gollem.Parameter{
+						"tags": {
+							Type:  gollem.TypeArray,
+							Items: &gollem.Parameter{Type: gollem.TypeObject},
+						},
+					},
+				},
+			},
+		}
+		err := p.Validate()
+		gt.True(t, errors.Is(err, gollem.ErrInvalidParameter))
+		gt.S(t, err.Error()).Contains(`invalid property "user": invalid property "tags": invalid items: properties or additionalProperties is required for object type`)
+	})
+
+	t.Run("first invalid property in name order is reported", func(t *testing.T) {
+		p := &gollem.Parameter{
+			Type: gollem.TypeObject,
+			Properties: map[string]*gollem.Parameter{
+				"b": {Type: "invalid"},
+				"a": {Type: "invalid"},
+			},
+		}
+		for range 20 {
+			msg := p.Validate().Error()
+			gt.S(t, msg).Contains(`invalid property "a"`)
+			gt.S(t, msg).NotContains(`invalid property "b"`)
+		}
 	})
 }
 
@@ -224,6 +285,48 @@ func TestToolSpecValidation(t *testing.T) {
 			},
 		}
 		gt.Error(t, spec.Validate())
+	})
+
+	t.Run("invalid parameter keeps both sentinels and the cause", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "search",
+			Parameters: map[string]*gollem.Parameter{
+				"query": {Type: gollem.TypeString, Pattern: "[a-"},
+			},
+		}
+		err := spec.Validate()
+		gt.True(t, errors.Is(err, gollem.ErrInvalidTool))
+		gt.True(t, errors.Is(err, gollem.ErrInvalidParameter))
+		gt.S(t, err.Error()).Contains(`invalid parameter "query"`)
+		gt.S(t, err.Error()).Contains("invalid pattern")
+	})
+
+	t.Run("first invalid parameter in name order is reported", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "search",
+			Parameters: map[string]*gollem.Parameter{
+				"b": {Type: "invalid"},
+				"a": {Type: "invalid"},
+			},
+		}
+		for range 20 {
+			msg := spec.Validate().Error()
+			gt.S(t, msg).Contains(`invalid parameter "a"`)
+			gt.S(t, msg).NotContains(`invalid parameter "b"`)
+		}
+	})
+
+	t.Run("map parameter is valid", func(t *testing.T) {
+		spec := gollem.ToolSpec{
+			Name: "label",
+			Parameters: map[string]*gollem.Parameter{
+				"labels": {
+					Type:                 gollem.TypeObject,
+					AdditionalProperties: &gollem.Parameter{Type: gollem.TypeString},
+				},
+			},
+		}
+		gt.NoError(t, spec.Validate())
 	})
 }
 
@@ -648,6 +751,48 @@ func TestValidateValue(t *testing.T) {
 				},
 			}
 			gt.Error(t, p.ValidateValue("test", map[string]any{"age": "not a number"}))
+		})
+	})
+
+	t.Run("map type", func(t *testing.T) {
+		mapParam := &gollem.Parameter{
+			Type:                 gollem.TypeObject,
+			AdditionalProperties: &gollem.Parameter{Type: gollem.TypeInteger},
+		}
+
+		t.Run("valid values", func(t *testing.T) {
+			gt.NoError(t, mapParam.ValidateValue("labels", map[string]any{"x": float64(1), "y": float64(2)}))
+		})
+
+		t.Run("empty map is valid", func(t *testing.T) {
+			gt.NoError(t, mapParam.ValidateValue("labels", map[string]any{}))
+		})
+
+		t.Run("null value is rejected", func(t *testing.T) {
+			err := mapParam.ValidateValue("labels", map[string]any{"x": nil})
+			gt.True(t, errors.Is(err, gollem.ErrInvalidParameter))
+			gt.S(t, err.Error()).Contains("map value must not be null")
+			gt.Equal(t, goerr.Values(err)["parameter"], any("labels.x"))
+		})
+
+		t.Run("value of wrong type names the key", func(t *testing.T) {
+			err := mapParam.ValidateValue("labels", map[string]any{"x": "s"})
+			gt.Error(t, err)
+			gt.S(t, err.Error()).Contains("expected integer type")
+			gt.Equal(t, goerr.Values(err)["parameter"], any("labels.x"))
+		})
+
+		t.Run("listed keys use Properties and other keys use AdditionalProperties", func(t *testing.T) {
+			p := &gollem.Parameter{
+				Type: gollem.TypeObject,
+				Properties: map[string]*gollem.Parameter{
+					"name": {Type: gollem.TypeString},
+				},
+				AdditionalProperties: &gollem.Parameter{Type: gollem.TypeInteger},
+			}
+			gt.NoError(t, p.ValidateValue("obj", map[string]any{"name": "n", "count": float64(3)}))
+			gt.Error(t, p.ValidateValue("obj", map[string]any{"name": float64(1)}))
+			gt.Error(t, p.ValidateValue("obj", map[string]any{"name": "n", "count": "three"}))
 		})
 	})
 }

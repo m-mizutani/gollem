@@ -110,3 +110,131 @@ func TestConvertParameterToJSONStringDoesNotEscapeHTML(t *testing.T) {
 	var decoded map[string]any
 	gt.NoError(t, json.Unmarshal([]byte(out), &decoded))
 }
+
+func newMapParameter(value gollem.ParameterType) *gollem.Parameter {
+	return &gollem.Parameter{
+		Type:                 gollem.TypeObject,
+		AdditionalProperties: &gollem.Parameter{Type: value},
+	}
+}
+
+func TestFindAdditionalProperties(t *testing.T) {
+	type testCase struct {
+		param *gollem.Parameter
+		path  string
+		found bool
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			path, found := schema.FindAdditionalProperties(tc.param)
+			gt.Equal(t, tc.found, found)
+			gt.Equal(t, tc.path, path)
+		}
+	}
+
+	t.Run("no map", runTest(testCase{
+		param: newMultiRequiredParameter(),
+	}))
+
+	t.Run("root map", runTest(testCase{
+		param: newMapParameter(gollem.TypeString),
+		path:  "(root)",
+		found: true,
+	}))
+
+	t.Run("map property", runTest(testCase{
+		param: &gollem.Parameter{
+			Type: gollem.TypeObject,
+			Properties: map[string]*gollem.Parameter{
+				"name":   {Type: gollem.TypeString},
+				"labels": newMapParameter(gollem.TypeString),
+			},
+		},
+		path:  "labels",
+		found: true,
+	}))
+
+	t.Run("map in array items", runTest(testCase{
+		param: &gollem.Parameter{
+			Type: gollem.TypeObject,
+			Properties: map[string]*gollem.Parameter{
+				"items": {
+					Type: gollem.TypeArray,
+					Items: &gollem.Parameter{
+						Type: gollem.TypeObject,
+						Properties: map[string]*gollem.Parameter{
+							"attrs": newMapParameter(gollem.TypeInteger),
+						},
+					},
+				},
+			},
+		},
+		path:  "items[].attrs",
+		found: true,
+	}))
+
+	t.Run("nested property", runTest(testCase{
+		param: &gollem.Parameter{
+			Type: gollem.TypeObject,
+			Properties: map[string]*gollem.Parameter{
+				"a": {
+					Type: gollem.TypeObject,
+					Properties: map[string]*gollem.Parameter{
+						"b": newMapParameter(gollem.TypeBoolean),
+					},
+				},
+			},
+		},
+		path:  "a.b",
+		found: true,
+	}))
+
+	t.Run("first map in name order", func(t *testing.T) {
+		param := &gollem.Parameter{
+			Type: gollem.TypeObject,
+			Properties: map[string]*gollem.Parameter{
+				"zeta":  newMapParameter(gollem.TypeString),
+				"alpha": newMapParameter(gollem.TypeString),
+			},
+		}
+		for range 20 {
+			path, found := schema.FindAdditionalProperties(param)
+			gt.True(t, found)
+			gt.Equal(t, "alpha", path)
+		}
+	})
+}
+
+func TestConvertParameterToJSONSchemaMap(t *testing.T) {
+	t.Run("map object has a value schema and no properties", func(t *testing.T) {
+		out, err := json.Marshal(schema.ConvertParameterToJSONSchema(newMapParameter(gollem.TypeString)))
+		gt.NoError(t, err)
+		gt.Equal(t, `{"additionalProperties":{"type":"string"},"type":"object"}`, string(out))
+	})
+
+	t.Run("map nested in an object", func(t *testing.T) {
+		param := &gollem.Parameter{
+			Type: gollem.TypeObject,
+			Properties: map[string]*gollem.Parameter{
+				"labels": newMapParameter(gollem.TypeInteger),
+			},
+		}
+		out, err := json.Marshal(schema.ConvertParameterToJSONSchema(param))
+		gt.NoError(t, err)
+		gt.Equal(t, `{"additionalProperties":false,"properties":{"labels":{"additionalProperties":{"type":"integer"},"type":"object"}},"type":"object"}`, string(out))
+	})
+
+	t.Run("object with properties and a value schema", func(t *testing.T) {
+		param := &gollem.Parameter{
+			Type: gollem.TypeObject,
+			Properties: map[string]*gollem.Parameter{
+				"name": {Type: gollem.TypeString},
+			},
+			AdditionalProperties: &gollem.Parameter{Type: gollem.TypeInteger},
+		}
+		out, err := json.Marshal(schema.ConvertParameterToJSONSchema(param))
+		gt.NoError(t, err)
+		gt.Equal(t, `{"additionalProperties":{"type":"integer"},"properties":{"name":{"type":"string"}},"type":"object"}`, string(out))
+	})
+}

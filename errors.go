@@ -13,6 +13,13 @@ var (
 	// ErrInvalidParameter is returned when the parameter validation of definition fails.
 	ErrInvalidParameter = errors.New("invalid parameter")
 
+	// ErrUnsupportedSchema is returned when a valid schema cannot be sent in the
+	// way the request uses, such as a map (Parameter.AdditionalProperties) in
+	// Claude structured outputs or OpenAI strict mode, both of which require
+	// additionalProperties to be false on every object. The schema itself is
+	// valid; sending it requires another way, such as disabling strict mode.
+	ErrUnsupportedSchema = errors.New("schema is not supported by the provider")
+
 	// ErrToolNameConflict is returned when the tool name is already used.
 	ErrToolNameConflict = errors.New("tool name conflict")
 

@@ -1,6 +1,8 @@
 package gollem
 
 import (
+	"encoding"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -46,6 +48,23 @@ type tagInfo struct {
 //   - maxItems:"10" - Maximum array length
 //   - required:"true" - Mark field as required
 //
+// Supported types:
+//   - string, integer and float kinds, bool, structs, slices, arrays and
+//     pointers to them.
+//   - Maps whose key encoding/json can both encode and decode as a JSON object
+//     key (string kinds, integer kinds, or a type implementing
+//     encoding.TextMarshaler whose pointer implements encoding.TextUnmarshaler)
+//     and whose value is a supported type. A map becomes an object whose AdditionalProperties holds the value
+//     schema; the key constraint is not expressed. Interface values, such as
+//     map[string]any, are not supported.
+//
+// A map cannot be sent in every way a schema reaches an LLM; see
+// Parameter.AdditionalProperties for which ways reject it.
+//
+// The returned schema is checked with Parameter.Validate, so an invalid tag
+// combination (e.g. min greater than max, or a pattern that does not compile)
+// returns ErrInvalidParameter.
+//
 // Example:
 //
 //	type User struct {
@@ -65,7 +84,40 @@ func ToSchema(v any) (*Parameter, error) {
 		return nil, goerr.Wrap(ErrUnsupportedType, "nil value")
 	}
 
-	return convertWithPath(t, make(map[reflect.Type]bool), tagInfo{})
+	param, err := convertWithPath(t, make(map[reflect.Type]bool), tagInfo{})
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate is the single source of truth for schema correctness. Running it
+	// here guarantees that a schema returned by ToSchema is accepted by every
+	// consumer that validates before use (LLM clients, NewTool), so an invalid
+	// tag combination fails here instead of right before an LLM call.
+	if err := param.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "generated schema is invalid", goerr.V("type", t.String()))
+	}
+	return param, nil
+}
+
+var (
+	textMarshalerType   = reflect.TypeFor[encoding.TextMarshaler]()
+	textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
+)
+
+// isJSONMapKey reports whether encoding/json can both encode and decode a map
+// with key type k as a JSON object. A schema is used to decode what the LLM
+// returns (Query, typed tools), so a key that can only be encoded is rejected.
+// This follows encoding/json: string and integer kinds always work; any other
+// key needs encoding.TextMarshaler on the key type for encoding and
+// encoding.TextUnmarshaler on its pointer for decoding.
+func isJSONMapKey(k reflect.Type) bool {
+	switch k.Kind() {
+	case reflect.String,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return true
+	}
+	return k.Implements(textMarshalerType) && reflect.PointerTo(k).Implements(textUnmarshalerType)
 }
 
 // MustToSchema is like ToSchema but panics on error.
@@ -85,12 +137,15 @@ func MustToSchema(v any) *Parameter {
 // convertWithPath handles type conversion with cycle detection
 func convertWithPath(t reflect.Type, seen map[reflect.Type]bool, tags tagInfo) (*Parameter, error) {
 	// Handle pointer types
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 
-	// Check for cyclic references
-	if t.Kind() == reflect.Struct {
+	// Check for cyclic references. Only a named type can refer to itself, and it
+	// can do so through a struct field, a map value or a slice/array element
+	// (e.g. type M map[string]M), so all of these kinds are tracked.
+	switch t.Kind() {
+	case reflect.Struct, reflect.Map, reflect.Slice, reflect.Array:
 		if seen[t] {
 			return nil, goerr.Wrap(ErrCyclicReference, "type appears multiple times in hierarchy", goerr.V("type", t.String()))
 		}
@@ -154,8 +209,16 @@ func convertWithPath(t reflect.Type, seen map[reflect.Type]bool, tags tagInfo) (
 		return convertStruct(t, seen)
 
 	case reflect.Map:
+		if !isJSONMapKey(t.Key()) {
+			return nil, goerr.Wrap(ErrUnsupportedType, "map key type must be a string or integer type, or implement both encoding.TextMarshaler and encoding.TextUnmarshaler (on its pointer)",
+				goerr.V("key_type", t.Key().String()))
+		}
+		valueParam, err := convertWithPath(t.Elem(), seen, tagInfo{})
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to convert map value type")
+		}
 		param.Type = TypeObject
-		// Maps are treated as objects with arbitrary keys
+		param.AdditionalProperties = valueParam
 
 	default:
 		return nil, goerr.Wrap(ErrUnsupportedType, "cannot convert type", goerr.V("type", t.Kind().String()))
@@ -207,7 +270,7 @@ func convertStruct(t reflect.Type, seen map[reflect.Type]bool) (*Parameter, erro
 		// Convert field type
 		fieldParam, err := convertWithPath(field.Type, seen, tags)
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to convert field", goerr.V("field", field.Name))
+			return nil, goerr.Wrap(err, fmt.Sprintf("failed to convert field %q", fieldName), goerr.V("field", field.Name))
 		}
 
 		// Set required flag on the parameter itself

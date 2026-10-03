@@ -144,6 +144,18 @@ func TestConvertParameterToSchema(t *testing.T) {
 		schema := openai.ConvertParameterToSchema(p)
 		gt.Value(t, schema["default"]).Equal("default value")
 	})
+
+	t.Run("map", func(t *testing.T) {
+		p := &gollem.Parameter{
+			Type:                 gollem.TypeObject,
+			AdditionalProperties: &gollem.Parameter{Type: gollem.TypeInteger},
+		}
+		schema := openai.ConvertParameterToSchema(p)
+		gt.Value(t, schema["type"]).Equal("object")
+		gt.Value(t, schema["additionalProperties"].(map[string]interface{})["type"]).Equal("integer")
+		_, hasProperties := schema["properties"]
+		gt.False(t, hasProperties)
+	})
 }
 
 func ptr[T any](v T) *T {

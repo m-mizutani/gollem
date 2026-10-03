@@ -1294,6 +1294,108 @@ func TestResponseSchemaIsSentAsOutputFormat(t *testing.T) {
 	}
 }
 
+func mapResponseTestSchema() *gollem.Parameter {
+	return &gollem.Parameter{
+		Type: gollem.TypeObject,
+		Properties: map[string]*gollem.Parameter{
+			"answer": {Type: gollem.TypeString, Required: true},
+			"labels": {
+				Type:                 gollem.TypeObject,
+				AdditionalProperties: &gollem.Parameter{Type: gollem.TypeString},
+			},
+		},
+	}
+}
+
+// sendErr calls Generate or Stream and returns the error from either the call
+// or the stream.
+func (p requestPath) sendErr(session gollem.Session, opts ...gollem.GenerateOption) error {
+	ctx := context.Background()
+	input := []gollem.Input{gollem.Text("question")}
+	if !p.stream {
+		_, err := session.Generate(ctx, input, opts...)
+		return err
+	}
+	ch, err := session.Stream(ctx, input, opts...)
+	if err != nil {
+		return err
+	}
+	for resp := range ch {
+		if resp.Error != nil {
+			err = resp.Error
+		}
+	}
+	return err
+}
+
+func TestMapInResponseSchema(t *testing.T) {
+	type testCase struct {
+		path       requestPath
+		perCall    bool
+		structured bool
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			rs := newRecordingServer(t, "{}")
+			model := "claude-sonnet-4-20250514"
+			if tc.structured {
+				model = "claude-opus-5-5"
+			}
+
+			var sessionOpts []gollem.SessionOption
+			var generateOpts []gollem.GenerateOption
+			if tc.perCall {
+				generateOpts = append(generateOpts, gollem.WithGenerateResponseSchema(mapResponseTestSchema()))
+			} else {
+				sessionOpts = append(sessionOpts,
+					gollem.WithSessionContentType(gollem.ContentTypeJSON),
+					gollem.WithSessionResponseSchema(mapResponseTestSchema()))
+			}
+			session := tc.path.newSession(t, rs.srv.URL, model, sessionOpts...)
+			err := tc.path.sendErr(session, generateOpts...)
+
+			if tc.structured {
+				gt.True(t, errors.Is(err, gollem.ErrUnsupportedSchema))
+				gt.S(t, err.Error()).Contains(`map at "labels" cannot be sent as Claude structured outputs`)
+				rs.mu.Lock()
+				defer rs.mu.Unlock()
+				gt.A(t, rs.bodies).Length(0)
+				return
+			}
+
+			gt.NoError(t, err)
+			body := rs.lastBody(t)
+			_, hasOutputConfig := body["output_config"]
+			gt.False(t, hasOutputConfig)
+			var system []anthropic.TextBlockParam
+			gt.NoError(t, json.Unmarshal(body["system"], &system))
+			gt.A(t, system).Length(1).Required()
+			gt.S(t, system[0].Text).Contains(`"additionalProperties": {`)
+		}
+	}
+
+	apiGenerate, apiStream, vertexGenerate, vertexStream := requestPaths[0], requestPaths[1], requestPaths[2], requestPaths[3]
+
+	t.Run("structured outputs rejects a per-call map: API Generate", runTest(testCase{path: apiGenerate, perCall: true, structured: true}))
+	t.Run("structured outputs rejects a per-call map: API Stream", runTest(testCase{path: apiStream, perCall: true, structured: true}))
+	t.Run("structured outputs rejects a per-call map: Vertex Generate", runTest(testCase{path: vertexGenerate, perCall: true, structured: true}))
+	t.Run("structured outputs rejects a per-call map: Vertex Stream", runTest(testCase{path: vertexStream, perCall: true, structured: true}))
+	t.Run("structured outputs rejects a session map: API Generate", runTest(testCase{path: apiGenerate, structured: true}))
+	t.Run("structured outputs rejects a session map: API Stream", runTest(testCase{path: apiStream, structured: true}))
+	t.Run("structured outputs rejects a session map: Vertex Generate", runTest(testCase{path: vertexGenerate, structured: true}))
+	t.Run("structured outputs rejects a session map: Vertex Stream", runTest(testCase{path: vertexStream, structured: true}))
+
+	t.Run("system prompt keeps a per-call map: API Generate", runTest(testCase{path: apiGenerate, perCall: true}))
+	t.Run("system prompt keeps a per-call map: API Stream", runTest(testCase{path: apiStream, perCall: true}))
+	t.Run("system prompt keeps a per-call map: Vertex Generate", runTest(testCase{path: vertexGenerate, perCall: true}))
+	t.Run("system prompt keeps a per-call map: Vertex Stream", runTest(testCase{path: vertexStream, perCall: true}))
+	t.Run("system prompt keeps a session map: API Generate", runTest(testCase{path: apiGenerate}))
+	t.Run("system prompt keeps a session map: API Stream", runTest(testCase{path: apiStream}))
+	t.Run("system prompt keeps a session map: Vertex Generate", runTest(testCase{path: vertexGenerate}))
+	t.Run("system prompt keeps a session map: Vertex Stream", runTest(testCase{path: vertexStream}))
+}
+
 func TestJSONIsExtractedHoweverTheSchemaIsSent(t *testing.T) {
 	// JSON extraction re-marshals the value, which sorts keys and drops
 	// whitespace, so the compact form shows that extraction took place.

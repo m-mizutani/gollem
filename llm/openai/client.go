@@ -968,6 +968,12 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 }
 
 // convertResponseSchemaToOpenAI converts gollem.ResponseSchema to OpenAI's JSONSchemaParams
+//
+// Strict mode requires additionalProperties to be false on every object, so a
+// schema that contains a map (gollem.Parameter.AdditionalProperties) is
+// rejected with gollem.ErrUnsupportedSchema before the request is sent.
+// Without strict mode the map is sent as additionalProperties with the value
+// schema.
 func convertResponseSchemaToOpenAI(param *gollem.Parameter, strict bool) (*openai.ChatCompletionResponseFormatJSONSchema, error) {
 	if param == nil {
 		return nil, nil
@@ -976,6 +982,13 @@ func convertResponseSchemaToOpenAI(param *gollem.Parameter, strict bool) (*opena
 	// Validate schema
 	if err := param.Validate(); err != nil {
 		return nil, goerr.Wrap(err, "invalid response schema")
+	}
+	if strict {
+		if path, found := schema.FindAdditionalProperties(param); found {
+			return nil, goerr.Wrap(gollem.ErrUnsupportedSchema,
+				fmt.Sprintf("map at %q cannot be sent in OpenAI strict mode, which requires additionalProperties to be false", path),
+				goerr.V("path", path))
+		}
 	}
 
 	// Convert Parameter to JSON Schema format

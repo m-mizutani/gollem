@@ -235,7 +235,17 @@ gollem supports the following JSON Schema types:
 	Enum: []any{"active", "inactive", "pending"},
 	Description: "User status",
 }
+
+// Map (any keys, values of one schema), e.g. map[string]int
+&gollem.Parameter{
+	Type: gollem.TypeObject,
+	AdditionalProperties: &gollem.Parameter{
+		Type: gollem.TypeInteger,
+	},
+}
 ```
+
+Not every way of sending a schema accepts a map; see [Maps](#maps).
 
 ## Advanced Examples
 
@@ -414,11 +424,49 @@ All tags are optional except `json` for field naming:
 - **`maxItems:"10"`** - Maximum array length
 - **`required:"true"`** - Mark field as required
 
+`ToSchema` checks the generated schema with `Parameter.Validate` before returning it. A tag combination that the schema cannot hold, such as `min` greater than `max`, `minLength` greater than `maxLength`, `minItems` greater than `maxItems`, or a `pattern` that does not compile, returns `gollem.ErrInvalidParameter`. The error message names the field, for example `invalid property "name": invalid pattern`.
+
 ### Supported Types
 
 - **Basic types**: `string`, `int`, `int8`, `int16`, `int32`, `int64`, `uint`, `uint8`, `uint16`, `uint32`, `uint64`, `float32`, `float64`, `bool`
-- **Complex types**: `[]T` (arrays/slices), nested structs, `map[string]T`
+- **Complex types**: `[]T` (arrays/slices), nested structs, `map[K]V` (see [Maps](#maps))
 - **Pointer types**: Automatically unwrapped to base type
+- **Not supported**: interface types such as `any`, including `map[string]any`; channels and functions. These return `gollem.ErrUnsupportedType`.
+
+### Maps
+
+`ToSchema` converts a map to an object whose `AdditionalProperties` holds the schema of the values, for example `map[string]int` becomes `{"type": "object", "additionalProperties": {"type": "integer"}}`.
+
+- The key type must be one that `encoding/json` can both encode and decode as an object key, because `Query[T]`, `SessionQuery[T]` and `NewTool` decode the LLM's JSON into your type: a string type, an integer type, or a type that implements `encoding.TextMarshaler` and whose pointer implements `encoding.TextUnmarshaler`. Other key types, including a type that implements only `MarshalText`, return `gollem.ErrUnsupportedType`.
+- The schema does not restrict the keys, so the LLM may return a key that your key type cannot parse, such as a non-numeric key for `map[int]string`. Decoding then fails, and `Query[T]` asks the LLM to correct its response.
+- The value type can be any supported type, including structs, slices and other maps. A map value must not be JSON `null`; validation rejects it, because the value schema does not allow null and decoding null would silently produce the zero value.
+
+A map can be sent to an LLM in some ways but not in others:
+
+| Where the schema is sent | Map |
+|---|---|
+| Tool definitions (Claude, OpenAI, Gemini) | Sent |
+| Response schema, OpenAI without strict mode (the default) | Sent |
+| Response schema, Gemini | Sent (as `responseJsonSchema`) |
+| Response schema, Claude models or configurations without structured outputs (schema in the system prompt) | Sent |
+| Response schema, Claude structured outputs | Rejected with `gollem.ErrUnsupportedSchema` |
+| Response schema, OpenAI strict mode | Rejected with `gollem.ErrUnsupportedSchema` |
+
+Claude structured outputs and OpenAI strict mode require `additionalProperties` to be `false` on every object, so they cannot express a map. gollem returns `gollem.ErrUnsupportedSchema` before calling the API, and the message names the map, for example `map at "labels" cannot be sent as Claude structured outputs`. The schema is sent unchanged in every other case; gollem does not rewrite a map into another shape. This applies equally to `Query[T]`, `SessionQuery[T]`, `WithSessionResponseSchema` and `WithGenerateResponseSchema`.
+
+Gemini's `genai.Schema` has no `additionalProperties` field, so gollem sends a tool or response schema that contains a map as JSON Schema (`parametersJsonSchema` / `responseJsonSchema`), and every other schema in the `genai.Schema` form as before.
+
+```go
+type Result struct {
+	Capitals map[string]string `json:"capitals" description:"capital city keyed by country name"`
+}
+
+resp, err := gollem.Query[Result](ctx, client, "Capitals of Japan and France")
+if errors.Is(err, gollem.ErrUnsupportedSchema) {
+	// The client sends response schemas in a way that cannot express a map,
+	// e.g. Claude structured outputs.
+}
+```
 
 ### MustToSchema
 
@@ -476,7 +524,7 @@ schema := &gollem.Parameter{
 
 OpenAI uses Structured Outputs with JSON Schema:
 - Supports all JSON Schema features
-- `strict: true` is automatically enabled for schema validation
+- gollem sends response schemas with `strict: false` by default. Strict mode requires `additionalProperties: false` on every object, so a schema with a map is rejected in strict mode (see [Maps](#maps)).
 - Compatible with GPT-4o and later models
 
 ### Claude

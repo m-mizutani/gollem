@@ -632,6 +632,32 @@ func TestConvertResponseSchemaToOpenAIIsByteStable(t *testing.T) {
 	t.Run("non-strict mode requires the marked properties", runTest(false, `"required":["alpha","zulu"]`))
 }
 
+func TestConvertResponseSchemaToOpenAIMap(t *testing.T) {
+	param := &gollem.Parameter{
+		Type: gollem.TypeObject,
+		Properties: map[string]*gollem.Parameter{
+			"answer": {Type: gollem.TypeString, Required: true},
+			"labels": {
+				Type:                 gollem.TypeObject,
+				AdditionalProperties: &gollem.Parameter{Type: gollem.TypeString},
+			},
+		},
+	}
+
+	t.Run("non-strict mode sends the map", func(t *testing.T) {
+		format, err := openai.ConvertResponseSchemaToOpenAI(param, false)
+		gt.NoError(t, err)
+		gt.S(t, string(format.Schema.(json.RawMessage))).
+			Contains(`"labels":{"additionalProperties":{"type":"string"},"type":"object"}`)
+	})
+
+	t.Run("strict mode rejects the map", func(t *testing.T) {
+		_, err := openai.ConvertResponseSchemaToOpenAI(param, true)
+		gt.True(t, errors.Is(err, gollem.ErrUnsupportedSchema))
+		gt.S(t, err.Error()).Contains(`map at "labels" cannot be sent in OpenAI strict mode`)
+	})
+}
+
 var _ gollem.ModelNamer = (*openai.Client)(nil)
 
 // TestClientModel verifies that the client reports the model name it was

@@ -173,6 +173,18 @@ func TestConvertParameterToSchema(t *testing.T) {
 			Default: "default value",
 		},
 	}))
+
+	t.Run("map", runTest(testCase{
+		name: "map",
+		schema: &gollem.Parameter{
+			Type:                 gollem.TypeObject,
+			AdditionalProperties: &gollem.Parameter{Type: gollem.TypeInteger},
+		},
+		expected: claude.JsonSchema{
+			Type:                 "object",
+			AdditionalProperties: &claude.JsonSchema{Type: "integer"},
+		},
+	}))
 }
 
 func ptr[T any](v T) *T {

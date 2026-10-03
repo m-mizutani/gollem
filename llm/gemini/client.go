@@ -296,11 +296,9 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 
 	// Set response schema if provided
 	if cfg.ResponseSchema() != nil {
-		schema, err := convertResponseSchemaToGenai(cfg.ResponseSchema())
-		if err != nil {
+		if err := setResponseSchema(config, cfg.ResponseSchema()); err != nil {
 			return nil, goerr.Wrap(err, "failed to convert response schema")
 		}
-		config.ResponseSchema = schema
 	}
 
 	// Set system prompt
@@ -970,8 +968,22 @@ func (c *Client) GenerateEmbedding(ctx context.Context, dimension int, input []s
 // Helper function to convert new SDK history to gollem.History
 
 // convertToolToNewSDK converts gollem.Tool to new SDK's FunctionDeclaration
+//
+// genai.Schema (genai v1.53.0) has no field for additionalProperties, so a tool
+// whose parameters contain a map (gollem.Parameter.AdditionalProperties) is
+// sent as JSON Schema in ParametersJsonSchema, which accepts it. Other tools
+// keep the genai.Schema form so that their requests do not change.
 func convertToolToNewSDK(tool gollem.Tool) *genai.FunctionDeclaration {
 	spec := tool.Spec()
+
+	root := &gollem.Parameter{Type: gollem.TypeObject, Properties: spec.Parameters}
+	if _, found := gollemschema.FindAdditionalProperties(root); found {
+		return &genai.FunctionDeclaration{
+			Name:                 spec.Name,
+			Description:          spec.Description,
+			ParametersJsonSchema: gollemschema.ConvertParameterToJSONSchema(root),
+		}
+	}
 
 	// Collect required fields from parameters
 	required := gollemschema.CollectRequiredFields(spec.Parameters)
@@ -1085,6 +1097,33 @@ func getNewGeminiType(paramType gollem.ParameterType) genai.Type {
 	}
 }
 
+// setResponseSchema validates param and stores it in config.
+//
+// genai.Schema (genai v1.53.0) has no field for additionalProperties, so a
+// schema that contains a map (gollem.Parameter.AdditionalProperties) is sent as
+// JSON Schema in ResponseJsonSchema, which accepts it. Any other schema keeps
+// the genai.Schema form in ResponseSchema so that its requests do not change.
+// The unused field is cleared so that a per-call schema never leaves the
+// session's schema of the other form in the request.
+func setResponseSchema(config *genai.GenerateContentConfig, param *gollem.Parameter) error {
+	if _, found := gollemschema.FindAdditionalProperties(param); found {
+		if err := param.Validate(); err != nil {
+			return goerr.Wrap(err, "invalid response schema")
+		}
+		config.ResponseJsonSchema = gollemschema.ConvertParameterToJSONSchema(param)
+		config.ResponseSchema = nil
+		return nil
+	}
+
+	schema, err := convertResponseSchemaToGenai(param)
+	if err != nil {
+		return err
+	}
+	config.ResponseSchema = schema
+	config.ResponseJsonSchema = nil
+	return nil
+}
+
 // convertResponseSchemaToGenai converts gollem.Parameter to genai.Schema
 func convertResponseSchemaToGenai(param *gollem.Parameter) (*genai.Schema, error) {
 	if param == nil {
@@ -1122,11 +1161,9 @@ func (s *Session) buildEffectiveConfig(opts ...gollem.GenerateOption) (*genai.Ge
 	}
 	if perCallSchema := genCfg.ResponseSchema(); perCallSchema != nil {
 		effectiveConfig.ResponseMIMEType = "application/json"
-		genaiSchema, err := convertResponseSchemaToGenai(perCallSchema)
-		if err != nil {
+		if err := setResponseSchema(&effectiveConfig, perCallSchema); err != nil {
 			return nil, goerr.Wrap(err, "failed to convert per-call response schema")
 		}
-		effectiveConfig.ResponseSchema = genaiSchema
 	}
 	// The tool declarations stay in the request; mode NONE only forbids calling
 	// them. Without tools there is nothing to forbid, so no ToolConfig is sent.

@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/llm/claude"
+	"github.com/gollem-dev/gollem/llm/gemini"
+	"github.com/gollem-dev/gollem/llm/openai"
 	"github.com/gollem-dev/gollem/mock"
 	"github.com/m-mizutani/gt"
 )
@@ -116,7 +120,7 @@ func TestToolSchema(t *testing.T) {
 	})
 
 	t.Run("map In is rejected", func(t *testing.T) {
-		// A map In would yield a property-less schema, so it is not a valid input type.
+		// A map In has no named parameters to declare, so it is not a valid input type.
 		_, err := gollem.ToolSchema[map[string]any, addResult]()
 		gt.Error(t, err)
 		gt.True(t, errors.Is(err, gollem.ErrInvalidToolType))
@@ -464,4 +468,136 @@ func TestTypedToolResultPreservesWideIntegers(t *testing.T) {
 	encoded, err := json.Marshal(result)
 	gt.NoError(t, err)
 	gt.Equal(t, `{"account_id":9007199254740993}`, string(encoded))
+}
+
+type setLabelsArgs struct {
+	ID     string            `json:"id" description:"Resource ID" required:"true"`
+	Labels map[string]string `json:"labels" description:"Labels to set, keyed by label name" required:"true"`
+}
+
+type setLabelsResult struct {
+	Count int `json:"count"`
+}
+
+func newSetLabelsTool(t *testing.T, received *map[string]string) gollem.Tool {
+	t.Helper()
+	tool, err := gollem.NewTool("set_labels", "Sets labels on a resource",
+		func(_ context.Context, in setLabelsArgs) (setLabelsResult, error) {
+			*received = in.Labels
+			return setLabelsResult{Count: len(in.Labels)}, nil
+		})
+	gt.NoError(t, err).Required()
+	return tool
+}
+
+func TestNewToolWithMapArgument(t *testing.T) {
+	var received map[string]string
+	tool := newSetLabelsTool(t, &received)
+
+	labels := tool.Spec().Parameters["labels"]
+	gt.Equal(t, gollem.TypeObject, labels.Type)
+	gt.Equal(t, gollem.TypeString, labels.AdditionalProperties.Type)
+
+	t.Run("valid map argument is decoded", func(t *testing.T) {
+		args := map[string]any{"id": "r1", "labels": map[string]any{"env": "prod", "team": "core"}}
+		spec := tool.Spec()
+		gt.NoError(t, spec.ValidateArgs(args))
+		out, err := tool.Run(t.Context(), args)
+		gt.NoError(t, err)
+		gt.Equal(t, map[string]string{"env": "prod", "team": "core"}, received)
+		encoded, err := json.Marshal(out)
+		gt.NoError(t, err)
+		gt.Equal(t, `{"count":2}`, string(encoded))
+	})
+
+	t.Run("map value of wrong type is rejected", func(t *testing.T) {
+		spec := tool.Spec()
+		err := spec.ValidateArgs(map[string]any{"id": "r1", "labels": map[string]any{"env": float64(1)}})
+		gt.True(t, errors.Is(err, gollem.ErrToolArgsValidation))
+		gt.S(t, err.Error()).Contains("expected string type")
+	})
+}
+
+func TestNewToolRejectsInvalidTagCombination(t *testing.T) {
+	type patternArgs struct {
+		Name string `json:"name" pattern:"[a-"`
+	}
+	_, err := gollem.NewTool("bad", "bad pattern",
+		func(_ context.Context, _ patternArgs) (setLabelsResult, error) { return setLabelsResult{}, nil })
+	gt.True(t, errors.Is(err, gollem.ErrInvalidParameter))
+	gt.S(t, err.Error()).Contains(`invalid property "name": invalid pattern`)
+}
+
+// TestNewToolWithMapArgumentIntegration checks against the real APIs that a
+// tool definition with a map argument is accepted and that the map the LLM
+// sends is decoded into the typed argument.
+func TestNewToolWithMapArgumentIntegration(t *testing.T) {
+	t.Parallel()
+
+	testFn := func(t *testing.T, client gollem.LLMClient) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+
+		var received map[string]string
+		tool := newSetLabelsTool(t, &received)
+
+		session, err := client.NewSession(ctx, gollem.WithSessionTools(tool))
+		gt.NoError(t, err).Required()
+
+		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text(
+			`Call set_labels for resource "r1" with the labels env=prod and team=core.`)})
+		gt.NoError(t, err).Required()
+		gt.A(t, resp.FunctionCalls).Longer(0).Required()
+
+		call := resp.FunctionCalls[0]
+		gt.Equal(t, "set_labels", call.Name)
+		spec := tool.Spec()
+		gt.NoError(t, spec.ValidateArgs(call.Arguments))
+		_, err = tool.Run(ctx, call.Arguments)
+		gt.NoError(t, err)
+		t.Logf("labels: %v", received)
+		gt.Equal(t, "prod", received["env"])
+		gt.Equal(t, "core", received["team"])
+	}
+
+	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
+		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
+		if !ok {
+			t.Skip("TEST_OPENAI_API_KEY is not set")
+		}
+		client, err := openai.New(context.Background(), apiKey)
+		gt.NoError(t, err).Required()
+		testFn(t, client)
+	})
+
+	t.Run("Claude", func(t *testing.T) {
+		t.Parallel()
+		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
+		if !ok {
+			t.Skip("TEST_CLAUDE_API_KEY is not set")
+		}
+		client, err := claude.New(context.Background(), apiKey)
+		gt.NoError(t, err).Required()
+		testFn(t, client)
+	})
+
+	t.Run("Gemini", func(t *testing.T) {
+		t.Parallel()
+		projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+		if !ok {
+			t.Skip("TEST_GCP_PROJECT_ID is not set")
+		}
+		location, ok := os.LookupEnv("TEST_GCP_LOCATION")
+		if !ok {
+			t.Skip("TEST_GCP_LOCATION is not set")
+		}
+		var opts []gemini.Option
+		if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
+		client, err := gemini.New(context.Background(), projectID, location, opts...)
+		gt.NoError(t, err).Required()
+		testFn(t, client)
+	})
 }

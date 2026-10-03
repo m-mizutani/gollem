@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"maps"
 	"slices"
 
 	"github.com/gollem-dev/gollem"
@@ -22,6 +23,48 @@ func CollectRequiredFields(properties map[string]*gollem.Parameter) []string {
 	}
 	slices.Sort(required)
 	return required
+}
+
+// FindAdditionalProperties returns the path of the first object that has
+// AdditionalProperties (a map), visiting properties in ascending name order so
+// that the result does not depend on map iteration. The path joins property
+// names with "." and marks array items with "[]", e.g. "items[].attrs"; the
+// root itself is reported as "(root)".
+//
+// Providers use it to decide how to send a schema: Claude structured outputs
+// and OpenAI strict mode reject a schema that contains a map, and Gemini sends
+// such a schema as JSON Schema because genai.Schema cannot express a map.
+func FindAdditionalProperties(param *gollem.Parameter) (path string, found bool) {
+	return findAdditionalProperties(param, "")
+}
+
+func findAdditionalProperties(param *gollem.Parameter, path string) (string, bool) {
+	if param == nil {
+		return "", false
+	}
+	if param.Type == gollem.TypeObject && param.AdditionalProperties != nil {
+		if path == "" {
+			return "(root)", true
+		}
+		return path, true
+	}
+	for _, name := range slices.Sorted(maps.Keys(param.Properties)) {
+		childPath := name
+		if path != "" {
+			childPath = path + "." + name
+		}
+		if found, ok := findAdditionalProperties(param.Properties[name], childPath); ok {
+			return found, true
+		}
+	}
+	if param.Items != nil {
+		itemsPath := path + "[]"
+		if path == "" {
+			itemsPath = "(root)[]"
+		}
+		return findAdditionalProperties(param.Items, itemsPath)
+	}
+	return "", false
 }
 
 // ConvertParameterToJSONSchema converts gollem.Parameter to JSON Schema map
@@ -47,6 +90,12 @@ func ConvertParameterToJSONSchema(param *gollem.Parameter) map[string]any {
 		if required := CollectRequiredFields(param.Properties); len(required) > 0 {
 			schema["required"] = required
 		}
+	}
+
+	// A map: the value schema of keys not listed in properties. It replaces the
+	// "additionalProperties": false set above when an object has both.
+	if param.Type == gollem.TypeObject && param.AdditionalProperties != nil {
+		schema["additionalProperties"] = ConvertParameterToJSONSchema(param.AdditionalProperties)
 	}
 
 	if param.Type == gollem.TypeArray && param.Items != nil {
