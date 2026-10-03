@@ -6,17 +6,18 @@ package gollem
 // Example:
 //
 //	resp, err := session.Generate(ctx, inputs,
-//	    gollem.WithTemperature(0.2),
 //	    gollem.WithMaxTokens(256),
 //	)
+//
+// Sampling parameters such as temperature and top-p are not provided as
+// per-call options because several providers reject them on recent models.
+// Set them with the provider-specific client options instead.
 type GenerateOption func(*generateConfig)
 
 // generateConfig holds per-call overrides for generation parameters.
 // nil fields mean "use session default".
 type generateConfig struct {
 	responseSchema *Parameter
-	temperature    *float64
-	topP           *float64
 	maxTokens      *int
 
 	toolCallsDisabled bool
@@ -35,16 +36,6 @@ func NewGenerateConfig(opts ...GenerateOption) generateConfig { //nolint:revive
 // ResponseSchema returns the per-call response schema override, or nil if not set.
 func (c *generateConfig) ResponseSchema() *Parameter {
 	return c.responseSchema
-}
-
-// Temperature returns the per-call temperature override, or nil if not set.
-func (c *generateConfig) Temperature() *float64 {
-	return c.temperature
-}
-
-// TopP returns the per-call top-p override, or nil if not set.
-func (c *generateConfig) TopP() *float64 {
-	return c.topP
 }
 
 // MaxTokens returns the per-call max tokens override, or nil if not set.
@@ -79,20 +70,6 @@ func WithToolCallsDisabled() GenerateOption {
 func WithGenerateResponseSchema(schema *Parameter) GenerateOption {
 	return func(cfg *generateConfig) {
 		cfg.responseSchema = schema
-	}
-}
-
-// WithTemperature sets the temperature for a single Generate/Stream call.
-func WithTemperature(t float64) GenerateOption {
-	return func(cfg *generateConfig) {
-		cfg.temperature = &t
-	}
-}
-
-// WithTopP sets the top-p for a single Generate/Stream call.
-func WithTopP(p float64) GenerateOption {
-	return func(cfg *generateConfig) {
-		cfg.topP = &p
 	}
 }
 

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/llm/claude"
 	"github.com/m-mizutani/gt"
@@ -270,4 +272,48 @@ func TestVertexClientModel(t *testing.T) {
 		options:  []claude.VertexOption{claude.WithVertexModel("")},
 		expected: "",
 	}))
+}
+
+func TestWithVertexEffort(t *testing.T) {
+	type testCase struct {
+		effort   claude.Effort
+		stream   bool
+		expected string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			rs := newRecordingServer(t, "ok")
+			anthropicClient := anthropic.NewClient(
+				option.WithAPIKey("test-key"),
+				option.WithBaseURL(rs.srv.URL),
+				option.WithMaxRetries(0),
+			)
+			options := []claude.VertexOption{claude.WithVertexModel("claude-opus-5-5")}
+			if tc.effort != "" {
+				options = append(options, claude.WithVertexEffort(tc.effort))
+			}
+			client := claude.NewVertexClientWithAnthropicClient(&anthropicClient, options...)
+			session, err := client.NewSession(context.Background())
+			gt.NoError(t, err).Required()
+
+			requestPath{stream: tc.stream}.send(t, session)
+
+			outputConfig, ok := rs.lastBody(t)["output_config"]
+			if tc.expected == "" {
+				gt.False(t, ok)
+				return
+			}
+			gt.True(t, ok).Required()
+			assertJSONEqual(t, tc.expected, outputConfig)
+		}
+	}
+
+	t.Run("low", runTest(testCase{effort: claude.EffortLow, expected: `{"effort":"low"}`}))
+	t.Run("medium", runTest(testCase{effort: claude.EffortMedium, expected: `{"effort":"medium"}`}))
+	t.Run("high", runTest(testCase{effort: claude.EffortHigh, expected: `{"effort":"high"}`}))
+	t.Run("xhigh", runTest(testCase{effort: claude.EffortXHigh, expected: `{"effort":"xhigh"}`}))
+	t.Run("max", runTest(testCase{effort: claude.EffortMax, expected: `{"effort":"max"}`}))
+	t.Run("stream", runTest(testCase{effort: claude.EffortLow, stream: true, expected: `{"effort":"low"}`}))
+	t.Run("not set", runTest(testCase{}))
 }

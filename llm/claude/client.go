@@ -36,7 +36,30 @@ type generationParameters struct {
 	// resolves the model's documented maximum only when it did not, so an
 	// explicit value is always sent as given, including an invalid one.
 	maxTokensSet bool
+
+	// effort is sent as output_config.effort. Empty means not sent, so the
+	// model default applies.
+	effort Effort
 }
+
+// Effort is the effort level sent as output_config.effort. It controls how many
+// tokens Claude spends on a response, including text, tool calls and thinking.
+// Which levels a model accepts depends on the model; see
+// https://platform.claude.com/docs/en/build-with-claude/effort
+type Effort string
+
+const (
+	// EffortLow spends the fewest tokens.
+	EffortLow Effort = "low"
+	// EffortMedium balances token usage and capability.
+	EffortMedium Effort = "medium"
+	// EffortHigh spends as many tokens as the task needs.
+	EffortHigh Effort = "high"
+	// EffortXHigh extends EffortHigh for long-running agentic work.
+	EffortXHigh Effort = "xhigh"
+	// EffortMax places no constraint on token spending.
+	EffortMax Effort = "max"
+)
 
 // defaultNonStreamingTimeout is the request timeout attached to every
 // non-streaming Messages call.
@@ -131,6 +154,16 @@ func WithMaxTokens(maxTokens int64) Option {
 	return func(c *Client) {
 		c.params.MaxTokens = maxTokens
 		c.params.maxTokensSet = true
+	}
+}
+
+// WithEffort sets the effort level sent as output_config.effort on every
+// request of the client's sessions. When not set, no effort is sent and the
+// model default applies. A level the model does not support is sent as given
+// and rejected by the API.
+func WithEffort(effort Effort) Option {
+	return func(c *Client) {
+		c.params.effort = effort
 	}
 }
 
@@ -471,6 +504,9 @@ func buildMessageParams(
 	if err := setTemperatureAndTopP(&request, params.Temperature, params.TopP); err != nil {
 		return anthropic.MessageNewParams{}, goerr.Wrap(err, "failed to set generation parameters")
 	}
+	if params.effort != "" {
+		request.OutputConfig.Effort = anthropic.OutputConfigEffort(params.effort)
+	}
 
 	systemPrompt, err := createSystemPrompt(ctx, cfg, structuredOutputs)
 	if err != nil {
@@ -809,12 +845,6 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 // applyResponseSchema.
 func applyPerCallOverrides(request *anthropic.MessageNewParams, opts ...gollem.GenerateOption) {
 	genCfg := gollem.NewGenerateConfig(opts...)
-	if t := genCfg.Temperature(); t != nil {
-		request.Temperature = anthropic.Float(*t)
-	}
-	if p := genCfg.TopP(); p != nil {
-		request.TopP = anthropic.Float(*p)
-	}
 	if m := genCfg.MaxTokens(); m != nil {
 		request.MaxTokens = int64(*m)
 	}

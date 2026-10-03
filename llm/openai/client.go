@@ -1091,12 +1091,6 @@ func convertParameterToJSONSchemaWithStrict(param *gollem.Parameter, strict bool
 // applyPerCallOverrides applies per-call GenerateOption overrides to an API request.
 func (s *Session) applyPerCallOverrides(req *openai.ChatCompletionRequest, opts ...gollem.GenerateOption) error {
 	genCfg := gollem.NewGenerateConfig(opts...)
-	if t := genCfg.Temperature(); t != nil {
-		req.Temperature = float32(*t)
-	}
-	if p := genCfg.TopP(); p != nil {
-		req.TopP = float32(*p)
-	}
 	if m := genCfg.MaxTokens(); m != nil {
 		req.MaxCompletionTokens = *m
 	}
