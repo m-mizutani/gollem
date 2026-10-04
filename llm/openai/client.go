@@ -981,11 +981,13 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					}
 				}
 
-				// Create assistant message with tool calls. The reasoning is kept
-				// because OpenAI-compatible servers that return reasoning_content
-				// can require it back on later requests that carry tools.
+				// Create assistant message with tool calls, keeping the text that
+				// came with them as Generate does. The reasoning is kept because
+				// OpenAI-compatible servers that return reasoning_content can
+				// require it back on later requests that carry tools.
 				assistantMessage := openai.ChatCompletionMessage{
 					Role:             openai.ChatMessageRoleAssistant,
+					Content:          textContent,
 					ReasoningContent: reasoningContent,
 					ToolCalls:        toolCalls,
 				}

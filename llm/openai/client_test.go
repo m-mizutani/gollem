@@ -1182,6 +1182,7 @@ func newChatReasoningServer(t *testing.T) *chatReasoningServer {
 				chunks = []string{
 					`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"think "}}]}`,
 					`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"reasoning_content":"hard"}}]}`,
+					`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"content":"let me check"}}]}`,
 					`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"key\":\"alpha\"}"}}]}}]}`,
 					`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
 				}
@@ -1200,7 +1201,7 @@ func newChatReasoningServer(t *testing.T) *chatReasoningServer {
 		w.Header().Set("Content-Type", "application/json")
 		if first {
 			_, _ = io.WriteString(w, `{"id":"c1","object":"chat.completion","model":"m",
-				"choices":[{"index":0,"message":{"role":"assistant","content":"","reasoning_content":"think hard",
+				"choices":[{"index":0,"message":{"role":"assistant","content":"let me check","reasoning_content":"think hard",
 				"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"key\":\"alpha\"}"}}]},
 				"finish_reason":"tool_calls"}],
 				"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}`)
@@ -1215,7 +1216,8 @@ func newChatReasoningServer(t *testing.T) *chatReasoningServer {
 }
 
 // OpenAI-compatible servers that return reasoning_content can reject a request
-// with tools that does not send it back, so the session keeps it in its history.
+// with tools that does not send it back, so the session keeps it in its history,
+// together with the text that came with the tool calls.
 func TestChatReasoningIsSentBack(t *testing.T) {
 	runTest := func(stream bool) func(t *testing.T) {
 		return func(t *testing.T) {
@@ -1255,6 +1257,7 @@ func TestChatReasoningIsSentBack(t *testing.T) {
 			assistant := cs.requests[1][1]
 			gt.Equal(t, any("assistant"), assistant["role"])
 			gt.Equal(t, any("think hard"), assistant["reasoning_content"])
+			gt.Equal(t, any("let me check"), assistant["content"])
 			gt.A(t, assistant["tool_calls"].([]any)).Length(1)
 		}
 	}
