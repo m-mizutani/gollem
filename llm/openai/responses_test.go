@@ -374,6 +374,7 @@ func TestResponsesRequestParameters(t *testing.T) {
 		options         []openai.Option
 		generateOptions []gollem.GenerateOption
 		expectEffort    string
+		expectVerbosity string
 		expectMaxTokens *int
 	}
 
@@ -407,6 +408,16 @@ func TestResponsesRequestParameters(t *testing.T) {
 				gt.Equal(t, tc.expectEffort, req.Reasoning.Effort)
 			}
 
+			// The text session sends no response format, so text appears only
+			// to carry the verbosity.
+			if tc.expectVerbosity == "" {
+				_, hasText := req.Raw["text"]
+				gt.False(t, hasText)
+			} else {
+				gt.V(t, req.Text).NotNil().Required()
+				gt.Equal(t, tc.expectVerbosity, req.Text.Verbosity)
+			}
+
 			if tc.expectMaxTokens == nil {
 				_, hasMax := req.Raw["max_output_tokens"]
 				gt.False(t, hasMax)
@@ -417,10 +428,14 @@ func TestResponsesRequestParameters(t *testing.T) {
 		}
 	}
 
-	t.Run("sends no reasoning or max_output_tokens by default", runTest(testCase{}))
+	t.Run("sends no reasoning, verbosity or max_output_tokens by default", runTest(testCase{}))
 	t.Run("sends reasoning.effort when set", runTest(testCase{
 		options:      []openai.Option{openai.WithReasoningEffort("low")},
 		expectEffort: "low",
+	}))
+	t.Run("sends text.verbosity when set", runTest(testCase{
+		options:         []openai.Option{openai.WithVerbosity("low")},
+		expectVerbosity: "low",
 	}))
 	t.Run("sends max_output_tokens from WithMaxTokens", runTest(testCase{
 		options:         []openai.Option{openai.WithMaxTokens(100)},

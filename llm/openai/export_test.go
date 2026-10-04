@@ -39,6 +39,7 @@ func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model s
 	return &Session{
 		apiClient:       client,
 		defaultModel:    model,
+		systemPrompt:    cfg.SystemPrompt(),
 		tools:           tools,
 		historyMessages: historyMessages,
 		params:          generationParameters{},

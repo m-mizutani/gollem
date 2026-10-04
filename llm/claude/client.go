@@ -184,7 +184,6 @@ func WithSystemPrompt(prompt string) Option {
 // WithBaseURL sets the custom base URL for the Claude API.
 // Allows usage with compatible endpoints, proxies, or self-hosted instances.
 // If empty, uses the default Anthropic API endpoints.
-// Reference: Brain Memory c4705651-435d-4cca-95eb-d39d1ea69a9c
 func WithBaseURL(url string) Option {
 	return func(c *Client) {
 		c.baseURL = url

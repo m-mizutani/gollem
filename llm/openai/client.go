@@ -42,7 +42,8 @@ type generationParameters struct {
 	// the parameter is not sent and the model applies its own default.
 	ReasoningEffort string
 
-	// Verbosity controls the amount of output tokens generated ("low", "medium", "high").
+	// Verbosity controls the amount of output tokens generated. Empty means the
+	// parameter is not sent and the model applies its own default.
 	Verbosity string
 }
 
@@ -158,15 +159,20 @@ func WithReasoningEffort(effort string) Option {
 	}
 }
 
-// WithVerbosity sets the verbosity parameter for GPT-5 models.
-// Supported values (as of 2025-10-04): "low", "medium", "high".
+// WithVerbosity sets the verbosity of the response. It is sent as verbosity on
+// Chat Completions and as text.verbosity on the Responses API. The value is
+// passed to the API unchanged, and the accepted values depend on the model (for
+// example, gpt-5 accepts "low" and gpt-4.1 accepts only "medium"); the API
+// rejects a value the model does not support. Without this option no verbosity
+// is sent and the model applies its own default.
 func WithVerbosity(verbosity string) Option {
 	return func(c *Client) {
 		c.params.Verbosity = verbosity
 	}
 }
 
-// WithSystemPrompt sets the system prompt to use for chat completions.
+// WithSystemPrompt sets the system prompt used when a session does not set
+// one with gollem.WithSessionSystemPrompt.
 func WithSystemPrompt(prompt string) Option {
 	return func(c *Client) {
 		c.systemPrompt = prompt
@@ -184,7 +190,6 @@ func WithContentType(contentType gollem.ContentType) Option {
 // WithBaseURL sets the custom base URL for the OpenAI API.
 // Allows usage with compatible endpoints, proxies, or self-hosted instances.
 // If empty, uses the default OpenAI API endpoints.
-// Reference: Brain Memory c4705651-435d-4cca-95eb-d39d1ea69a9c
 func WithBaseURL(url string) Option {
 	return func(c *Client) {
 		c.baseURL = url
@@ -218,10 +223,7 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 		defaultModel:   DefaultModel,
 		embeddingModel: DefaultEmbeddingModel,
 		baseURL:        "", // Default empty, will be set by options
-		params: generationParameters{
-			Verbosity: "low",
-		},
-		contentType: gollem.ContentTypeText,
+		contentType:    gollem.ContentTypeText,
 	}
 
 	for _, option := range options {
@@ -260,6 +262,11 @@ type Session struct {
 
 	// defaultModel is the model to use for chat completions.
 	defaultModel string
+
+	// systemPrompt is the session system prompt, or the client one when the
+	// session sets none. It is sent as a system message at the head of every
+	// request unless a middleware replaces it, and is not stored in the history.
+	systemPrompt string
 
 	// tools are the available tools for the session.
 	tools []openai.Tool
@@ -310,9 +317,15 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		}
 	}
 
+	systemPrompt := cfg.SystemPrompt()
+	if systemPrompt == "" {
+		systemPrompt = c.systemPrompt
+	}
+
 	session := &Session{
 		apiClient:       &realAPIClient{client: c.client},
 		defaultModel:    c.defaultModel,
+		systemPrompt:    systemPrompt,
 		tools:           openaiTools,
 		params:          c.params,
 		historyMessages: historyMessages,
@@ -322,6 +335,8 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 	return session, nil
 }
 
+// History returns the conversation history. It does not contain the system
+// prompt.
 func (s *Session) History() (*gollem.History, error) {
 	return newHistory(s.historyMessages)
 }
@@ -457,12 +472,26 @@ func (s *Session) convertInputs(input ...gollem.Input) ([]openai.ChatCompletionM
 	return newMessages, nil
 }
 
-// createRequest creates a chat completion request with the current session state
-func (s *Session) createRequest(stream bool) (openai.ChatCompletionRequest, error) {
-	messages, err := s.getMessages()
+// createRequest creates a chat completion request with the current session
+// state. systemPrompt is the value the middleware chain passed on in
+// ContentRequest.SystemPrompt.
+func (s *Session) createRequest(stream bool, systemPrompt string) (openai.ChatCompletionRequest, error) {
+	history, err := s.getMessages()
 	if err != nil {
 		return openai.ChatCompletionRequest{}, goerr.Wrap(err, "failed to get messages for API call")
 	}
+
+	// The "system" role is used rather than "developer" because OpenAI
+	// compatible endpoints reached through WithBaseURL may not accept
+	// "developer", while OpenAI accepts "system" as well.
+	messages := make([]openai.ChatCompletionMessage, 0, len(history)+1)
+	if systemPrompt != "" {
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: systemPrompt,
+		})
+	}
+	messages = append(messages, history...)
 
 	req := openai.ChatCompletionRequest{
 		Model:               s.defaultModel,
@@ -533,7 +562,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 	contentReq := &gollem.ContentRequest{
 		Inputs:       input,
 		History:      historyCopy,
-		SystemPrompt: s.cfg.SystemPrompt(),
+		SystemPrompt: s.systemPrompt,
 	}
 
 	// Create the base handler that performs the actual API call
@@ -553,7 +582,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			return nil, err
 		}
 
-		openaiReq, err := s.createRequest(false)
+		openaiReq, err := s.createRequest(false, req.SystemPrompt)
 		if err != nil {
 			return nil, err
 		}
@@ -660,7 +689,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		// Set trace data for defer.
 		// Record only messages added in this turn; the full request history is
 		// captured incrementally across previous trace spans.
-		openaiTraceData = buildOpenAITraceData(resp, response.CacheCreationInputToken, s.cfg.SystemPrompt(), newMessages)
+		openaiTraceData = buildOpenAITraceData(resp, response.CacheCreationInputToken, req.SystemPrompt, newMessages)
 
 		// History is already updated by updateHistoryWithResponse above
 
@@ -716,7 +745,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 	contentReq := &gollem.ContentRequest{
 		Inputs:       input,
 		History:      historyCopy,
-		SystemPrompt: s.cfg.SystemPrompt(),
+		SystemPrompt: s.systemPrompt,
 	}
 
 	// Create the base handler that performs the actual API call
@@ -736,7 +765,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			return nil, err
 		}
 
-		openaiReq, err := s.createRequest(true)
+		openaiReq, err := s.createRequest(true, req.SystemPrompt)
 		if err != nil {
 			return nil, err
 		}
@@ -965,7 +994,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				CacheCreationInputTokens: totalCacheWrite,
 				CacheReadInputTokens:     totalCacheRead,
 				Request: &trace.LLMRequest{
-					SystemPrompt: s.cfg.SystemPrompt(),
+					SystemPrompt: req.SystemPrompt,
 					Messages:     openaiMessagesToTraceMessages(newMessages),
 				},
 				Response: &trace.LLMResponse{},
@@ -1206,7 +1235,7 @@ func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, e
 	// Combine history copy with new inputs for counting
 	messages := append(historyMessagesCopy, newMessages...)
 
-	return countChatTokens(s.defaultModel, s.cfg.SystemPrompt(), messages, s.tools)
+	return countChatTokens(s.defaultModel, s.systemPrompt, messages, s.tools)
 }
 
 // countChatTokens estimates the input tokens of a request locally with tiktoken,
