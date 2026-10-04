@@ -238,11 +238,11 @@ A model that is not in the table — a model released after this table was writt
 
 **Note**: gollem previously defaulted to 8192 regardless of model. If your code relied on that cap to bound output length or cost, call `WithMaxTokens(8192)` explicitly.
 
-**Note**: `max_tokens` is a ceiling, not a reservation — it does not by itself make a request slower or more expensive. But a response that actually approaches the ceiling takes time to generate, and `Generate` waits for the whole response. The default request timeout is 30 seconds (`WithTimeout`); raise it before expecting long outputs.
+**Note**: `max_tokens` is a ceiling, not a reservation — it does not by itself make a request slower or more expensive. But a response that actually approaches the ceiling takes time to generate, and `Generate` waits for the whole response. The default request timeout is 30 seconds (`WithTimeout`); raise it before expecting long outputs. The timeout also covers a streamed response from the request to its last event, so a `Stream` call that runs longer is cut off as well.
 
 #### Thinking and Issuer Scope
 
-The text of each thinking block is returned in `Response.Thoughts`. A block whose text the API omitted, and a redacted thinking block, add no element. Thinking blocks and their signatures are kept in the history in both `Generate` and `Stream`.
+The text of each thinking block is returned in `Response.Thoughts`. A block whose text the API omitted, and a redacted thinking block, add no element. `Stream` uses the streaming Messages API and returns thinking and text deltas and tool calls as they arrive. Thinking blocks and their signatures are kept in the history in both `Generate` and `Stream`.
 
 ```go
 client, err := claude.New(ctx, apiKey,

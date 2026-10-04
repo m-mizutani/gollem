@@ -255,6 +255,13 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 	for _, content := range msg.Contents {
 		switch content.Type {
 		case gollem.MessageContentTypeThinking:
+			// Chat Completions reasoning records only its issuer. A thinking
+			// content with data is a Responses API reasoning item, whose summary
+			// is not reasoning_content and whose encrypted content only the
+			// Responses API can read, so it is not sent here.
+			if content.Provider != nil && len(content.Provider.Data) > 0 {
+				continue
+			}
 			thinkingContent, err := content.GetThinkingContent()
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to get thinking content")

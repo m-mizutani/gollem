@@ -108,7 +108,7 @@ func NewStdio(ctx context.Context, path string, args []string, options ...StdioO
 	}
 
 	// Create command with environment variables inheriting from the current process
-	cmd := exec.Command(path, args...)
+	cmd := exec.Command(path, args...) // #nosec G204 -- NewStdio exists to launch the MCP server executable its caller specifies
 	cmd.Env = append(os.Environ(), client.envVars...)
 
 	// Create transport

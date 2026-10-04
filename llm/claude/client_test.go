@@ -806,29 +806,22 @@ func TestClaudeCacheTokenObservation(t *testing.T) {
 }
 
 func TestClaudeStreamPromptCacheAndObservation(t *testing.T) {
-	var sent anthropic.MessageNewParams
-	mockClient := &apiClientMock{
-		MessagesNewFunc: func(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
-			sent = params
-			return &anthropic.Message{
-				Content: []anthropic.ContentBlockUnion{{Type: "text", Text: "streamed"}},
-				Role:    "assistant",
-				Model:   "claude-3-opus-20240229",
-				Usage: anthropic.Usage{
-					InputTokens:          30,
-					OutputTokens:         5,
-					CacheReadInputTokens: 120,
-				},
-			}, nil
-		},
-	}
-
-	cfg := gollem.NewSessionConfig(
+	ss := newScriptedServer(t, "", [][2]string{
+		{"message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[],"stop_reason":null,"usage":{"input_tokens":30,"cache_read_input_tokens":120,"output_tokens":0}}}`},
+		{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+		{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"streamed"}}`},
+		{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+		{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`},
+		{"message_stop", `{"type":"message_stop"}`},
+	})
+	client, err := claude.New(context.Background(), "test-key",
+		claude.WithBaseURL(ss.srv.URL), claude.WithModel("claude-3-opus-20240229"))
+	gt.NoError(t, err).Required()
+	session, err := client.NewSession(context.Background(),
 		gollem.WithSessionSystemPrompt("sys"),
 		gollem.WithSessionPromptCache(true),
 	)
-	session, err := claude.NewSessionWithAPIClient(mockClient, cfg, "claude-3-opus-20240229")
-	gt.NoError(t, err)
+	gt.NoError(t, err).Required()
 
 	rec := trace.New()
 	ctx := rec.StartAgentExecute(context.Background())
@@ -852,7 +845,17 @@ func TestClaudeStreamPromptCacheAndObservation(t *testing.T) {
 	gt.Equal(t, 120, gotCacheRead)
 
 	// The stream request carried the cache_control marker on the system prefix.
-	gt.Equal(t, anthropic.CacheControlEphemeralTTLTTL5m, sent.System[len(sent.System)-1].CacheControl.TTL)
+	ss.mu.Lock()
+	gt.A(t, ss.bodies).Length(1).Required()
+	var system []struct {
+		CacheControl struct {
+			TTL string `json:"ttl"`
+		} `json:"cache_control"`
+	}
+	gt.NoError(t, json.Unmarshal(ss.bodies[0]["system"], &system)).Required()
+	ss.mu.Unlock()
+	gt.A(t, system).Longer(0).Required()
+	gt.Equal(t, string(anthropic.CacheControlEphemeralTTLTTL5m), system[len(system)-1].CacheControl.TTL)
 
 	// Trace records the cache breakdown.
 	var llmSpan *trace.Span
@@ -1010,9 +1013,17 @@ func TestGenerateWithResolvedMaxTokens(t *testing.T) {
 	})
 
 	t.Run("Stream", func(t *testing.T) {
-		_, err := session.Stream(ctx, []gollem.Input{gollem.Text("hello")})
-		gt.Error(t, err).Required()
-		gt.False(t, strings.Contains(err.Error(), guardMessage))
+		// A streaming request reports the transport error on the channel.
+		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("hello")})
+		gt.NoError(t, err).Required()
+		var streamErr error
+		for resp := range ch {
+			if resp.Error != nil {
+				streamErr = resp.Error
+			}
+		}
+		gt.Error(t, streamErr).Required()
+		gt.False(t, strings.Contains(streamErr.Error(), guardMessage))
 	})
 }
 
@@ -1701,21 +1712,55 @@ func TestClaudeGenerateThoughts(t *testing.T) {
 	t.Run("redacted thinking adds no Thoughts", runEmpty(
 		`{"type":"redacted_thinking","data":"opaque"}`))
 
-	t.Run("Stream sends thinking text as Thoughts", func(t *testing.T) {
-		ss := newScriptedServer(t, messageJSON(
-			`{"type":"thinking","thinking":"plan","signature":"sig"},{"type":"text","text":"answer"}`), nil)
-		session := newScopedAPISession(t, ss.srv.URL, model, "")
+	t.Run("Stream sends thinking, text and tool calls as they arrive", func(t *testing.T) {
+		events := append([][2]string{
+			{"message_start", sseMessageStart},
+			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"pl"}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"an"}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+			{"content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"answer"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":1}`},
+			{"content_block_start", `{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"call_1","name":"search","input":{}}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"q\":\"x\"}"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":2}`},
+		}, sseMessageEnd...)
+		ss := newScriptedServer(t, "", events)
+		session := newScopedAPISession(t, ss.srv.URL, model, "tenant-a")
 
 		ch, err := session.Stream(context.Background(), question)
 		gt.NoError(t, err)
 		var thoughts, texts []string
+		var calls []*gollem.FunctionCall
 		for resp := range ch {
 			gt.NoError(t, resp.Error)
 			thoughts = append(thoughts, resp.Thoughts...)
 			texts = append(texts, resp.Texts...)
+			calls = append(calls, resp.FunctionCalls...)
 		}
-		gt.Equal(t, []string{"plan"}, thoughts)
+		gt.Equal(t, []string{"pl", "an"}, thoughts)
 		gt.Equal(t, []string{"answer"}, texts)
+		gt.A(t, calls).Length(1).Required()
+		gt.Equal(t, "call_1", calls[0].ID)
+		gt.Equal(t, "search", calls[0].Name)
+		gt.Equal(t, "x", calls[0].Arguments["q"])
+
+		// The request went through the streaming API.
+		ss.mu.Lock()
+		gt.Equal(t, "true", string(ss.bodies[0]["stream"]))
+		ss.mu.Unlock()
+
+		h, err := session.History()
+		gt.NoError(t, err)
+		contents := assistantContents(t, h)
+		gt.A(t, contents).Length(3).Required()
+		gt.Equal(t, gollem.MessageContentTypeThinking, contents[0].Type)
+		gt.Equal(t, gollem.MessageContentTypeText, contents[1].Type)
+		gt.Equal(t, gollem.MessageContentTypeToolCall, contents[2].Type)
+		gt.Equal(t, gollem.Issuer{Provider: gollem.LLMTypeClaude, Model: model, Scope: "tenant-a"}, contents[0].Provider.Issuer)
+		gt.Equal(t, `{"signature":"sig"}`, string(contents[0].Provider.Data))
 	})
 }
 
