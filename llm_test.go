@@ -901,3 +901,111 @@ func TestSchemaCallAfterToolUseWithRealLLM(t *testing.T) {
 		testFn(t, client, false)
 	})
 }
+
+// TestClaudeStreamToolLoopWithRealLLM runs a tool loop through Stream only. The
+// stream must return the tool call, and the history it records (signed thinking,
+// text and tool use in the order received) must be accepted by the API on the
+// next turn, both in the same session and in a session restored from JSON.
+func TestClaudeStreamToolLoopWithRealLLM(t *testing.T) {
+	t.Parallel()
+
+	const systemPrompt = "You are a weather assistant. Always use the get_weather tool to answer questions about the weather."
+
+	stream := func(t *testing.T, session gollem.Session, input []gollem.Input) []*gollem.FunctionCall {
+		t.Helper()
+		ch, err := session.Stream(context.Background(), input)
+		gt.NoError(t, err).Required()
+		var calls []*gollem.FunctionCall
+		var texts []string
+		for resp := range ch {
+			gt.NoError(t, resp.Error).Required()
+			calls = append(calls, resp.FunctionCalls...)
+			texts = append(texts, resp.Texts...)
+		}
+		gt.True(t, len(calls) > 0 || len(texts) > 0)
+		return calls
+	}
+
+	testFn := func(t *testing.T, client gollem.LLMClient) {
+		tool := &weatherLookupTool{}
+		sessionOpts := []gollem.SessionOption{
+			gollem.WithSessionSystemPrompt(systemPrompt),
+			gollem.WithSessionTools(tool),
+		}
+
+		session, err := client.NewSession(context.Background(), sessionOpts...)
+		gt.NoError(t, err).Required()
+
+		// 1. The stream returns the tool call. The puzzle makes Claude reason
+		// before choosing the argument, so that the history carries a signed
+		// thinking block.
+		calls := stream(t, session, []gollem.Input{gollem.Text(
+			"I will visit exactly one city. Candidates: Tokyo, Osaka, Sapporo, Fukuoka. " +
+				"Rule 1: the city's name must not contain the letter 'k' unless it has exactly five letters. " +
+				"Rule 2: among the remaining cities, pick the one whose name has the most vowels; break ties alphabetically. " +
+				"Work out the city carefully, then get its weather with the tool.")})
+		gt.A(t, calls).Longer(0).Required()
+
+		history, err := session.History()
+		gt.NoError(t, err).Required()
+		var signedThinking int
+		for _, msg := range history.Messages {
+			for _, c := range msg.Contents {
+				if c.Type == gollem.MessageContentTypeThinking && c.Provider != nil && len(c.Provider.Data) > 0 {
+					signedThinking++
+				}
+			}
+		}
+		t.Logf("signed thinking blocks after the first turn: %d", signedThinking)
+		gt.N(t, signedThinking).Greater(0).Required()
+
+		// 2. Return the tool results through Stream in the same session.
+		var results []gollem.Input
+		for _, fc := range calls {
+			out, err := tool.Run(context.Background(), fc.Arguments)
+			gt.NoError(t, err).Required()
+			results = append(results, gollem.FunctionResponse{ID: fc.ID, Name: fc.Name, Data: out})
+		}
+		stream(t, session, results)
+
+		// 3. Continue in a session restored from the serialized history.
+		history, err = session.History()
+		gt.NoError(t, err).Required()
+		data, err := json.Marshal(history)
+		gt.NoError(t, err).Required()
+		var restored gollem.History
+		gt.NoError(t, json.Unmarshal(data, &restored)).Required()
+
+		next, err := client.NewSession(context.Background(), append(sessionOpts, gollem.WithSessionHistory(&restored))...)
+		gt.NoError(t, err).Required()
+		stream(t, next, []gollem.Input{gollem.Text("Summarize the weather you found in one sentence.")})
+	}
+
+	t.Run("Claude", func(t *testing.T) {
+		t.Parallel()
+		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
+		if !ok {
+			t.Skip("TEST_CLAUDE_API_KEY is not set")
+		}
+		client, err := claude.New(context.Background(), apiKey,
+			claude.WithModel("claude-opus-5-5"), claude.WithTimeout(5*time.Minute))
+		gt.NoError(t, err).Required()
+		testFn(t, client)
+	})
+
+	t.Run("ClaudeVertex", func(t *testing.T) {
+		t.Parallel()
+		projectID, ok := os.LookupEnv("TEST_CLAUDE_VERTEX_AI_PROJECT_ID")
+		if !ok {
+			t.Skip("TEST_CLAUDE_VERTEX_AI_PROJECT_ID is not set")
+		}
+		location := os.Getenv("TEST_CLAUDE_VERTEX_AI_LOCATION")
+		if location == "" {
+			location = "us-east5"
+		}
+		client, err := claude.NewWithVertex(context.Background(), location, projectID,
+			claude.WithVertexModel("claude-opus-5-5"))
+		gt.NoError(t, err).Required()
+		testFn(t, client)
+	})
+}
