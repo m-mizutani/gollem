@@ -12,15 +12,15 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 )
 
-// claudePartMeta is the metadata stored in MessageContent.Meta for Claude content blocks.
-// It preserves Claude-specific fields (e.g., thinking signatures, redacted status) across
-// serialization/deserialization without polluting the common message types.
+// claudePartMeta is the data stored in MessageContent.Provider.Data for Claude content
+// blocks. It preserves Claude-specific fields (e.g., thinking signatures, redacted status)
+// across serialization/deserialization without polluting the common message types.
 type claudePartMeta struct {
 	Signature string `json:"signature,omitempty"` // Signature for thinking blocks
 	Redacted  bool   `json:"redacted,omitempty"`  // Whether this is a redacted thinking block
 }
 
-// marshalClaudePartMeta marshals claudePartMeta to JSON for MessageContent.Meta.
+// marshalClaudePartMeta marshals claudePartMeta to JSON for MessageContent.Provider.Data.
 // Returns nil if no metadata needs to be stored.
 func marshalClaudePartMeta(m claudePartMeta) (json.RawMessage, error) {
 	if !m.Redacted && m.Signature == "" {
@@ -33,7 +33,7 @@ func marshalClaudePartMeta(m claudePartMeta) (json.RawMessage, error) {
 	return data, nil
 }
 
-// unmarshalClaudePartMeta unmarshals claudePartMeta from MessageContent.Meta.
+// unmarshalClaudePartMeta unmarshals claudePartMeta from MessageContent.Provider.Data.
 // Returns zero-value claudePartMeta if meta is nil or empty.
 func unmarshalClaudePartMeta(meta json.RawMessage) (claudePartMeta, error) {
 	if len(meta) == 0 {
@@ -46,8 +46,10 @@ func unmarshalClaudePartMeta(meta json.RawMessage) (claudePartMeta, error) {
 	return m, nil
 }
 
-// convertClaudeToMessages converts Claude messages to common Message format
-func convertClaudeToMessages(messages []anthropic.MessageParam) ([]gollem.Message, error) {
+// convertClaudeToMessages converts Claude messages to common Message format. Every
+// thinking block is recorded as issued by issuer: the messages hold only this
+// session's API responses and content that FilterProviderData kept for issuer.
+func convertClaudeToMessages(messages []anthropic.MessageParam, issuer gollem.Issuer) ([]gollem.Message, error) {
 	if len(messages) == 0 {
 		return []gollem.Message{}, nil
 	}
@@ -60,7 +62,7 @@ func convertClaudeToMessages(messages []anthropic.MessageParam) ([]gollem.Messag
 		contents := make([]gollem.MessageContent, 0, len(msg.Content))
 
 		for _, block := range msg.Content {
-			content, err := convertClaudeContentBlock(block, toolNamesByID)
+			content, err := convertClaudeContentBlock(block, toolNamesByID, issuer)
 			if err != nil {
 				// Skip unsupported content types (like empty text blocks)
 				if err == convert.ErrUnsupportedContentType {
@@ -117,7 +119,7 @@ func collectClaudeToolNames(messages []anthropic.MessageParam) map[string]string
 
 // convertClaudeContentBlock converts a single Claude content block to MessageContent.
 // toolNamesByID supplies the tool name for tool_result blocks, which do not carry one.
-func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion, toolNamesByID map[string]string) (gollem.MessageContent, error) {
+func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion, toolNamesByID map[string]string, issuer gollem.Issuer) (gollem.MessageContent, error) {
 	// Handle text blocks
 	if block.OfText != nil {
 		// Skip empty text blocks
@@ -133,16 +135,15 @@ func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion, toolNames
 		if err != nil {
 			return gollem.MessageContent{}, err
 		}
-		// Store signature in meta for multi-turn conversations
-		if block.OfThinking.Signature != "" {
-			meta, err := marshalClaudePartMeta(claudePartMeta{
-				Signature: block.OfThinking.Signature,
-			})
-			if err != nil {
-				return gollem.MessageContent{}, err
-			}
-			mc.Meta = meta
+		// The issuer is recorded even without a signature, so that the block is
+		// never sent to another issuer.
+		meta, err := marshalClaudePartMeta(claudePartMeta{
+			Signature: block.OfThinking.Signature,
+		})
+		if err != nil {
+			return gollem.MessageContent{}, err
 		}
+		mc.Provider = &gollem.ProviderData{Issuer: issuer, Data: meta}
 		return mc, nil
 	}
 
@@ -152,7 +153,6 @@ func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion, toolNames
 		if err != nil {
 			return gollem.MessageContent{}, err
 		}
-		// Store signature and redacted flag in meta
 		meta, err := marshalClaudePartMeta(claudePartMeta{
 			Signature: block.OfRedactedThinking.Data,
 			Redacted:  true,
@@ -160,7 +160,7 @@ func convertClaudeContentBlock(block anthropic.ContentBlockParamUnion, toolNames
 		if err != nil {
 			return gollem.MessageContent{}, err
 		}
-		mc.Meta = meta
+		mc.Provider = &gollem.ProviderData{Issuer: issuer, Data: meta}
 		return mc, nil
 	}
 
@@ -378,18 +378,24 @@ func convertContentToClaude(content gollem.MessageContent, messageRole gollem.Me
 			return anthropic.ContentBlockParamUnion{}, err
 		}
 
-		// Extract metadata to determine if this is a redacted block
-		meta, err := unmarshalClaudePartMeta(content.Meta)
+		// FilterProviderData has already removed thinking issued by anyone else,
+		// so a remaining thinking content always has Provider set.
+		if content.Provider == nil {
+			return anthropic.ContentBlockParamUnion{}, convert.ErrUnsupportedContentType
+		}
+		meta, err := unmarshalClaudePartMeta(content.Provider.Data)
 		if err != nil {
 			return anthropic.ContentBlockParamUnion{}, err
 		}
 
-		// Handle redacted thinking blocks
 		if meta.Redacted {
 			return anthropic.NewRedactedThinkingBlock(meta.Signature), nil
 		}
-
-		// Handle normal thinking blocks with signature
+		// The API rejects a thinking block without a signature, so an unsigned
+		// block is not sent.
+		if meta.Signature == "" {
+			return anthropic.ContentBlockParamUnion{}, convert.ErrUnsupportedContentType
+		}
 		return anthropic.NewThinkingBlock(meta.Signature, thinkingContent.Text), nil
 
 	case gollem.MessageContentTypeImage:
@@ -467,17 +473,19 @@ func convertContentToClaude(content gollem.MessageContent, messageRole gollem.Me
 	}
 }
 
-// toMessages converts gollem.History to Claude messages
-func toMessages(h *gollem.History) ([]anthropic.MessageParam, error) {
+// toMessages converts gollem.History to Claude messages to send to dest. Provider-bound
+// data is filtered by gollem.FilterProviderData first.
+func toMessages(h *gollem.History, dest gollem.Issuer) ([]anthropic.MessageParam, error) {
 	if h == nil || len(h.Messages) == 0 {
 		return []anthropic.MessageParam{}, nil
 	}
-	return convertMessagesToClaude(h.Messages)
+	return convertMessagesToClaude(gollem.FilterProviderData(h.Messages, dest))
 }
 
-// newHistory creates gollem.History from Claude messages
-func newHistory(messages []anthropic.MessageParam) (*gollem.History, error) {
-	commonMessages, err := convertClaudeToMessages(messages)
+// newHistory creates gollem.History from Claude messages, recording issuer on the
+// provider-bound data of each content.
+func newHistory(messages []anthropic.MessageParam, issuer gollem.Issuer) (*gollem.History, error) {
+	commonMessages, err := convertClaudeToMessages(messages, issuer)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to convert Claude messages to common format")
 	}

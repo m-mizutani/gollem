@@ -48,7 +48,7 @@ newHistory, err = agent.Prompt(ctx, "Continue", gollem.WithHistory(history))
 
 ## Version Management
 
-History includes version information to ensure compatibility. The current version is **3**.
+History includes version information to ensure compatibility. The current version is **4**.
 
 ### Version History
 
@@ -57,11 +57,12 @@ History includes version information to ensure compatibility. The current versio
 | 1 | Initial format with provider-specific message dialects |
 | 2 | Introduced unified message format across providers |
 | 3 | Removed legacy function call fields and provider-specific dialects. Messages use a single canonical representation (`Message` with `MessageContent` typed data) |
+| 4 | Replaced `MessageContent.Meta` with `MessageContent.Provider`, which records the issuer of provider-bound data such as thinking signatures. A Gemini part that carries only a thought signature is stored as a thinking content with empty text instead of an empty text content |
 
 ### Compatibility
 
-- **v1/v2 → v3 migration is not supported.** History serialized with v1 or v2 cannot be deserialized into v3; the format is a breaking change.
-- If you have persisted v1/v2 histories, discard them or re-create the conversations with the current library version.
+- **Migration from an earlier version is not supported.** History serialized with v1, v2 or v3 cannot be deserialized into v4. A v3 history has no record of which model and scope issued its signatures, so it cannot be converted correctly.
+- If you have persisted histories of an earlier version, discard them or re-create the conversations with the current library version.
 - Version is stored in the `"version"` JSON field of the serialized `History` struct. When deserializing, callers should verify that the version matches `gollem.HistoryVersion` before use.
 - Future versions will document migration paths when feasible.
 - The serialized format is not covered by semver guarantees. See [Compatibility Policy](compatibility.md#serialized-history-format).
@@ -103,10 +104,82 @@ History can be easily serialized/deserialized using standard JSON marshaling. Th
 
 ## LLM Type Compatibility
 
-A session accepts a History created by any provider; the clients do not check `LLType`. Each client converts the messages to its own API format, so the content must be something the destination can send:
+A session accepts a History created by any provider; the clients do not check `LLType`. Each client converts the messages to its own API format, so the content must be something the destination can send. A client can reject content its API cannot represent. For example, the Ollama client returns an error from `NewSession` when the history contains a PDF or an image given only by URL.
 
-- A client can reject content its API cannot represent. For example, the Ollama client returns an error from `NewSession` when the history contains a PDF or an image given only by URL.
-- Provider-specific metadata, such as Claude thinking signatures and Gemini thought signatures, is kept in the history but only the provider that issued it can use it. A thinking block created by another provider reaches Claude without a signature.
+### Provider-bound data
+
+Some providers return data that only they can interpret and that must be sent back unchanged, such as Claude thinking signatures and redacted thinking, and Gemini thought signatures. The history stores this data in `MessageContent.Provider` together with its issuer:
+
+```go
+type Issuer struct {
+    Provider LLMType // the provider of the client that created the data
+    Model    string  // the model the client was configured with
+    Scope    string  // a value set with the client's WithIssuerScope option
+}
+```
+
+Two issuers are the same only when all three fields are equal. The built-in clients record their issuer on every thinking content, including the reasoning of OpenAI and Ollama, which has no signature. The Gemini client also records it on text, tool call, image and PDF content that carries a thought signature.
+
+Before a client converts a history to its API format, it applies `gollem.FilterProviderData` with its own issuer as the destination:
+
+| Content | Provider-bound data | Sent to the destination |
+|---------|---------------------|-------------------------|
+| thinking | issued by the destination | as is, with its data |
+| thinking | issued by another issuer, or none | not sent |
+| any other type | issued by the destination | as is, with its data |
+| any other type | issued by another issuer | without its data |
+| any other type | none | as is |
+
+A message left with no content is not sent. `FilterProviderData` does not modify the history.
+
+As a result, a session receives thinking only from a client with the same provider, model and scope. When you switch the model or the provider of a conversation, the earlier thinking is not sent, while the text, tool calls and tool results are. A thinking content you create with `gollem.NewThinkingContent` has no issuer and is not sent to any provider.
+
+### Setting an issuer scope
+
+The scope is empty unless you set it, so a single account needs no configuration. Set a scope when two clients of the same provider and model must not exchange provider-bound data, because the provider would reject it. For example, a Claude signature created with one Anthropic account is rejected by the API when a session of another account sends it:
+
+```go
+clientA, _ := claude.New(ctx, keyA, claude.WithModel(model), claude.WithIssuerScope("tenant-a"))
+clientB, _ := claude.New(ctx, keyB, claude.WithModel(model), claude.WithIssuerScope("tenant-b"))
+
+sessionA, _ := clientA.NewSession(ctx)
+// ... generate with sessionA ...
+history, _ := sessionA.History()
+
+// The thinking of sessionA is not sent; text and tool calls are.
+sessionB, _ := clientB.NewSession(ctx, gollem.WithSessionHistory(history))
+```
+
+A client created with `claude.New` and one created with `claude.NewWithVertex` record the same provider. Whether Vertex AI accepts thinking signatures issued through the Anthropic API, and the reverse, has not been confirmed. To keep their data apart, set different scopes:
+
+```go
+anthropicClient, _ := claude.New(ctx, apiKey, claude.WithIssuerScope("anthropic"))
+vertexClient, _ := claude.NewWithVertex(ctx, region, projectID, claude.WithVertexIssuerScope("vertex:"+projectID))
+```
+
+### Implementing your own client
+
+A custom `LLMClient` and `Session` follow the same rules as the built-in clients when they do the following:
+
+1. When converting an API response to a history, set `MessageContent.Provider` on every content that carries provider-bound data, with the session's issuer. Set it on every thinking content, even without data, so that the thinking is sent back only to your client.
+2. Before converting a history to your API format, call `gollem.FilterProviderData` with the session's issuer.
+3. Use a `Provider` value other than the `LLMType` constants of the built-in clients. With the same provider, model and an empty scope, the data your client records is sent by the built-in client to its API. Use a built-in value only when your client is meant to exchange provider-bound data with that built-in client.
+4. Store data that belongs to no text or tool call, such as an opaque block returned on its own, on a thinking content with empty text. `FilterProviderData` then removes it for other issuers, and it adds no element to `Response.Thoughts`.
+5. Do not add your own `MessageContentType`. `FilterProviderData` keeps content of a type other than thinking even when another issuer created it, and a built-in client returns an error or skips content of a type it does not know.
+
+```go
+issuer := gollem.Issuer{Provider: "my-provider", Model: s.model, Scope: s.scope}
+
+// API response -> history
+c, err := gollem.NewThinkingContent(block.Text)
+if err != nil {
+    return nil, err
+}
+c.Provider = &gollem.ProviderData{Issuer: issuer, Data: block.RawSignature} // any JSON
+
+// history -> API request
+messages := gollem.FilterProviderData(history.Messages, issuer)
+```
 
 ## Usage Guidelines
 
@@ -280,7 +353,7 @@ return &h, nil
 
 ### Check the content before switching providers
 
-A history can be restored into a session of another provider, but only the content that provider supports can be sent (see [LLM Type Compatibility](#llm-type-compatibility)). Test the switch with histories that contain the content types your application uses, such as images, PDFs, and thinking blocks.
+A history can be restored into a session of another provider, but only the content that provider supports can be sent, and thinking is sent only to the client that created it (see [LLM Type Compatibility](#llm-type-compatibility)). Test the switch with histories that contain the content types your application uses, such as images, PDFs, and thinking blocks.
 
 ## Next Steps
 

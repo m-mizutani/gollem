@@ -38,11 +38,13 @@ type APIClient = apiClient
 
 // NewSessionWithAPIClient creates a new session with a custom API client for testing
 func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model string) (*Session, error) {
+	issuer := gollem.Issuer{Provider: gollem.LLMTypeGemini, Model: model}
+
 	// Initialize historyContents from config
 	var historyContents []*genai.Content
 	if cfg.History() != nil {
 		var err error
-		historyContents, err = toContents(cfg.History())
+		historyContents, err = toContents(cfg.History(), issuer)
 		if err != nil {
 			return nil, err
 		}
@@ -56,6 +58,7 @@ func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model s
 		model:           model,
 		config:          config,
 		historyContents: historyContents,
+		issuer:          issuer,
 		cfg:             cfg,
 	}, nil
 }

@@ -34,11 +34,11 @@ func TestClaudeMessageRoundTrip(t *testing.T) {
 	runTest := func(tc testCase) func(t *testing.T) {
 		return func(t *testing.T) {
 			// Convert Claude messages to gollem.History
-			history, err := claude.NewHistory(tc.messages)
+			history, err := claude.NewHistory(tc.messages, testIssuer)
 			gt.NoError(t, err)
 
 			// Convert back to Claude messages
-			restored, err := claude.ToMessages(history)
+			restored, err := claude.ToMessages(history, testIssuer)
 			gt.NoError(t, err)
 
 			// Compare the wire form rather than the Go values. A tool_use input is carried
@@ -115,66 +115,137 @@ func TestClaudeMessageRoundTrip(t *testing.T) {
 		},
 	}))
 
-	t.Run("thinking block", func(t *testing.T) {
-		// Test thinking content conversion (Claude → gollem)
-		block := anthropic.NewThinkingBlock("sig-123", "Let me think...")
-
-		history, err := claude.NewHistory([]anthropic.MessageParam{
+	t.Run("thinking and redacted thinking blocks", runTest(testCase{
+		name: "thinking and redacted thinking blocks",
+		messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock("Help me")),
-			anthropic.NewAssistantMessage(block),
-		})
+			anthropic.NewAssistantMessage(
+				anthropic.NewThinkingBlock("sig-123", "Let me think..."),
+				anthropic.NewRedactedThinkingBlock("Redacted"),
+				anthropic.NewTextBlock("Done."),
+			),
+		},
+	}))
+}
+
+var testIssuer = gollem.Issuer{Provider: gollem.LLMTypeClaude, Model: "claude-test"}
+
+func TestNewHistoryRecordsIssuerOnThinking(t *testing.T) {
+	issuer := gollem.Issuer{Provider: gollem.LLMTypeClaude, Model: "claude-test", Scope: "tenant-a"}
+	history, err := claude.NewHistory([]anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("Help me")),
+		anthropic.NewAssistantMessage(
+			anthropic.NewThinkingBlock("sig-123", "Let me think..."),
+			anthropic.NewRedactedThinkingBlock("Redacted"),
+			anthropic.NewTextBlock("Done."),
+		),
+	}, issuer)
+	gt.NoError(t, err)
+
+	contents := history.Messages[1].Contents
+	gt.A(t, contents).Length(3).Required()
+
+	thinking, err := contents[0].GetThinkingContent()
+	gt.NoError(t, err)
+	gt.Equal(t, "Let me think...", thinking.Text)
+	gt.NotNil(t, contents[0].Provider)
+	gt.Equal(t, issuer, contents[0].Provider.Issuer)
+	gt.Equal(t, `{"signature":"sig-123"}`, string(contents[0].Provider.Data))
+
+	redacted, err := contents[1].GetThinkingContent()
+	gt.NoError(t, err)
+	gt.Equal(t, "", redacted.Text)
+	gt.NotNil(t, contents[1].Provider)
+	gt.Equal(t, issuer, contents[1].Provider.Issuer)
+	gt.Equal(t, `{"signature":"Redacted","redacted":true}`, string(contents[1].Provider.Data))
+
+	// Text carries no provider-bound data.
+	gt.Nil(t, contents[2].Provider)
+}
+
+func TestToMessagesFiltersThinkingByIssuer(t *testing.T) {
+	original := []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("Help me")),
+		anthropic.NewAssistantMessage(
+			anthropic.NewThinkingBlock("sig-123", "Let me think..."),
+			anthropic.NewTextBlock("Calling the tool."),
+			anthropic.NewToolUseBlock("call_1", map[string]any{"q": "x"}, "search"),
+		),
+	}
+	history, err := claude.NewHistory(original, testIssuer)
+	gt.NoError(t, err)
+
+	t.Run("same issuer sends the signed thinking block", func(t *testing.T) {
+		restored, err := claude.ToMessages(history, testIssuer)
 		gt.NoError(t, err)
-
-		// Find assistant message with thinking content
-		var assistantMsg *gollem.Message
-		for i := range history.Messages {
-			if history.Messages[i].Role == gollem.RoleAssistant {
-				assistantMsg = &history.Messages[i]
-				break
-			}
-		}
-
-		gt.NotNil(t, assistantMsg)
-		gt.Equal(t, 1, len(assistantMsg.Contents))
-
-		content := assistantMsg.Contents[0]
-		gt.Equal(t, gollem.MessageContentTypeThinking, content.Type)
-
-		reasoning, err := content.GetThinkingContent()
-		gt.NoError(t, err)
-		gt.Equal(t, "Let me think...", reasoning.Text)
+		gt.Equal(t, marshalMessages(t, original), marshalMessages(t, restored))
 	})
 
-	t.Run("redacted thinking block", func(t *testing.T) {
-		// Test redacted thinking content conversion
-		block := anthropic.NewRedactedThinkingBlock("Redacted")
-
-		history, err := claude.NewHistory([]anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock("Help me")),
-			anthropic.NewAssistantMessage(block),
-		})
+	t.Run("another model drops the thinking block only", func(t *testing.T) {
+		restored, err := claude.ToMessages(history, gollem.Issuer{Provider: gollem.LLMTypeClaude, Model: "claude-other"})
 		gt.NoError(t, err)
+		gt.A(t, restored).Length(2).Required()
+		gt.A(t, restored[1].Content).Length(2).Required()
+		gt.NotNil(t, restored[1].Content[0].OfText)
+		gt.NotNil(t, restored[1].Content[1].OfToolUse)
+	})
+}
 
-		// Find assistant message with redacted thinking content
-		var assistantMsg *gollem.Message
-		for i := range history.Messages {
-			if history.Messages[i].Role == gollem.RoleAssistant {
-				assistantMsg = &history.Messages[i]
-				break
-			}
+func TestToMessagesDropsGeminiThinking(t *testing.T) {
+	gemini := gollem.Issuer{Provider: gollem.LLMTypeGemini, Model: "gemini-test"}
+	thinking, err := gollem.NewThinkingContent("")
+	gt.NoError(t, err)
+	thinking.Provider = &gollem.ProviderData{Issuer: gemini, Data: json.RawMessage(`{"thought_signature":"c2ln"}`)}
+	call, err := gollem.NewToolCallContent("call_1", "search", map[string]any{"q": "x"})
+	gt.NoError(t, err)
+	call.Provider = &gollem.ProviderData{Issuer: gemini, Data: json.RawMessage(`{"thought_signature":"c2ln"}`)}
+	user, err := gollem.NewTextContent("go")
+	gt.NoError(t, err)
+
+	history := &gollem.History{
+		Version: gollem.HistoryVersion,
+		Messages: []gollem.Message{
+			{Role: gollem.RoleUser, Contents: []gollem.MessageContent{user}},
+			{Role: gollem.RoleAssistant, Contents: []gollem.MessageContent{thinking, call}},
+		},
+	}
+
+	messages, err := claude.ToMessages(history, testIssuer)
+	gt.NoError(t, err)
+	gt.A(t, messages).Length(2).Required()
+	gt.A(t, messages[1].Content).Length(1).Required()
+	gt.NotNil(t, messages[1].Content[0].OfToolUse)
+}
+
+func TestToMessagesThinkingProviderDataEdgeCases(t *testing.T) {
+	newHistory := func(t *testing.T, data string) *gollem.History {
+		thinking, err := gollem.NewThinkingContent("plan")
+		gt.NoError(t, err)
+		thinking.Provider = &gollem.ProviderData{Issuer: testIssuer}
+		if data != "" {
+			thinking.Provider.Data = json.RawMessage(data)
 		}
-
-		gt.NotNil(t, assistantMsg)
-		gt.Equal(t, 1, len(assistantMsg.Contents))
-
-		content := assistantMsg.Contents[0]
-		gt.Equal(t, gollem.MessageContentTypeThinking, content.Type)
-
-		reasoning, err := content.GetThinkingContent()
+		text, err := gollem.NewTextContent("answer")
 		gt.NoError(t, err)
-		gt.Equal(t, "", reasoning.Text)
-		// Signature is stored in meta
-		gt.NotNil(t, content.Meta)
+		return &gollem.History{
+			Version: gollem.HistoryVersion,
+			Messages: []gollem.Message{
+				{Role: gollem.RoleAssistant, Contents: []gollem.MessageContent{thinking, text}},
+			},
+		}
+	}
+
+	t.Run("broken provider data returns an error", func(t *testing.T) {
+		_, err := claude.ToMessages(newHistory(t, `{`), testIssuer)
+		gt.Error(t, err)
+	})
+
+	t.Run("unsigned thinking from the same issuer is not sent", func(t *testing.T) {
+		messages, err := claude.ToMessages(newHistory(t, ""), testIssuer)
+		gt.NoError(t, err)
+		gt.A(t, messages).Length(1).Required()
+		gt.A(t, messages[0].Content).Length(1).Required()
+		gt.NotNil(t, messages[0].Content[0].OfText)
 	})
 }
 
@@ -203,14 +274,14 @@ func TestToMessagesLeavesHistoryUnchanged(t *testing.T) {
 	}
 	before := append([]gollem.Message(nil), history.Messages...)
 
-	first, err := claude.ToMessages(history)
+	first, err := claude.ToMessages(history, testIssuer)
 	gt.NoError(t, err)
 
 	// The same History is converted again on every later request, so a conversion must not
 	// consume the system message or duplicate the trailing message.
 	gt.Equal(t, before, history.Messages)
 
-	second, err := claude.ToMessages(history)
+	second, err := claude.ToMessages(history, testIssuer)
 	gt.NoError(t, err)
 	gt.Equal(t, first, second)
 }
@@ -239,7 +310,7 @@ func TestToolResponsesInSeparateMessagesBecomeOneMessage(t *testing.T) {
 		},
 	}
 
-	messages, err := claude.ToMessages(history)
+	messages, err := claude.ToMessages(history, testIssuer)
 	gt.NoError(t, err)
 
 	// Claude requires one tool_result for each tool_use block, all in the next user message.
@@ -265,7 +336,7 @@ func TestNewHistoryRecoversToolNameForToolResults(t *testing.T) {
 		),
 	}
 
-	history, err := claude.NewHistory(messages)
+	history, err := claude.NewHistory(messages, testIssuer)
 	gt.NoError(t, err)
 
 	resp, err := history.Messages[2].Contents[0].GetToolResponseContent()
@@ -283,7 +354,7 @@ func TestNewHistoryToolResultWithoutMatchingToolUse(t *testing.T) {
 		),
 	}
 
-	history, err := claude.NewHistory(messages)
+	history, err := claude.NewHistory(messages, testIssuer)
 	gt.NoError(t, err)
 
 	resp, err := history.Messages[0].Contents[0].GetToolResponseContent()
@@ -307,7 +378,7 @@ func TestClaudeHistoryPreservesWideIntegers(t *testing.T) {
 		),
 	}
 
-	history, err := claude.NewHistory(messages)
+	history, err := claude.NewHistory(messages, testIssuer)
 	gt.NoError(t, err)
 
 	call, err := history.Messages[0].Contents[0].GetToolCallContent()
@@ -325,7 +396,7 @@ func TestClaudeHistoryPreservesWideIntegers(t *testing.T) {
 	// Back into Claude's own request types, then out through the SDK's encoder.
 	// anthropic.MessageParam has its own MarshalJSON, so this is the wire form the
 	// Anthropic API actually receives, not encoding/json's view of it.
-	restored, err := claude.ToMessages(history)
+	restored, err := claude.ToMessages(history, testIssuer)
 	gt.NoError(t, err)
 	wire, err := restored[0].MarshalJSON()
 	gt.NoError(t, err)
@@ -375,7 +446,7 @@ func TestTraceMessagesReadRawToolUseInput(t *testing.T) {
 func TestOpenAIToClaudeConversion(t *testing.T) {
 	runTest := func(expected []anthropic.MessageParam) func(t *testing.T) {
 		return func(t *testing.T) {
-			messages, err := claude.ToMessages(historytest.Load(t, "openai_to_claude", "openai"))
+			messages, err := claude.ToMessages(historytest.Load(t, "openai_to_claude", "openai"), testIssuer)
 			gt.NoError(t, err)
 
 			// Compare the wire form rather than the Go values. A tool_use input is carried
@@ -443,7 +514,7 @@ func TestOpenAIToClaudeConversion(t *testing.T) {
 func TestClaudeToGeminiConversion(t *testing.T) {
 	runTest := func(messages []anthropic.MessageParam) func(t *testing.T) {
 		return func(t *testing.T) {
-			history, err := claude.NewHistory(messages)
+			history, err := claude.NewHistory(messages, testIssuer)
 			gt.NoError(t, err).Required()
 			historytest.Equal(t, "claude_to_gemini", "claude", history)
 		}
@@ -515,11 +586,11 @@ func TestClaudeToGeminiConversion(t *testing.T) {
 func TestClaudeRoundTrip(t *testing.T) {
 	runTest := func(messages []anthropic.MessageParam) func(t *testing.T) {
 		return func(t *testing.T) {
-			history, err := claude.NewHistory(messages)
+			history, err := claude.NewHistory(messages, testIssuer)
 			gt.NoError(t, err).Required()
 			historytest.Equal(t, "claude_round_trip", "claude", history)
 
-			restored, err := claude.ToMessages(historytest.Load(t, "claude_round_trip", "gemini"))
+			restored, err := claude.ToMessages(historytest.Load(t, "claude_round_trip", "gemini"), testIssuer)
 			gt.NoError(t, err)
 			gt.Equal(t, messages, restored)
 		}
@@ -548,10 +619,10 @@ func TestClaudeRoundTrip(t *testing.T) {
 // both ends and compares the restored messages with the original.
 func TestOpenAIRoundTrip(t *testing.T) {
 	run := func(t *testing.T) {
-		messages, err := claude.ToMessages(historytest.Load(t, "openai_round_trip", "openai"))
+		messages, err := claude.ToMessages(historytest.Load(t, "openai_round_trip", "openai"), testIssuer)
 		gt.NoError(t, err).Required()
 
-		history, err := claude.NewHistory(messages)
+		history, err := claude.NewHistory(messages, testIssuer)
 		gt.NoError(t, err).Required()
 		historytest.Equal(t, "openai_round_trip", "claude", history)
 	}

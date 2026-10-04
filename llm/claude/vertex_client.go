@@ -35,6 +35,10 @@ type VertexClient struct {
 
 	// structuredOutputs allows sending response schemas as output_config.format.
 	structuredOutputs bool
+
+	// issuerScope distinguishes this client's provider-bound data from data
+	// issued by another client of the same model. See WithVertexIssuerScope.
+	issuerScope string
 }
 
 // VertexOption is a function that configures a VertexClient.
@@ -150,6 +154,23 @@ func WithVertexStructuredOutputsDisabled() VertexOption {
 	}
 }
 
+// WithVertexIssuerScope sets the scope recorded on the provider-bound data this
+// client creates, such as thinking signatures. Data is sent back only to a
+// session whose client has the same model and the same scope.
+//
+// A client created with New and one created with NewWithVertex record the same
+// provider and, with the same model, the same issuer unless their scopes
+// differ. Whether Vertex AI accepts thinking signatures issued through the
+// Anthropic API, and the reverse, has not been confirmed; set different scopes,
+// for example "anthropic" with WithIssuerScope and "vertex:" + projectID here,
+// to keep the data of the two clients apart.
+// Default: "" (empty).
+func WithVertexIssuerScope(scope string) VertexOption {
+	return func(c *VertexClient) {
+		c.issuerScope = scope
+	}
+}
+
 // newConfiguredVertexClient builds a VertexClient from the defaults and the
 // given options, stopping short of the parts that need GCP credentials. It is
 // split out of NewWithVertex so that tests can exercise the real defaults and
@@ -209,6 +230,9 @@ type VertexAnthropicSession struct {
 	cfg          gollem.SessionConfig
 	messages     []anthropic.MessageParam
 
+	// issuer identifies this session as the issuer of provider-bound data.
+	issuer gollem.Issuer
+
 	structuredOutputs bool
 }
 
@@ -220,10 +244,11 @@ func (c *VertexClient) Model() string { return c.defaultModel }
 // NewSession creates a new session for Claude via Vertex AI using Anthropic SDK.
 func (c *VertexClient) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 	cfg := gollem.NewSessionConfig(options...)
+	issuer := gollem.Issuer{Provider: gollem.LLMTypeClaude, Model: c.defaultModel, Scope: c.issuerScope}
 
 	var messages []anthropic.MessageParam
 	if cfg.History() != nil {
-		history, err := toMessages(cfg.History())
+		history, err := toMessages(cfg.History(), issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history to anthropic.MessageParam")
 		}
@@ -236,6 +261,7 @@ func (c *VertexClient) NewSession(ctx context.Context, options ...gollem.Session
 		params:       c.params,
 		cfg:          cfg,
 		messages:     messages,
+		issuer:       issuer,
 
 		structuredOutputs: c.structuredOutputs,
 	}
@@ -245,14 +271,14 @@ func (c *VertexClient) NewSession(ctx context.Context, options ...gollem.Session
 
 // History returns the conversation history
 func (s *VertexAnthropicSession) History() (*gollem.History, error) {
-	return newHistory(s.messages)
+	return newHistory(s.messages, s.issuer)
 }
 
 func (s *VertexAnthropicSession) AppendHistory(h *gollem.History) error {
 	if h == nil {
 		return nil
 	}
-	messages, err := toMessages(h)
+	messages, err := toMessages(h, s.issuer)
 	if err != nil {
 		return goerr.Wrap(err, "failed to convert history to Claude format")
 	}
@@ -356,7 +382,6 @@ func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Inpu
 		ctx,
 		s.client,
 		msgParams,
-		needsJSONExtraction(s.cfg, opts...),
 		&s.messages,
 		messages,
 	)

@@ -31,7 +31,7 @@ func isGeminiFallbackToolCallID(id string) bool {
 	return strings.HasPrefix(id, geminiFallbackIDPrefix)
 }
 
-// partMeta is the metadata stored in MessageContent.Meta for Gemini parts.
+// partMeta is the data stored in MessageContent.Provider.Data for Gemini parts.
 // It preserves Gemini-specific fields (e.g., thinking model signatures) across
 // serialization/deserialization without polluting the common message types.
 type partMeta struct {
@@ -39,7 +39,7 @@ type partMeta struct {
 	ThoughtSignature []byte `json:"thought_signature,omitempty"`
 }
 
-// marshalPartMeta marshals partMeta to JSON for MessageContent.Meta.
+// marshalPartMeta marshals partMeta to JSON for MessageContent.Provider.Data.
 // Returns nil if no metadata needs to be stored.
 func marshalPartMeta(m partMeta) (json.RawMessage, error) {
 	if !m.Thought && len(m.ThoughtSignature) == 0 {
@@ -52,17 +52,27 @@ func marshalPartMeta(m partMeta) (json.RawMessage, error) {
 	return data, nil
 }
 
-// unmarshalPartMeta unmarshals partMeta from MessageContent.Meta.
-// Returns zero-value partMeta if meta is nil or empty.
-func unmarshalPartMeta(meta json.RawMessage) (partMeta, error) {
-	if len(meta) == 0 {
+// unmarshalPartMeta unmarshals partMeta from the provider-bound data of a content.
+// Returns zero-value partMeta if the content has none.
+func unmarshalPartMeta(provider *gollem.ProviderData) (partMeta, error) {
+	if provider == nil || len(provider.Data) == 0 {
 		return partMeta{}, nil
 	}
 	var m partMeta
-	if err := json.Unmarshal(meta, &m); err != nil {
+	if err := json.Unmarshal(provider.Data, &m); err != nil {
 		return partMeta{}, goerr.Wrap(err, "failed to unmarshal part meta")
 	}
 	return m, nil
+}
+
+// withProviderData attaches meta to mc as data issued by issuer. A content
+// without meta gets no provider-bound data, except a thinking content, which
+// always records its issuer so that it is never sent to another issuer.
+func withProviderData(mc gollem.MessageContent, meta json.RawMessage, issuer gollem.Issuer) gollem.MessageContent {
+	if meta != nil || mc.Type == gollem.MessageContentTypeThinking {
+		mc.Provider = &gollem.ProviderData{Issuer: issuer, Data: meta}
+	}
+	return mc
 }
 
 // hasNonTextContent reports whether a part carries content beyond plain text.
@@ -176,8 +186,11 @@ func mergeStreamedParts(parts []*genai.Part) []*genai.Part {
 	return merged
 }
 
-// convertGeminiToMessages converts Gemini contents to common Message format
-func convertGeminiToMessages(contents []*genai.Content) ([]gollem.Message, error) {
+// convertGeminiToMessages converts Gemini contents to common Message format. All
+// provider-bound data is recorded as issued by issuer: the contents hold only
+// this session's API responses and content that FilterProviderData kept for
+// issuer.
+func convertGeminiToMessages(contents []*genai.Content, issuer gollem.Issuer) ([]gollem.Message, error) {
 	if len(contents) == 0 {
 		return []gollem.Message{}, nil
 	}
@@ -185,7 +198,7 @@ func convertGeminiToMessages(contents []*genai.Content) ([]gollem.Message, error
 	result := make([]gollem.Message, 0, len(contents))
 
 	for _, content := range contents {
-		msg, err := convertGeminiContent(content)
+		msg, err := convertGeminiContent(content, issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert Gemini content")
 		}
@@ -196,7 +209,7 @@ func convertGeminiToMessages(contents []*genai.Content) ([]gollem.Message, error
 }
 
 // convertGeminiContent converts a single Gemini content to Message
-func convertGeminiContent(content *genai.Content) (gollem.Message, error) {
+func convertGeminiContent(content *genai.Content, issuer gollem.Issuer) (gollem.Message, error) {
 	contents := make([]gollem.MessageContent, 0, len(content.Parts))
 
 	// Index used to disambiguate fallback ids for FunctionCall/Response parts
@@ -207,7 +220,7 @@ func convertGeminiContent(content *genai.Content) (gollem.Message, error) {
 		if isEmptyPart(part) {
 			continue
 		}
-		msgContent, err := convertGeminiPart(part, toolPartIndex)
+		msgContent, err := convertGeminiPart(part, toolPartIndex, issuer)
 		if err != nil {
 			return gollem.Message{}, goerr.Wrap(err, "failed to convert Gemini part")
 		}
@@ -229,7 +242,7 @@ func convertGeminiContent(content *genai.Content) (gollem.Message, error) {
 // convertGeminiPart converts a Gemini part to MessageContent. fallbackIndex
 // disambiguates synthesized tool-call ids for parts whose FunctionCall.ID is
 // empty.
-func convertGeminiPart(part *genai.Part, fallbackIndex int) (gollem.MessageContent, error) {
+func convertGeminiPart(part *genai.Part, fallbackIndex int, issuer gollem.Issuer) (gollem.MessageContent, error) {
 	// Build metadata from thinking-related fields
 	meta, err := marshalPartMeta(partMeta{
 		Thought:          part.Thought,
@@ -245,8 +258,7 @@ func convertGeminiPart(part *genai.Part, fallbackIndex int) (gollem.MessageConte
 		if err != nil {
 			return gollem.MessageContent{}, err
 		}
-		mc.Meta = meta
-		return mc, nil
+		return withProviderData(mc, meta, issuer), nil
 	}
 
 	// Text part
@@ -255,32 +267,43 @@ func convertGeminiPart(part *genai.Part, fallbackIndex int) (gollem.MessageConte
 		if err != nil {
 			return gollem.MessageContent{}, err
 		}
-		mc.Meta = meta
-		return mc, nil
+		return withProviderData(mc, meta, issuer), nil
 	}
 
-	// Inline data (image or PDF)
+	// Inline data (image or PDF). An image the model generated carries a
+	// thought signature.
 	if part.InlineData != nil {
+		var mc gollem.MessageContent
+		var err error
 		if part.InlineData.MIMEType == "application/pdf" {
-			return gollem.NewPDFContent(part.InlineData.Data, "")
+			mc, err = gollem.NewPDFContent(part.InlineData.Data, "")
+		} else {
+			mc, err = gollem.NewImageContent(
+				part.InlineData.MIMEType,
+				part.InlineData.Data,
+				"",
+				"",
+			)
 		}
-		return gollem.NewImageContent(
-			part.InlineData.MIMEType,
-			part.InlineData.Data,
-			"",
-			"",
-		)
+		if err != nil {
+			return gollem.MessageContent{}, err
+		}
+		return withProviderData(mc, meta, issuer), nil
 	}
 
 	// File data
 	if part.FileData != nil {
 		// Gemini uses file URIs, store as URL
-		return gollem.NewImageContent(
+		mc, err := gollem.NewImageContent(
 			part.FileData.MIMEType,
 			nil,
 			part.FileData.FileURI,
 			"",
 		)
+		if err != nil {
+			return gollem.MessageContent{}, err
+		}
+		return withProviderData(mc, meta, issuer), nil
 	}
 
 	// Function call
@@ -301,8 +324,7 @@ func convertGeminiPart(part *genai.Part, fallbackIndex int) (gollem.MessageConte
 		if err != nil {
 			return gollem.MessageContent{}, err
 		}
-		mc.Meta = meta
-		return mc, nil
+		return withProviderData(mc, meta, issuer), nil
 	}
 
 	// Function response
@@ -320,14 +342,16 @@ func convertGeminiPart(part *genai.Part, fallbackIndex int) (gollem.MessageConte
 	}
 
 	// ThoughtSignature-only part (no text, no function call, not marked as thought)
-	// Some Gemini models return parts with only ThoughtSignature set.
+	// Some Gemini models return parts with only ThoughtSignature set. It is a
+	// signature of the model's reasoning, not something the model said, so it is
+	// kept as a thinking content with empty text: another issuer then drops it
+	// instead of receiving an empty text.
 	if len(part.ThoughtSignature) > 0 {
-		mc, err := gollem.NewTextContent("")
+		mc, err := gollem.NewThinkingContent("")
 		if err != nil {
 			return gollem.MessageContent{}, err
 		}
-		mc.Meta = meta
-		return mc, nil
+		return withProviderData(mc, meta, issuer), nil
 	}
 
 	return gollem.MessageContent{}, goerr.Wrap(convert.ErrUnsupportedContentType, "unknown Gemini part type")
@@ -405,8 +429,9 @@ func convertMessageToGemini(msg gollem.Message) (*genai.Content, error) {
 
 // convertContentToGemini converts MessageContent to Gemini part
 func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) {
-	// Extract provider metadata if present
-	meta, err := unmarshalPartMeta(content.Meta)
+	// FilterProviderData has already removed provider-bound data issued by
+	// anyone else, so what remains is Gemini's own.
+	meta, err := unmarshalPartMeta(content.Provider)
 	if err != nil {
 		return nil, err
 	}
@@ -428,6 +453,11 @@ func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) 
 		if err != nil {
 			return nil, err
 		}
+		// A signature-only part was not marked as thought; send it back the
+		// same way.
+		if !meta.Thought && len(meta.ThoughtSignature) > 0 {
+			return &genai.Part{ThoughtSignature: meta.ThoughtSignature}, nil
+		}
 		return &genai.Part{
 			Text:             reasoningContent.Text,
 			Thought:          true,
@@ -446,6 +476,7 @@ func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) 
 					MIMEType: imgContent.MediaType,
 					Data:     imgContent.Data,
 				},
+				ThoughtSignature: meta.ThoughtSignature,
 			}, nil
 		} else if imgContent.URL != "" {
 			// File URI
@@ -454,6 +485,7 @@ func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) 
 					MIMEType: imgContent.MediaType,
 					FileURI:  imgContent.URL,
 				},
+				ThoughtSignature: meta.ThoughtSignature,
 			}, nil
 		}
 		return nil, goerr.Wrap(convert.ErrInvalidMessageFormat, "image has neither data nor URL")
@@ -469,6 +501,7 @@ func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) 
 					MIMEType: "application/pdf",
 					Data:     pdfContent.Data,
 				},
+				ThoughtSignature: meta.ThoughtSignature,
 			}, nil
 		}
 		if pdfContent.URL != "" {
@@ -477,6 +510,7 @@ func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) 
 					MIMEType: "application/pdf",
 					FileURI:  pdfContent.URL,
 				},
+				ThoughtSignature: meta.ThoughtSignature,
 			}, nil
 		}
 		return nil, goerr.Wrap(convert.ErrInvalidMessageFormat, "PDF has neither data nor URL")
@@ -523,17 +557,19 @@ func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) 
 	}
 }
 
-// toContents converts gollem.History to Gemini contents
-func toContents(h *gollem.History) ([]*genai.Content, error) {
+// toContents converts gollem.History to Gemini contents to send to dest.
+// Provider-bound data is filtered by gollem.FilterProviderData first.
+func toContents(h *gollem.History, dest gollem.Issuer) ([]*genai.Content, error) {
 	if h == nil || len(h.Messages) == 0 {
 		return []*genai.Content{}, nil
 	}
-	return convertMessagesToGemini(h.Messages)
+	return convertMessagesToGemini(gollem.FilterProviderData(h.Messages, dest))
 }
 
-// newHistory creates gollem.History from Gemini contents
-func newHistory(contents []*genai.Content) (*gollem.History, error) {
-	commonMessages, err := convertGeminiToMessages(contents)
+// newHistory creates gollem.History from Gemini contents, recording issuer on
+// the provider-bound data of each content.
+func newHistory(contents []*genai.Content, issuer gollem.Issuer) (*gollem.History, error) {
+	commonMessages, err := convertGeminiToMessages(contents, issuer)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to convert Gemini messages to common format")
 	}

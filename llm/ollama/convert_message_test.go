@@ -30,6 +30,7 @@ func wireMessages(t *testing.T, data json.RawMessage) []map[string]any {
 func TestHistoryConversion(t *testing.T) {
 	t.Run("round trip of every supported content", func(t *testing.T) {
 		thinking := mustContent(t)(gollem.NewThinkingContent("let me think"))
+		thinking.Provider = &gollem.ProviderData{Issuer: ollama.TestIssuer}
 		text := mustContent(t)(gollem.NewTextContent("look at this"))
 		image := mustContent(t)(gollem.NewImageContent("image/png", pngData, "", ""))
 		call := mustContent(t)(gollem.NewToolCallContent("c1", "get_weather", map[string]any{"city": "Tokyo"}))
@@ -162,6 +163,44 @@ func TestHistoryConversion(t *testing.T) {
 		gt.Equal(t, msgs[0]["content"], any("from openai"))
 		gt.Equal(t, msgs[1]["role"], any("assistant"))
 		gt.Equal(t, msgs[1]["content"], any("openai reply"))
+	})
+
+	t.Run("thinking is sent only to its issuer", func(t *testing.T) {
+		ownThinking := mustContent(t)(gollem.NewThinkingContent("own reasoning"))
+		ownThinking.Provider = &gollem.ProviderData{Issuer: ollama.TestIssuer}
+		otherThinking := mustContent(t)(gollem.NewThinkingContent("other reasoning"))
+		otherThinking.Provider = &gollem.ProviderData{
+			Issuer: gollem.Issuer{Provider: gollem.LLMTypeClaude, Model: "claude-test"},
+			Data:   json.RawMessage(`{"signature":"sig"}`),
+		}
+		history := &gollem.History{Messages: []gollem.Message{
+			{Role: gollem.RoleUser, Contents: []gollem.MessageContent{mustContent(t)(gollem.NewTextContent("q"))}},
+			{Role: gollem.RoleAssistant, Contents: []gollem.MessageContent{
+				otherThinking, ownThinking, mustContent(t)(gollem.NewTextContent("answer")),
+			}},
+		}}
+
+		wire, back, err := ollama.HistoryRoundTrip(history)
+		gt.NoError(t, err).Required()
+		msgs := wireMessages(t, wire)
+		gt.A(t, msgs).Length(2).Required()
+		gt.Equal(t, msgs[1]["thinking"], any("own reasoning"))
+
+		// The thinking read back records the session's issuer and no data.
+		thinking := back.Messages[1].Contents[0]
+		gt.Equal(t, gollem.MessageContentTypeThinking, thinking.Type)
+		gt.NotNil(t, thinking.Provider)
+		gt.Equal(t, ollama.TestIssuer, thinking.Provider.Issuer)
+		gt.A(t, thinking.Provider.Data).Length(0)
+
+		otherModel := gollem.Issuer{Provider: gollem.LLMTypeOllama, Model: "other-model"}
+		wire, _, err = ollama.HistoryRoundTripWith(history, otherModel, otherModel)
+		gt.NoError(t, err).Required()
+		msgs = wireMessages(t, wire)
+		gt.A(t, msgs).Length(2).Required()
+		_, hasThinking := msgs[1]["thinking"]
+		gt.False(t, hasThinking)
+		gt.Equal(t, msgs[1]["content"], any("answer"))
 	})
 
 	t.Run("session history with unsupported content", func(t *testing.T) {

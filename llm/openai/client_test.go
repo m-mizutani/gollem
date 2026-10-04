@@ -1151,3 +1151,134 @@ func TestToolCallsDisabled(t *testing.T) {
 		})
 	}
 }
+
+// chatReasoningServer is a Chat Completions endpoint that records the messages
+// of every request and answers the first request with reasoning and a tool call,
+// and later requests with a plain text.
+type chatReasoningServer struct {
+	srv      *httptest.Server
+	requests [][]map[string]any
+}
+
+func newChatReasoningServer(t *testing.T) *chatReasoningServer {
+	t.Helper()
+	cs := &chatReasoningServer{}
+	cs.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Stream   bool             `json:"stream"`
+			Messages []map[string]any `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		cs.requests = append(cs.requests, body.Messages)
+		first := len(cs.requests) == 1
+
+		if body.Stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			var chunks []string
+			if first {
+				chunks = []string{
+					`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"think "}}]}`,
+					`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"reasoning_content":"hard"}}]}`,
+					`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"key\":\"alpha\"}"}}]}}]}`,
+					`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+				}
+			} else {
+				chunks = []string{
+					`{"id":"c2","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}`,
+				}
+			}
+			for _, c := range chunks {
+				_, _ = io.WriteString(w, "data: "+c+"\n\n")
+			}
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if first {
+			_, _ = io.WriteString(w, `{"id":"c1","object":"chat.completion","model":"m",
+				"choices":[{"index":0,"message":{"role":"assistant","content":"","reasoning_content":"think hard",
+				"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"key\":\"alpha\"}"}}]},
+				"finish_reason":"tool_calls"}],
+				"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"c2","object":"chat.completion","model":"m",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}`)
+	}))
+	t.Cleanup(cs.srv.Close)
+	return cs
+}
+
+// OpenAI-compatible servers that return reasoning_content can reject a request
+// with tools that does not send it back, so the session keeps it in its history.
+func TestChatReasoningIsSentBack(t *testing.T) {
+	runTest := func(stream bool) func(t *testing.T) {
+		return func(t *testing.T) {
+			cs := newChatReasoningServer(t)
+			client, err := openai.New(context.Background(), "test-key",
+				openai.WithBaseURL(cs.srv.URL+"/v1"), openai.WithModel("gpt-test"))
+			gt.NoError(t, err).Required()
+			session, err := client.NewSession(context.Background(), gollem.WithSessionTools(&lookupTool{}))
+			gt.NoError(t, err).Required()
+
+			send := func(input []gollem.Input) {
+				if !stream {
+					_, err := session.Generate(context.Background(), input)
+					gt.NoError(t, err).Required()
+					return
+				}
+				ch, err := session.Stream(context.Background(), input)
+				gt.NoError(t, err).Required()
+				for resp := range ch {
+					gt.NoError(t, resp.Error).Required()
+				}
+			}
+
+			send([]gollem.Input{gollem.Text("what is alpha?")})
+
+			h, err := session.History()
+			gt.NoError(t, err).Required()
+			gt.A(t, h.Messages).Length(2).Required()
+			thinking := h.Messages[1].Contents[0]
+			gt.Equal(t, gollem.MessageContentTypeThinking, thinking.Type)
+			gt.V(t, thinking.Provider).NotNil().Required()
+			gt.Equal(t, gollem.Issuer{Provider: gollem.LLMTypeOpenAI, Model: "gpt-test"}, thinking.Provider.Issuer)
+
+			send([]gollem.Input{gollem.FunctionResponse{ID: "call_1", Name: "lookup", Data: map[string]any{"value": "ok"}}})
+
+			gt.A(t, cs.requests).Length(2).Required()
+			assistant := cs.requests[1][1]
+			gt.Equal(t, any("assistant"), assistant["role"])
+			gt.Equal(t, any("think hard"), assistant["reasoning_content"])
+			gt.A(t, assistant["tool_calls"].([]any)).Length(1)
+		}
+	}
+
+	t.Run("Generate", runTest(false))
+	t.Run("Stream", runTest(true))
+}
+
+func TestChatReasoningOnlyMessageIsSentBack(t *testing.T) {
+	thinking, err := gollem.NewThinkingContent("only reasoning")
+	gt.NoError(t, err).Required()
+	thinking.Provider = &gollem.ProviderData{Issuer: gollem.Issuer{Provider: gollem.LLMTypeOpenAI, Model: "gpt-test"}}
+	user, err := gollem.NewTextContent("hi")
+	gt.NoError(t, err).Required()
+
+	messages, err := openai.ToMessages(&gollem.History{
+		Version: gollem.HistoryVersion,
+		Messages: []gollem.Message{
+			{Role: gollem.RoleUser, Contents: []gollem.MessageContent{user}},
+			{Role: gollem.RoleAssistant, Contents: []gollem.MessageContent{thinking}},
+		},
+	}, gollem.Issuer{Provider: gollem.LLMTypeOpenAI, Model: "gpt-test"})
+	gt.NoError(t, err).Required()
+	gt.A(t, messages).Length(2).Required()
+	gt.Equal(t, "assistant", messages[1].Role)
+	gt.Equal(t, "only reasoning", messages[1].ReasoningContent)
+}

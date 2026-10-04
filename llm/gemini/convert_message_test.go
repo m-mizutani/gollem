@@ -54,11 +54,11 @@ func TestGeminiMessageRoundTrip(t *testing.T) {
 	runTest := func(tc testCase) func(t *testing.T) {
 		return func(t *testing.T) {
 			// Convert Gemini contents to gollem.History
-			history, err := gemini.NewHistory(tc.contents)
+			history, err := gemini.NewHistory(tc.contents, testIssuer)
 			gt.NoError(t, err)
 
 			// Convert back to Gemini contents
-			restored, err := gemini.ToContents(history)
+			restored, err := gemini.ToContents(history, testIssuer)
 			gt.NoError(t, err)
 
 			// Normalize JSON content before comparison
@@ -240,22 +240,21 @@ func TestThoughtSignatureRoundTrip(t *testing.T) {
 	}
 
 	// Convert to gollem History
-	history, err := gemini.NewHistory(contents)
+	history, err := gemini.NewHistory(contents, testIssuer)
 	gt.NoError(t, err)
 
-	// Verify the Messages have Meta set
+	// Verify the contents carry provider-bound data issued by testIssuer
 	gt.A(t, history.Messages).Length(2)
 	modelMsg := history.Messages[1]
 	gt.A(t, modelMsg.Contents).Length(2)
 
-	// Thought part should have Meta
-	gt.Value(t, modelMsg.Contents[0].Meta).NotEqual(json.RawMessage(nil))
-
-	// Function call part should have Meta
-	gt.Value(t, modelMsg.Contents[1].Meta).NotEqual(json.RawMessage(nil))
+	gt.NotNil(t, modelMsg.Contents[0].Provider)
+	gt.Equal(t, testIssuer, modelMsg.Contents[0].Provider.Issuer)
+	gt.NotNil(t, modelMsg.Contents[1].Provider)
+	gt.Equal(t, testIssuer, modelMsg.Contents[1].Provider.Issuer)
 
 	// Convert back to Gemini contents
-	restored, err := gemini.ToContents(history)
+	restored, err := gemini.ToContents(history, testIssuer)
 	gt.NoError(t, err)
 
 	gt.A(t, restored).Length(2)
@@ -294,26 +293,25 @@ func TestThoughtPartsExcludedFromResponse(t *testing.T) {
 		},
 	}
 
-	history, err := gemini.NewHistory(contents)
+	history, err := gemini.NewHistory(contents, testIssuer)
 	gt.NoError(t, err)
 
 	// Both parts should be in the message (for history preservation)
 	gt.A(t, history.Messages[0].Contents).Length(2)
 
-	// First part should be ThinkingContentType with Meta
+	// First part should be ThinkingContentType with provider-bound data
 	thoughtContent := history.Messages[0].Contents[0]
 	gt.Value(t, thoughtContent.Type).Equal(gollem.MessageContentTypeThinking)
-	gt.Value(t, thoughtContent.Meta).NotEqual(json.RawMessage(nil))
+	gt.NotNil(t, thoughtContent.Provider)
 
-	// Second part should be normal TextContentType without Meta
+	// Normal text without thought/signature has no provider-bound data
 	normalContent := history.Messages[0].Contents[1]
 	gt.Value(t, normalContent.Type).Equal(gollem.MessageContentTypeText)
-	// Normal text without thought/signature should have nil Meta
-	gt.Value(t, normalContent.Meta).Equal(json.RawMessage(nil))
+	gt.Nil(t, normalContent.Provider)
 }
 
-func TestBackwardCompatibilityWithoutMeta(t *testing.T) {
-	// Verify that messages without Meta field (from older versions) still work
+func TestContentsWithoutSignatures(t *testing.T) {
+	// Verify that contents without any thought or signature carry no provider-bound data
 	contents := []*genai.Content{
 		{
 			Role:  "user",
@@ -334,18 +332,17 @@ func TestBackwardCompatibilityWithoutMeta(t *testing.T) {
 	}
 
 	// Convert to history (no ThoughtSignature anywhere)
-	history, err := gemini.NewHistory(contents)
+	history, err := gemini.NewHistory(contents, testIssuer)
 	gt.NoError(t, err)
 
-	// All Meta should be nil
 	for _, msg := range history.Messages {
 		for _, content := range msg.Contents {
-			gt.Value(t, content.Meta).Equal(json.RawMessage(nil))
+			gt.Nil(t, content.Provider)
 		}
 	}
 
 	// Convert back should work without error
-	restored, err := gemini.ToContents(history)
+	restored, err := gemini.ToContents(history, testIssuer)
 	gt.NoError(t, err)
 
 	// Restored parts should have zero-value Thought/ThoughtSignature
@@ -390,7 +387,7 @@ func TestFunctionCallIDPreservedWithExplicitID(t *testing.T) {
 		},
 	}
 
-	history, err := gemini.NewHistory(contents)
+	history, err := gemini.NewHistory(contents, testIssuer)
 	gt.NoError(t, err)
 
 	// gollem.ToolCallContent.ID must mirror FunctionCall.ID.
@@ -403,7 +400,7 @@ func TestFunctionCallIDPreservedWithExplicitID(t *testing.T) {
 	gt.Value(t, respContent.ToolCallID).Equal(callID)
 
 	// Round-trip back into Gemini parts and ensure IDs survive.
-	restored, err := gemini.ToContents(history)
+	restored, err := gemini.ToContents(history, testIssuer)
 	gt.NoError(t, err)
 
 	gt.Value(t, restored[1].Parts[0].FunctionCall.ID).Equal(callID)
@@ -435,7 +432,7 @@ func TestFunctionCallIDBackwardCompatNoID(t *testing.T) {
 		},
 	}
 
-	history, err := gemini.NewHistory(contents)
+	history, err := gemini.NewHistory(contents, testIssuer)
 	gt.NoError(t, err)
 
 	// Fallback id is populated for internal correlation.
@@ -449,7 +446,7 @@ func TestFunctionCallIDBackwardCompatNoID(t *testing.T) {
 
 	// On the way out, the fallback id must be stripped so we do not feed Gemini
 	// an id it never issued.
-	restored, err := gemini.ToContents(history)
+	restored, err := gemini.ToContents(history, testIssuer)
 	gt.NoError(t, err)
 
 	gt.Value(t, restored[0].Parts[0].FunctionCall.ID).Equal("")
@@ -481,14 +478,14 @@ func TestToContentsLeavesHistoryUnchanged(t *testing.T) {
 	}
 	before := append([]gollem.Message(nil), history.Messages...)
 
-	first, err := gemini.ToContents(history)
+	first, err := gemini.ToContents(history, testIssuer)
 	gt.NoError(t, err)
 
 	// The same History is converted again on every later request, so a conversion must not
 	// consume the system message or duplicate the trailing message.
 	gt.Equal(t, before, history.Messages)
 
-	second, err := gemini.ToContents(history)
+	second, err := gemini.ToContents(history, testIssuer)
 	gt.NoError(t, err)
 	gt.Equal(t, first, second)
 }
@@ -517,7 +514,7 @@ func TestToolResponsesInSeparateMessagesBecomeOneContent(t *testing.T) {
 		},
 	}
 
-	contents, err := gemini.ToContents(history)
+	contents, err := gemini.ToContents(history, testIssuer)
 	gt.NoError(t, err)
 
 	// Gemini requires the answering turn to carry as many functionResponse parts as the
@@ -554,7 +551,7 @@ func TestGeminiHistoryPreservesWideIntegers(t *testing.T) {
 		},
 	}
 
-	contents, err := gemini.ToContents(history)
+	contents, err := gemini.ToContents(history, testIssuer)
 	gt.NoError(t, err)
 
 	encodedArgs, err := json.Marshal(contents[0].Parts[0].FunctionCall.Args)
@@ -566,6 +563,145 @@ func TestGeminiHistoryPreservesWideIntegers(t *testing.T) {
 	gt.Equal(t, `{"account":`+wide+`}`, string(encodedResp))
 }
 
+var testIssuer = gollem.Issuer{Provider: gollem.LLMTypeGemini, Model: "gemini-test"}
+
+var claudeIssuer = gollem.Issuer{Provider: gollem.LLMTypeClaude, Model: "claude-test"}
+
+func TestSignatureOnlyPartBecomesThinking(t *testing.T) {
+	contents := []*genai.Content{
+		{Role: "user", Parts: []*genai.Part{{Text: "go"}}},
+		{Role: "model", Parts: []*genai.Part{
+			{Text: "answer"},
+			{ThoughtSignature: []byte("sig")},
+		}},
+	}
+
+	history, err := gemini.NewHistory(contents, testIssuer)
+	gt.NoError(t, err)
+
+	sigContent := history.Messages[1].Contents[1]
+	gt.Equal(t, gollem.MessageContentTypeThinking, sigContent.Type)
+	thinking, err := sigContent.GetThinkingContent()
+	gt.NoError(t, err)
+	gt.Equal(t, "", thinking.Text)
+	gt.NotNil(t, sigContent.Provider)
+	gt.Equal(t, testIssuer, sigContent.Provider.Issuer)
+	gt.Equal(t, `{"thought_signature":"c2ln"}`, string(sigContent.Provider.Data))
+
+	t.Run("same issuer restores a part with only the signature", func(t *testing.T) {
+		restored, err := gemini.ToContents(history, testIssuer)
+		gt.NoError(t, err)
+		gt.Equal(t, contents, restored)
+	})
+
+	t.Run("another issuer drops the signature-only part", func(t *testing.T) {
+		restored, err := gemini.ToContents(history, claudeIssuer)
+		gt.NoError(t, err)
+		gt.A(t, restored[1].Parts).Length(1).Required()
+		gt.Equal(t, "answer", restored[1].Parts[0].Text)
+	})
+}
+
+func TestSignedPartsAcrossIssuers(t *testing.T) {
+	contents := []*genai.Content{
+		{Role: "user", Parts: []*genai.Part{{Text: "go"}}},
+		{Role: "model", Parts: []*genai.Part{
+			{Text: "calling", ThoughtSignature: []byte("text-sig")},
+			{FunctionCall: &genai.FunctionCall{ID: "c1", Name: "search", Args: map[string]any{"q": "x"}}, ThoughtSignature: []byte("fc-sig")},
+		}},
+	}
+
+	history, err := gemini.NewHistory(contents, testIssuer)
+	gt.NoError(t, err)
+	call := history.Messages[1].Contents[1]
+	gt.Equal(t, gollem.MessageContentTypeToolCall, call.Type)
+	gt.NotNil(t, call.Provider)
+
+	t.Run("same issuer keeps the signatures", func(t *testing.T) {
+		restored, err := gemini.ToContents(history, testIssuer)
+		gt.NoError(t, err)
+		gt.Equal(t, []byte("text-sig"), restored[1].Parts[0].ThoughtSignature)
+		gt.Equal(t, []byte("fc-sig"), restored[1].Parts[1].ThoughtSignature)
+	})
+
+	t.Run("another issuer sends the parts without signatures", func(t *testing.T) {
+		restored, err := gemini.ToContents(history, gollem.Issuer{Provider: gollem.LLMTypeGemini, Model: "gemini-other"})
+		gt.NoError(t, err)
+		gt.A(t, restored[1].Parts).Length(2).Required()
+		gt.Equal(t, "calling", restored[1].Parts[0].Text)
+		gt.Nil(t, restored[1].Parts[0].ThoughtSignature)
+		gt.Equal(t, "search", restored[1].Parts[1].FunctionCall.Name)
+		gt.Nil(t, restored[1].Parts[1].ThoughtSignature)
+	})
+}
+
+func TestSignedImagePart(t *testing.T) {
+	contents := []*genai.Content{
+		{Role: "user", Parts: []*genai.Part{{Text: "draw"}}},
+		{Role: "model", Parts: []*genai.Part{
+			{InlineData: &genai.Blob{MIMEType: "image/png", Data: []byte("png-bytes")}, ThoughtSignature: []byte("img-sig")},
+		}},
+	}
+
+	history, err := gemini.NewHistory(contents, testIssuer)
+	gt.NoError(t, err)
+	image := history.Messages[1].Contents[0]
+	gt.Equal(t, gollem.MessageContentTypeImage, image.Type)
+	gt.NotNil(t, image.Provider)
+	gt.Equal(t, testIssuer, image.Provider.Issuer)
+
+	// Go through JSON, as a stored history does.
+	data, err := json.Marshal(history)
+	gt.NoError(t, err)
+	var restoredHistory gollem.History
+	gt.NoError(t, json.Unmarshal(data, &restoredHistory))
+
+	t.Run("same issuer restores the signature", func(t *testing.T) {
+		restored, err := gemini.ToContents(&restoredHistory, testIssuer)
+		gt.NoError(t, err)
+		gt.Equal(t, contents, restored)
+	})
+
+	t.Run("another issuer sends the image without the signature", func(t *testing.T) {
+		restored, err := gemini.ToContents(&restoredHistory, gollem.Issuer{Provider: gollem.LLMTypeGemini, Model: "gemini-other"})
+		gt.NoError(t, err)
+		gt.A(t, restored[1].Parts).Length(1).Required()
+		gt.Equal(t, []byte("png-bytes"), restored[1].Parts[0].InlineData.Data)
+		gt.Nil(t, restored[1].Parts[0].ThoughtSignature)
+	})
+}
+
+func TestToContentsDropsOtherProviderThinking(t *testing.T) {
+	user, err := gollem.NewTextContent("go")
+	gt.NoError(t, err)
+	thinking, err := gollem.NewThinkingContent("claude reasoning")
+	gt.NoError(t, err)
+	thinking.Provider = &gollem.ProviderData{Issuer: claudeIssuer, Data: json.RawMessage(`{"signature":"sig"}`)}
+	answer, err := gollem.NewTextContent("answer")
+	gt.NoError(t, err)
+
+	history := &gollem.History{
+		Version: gollem.HistoryVersion,
+		Messages: []gollem.Message{
+			{Role: gollem.RoleUser, Contents: []gollem.MessageContent{user}},
+			{Role: gollem.RoleAssistant, Contents: []gollem.MessageContent{thinking, answer}},
+			// An assistant message holding only another provider's thinking.
+			{Role: gollem.RoleAssistant, Contents: []gollem.MessageContent{thinking}},
+		},
+	}
+
+	contents, err := gemini.ToContents(history, testIssuer)
+	gt.NoError(t, err)
+	// The thinking-only message is removed instead of being sent with no parts.
+	gt.A(t, contents).Length(2).Required()
+	for _, c := range contents {
+		gt.A(t, c.Parts).Longer(0)
+		for _, p := range c.Parts {
+			gt.False(t, p.Thought)
+		}
+	}
+}
+
 // Cross-provider conversion tests. Each one is split at the gollem.History shared
 // through internal/historytest; the test with the same name in the other provider
 // package converts that History. See the historytest package documentation.
@@ -574,7 +710,7 @@ func TestGeminiHistoryPreservesWideIntegers(t *testing.T) {
 func TestClaudeToGeminiConversion(t *testing.T) {
 	runTest := func(expected []*genai.Content) func(t *testing.T) {
 		return func(t *testing.T) {
-			contents, err := gemini.ToContents(historytest.Load(t, "claude_to_gemini", "claude"))
+			contents, err := gemini.ToContents(historytest.Load(t, "claude_to_gemini", "claude"), testIssuer)
 			gt.NoError(t, err)
 			gt.Equal(t, expected, contents)
 		}
@@ -673,7 +809,7 @@ func TestClaudeToGeminiConversion(t *testing.T) {
 func TestGeminiToOpenAIConversion(t *testing.T) {
 	runTest := func(contents []*genai.Content) func(t *testing.T) {
 		return func(t *testing.T) {
-			history, err := gemini.NewHistory(contents)
+			history, err := gemini.NewHistory(contents, testIssuer)
 			gt.NoError(t, err).Required()
 			historytest.Equal(t, "gemini_to_openai", "gemini", history)
 		}
@@ -752,11 +888,11 @@ func TestGeminiToOpenAIConversion(t *testing.T) {
 func TestGeminiRoundTrip(t *testing.T) {
 	runTest := func(contents []*genai.Content) func(t *testing.T) {
 		return func(t *testing.T) {
-			history, err := gemini.NewHistory(contents)
+			history, err := gemini.NewHistory(contents, testIssuer)
 			gt.NoError(t, err).Required()
 			historytest.Equal(t, "gemini_round_trip", "gemini", history)
 
-			restored, err := gemini.ToContents(historytest.Load(t, "gemini_round_trip", "openai"))
+			restored, err := gemini.ToContents(historytest.Load(t, "gemini_round_trip", "openai"), testIssuer)
 			gt.NoError(t, err)
 			gt.Equal(t, contents, restored)
 		}
@@ -806,10 +942,10 @@ func TestGeminiRoundTrip(t *testing.T) {
 // both ends and compares the restored messages with the original.
 func TestClaudeRoundTrip(t *testing.T) {
 	run := func(t *testing.T) {
-		contents, err := gemini.ToContents(historytest.Load(t, "claude_round_trip", "claude"))
+		contents, err := gemini.ToContents(historytest.Load(t, "claude_round_trip", "claude"), testIssuer)
 		gt.NoError(t, err).Required()
 
-		history, err := gemini.NewHistory(contents)
+		history, err := gemini.NewHistory(contents, testIssuer)
 		gt.NoError(t, err).Required()
 		historytest.Equal(t, "claude_round_trip", "gemini", history)
 	}

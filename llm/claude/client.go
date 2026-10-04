@@ -112,6 +112,10 @@ type Client struct {
 
 	// timeout for API requests
 	timeout time.Duration
+
+	// issuerScope distinguishes this client's provider-bound data from data
+	// issued by another client of the same model. See WithIssuerScope.
+	issuerScope string
 }
 
 // Option is a function that configures a Client.
@@ -190,6 +194,18 @@ func WithBaseURL(url string) Option {
 	}
 }
 
+// WithIssuerScope sets the scope recorded on the provider-bound data this
+// client creates, such as thinking signatures. Data is sent back only to a
+// session whose client has the same model and the same scope. Set a distinct
+// scope for each Anthropic account, so that a History created with one account
+// does not send its signatures to another account, which the API rejects.
+// Default: "" (empty).
+func WithIssuerScope(scope string) Option {
+	return func(c *Client) {
+		c.issuerScope = scope
+	}
+}
+
 // New creates a new client for the Claude API.
 // It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
@@ -252,6 +268,9 @@ type Session struct {
 	// historyMessages maintains history in Claude native format for efficiency
 	historyMessages []anthropic.MessageParam
 
+	// issuer identifies this session as the issuer of provider-bound data.
+	issuer gollem.Issuer
+
 	// generation parameters
 	params generationParameters
 
@@ -274,11 +293,13 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		claudeTools[i] = convertTool(tool)
 	}
 
+	issuer := gollem.Issuer{Provider: gollem.LLMTypeClaude, Model: c.defaultModel, Scope: c.issuerScope}
+
 	// Initialize history from config (convert to Claude native format)
 	var historyMessages []anthropic.MessageParam
 	if cfg.History() != nil {
 		var err error
-		historyMessages, err = toMessages(cfg.History())
+		historyMessages, err = toMessages(cfg.History(), issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history to Claude format")
 		}
@@ -290,6 +311,7 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		tools:           claudeTools,
 		params:          c.params,
 		historyMessages: historyMessages,
+		issuer:          issuer,
 		cfg:             cfg,
 	}
 
@@ -297,14 +319,14 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 }
 
 func (s *Session) History() (*gollem.History, error) {
-	return newHistory(s.historyMessages)
+	return newHistory(s.historyMessages, s.issuer)
 }
 
 func (s *Session) AppendHistory(h *gollem.History) error {
 	if h == nil {
 		return nil
 	}
-	messages, err := toMessages(h)
+	messages, err := toMessages(h, s.issuer)
 	if err != nil {
 		return goerr.Wrap(err, "failed to convert history to Claude format")
 	}
@@ -533,19 +555,83 @@ func buildMessageParams(
 	return request, nil
 }
 
+type streamBlockKind int
+
+const (
+	streamBlockText streamBlockKind = iota
+	streamBlockThinking
+	streamBlockRedactedThinking
+	streamBlockToolUse
+)
+
+// streamBlock accumulates one content block of a streamed response.
+type streamBlock struct {
+	index     int64
+	kind      streamBlockKind
+	text      strings.Builder
+	signature string
+	data      string
+	toolUse   anthropic.ContentBlockParamUnion
+}
+
+// streamBlocks holds the content blocks of a streamed response in the order
+// the API started them, so that the history keeps thinking blocks before the
+// text and tool use that followed them.
+type streamBlocks []*streamBlock
+
+// at returns the block with the given event index, adding one of kind when the
+// stream has not started it.
+func (x *streamBlocks) at(index int64, kind streamBlockKind) *streamBlock {
+	for _, b := range *x {
+		if b.index == index {
+			return b
+		}
+	}
+	b := &streamBlock{index: index, kind: kind}
+	*x = append(*x, b)
+	return b
+}
+
+// params converts the blocks to the content of an assistant message, keeping
+// every block in the order received and its text unchanged. Claude checks the
+// signature of a thinking block against the turn it was produced in, so
+// joining, reordering or rewriting the blocks of that turn, for example by
+// extracting JSON from its text, makes the API reject the thinking blocks
+// when the history is sent back.
+func (x streamBlocks) params() []anthropic.ContentBlockParamUnion {
+	var content []anthropic.ContentBlockParamUnion
+	for _, b := range x {
+		switch b.kind {
+		case streamBlockText:
+			// The API rejects an empty text block, and Generate leaves it out of
+			// the history as well.
+			if b.text.Len() > 0 {
+				content = append(content, anthropic.NewTextBlock(b.text.String()))
+			}
+		case streamBlockThinking:
+			content = append(content, anthropic.NewThinkingBlock(b.signature, b.text.String()))
+		case streamBlockRedactedThinking:
+			content = append(content, anthropic.NewRedactedThinkingBlock(b.data))
+		case streamBlockToolUse:
+			if b.toolUse.OfToolUse != nil {
+				content = append(content, b.toolUse)
+			}
+		}
+	}
+	return content
+}
+
 // generateClaudeStream is a shared helper function that handles the core logic for generating streaming content
-// This function is used by both the standard Claude client and the Vertex AI Claude client.
-// extractJSONText selects whether JSON is extracted from the text recorded in
-// messageHistory; see needsJSONExtraction.
+// This function is used by the Vertex AI Claude client.
 //
 // newMessages are the inputs of this call. They are appended to messageHistory
 // together with the response only when the stream completes without error, so
-// a failed call leaves the history as it was and can be retried as is.
+// a failed call leaves the history as it was and can be retried as is. The
+// response is recorded as received, as Generate records it.
 func generateClaudeStream(
 	ctx context.Context,
 	client *anthropic.Client,
 	msgParams anthropic.MessageNewParams,
-	extractJSONText bool,
 	messageHistory *[]anthropic.MessageParam,
 	newMessages []anthropic.MessageParam,
 ) (<-chan *gollem.Response, error) {
@@ -556,9 +642,8 @@ func generateClaudeStream(
 
 	responseChan := make(chan *gollem.Response)
 
-	// Accumulate text and tool calls for message history
-	var textContent strings.Builder
-	var toolCalls []anthropic.ContentBlockParamUnion
+	// Accumulate the response blocks, in index order, for message history
+	var blocks streamBlocks
 	acc := newFunctionCallAccumulator()
 	var totalInputTokens int
 	var totalOutputTokens int
@@ -585,16 +670,7 @@ func generateClaudeStream(
 
 				*messageHistory = append(*messageHistory, newMessages...)
 				// Add accumulated message to history when stream ends
-				if textContent.Len() > 0 || len(toolCalls) > 0 {
-					var content []anthropic.ContentBlockParamUnion
-					if textContent.Len() > 0 {
-						finalText := textContent.String()
-						if extractJSONText {
-							finalText = extractJSON(ctx, finalText)
-						}
-						content = append(content, anthropic.NewTextBlock(finalText))
-					}
-					content = append(content, toolCalls...)
+				if content := blocks.params(); len(content) > 0 {
 					*messageHistory = append(*messageHistory, anthropic.NewAssistantMessage(content...))
 				}
 				return
@@ -632,7 +708,19 @@ func generateClaudeStream(
 					response.OutputToken = totalOutputTokens
 					response.CacheCreationInputToken = totalCacheCreation
 					response.CacheReadInputToken = totalCacheRead
-					textContent.WriteString(textDelta.Text)
+					blocks.at(deltaEvent.Index, streamBlockText).text.WriteString(textDelta.Text)
+				case "thinking_delta":
+					thinking := deltaEvent.Delta.AsThinkingDelta().Thinking
+					blocks.at(deltaEvent.Index, streamBlockThinking).text.WriteString(thinking)
+					if thinking != "" {
+						response.Thoughts = append(response.Thoughts, thinking)
+						response.InputToken = totalInputTokens
+						response.OutputToken = totalOutputTokens
+						response.CacheCreationInputToken = totalCacheCreation
+						response.CacheReadInputToken = totalCacheRead
+					}
+				case "signature_delta":
+					blocks.at(deltaEvent.Index, streamBlockThinking).signature += deltaEvent.Delta.AsSignatureDelta().Signature
 				case "input_json_delta":
 					jsonDelta := deltaEvent.Delta.AsInputJSONDelta()
 					if jsonDelta.PartialJSON != "" {
@@ -641,10 +729,21 @@ func generateClaudeStream(
 				}
 			case "content_block_start":
 				startEvent := event.AsContentBlockStart()
-				if startEvent.ContentBlock.Type == "tool_use" {
+				switch startEvent.ContentBlock.Type {
+				case "tool_use":
 					toolUseBlock := startEvent.ContentBlock.AsToolUse()
 					acc.ID = toolUseBlock.ID
 					acc.Name = toolUseBlock.Name
+					blocks.at(startEvent.Index, streamBlockToolUse)
+				case "text":
+					blocks.at(startEvent.Index, streamBlockText)
+				case "thinking":
+					b := blocks.at(startEvent.Index, streamBlockThinking)
+					thinking := startEvent.ContentBlock.AsThinking()
+					b.text.WriteString(thinking.Thinking)
+					b.signature += thinking.Signature
+				case "redacted_thinking":
+					blocks.at(startEvent.Index, streamBlockRedactedThinking).data = startEvent.ContentBlock.AsRedactedThinking().Data
 				}
 			case "content_block_stop":
 				if acc.ID != "" && acc.Name != "" {
@@ -666,7 +765,8 @@ func generateClaudeStream(
 						responseChan <- response
 						return
 					}
-					toolCalls = append(toolCalls, anthropic.NewToolUseBlock(funcCall.ID, input, funcCall.Name))
+					blocks.at(event.AsContentBlockStop().Index, streamBlockToolUse).toolUse =
+						anthropic.NewToolUseBlock(funcCall.ID, input, funcCall.Name)
 					acc = newFunctionCallAccumulator()
 				}
 			}
@@ -709,6 +809,11 @@ func processResponseWithContentType(ctx context.Context, resp *anthropic.Message
 			}
 
 			response.Texts = append(response.Texts, text)
+		case "thinking":
+			// A block whose text was omitted adds no element; see Response.Thoughts.
+			if thinking := content.AsThinking().Thinking; thinking != "" {
+				response.Thoughts = append(response.Thoughts, thinking)
+			}
 		case "tool_use":
 			toolUseBlock := content.AsToolUse()
 			args, err := jsonutil.DecodeObject(toolUseBlock.Input)
@@ -736,7 +841,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 	var historyCopy *gollem.History
 	if len(s.historyMessages) > 0 {
 		var err error
-		historyCopy, err = newHistory(s.historyMessages)
+		historyCopy, err = newHistory(s.historyMessages, s.issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history from Claude format")
 		}
@@ -753,7 +858,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
 			var err error
-			s.historyMessages, err = toMessages(req.History)
+			s.historyMessages, err = toMessages(req.History, s.issuer)
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to convert history from middleware")
 			}
@@ -808,6 +913,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 
 		return &gollem.ContentResponse{
 			Texts:                   processedResp.Texts,
+			Thoughts:                processedResp.Thoughts,
 			FunctionCalls:           processedResp.FunctionCalls,
 			InputToken:              processedResp.InputToken,
 			OutputToken:             processedResp.OutputToken,
@@ -831,6 +937,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 	// Convert ContentResponse back to gollem.Response
 	return &gollem.Response{
 		Texts:                   contentResp.Texts,
+		Thoughts:                contentResp.Thoughts,
 		FunctionCalls:           contentResp.FunctionCalls,
 		InputToken:              contentResp.InputToken,
 		OutputToken:             contentResp.OutputToken,
@@ -1052,7 +1159,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 	var historyCopy *gollem.History
 	if len(s.historyMessages) > 0 {
 		var err error
-		historyCopy, err = newHistory(s.historyMessages)
+		historyCopy, err = newHistory(s.historyMessages, s.issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history from Claude format")
 		}
@@ -1069,7 +1176,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		// Update history if modified by middleware
 		if req.History != nil {
 			var err error
-			s.historyMessages, err = toMessages(req.History)
+			s.historyMessages, err = toMessages(req.History, s.issuer)
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to convert history from middleware")
 			}
@@ -1120,10 +1227,23 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			// Process response and send chunks
 			totalInput, cacheCreation, cacheRead := cacheTokensFromUsage(resp.Usage)
 			for _, content := range resp.Content {
-				if content.Type == "text" {
+				switch content.Type {
+				case "text":
 					textBlock := content.AsText()
 					responseChan <- &gollem.ContentResponse{
 						Texts:                   []string{textBlock.Text},
+						InputToken:              totalInput,
+						OutputToken:             int(resp.Usage.OutputTokens),
+						CacheCreationInputToken: cacheCreation,
+						CacheReadInputToken:     cacheRead,
+					}
+				case "thinking":
+					thinking := content.AsThinking().Thinking
+					if thinking == "" {
+						continue
+					}
+					responseChan <- &gollem.ContentResponse{
+						Thoughts:                []string{thinking},
 						InputToken:              totalInput,
 						OutputToken:             int(resp.Usage.OutputTokens),
 						CacheCreationInputToken: cacheCreation,
@@ -1169,6 +1289,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			} else {
 				responseChan <- &gollem.Response{
 					Texts:                   streamResp.Texts,
+					Thoughts:                streamResp.Thoughts,
 					FunctionCalls:           streamResp.FunctionCalls,
 					InputToken:              streamResp.InputToken,
 					OutputToken:             streamResp.OutputToken,

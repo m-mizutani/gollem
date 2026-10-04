@@ -16,8 +16,10 @@ const (
 	rawContentKey   = "content"
 )
 
-// convertOpenAIToMessages converts OpenAI messages to common Message format
-func convertOpenAIToMessages(messages []openai.ChatCompletionMessage) ([]gollem.Message, error) {
+// convertOpenAIToMessages converts OpenAI messages to common Message format.
+// Reasoning is recorded as issued by issuer: the messages hold only this
+// session's API responses and content that FilterProviderData kept for issuer.
+func convertOpenAIToMessages(messages []openai.ChatCompletionMessage, issuer gollem.Issuer) ([]gollem.Message, error) {
 	if len(messages) == 0 {
 		return []gollem.Message{}, nil
 	}
@@ -25,7 +27,7 @@ func convertOpenAIToMessages(messages []openai.ChatCompletionMessage) ([]gollem.
 	result := make([]gollem.Message, 0, len(messages))
 
 	for _, msg := range messages {
-		commonMsg, err := convertOpenAIMessage(msg)
+		commonMsg, err := convertOpenAIMessage(msg, issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert OpenAI message")
 		}
@@ -36,7 +38,7 @@ func convertOpenAIToMessages(messages []openai.ChatCompletionMessage) ([]gollem.
 }
 
 // convertOpenAIMessage converts a single OpenAI message to common format
-func convertOpenAIMessage(msg openai.ChatCompletionMessage) (gollem.Message, error) {
+func convertOpenAIMessage(msg openai.ChatCompletionMessage, issuer gollem.Issuer) (gollem.Message, error) {
 	contents := make([]gollem.MessageContent, 0)
 
 	// Handle different content types
@@ -46,6 +48,9 @@ func convertOpenAIMessage(msg openai.ChatCompletionMessage) (gollem.Message, err
 		if err != nil {
 			return gollem.Message{}, err
 		}
+		// Reasoning has no signature, but recording the issuer sends it back
+		// only to the model that produced it.
+		content.Provider = &gollem.ProviderData{Issuer: issuer}
 		contents = append(contents, content)
 	}
 
@@ -356,8 +361,8 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 			result = append(result, toolResp)
 		}
 	} else {
-		// Add main message if it has content or tool calls
-		if len(textParts) > 0 || len(toolCalls) > 0 {
+		// Add main message if it has content, tool calls or reasoning
+		if len(textParts) > 0 || len(toolCalls) > 0 || reasoningContent != "" {
 			mainMsg := openai.ChatCompletionMessage{
 				Role: role,
 				Name: msg.Name,
@@ -401,17 +406,19 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 	return result, nil
 }
 
-// toMessages converts gollem.History to OpenAI messages
-func toMessages(h *gollem.History) ([]openai.ChatCompletionMessage, error) {
+// toMessages converts gollem.History to OpenAI messages to send to dest.
+// Provider-bound data is filtered by gollem.FilterProviderData first.
+func toMessages(h *gollem.History, dest gollem.Issuer) ([]openai.ChatCompletionMessage, error) {
 	if h == nil || len(h.Messages) == 0 {
 		return []openai.ChatCompletionMessage{}, nil
 	}
-	return convertMessagesToOpenAI(h.Messages)
+	return convertMessagesToOpenAI(gollem.FilterProviderData(h.Messages, dest))
 }
 
-// newHistory creates gollem.History from OpenAI messages
-func newHistory(messages []openai.ChatCompletionMessage) (*gollem.History, error) {
-	commonMessages, err := convertOpenAIToMessages(messages)
+// newHistory creates gollem.History from OpenAI messages, recording issuer on
+// the reasoning content of each message.
+func newHistory(messages []openai.ChatCompletionMessage, issuer gollem.Issuer) (*gollem.History, error) {
+	commonMessages, err := convertOpenAIToMessages(messages, issuer)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to convert OpenAI messages to common format")
 	}

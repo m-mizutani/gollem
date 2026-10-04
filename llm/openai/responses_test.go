@@ -672,6 +672,43 @@ func TestResponsesHistoryRestore(t *testing.T) {
 		gt.A(t, h.Messages).Length(4)
 	})
 
+	t.Run("reasoning items are sent only to a client of the same model", func(t *testing.T) {
+		rs := newResponsesServer(t, replySequence(functionCallReplyBody, finalAnswerReplyBody))
+
+		first, err := rs.client(t).NewSession(context.Background(), gollem.WithSessionTools(&lookupTool{}))
+		gt.NoError(t, err).Required()
+		_, err = first.Generate(context.Background(), []gollem.Input{gollem.Text("what is alpha?")})
+		gt.NoError(t, err).Required()
+		saved, err := first.History()
+		gt.NoError(t, err).Required()
+
+		// The reasoning item records the session's issuer.
+		var reasoning *gollem.MessageContent
+		for i := range saved.Messages {
+			for j := range saved.Messages[i].Contents {
+				if saved.Messages[i].Contents[j].Type == gollem.MessageContentTypeThinking {
+					reasoning = &saved.Messages[i].Contents[j]
+				}
+			}
+		}
+		gt.V(t, reasoning).NotNil().Required()
+		gt.V(t, reasoning.Provider).NotNil().Required()
+		gt.Equal(t, testIssuer, reasoning.Provider.Issuer)
+
+		second, err := rs.client(t, openai.WithModel("gpt-other")).NewSession(context.Background(),
+			gollem.WithSessionTools(&lookupTool{}),
+			gollem.WithSessionHistory(saved))
+		gt.NoError(t, err).Required()
+		_, err = second.Generate(context.Background(), []gollem.Input{
+			gollem.FunctionResponse{ID: "call_1", Name: "lookup", Data: map[string]any{"value": "ok"}},
+		})
+		gt.NoError(t, err).Required()
+
+		for _, item := range rs.sent()[1].Input {
+			gt.NotEqual(t, "reasoning", item.Type)
+		}
+	})
+
 	t.Run("history saved by the chat path loads", func(t *testing.T) {
 		chatMessages := []openaiapi.ChatCompletionMessage{
 			{Role: openaiapi.ChatMessageRoleUser, Content: "what is alpha?"},
@@ -687,7 +724,7 @@ func TestResponsesHistoryRestore(t *testing.T) {
 			{Role: openaiapi.ChatMessageRoleTool, ToolCallID: "call_9", Content: `{"value":"ok"}`},
 			{Role: openaiapi.ChatMessageRoleAssistant, Content: "the value is ok"},
 		}
-		chatHistory, err := openai.NewHistory(chatMessages)
+		chatHistory, err := openai.NewHistory(chatMessages, testIssuer)
 		gt.NoError(t, err).Required()
 		data, err := json.Marshal(chatHistory)
 		gt.NoError(t, err).Required()
@@ -729,7 +766,7 @@ func TestResponsesHistoryRestore(t *testing.T) {
 		h, err := session.History()
 		gt.NoError(t, err).Required()
 
-		messages, err := openai.ToMessages(h)
+		messages, err := openai.ToMessages(h, testIssuer)
 		gt.NoError(t, err).Required()
 		gt.A(t, messages).Length(2).Required()
 		gt.A(t, messages[1].ToolCalls).Length(1).Required()

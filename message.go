@@ -32,8 +32,86 @@ type MessageContent struct {
 	Type MessageContentType `json:"type"`
 	// Data contains type-specific content that should be unmarshaled based on Type
 	Data json.RawMessage `json:"data"`
-	// Meta contains provider-specific metadata (e.g., Gemini's ThoughtSignature)
-	Meta json.RawMessage `json:"meta,omitempty"`
+	// Provider holds data that only its issuer can interpret, such as a Claude
+	// thinking signature or a Gemini thought signature. It is nil when the
+	// content carries no such data.
+	Provider *ProviderData `json:"provider,omitempty"`
+}
+
+// Issuer identifies who issued provider-bound data. Two issuers are the same
+// only when every field is equal.
+//
+// Built-in clients set Provider to one of the LLMType constants. A custom
+// client should use a Provider value different from those constants, unless
+// it intends to exchange provider-bound data with the built-in client of that
+// provider.
+type Issuer struct {
+	Provider LLMType `json:"provider"`
+	Model    string  `json:"model"`
+	Scope    string  `json:"scope,omitempty"`
+}
+
+// Equal reports whether x and y are the same issuer.
+func (x Issuer) Equal(y Issuer) bool {
+	return x.Provider == y.Provider && x.Model == y.Model && x.Scope == y.Scope
+}
+
+// ProviderData is data that only its issuer can interpret. Data is opaque to
+// gollem and may be empty when only the issuer is recorded.
+type ProviderData struct {
+	Issuer Issuer          `json:"issuer"`
+	Data   json.RawMessage `json:"data,omitempty"`
+}
+
+// FilterProviderData returns the messages to send to the provider identified
+// by dest. A thinking content is kept only when its ProviderData was issued by
+// dest. Any other content is kept, without its ProviderData when that was
+// issued by someone else. A message left with no content is removed. The
+// input is not modified.
+//
+// Every built-in client calls this before converting a History to its API
+// format. A custom Session implementation should do the same, and record its
+// own Issuer on the ProviderData it creates from API responses. Data that
+// belongs to no text or tool call should be stored on a thinking content with
+// empty text, so that it is removed for other issuers. Content types not
+// defined by gollem are not supported: they are kept here and passed to the
+// destination client, which may skip them or return an error.
+func FilterProviderData(messages []Message, dest Issuer) []Message {
+	if messages == nil {
+		return nil
+	}
+
+	filtered := make([]Message, 0, len(messages))
+	for _, msg := range messages {
+		// A message that had no content to begin with is passed through, so
+		// each converter keeps handling it as it did before.
+		if len(msg.Contents) == 0 {
+			filtered = append(filtered, msg)
+			continue
+		}
+
+		contents := make([]MessageContent, 0, len(msg.Contents))
+		for _, c := range msg.Contents {
+			issuedByDest := c.Provider != nil && c.Provider.Issuer.Equal(dest)
+			if c.Type == MessageContentTypeThinking {
+				if issuedByDest {
+					contents = append(contents, c)
+				}
+				continue
+			}
+			if c.Provider != nil && !issuedByDest {
+				c.Provider = nil
+			}
+			contents = append(contents, c)
+		}
+		if len(contents) == 0 {
+			continue
+		}
+
+		msg.Contents = contents
+		filtered = append(filtered, msg)
+	}
+	return filtered
 }
 
 // MessageContentType represents the type of content in a message

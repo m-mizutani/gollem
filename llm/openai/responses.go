@@ -45,12 +45,17 @@ type responsesSession struct {
 	cfg          gollem.SessionConfig
 	// tools are kept in the Chat Completions form, which local token counting
 	// reads, and converted with openai.NewResponseFunctionTool for each request.
-	tools    []openai.Tool
+	tools []openai.Tool
+	// messages holds only content that FilterProviderData kept for issuer and
+	// content this session created, so all of its provider-bound data was
+	// issued by issuer.
 	messages []gollem.Message
+	// issuer identifies this session as the issuer of provider-bound data.
+	issuer gollem.Issuer
 }
 
-// reasoningMeta is stored in MessageContent.Meta of a thinking content that came
-// from a Responses API reasoning item. A stateless request must send every
+// reasoningMeta is stored in MessageContent.Provider.Data of a thinking content
+// that came from a Responses API reasoning item. A stateless request must send every
 // reasoning item back with its ID and encrypted content, so these fields are
 // what lets a restored History continue a reasoning conversation.
 type reasoningMeta struct {
@@ -59,8 +64,8 @@ type reasoningMeta struct {
 	Summary          []string `json:"openai_reasoning_summary,omitempty"`
 }
 
-// messageMeta is stored in MessageContent.Meta of a text content that came from
-// a Responses API message item. The API asks for the phase of an assistant
+// messageMeta is stored in MessageContent.Provider.Data of a text content that
+// came from a Responses API message item. The API asks for the phase of an assistant
 // message ("commentary" or "final_answer") to be sent back unchanged, so that
 // the model does not read commentary written before a tool call as a final
 // answer.
@@ -108,7 +113,7 @@ type responseUsage struct {
 	cacheWrite int
 }
 
-func newResponsesSession(apiClient responsesAPI, model, clientSystemPrompt string, params generationParameters, cfg gollem.SessionConfig) (*responsesSession, error) {
+func newResponsesSession(apiClient responsesAPI, model, clientSystemPrompt string, params generationParameters, cfg gollem.SessionConfig, issuer gollem.Issuer) (*responsesSession, error) {
 	systemPrompt := cfg.SystemPrompt()
 	if systemPrompt == "" {
 		systemPrompt = clientSystemPrompt
@@ -121,7 +126,7 @@ func newResponsesSession(apiClient responsesAPI, model, clientSystemPrompt strin
 
 	var messages []gollem.Message
 	if h := cfg.History(); h != nil {
-		messages = h.Clone().Messages
+		messages = gollem.FilterProviderData(h.Clone().Messages, issuer)
 		if _, err := toResponseInput(messages); err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history to Responses API input")
 		}
@@ -135,6 +140,7 @@ func newResponsesSession(apiClient responsesAPI, model, clientSystemPrompt strin
 		cfg:          cfg,
 		tools:        tools,
 		messages:     messages,
+		issuer:       issuer,
 	}, nil
 }
 
@@ -157,7 +163,7 @@ func (s *responsesSession) AppendHistory(h *gollem.History) error {
 	if h == nil {
 		return nil
 	}
-	messages := h.Clone().Messages
+	messages := gollem.FilterProviderData(h.Clone().Messages, s.issuer)
 	if _, err := toResponseInput(messages); err != nil {
 		return goerr.Wrap(err, "failed to convert history to Responses API input")
 	}
@@ -186,7 +192,7 @@ func (s *responsesSession) contentRequest(input []gollem.Input) (*gollem.Content
 // new inputs, and returns the messages added for this turn.
 func (s *responsesSession) startTurn(req *gollem.ContentRequest) ([]gollem.Message, error) {
 	if req.History != nil {
-		s.messages = req.History.Clone().Messages
+		s.messages = gollem.FilterProviderData(req.History.Clone().Messages, s.issuer)
 	}
 	newMessages, err := inputsToMessages(req.Inputs)
 	if err != nil {
@@ -326,7 +332,7 @@ func (s *responsesSession) Generate(ctx context.Context, input []gollem.Input, o
 			llmErr = err
 			return nil, err
 		}
-		turn, err := outputItemsToTurn(items)
+		turn, err := outputItemsToTurn(items, s.issuer)
 		if err != nil {
 			llmErr = err
 			return nil, err
@@ -426,7 +432,7 @@ func (s *responsesSession) Stream(ctx context.Context, input []gollem.Input, opt
 				return
 			}
 
-			turn, err := outputItemsToTurn(items)
+			turn, err := outputItemsToTurn(items, s.issuer)
 			if err != nil {
 				fail(err)
 				return
@@ -666,11 +672,13 @@ func inputsToMessages(inputs []gollem.Input) ([]gollem.Message, error) {
 	return messages, nil
 }
 
-// toResponseInput converts gollem messages to Responses API input items.
+// toResponseInput converts gollem messages to Responses API input items. The
+// messages must have been filtered by gollem.FilterProviderData for the
+// session's issuer.
 //
 // A thinking content without reasoningMeta (reasoning text that Chat
-// Completions or another provider produced) is not sent: the Responses API
-// accepts reasoning only as a reasoning item with the ID it issued.
+// Completions produced) is not sent: the Responses API accepts reasoning only
+// as a reasoning item with the ID it issued.
 func toResponseInput(messages []gollem.Message) ([]any, error) {
 	items := make([]any, 0, len(messages))
 
@@ -704,7 +712,7 @@ func toResponseInput(messages []gollem.Message) ([]any, error) {
 					return nil, goerr.Wrap(err, "failed to get text content")
 				}
 				if msg.Role == gollem.RoleAssistant {
-					meta, err := unmarshalMessageMeta(content.Meta)
+					meta, err := unmarshalMessageMeta(content.Provider)
 					if err != nil {
 						return nil, err
 					}
@@ -732,7 +740,7 @@ func toResponseInput(messages []gollem.Message) ([]any, error) {
 
 			case gollem.MessageContentTypeThinking:
 				flushParts()
-				meta, err := unmarshalReasoningMeta(content.Meta)
+				meta, err := unmarshalReasoningMeta(content.Provider)
 				if err != nil {
 					return nil, err
 				}
@@ -826,23 +834,23 @@ func mediaInputPart(content *gollem.MessageContent) (any, error) {
 	return openai.ResponseInputFile{Type: responseContentInputFile, FileURL: pdf.URL}, nil
 }
 
-func unmarshalMessageMeta(meta json.RawMessage) (messageMeta, error) {
-	if len(meta) == 0 {
+func unmarshalMessageMeta(provider *gollem.ProviderData) (messageMeta, error) {
+	if provider == nil || len(provider.Data) == 0 {
 		return messageMeta{}, nil
 	}
 	var m messageMeta
-	if err := json.Unmarshal(meta, &m); err != nil {
+	if err := json.Unmarshal(provider.Data, &m); err != nil {
 		return messageMeta{}, goerr.Wrap(err, "failed to unmarshal message meta")
 	}
 	return m, nil
 }
 
-func unmarshalReasoningMeta(meta json.RawMessage) (reasoningMeta, error) {
-	if len(meta) == 0 {
+func unmarshalReasoningMeta(provider *gollem.ProviderData) (reasoningMeta, error) {
+	if provider == nil || len(provider.Data) == 0 {
 		return reasoningMeta{}, nil
 	}
 	var m reasoningMeta
-	if err := json.Unmarshal(meta, &m); err != nil {
+	if err := json.Unmarshal(provider.Data, &m); err != nil {
 		return reasoningMeta{}, goerr.Wrap(err, "failed to unmarshal reasoning meta")
 	}
 	return m, nil
@@ -867,11 +875,12 @@ func decodeOutputItems(output []any) ([]responseOutputItem, error) {
 
 // outputItemsToTurn converts the output items of a response to the values
 // returned to the caller and to the assistant message stored in the history.
+// Reasoning items and message phases are recorded as issued by issuer.
 //
 // Only function tools are sent, so the items are reasoning, message and
 // function_call. Other item types (built-in tool calls) are not expected and
 // are neither returned nor stored.
-func outputItemsToTurn(items []responseOutputItem) (*responseTurn, error) {
+func outputItemsToTurn(items []responseOutputItem, issuer gollem.Issuer) (*responseTurn, error) {
 	turn := &responseTurn{
 		texts:         []string{},
 		thoughts:      []string{},
@@ -901,7 +910,7 @@ func outputItemsToTurn(items []responseOutputItem) (*responseTurn, error) {
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to marshal reasoning meta", goerr.V("reasoning_id", item.ID))
 			}
-			mc.Meta = meta
+			mc.Provider = &gollem.ProviderData{Issuer: issuer, Data: meta}
 			turn.message.Contents = append(turn.message.Contents, mc)
 
 		case responseItemMessage:
@@ -926,7 +935,7 @@ func outputItemsToTurn(items []responseOutputItem) (*responseTurn, error) {
 					if err != nil {
 						return nil, goerr.Wrap(err, "failed to marshal message meta", goerr.V("phase", item.Phase))
 					}
-					mc.Meta = meta
+					mc.Provider = &gollem.ProviderData{Issuer: issuer, Data: meta}
 				}
 				turn.message.Contents = append(turn.message.Contents, mc)
 			}

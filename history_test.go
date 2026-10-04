@@ -51,6 +51,11 @@ func TestHistoryUnmarshalVersionValidation(t *testing.T) {
 		expectErr: true,
 	}))
 
+	t.Run("old version 3", runTest(testCase{
+		version:   3,
+		expectErr: true,
+	}))
+
 	t.Run("future version", runTest(testCase{
 		version:   99,
 		expectErr: true,
@@ -72,11 +77,10 @@ func TestHistoryCloneWithCurrentVersion(t *testing.T) {
 	gt.Equal(t, original.Version, cloned.Version)
 }
 
-// TestClonePreservesContentMeta verifies that History.Clone performs a true deep
-// copy of every MessageContent field, including Meta (which carries Gemini's
-// ThoughtSignature and Claude content-block metadata).
-func TestClonePreservesContentMeta(t *testing.T) {
-	meta := json.RawMessage(`{"thought_signature":"YWJjZA=="}`)
+// History.Clone must deep-copy ProviderData, which carries signatures that are
+// sent back to the provider unchanged.
+func TestCloneCopiesProviderData(t *testing.T) {
+	issuer := gollem.Issuer{Provider: gollem.LLMTypeGemini, Model: "gemini-test", Scope: "s"}
 	original := &gollem.History{
 		LLType:  gollem.LLMTypeGemini,
 		Version: gollem.HistoryVersion,
@@ -87,7 +91,14 @@ func TestClonePreservesContentMeta(t *testing.T) {
 					{
 						Type: gollem.MessageContentTypeThinking,
 						Data: json.RawMessage(`{"text":"reasoning"}`),
-						Meta: meta,
+						Provider: &gollem.ProviderData{
+							Issuer: issuer,
+							Data:   json.RawMessage(`{"thought_signature":"YWJjZA=="}`),
+						},
+					},
+					{
+						Type: gollem.MessageContentTypeText,
+						Data: json.RawMessage(`{"text":"answer"}`),
 					},
 				},
 			},
@@ -96,9 +107,66 @@ func TestClonePreservesContentMeta(t *testing.T) {
 
 	cloned := original.Clone()
 
-	// Data was already copied; Meta must be too.
-	gt.Equal(t, original.Messages[0].Contents[0].Data, cloned.Messages[0].Contents[0].Data)
-	gt.Equal(t, original.Messages[0].Contents[0].Meta, cloned.Messages[0].Contents[0].Meta)
+	gotProvider := cloned.Messages[0].Contents[0].Provider
+	gt.NotNil(t, gotProvider)
+	gt.Equal(t, issuer, gotProvider.Issuer)
+	gt.Equal(t, string(original.Messages[0].Contents[0].Provider.Data), string(gotProvider.Data))
+	gt.Nil(t, cloned.Messages[0].Contents[1].Provider)
+
+	// Rewriting the clone's bytes must not reach the original.
+	gotProvider.Data[2] = 'X'
+	gotProvider.Issuer.Scope = "changed"
+	gt.Equal(t, `{"thought_signature":"YWJjZA=="}`, string(original.Messages[0].Contents[0].Provider.Data))
+	gt.Equal(t, "s", original.Messages[0].Contents[0].Provider.Issuer.Scope)
+}
+
+func TestHistoryProviderDataJSONRoundTrip(t *testing.T) {
+	issuer := gollem.Issuer{Provider: gollem.LLMTypeClaude, Model: "claude-test", Scope: "tenant-a"}
+	original := &gollem.History{
+		LLType:  gollem.LLMTypeClaude,
+		Version: gollem.HistoryVersion,
+		Messages: []gollem.Message{
+			{
+				Role: gollem.RoleAssistant,
+				Contents: []gollem.MessageContent{
+					{
+						Type: gollem.MessageContentTypeThinking,
+						Data: json.RawMessage(`{"text":"plan"}`),
+						Provider: &gollem.ProviderData{
+							Issuer: issuer,
+							Data:   json.RawMessage(`{"signature":"sig"}`),
+						},
+					},
+					{
+						Type: gollem.MessageContentTypeText,
+						Data: json.RawMessage(`{"text":"answer"}`),
+					},
+				},
+			},
+		},
+	}
+
+	data, err := json.Marshal(original)
+	gt.NoError(t, err)
+
+	var raw struct {
+		Messages []struct {
+			Contents []map[string]json.RawMessage `json:"contents"`
+		} `json:"messages"`
+	}
+	gt.NoError(t, json.Unmarshal(data, &raw))
+	_, hasProvider := raw.Messages[0].Contents[1]["provider"]
+	gt.False(t, hasProvider)
+	_, hasMeta := raw.Messages[0].Contents[0]["meta"]
+	gt.False(t, hasMeta)
+
+	var restored gollem.History
+	gt.NoError(t, json.Unmarshal(data, &restored))
+	got := restored.Messages[0].Contents[0].Provider
+	gt.NotNil(t, got)
+	gt.Equal(t, issuer, got.Issuer)
+	gt.Equal(t, `{"signature":"sig"}`, string(got.Data))
+	gt.Nil(t, restored.Messages[0].Contents[1].Provider)
 }
 
 // Clone used to deep-copy Metadata through a JSON round-trip, which dropped it entirely on

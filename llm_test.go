@@ -783,8 +783,12 @@ func TestSchemaCallAfterToolUseWithRealLLM(t *testing.T) {
 			var signedThinking int
 			for _, msg := range history.Messages {
 				for _, c := range msg.Contents {
-					t.Logf("history: role=%s type=%s meta=%dB", msg.Role, c.Type, len(c.Meta))
-					if c.Type == gollem.MessageContentTypeThinking && len(c.Meta) > 0 {
+					var providerData int
+					if c.Provider != nil {
+						providerData = len(c.Provider.Data)
+					}
+					t.Logf("history: role=%s type=%s provider_data=%dB", msg.Role, c.Type, providerData)
+					if c.Type == gollem.MessageContentTypeThinking && providerData > 0 {
 						signedThinking++
 					}
 				}

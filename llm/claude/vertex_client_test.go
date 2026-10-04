@@ -274,6 +274,203 @@ func TestVertexClientModel(t *testing.T) {
 	}))
 }
 
+func newScopedVertexSession(t *testing.T, baseURL, model, scope string, opts ...gollem.SessionOption) gollem.Session {
+	t.Helper()
+	anthropicClient := anthropic.NewClient(
+		option.WithAPIKey("test-key"),
+		option.WithBaseURL(baseURL),
+		option.WithMaxRetries(0),
+	)
+	client := claude.NewVertexClientWithAnthropicClient(&anthropicClient,
+		claude.WithVertexModel(model), claude.WithVertexIssuerScope(scope))
+	session, err := client.NewSession(context.Background(), opts...)
+	gt.NoError(t, err)
+	return session
+}
+
+const sseMessageStart = `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}}`
+
+var sseMessageEnd = [][2]string{
+	{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`},
+	{"message_stop", `{"type":"message_stop"}`},
+}
+
+// collectStream drains a stream and returns the thoughts, texts and the first error.
+func collectStream(t *testing.T, ch <-chan *gollem.Response) (thoughts, texts []string, calls []*gollem.FunctionCall, err error) {
+	t.Helper()
+	for resp := range ch {
+		if resp.Error != nil && err == nil {
+			err = resp.Error
+		}
+		thoughts = append(thoughts, resp.Thoughts...)
+		texts = append(texts, resp.Texts...)
+		calls = append(calls, resp.FunctionCalls...)
+	}
+	return thoughts, texts, calls, err
+}
+
+func TestVertexStreamRecordsThinking(t *testing.T) {
+	const model = "claude-test"
+	issuer := gollem.Issuer{Provider: gollem.LLMTypeClaude, Model: model, Scope: "v"}
+	question := []gollem.Input{gollem.Text("question")}
+
+	t.Run("thinking, text and tool use are kept in order", func(t *testing.T) {
+		events := append([][2]string{
+			{"message_start", sseMessageStart},
+			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"pl"}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"an"}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+			{"content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"answer"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":1}`},
+			{"content_block_start", `{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"call_1","name":"search","input":{}}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"q\":\"x\"}"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":2}`},
+		}, sseMessageEnd...)
+		ss := newScriptedServer(t, "", events)
+		session := newScopedVertexSession(t, ss.srv.URL, model, "v")
+
+		ch, err := session.Stream(context.Background(), question)
+		gt.NoError(t, err)
+		thoughts, texts, calls, streamErr := collectStream(t, ch)
+		gt.NoError(t, streamErr)
+		gt.Equal(t, []string{"pl", "an"}, thoughts)
+		gt.Equal(t, []string{"answer"}, texts)
+		gt.A(t, calls).Length(1)
+
+		h, err := session.History()
+		gt.NoError(t, err)
+		contents := assistantContents(t, h)
+		gt.A(t, contents).Length(3).Required()
+		gt.Equal(t, gollem.MessageContentTypeThinking, contents[0].Type)
+		gt.Equal(t, gollem.MessageContentTypeText, contents[1].Type)
+		gt.Equal(t, gollem.MessageContentTypeToolCall, contents[2].Type)
+
+		thinking, err := contents[0].GetThinkingContent()
+		gt.NoError(t, err)
+		gt.Equal(t, "plan", thinking.Text)
+		gt.NotNil(t, contents[0].Provider)
+		gt.Equal(t, issuer, contents[0].Provider.Issuer)
+		gt.Equal(t, `{"signature":"sig"}`, string(contents[0].Provider.Data))
+	})
+
+	t.Run("redacted thinking is kept and adds no Thoughts", func(t *testing.T) {
+		events := append([][2]string{
+			{"message_start", sseMessageStart},
+			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"opaque"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+			{"content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"answer"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":1}`},
+		}, sseMessageEnd...)
+		ss := newScriptedServer(t, "", events)
+		session := newScopedVertexSession(t, ss.srv.URL, model, "v")
+
+		ch, err := session.Stream(context.Background(), question)
+		gt.NoError(t, err)
+		thoughts, _, _, streamErr := collectStream(t, ch)
+		gt.NoError(t, streamErr)
+		gt.A(t, thoughts).Length(0)
+
+		h, err := session.History()
+		gt.NoError(t, err)
+		contents := assistantContents(t, h)
+		gt.A(t, contents).Length(2).Required()
+		gt.Equal(t, gollem.MessageContentTypeThinking, contents[0].Type)
+		gt.NotNil(t, contents[0].Provider)
+		gt.Equal(t, `{"signature":"opaque","redacted":true}`, string(contents[0].Provider.Data))
+	})
+
+	t.Run("blocks are sent back in the order and with the text received", func(t *testing.T) {
+		events := append([][2]string{
+			{"message_start", sseMessageStart},
+			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Here is {\"a\":1}"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+			{"content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":"","signature":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"signature_delta","signature":"sig"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":1}`},
+			{"content_block_start", `{"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"B"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":2}`},
+		}, sseMessageEnd...)
+		ss := newScriptedServer(t, messageJSON(`{"type":"text","text":"ok"}`), events)
+		// A JSON content type must not rewrite the recorded text either.
+		session := newScopedVertexSession(t, ss.srv.URL, model, "v", gollem.WithSessionContentType(gollem.ContentTypeJSON))
+
+		ch, err := session.Stream(context.Background(), question)
+		gt.NoError(t, err)
+		_, _, _, streamErr := collectStream(t, ch)
+		gt.NoError(t, streamErr)
+
+		_, err = session.Generate(context.Background(), []gollem.Input{gollem.Text("follow-up")})
+		gt.NoError(t, err)
+
+		messages := ss.lastMessages(t)
+		gt.Equal(t, [][]string{{"text"}, {"text", "thinking", "text"}, {"text"}}, blockTypes(messages))
+		blocks := messages[1]["content"].([]any)
+		gt.Equal(t, `Here is {"a":1}`, blocks[0].(map[string]any)["text"])
+		gt.Equal(t, "sig", blocks[1].(map[string]any)["signature"])
+		gt.Equal(t, "B", blocks[2].(map[string]any)["text"])
+	})
+
+	t.Run("a stream ending in an error leaves the history unchanged", func(t *testing.T) {
+		events := [][2]string{
+			{"message_start", sseMessageStart},
+			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"plan"}}`},
+			{"error", `{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`},
+		}
+		ss := newScriptedServer(t, "", events)
+		session := newScopedVertexSession(t, ss.srv.URL, model, "v")
+
+		ch, err := session.Stream(context.Background(), question)
+		gt.NoError(t, err)
+		_, _, _, streamErr := collectStream(t, ch)
+		gt.Error(t, streamErr)
+
+		h, err := session.History()
+		gt.NoError(t, err)
+		gt.A(t, h.Messages).Length(0)
+	})
+}
+
+func TestVertexIssuerScopeSeparatesThinking(t *testing.T) {
+	const model = "claude-test"
+	response := messageJSON(`{"type":"thinking","thinking":"plan","signature":"sig"},{"type":"text","text":"answer"}`)
+
+	type testCase struct {
+		nextScope string
+		expected  [][]string
+	}
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			ss := newScriptedServer(t, response, nil)
+			first := newScopedVertexSession(t, ss.srv.URL, model, "a")
+			_, err := first.Generate(context.Background(), []gollem.Input{gollem.Text("question")})
+			gt.NoError(t, err)
+			h, err := first.History()
+			gt.NoError(t, err)
+
+			next := newScopedVertexSession(t, ss.srv.URL, model, tc.nextScope, gollem.WithSessionHistory(h))
+			_, err = next.Generate(context.Background(), []gollem.Input{gollem.Text("follow-up")})
+			gt.NoError(t, err)
+			gt.Equal(t, tc.expected, blockTypes(ss.lastMessages(t)))
+		}
+	}
+
+	t.Run("same scope sends the thinking block", runTest(testCase{
+		nextScope: "a",
+		expected:  [][]string{{"text"}, {"thinking", "text"}, {"text"}},
+	}))
+	t.Run("different scope drops the thinking block", runTest(testCase{
+		nextScope: "b",
+		expected:  [][]string{{"text"}, {"text"}, {"text"}},
+	}))
+}
+
 func TestWithVertexEffort(t *testing.T) {
 	type testCase struct {
 		effort   claude.Effort

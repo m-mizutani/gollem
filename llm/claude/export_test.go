@@ -45,11 +45,13 @@ func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model s
 		tools = append(tools, convertTool(tool))
 	}
 
+	issuer := gollem.Issuer{Provider: gollem.LLMTypeClaude, Model: model}
+
 	// Initialize historyMessages from config
 	var historyMessages []anthropic.MessageParam
 	if cfg.History() != nil {
 		var err error
-		historyMessages, err = toMessages(cfg.History())
+		historyMessages, err = toMessages(cfg.History(), issuer)
 		if err != nil {
 			return nil, err
 		}
@@ -60,6 +62,7 @@ func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model s
 		defaultModel:    model,
 		tools:           tools,
 		historyMessages: historyMessages,
+		issuer:          issuer,
 		params: generationParameters{
 			Temperature: -1.0,
 			TopP:        -1.0,

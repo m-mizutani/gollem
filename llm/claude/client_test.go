@@ -1560,6 +1560,200 @@ func TestToolCallsDisabled(t *testing.T) {
 	}
 }
 
+// scriptedServer is a local Messages API endpoint that records every request
+// body and answers with a fixed response: messageJSON for a non-streaming
+// request, and sseEvents for a streaming one.
+type scriptedServer struct {
+	srv    *httptest.Server
+	mu     sync.Mutex
+	bodies []map[string]json.RawMessage
+}
+
+func newScriptedServer(t *testing.T, messageJSON string, sseEvents [][2]string) *scriptedServer {
+	t.Helper()
+	ss := &scriptedServer{}
+	ss.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		ss.mu.Lock()
+		ss.bodies = append(ss.bodies, body)
+		ss.mu.Unlock()
+
+		if string(body["stream"]) == "true" {
+			w.Header().Set("Content-Type", "text/event-stream")
+			for _, ev := range sseEvents {
+				_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev[0], ev[1])
+			}
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, messageJSON)
+	}))
+	t.Cleanup(ss.srv.Close)
+	return ss
+}
+
+// lastMessages returns the "messages" field of the last request.
+func (ss *scriptedServer) lastMessages(t *testing.T) []map[string]any {
+	t.Helper()
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	gt.A(t, ss.bodies).Longer(0).Required()
+	var messages []map[string]any
+	gt.NoError(t, json.Unmarshal(ss.bodies[len(ss.bodies)-1]["messages"], &messages)).Required()
+	return messages
+}
+
+// blockTypes returns the content block types of every message, in order.
+func blockTypes(messages []map[string]any) [][]string {
+	var out [][]string
+	for _, msg := range messages {
+		var types []string
+		blocks, _ := msg["content"].([]any)
+		for _, b := range blocks {
+			block, _ := b.(map[string]any)
+			typ, _ := block["type"].(string)
+			types = append(types, typ)
+		}
+		out = append(out, types)
+	}
+	return out
+}
+
+func messageJSON(content string) string {
+	return `{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[` + content +
+		`],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+}
+
+// assistantContents returns the contents of the last assistant message.
+func assistantContents(t *testing.T, h *gollem.History) []gollem.MessageContent {
+	t.Helper()
+	for i := len(h.Messages) - 1; i >= 0; i-- {
+		if h.Messages[i].Role == gollem.RoleAssistant {
+			return h.Messages[i].Contents
+		}
+	}
+	t.Fatal("no assistant message in history")
+	return nil
+}
+
+func newScopedAPISession(t *testing.T, baseURL, model, scope string, opts ...gollem.SessionOption) gollem.Session {
+	t.Helper()
+	client, err := claude.New(context.Background(), "test-key",
+		claude.WithBaseURL(baseURL), claude.WithModel(model), claude.WithIssuerScope(scope))
+	gt.NoError(t, err)
+	session, err := client.NewSession(context.Background(), opts...)
+	gt.NoError(t, err)
+	return session
+}
+
+func TestClaudeGenerateThoughts(t *testing.T) {
+	const model = "claude-test"
+	question := []gollem.Input{gollem.Text("question")}
+
+	t.Run("thinking text becomes Thoughts and is kept with its signature", func(t *testing.T) {
+		ss := newScriptedServer(t, messageJSON(
+			`{"type":"thinking","thinking":"plan","signature":"sig"},{"type":"text","text":"answer"}`), nil)
+		session := newScopedAPISession(t, ss.srv.URL, model, "tenant-a")
+
+		resp, err := session.Generate(context.Background(), question)
+		gt.NoError(t, err)
+		gt.Equal(t, []string{"plan"}, resp.Thoughts)
+		gt.Equal(t, []string{"answer"}, resp.Texts)
+
+		h, err := session.History()
+		gt.NoError(t, err)
+		contents := assistantContents(t, h)
+		gt.A(t, contents).Length(2).Required()
+		gt.Equal(t, gollem.MessageContentTypeThinking, contents[0].Type)
+		gt.NotNil(t, contents[0].Provider)
+		gt.Equal(t, gollem.Issuer{Provider: gollem.LLMTypeClaude, Model: model, Scope: "tenant-a"}, contents[0].Provider.Issuer)
+		gt.Equal(t, `{"signature":"sig"}`, string(contents[0].Provider.Data))
+	})
+
+	runEmpty := func(content string) func(t *testing.T) {
+		return func(t *testing.T) {
+			ss := newScriptedServer(t, messageJSON(content+`,{"type":"text","text":"answer"}`), nil)
+			session := newScopedAPISession(t, ss.srv.URL, model, "")
+
+			resp, err := session.Generate(context.Background(), question)
+			gt.NoError(t, err)
+			gt.A(t, resp.Thoughts).Length(0)
+
+			h, err := session.History()
+			gt.NoError(t, err)
+			contents := assistantContents(t, h)
+			gt.A(t, contents).Length(2).Required()
+			gt.Equal(t, gollem.MessageContentTypeThinking, contents[0].Type)
+			gt.NotNil(t, contents[0].Provider)
+		}
+	}
+	t.Run("signed thinking without text adds no Thoughts", runEmpty(
+		`{"type":"thinking","thinking":"","signature":"sig"}`))
+	t.Run("redacted thinking adds no Thoughts", runEmpty(
+		`{"type":"redacted_thinking","data":"opaque"}`))
+
+	t.Run("Stream sends thinking text as Thoughts", func(t *testing.T) {
+		ss := newScriptedServer(t, messageJSON(
+			`{"type":"thinking","thinking":"plan","signature":"sig"},{"type":"text","text":"answer"}`), nil)
+		session := newScopedAPISession(t, ss.srv.URL, model, "")
+
+		ch, err := session.Stream(context.Background(), question)
+		gt.NoError(t, err)
+		var thoughts, texts []string
+		for resp := range ch {
+			gt.NoError(t, resp.Error)
+			thoughts = append(thoughts, resp.Thoughts...)
+			texts = append(texts, resp.Texts...)
+		}
+		gt.Equal(t, []string{"plan"}, thoughts)
+		gt.Equal(t, []string{"answer"}, texts)
+	})
+}
+
+func TestClaudeIssuerScopeSeparatesThinking(t *testing.T) {
+	const model = "claude-test"
+	question := []gollem.Input{gollem.Text("question")}
+	response := messageJSON(`{"type":"thinking","thinking":"plan","signature":"sig"},{"type":"text","text":"answer"}`)
+
+	type testCase struct {
+		nextScope string
+		expected  [][]string
+	}
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			ss := newScriptedServer(t, response, nil)
+			first := newScopedAPISession(t, ss.srv.URL, model, "a")
+			_, err := first.Generate(context.Background(), question)
+			gt.NoError(t, err)
+			h, err := first.History()
+			gt.NoError(t, err)
+
+			next := newScopedAPISession(t, ss.srv.URL, model, tc.nextScope, gollem.WithSessionHistory(h))
+			_, err = next.Generate(context.Background(), []gollem.Input{gollem.Text("follow-up")})
+			gt.NoError(t, err)
+			gt.Equal(t, tc.expected, blockTypes(ss.lastMessages(t)))
+		}
+	}
+
+	t.Run("same scope sends the thinking block", runTest(testCase{
+		nextScope: "a",
+		expected:  [][]string{{"text"}, {"thinking", "text"}, {"text"}},
+	}))
+	t.Run("different scope drops the thinking block", runTest(testCase{
+		nextScope: "b",
+		expected:  [][]string{{"text"}, {"text"}, {"text"}},
+	}))
+}
+
 func TestWithEffort(t *testing.T) {
 	type testCase struct {
 		effort   claude.Effort

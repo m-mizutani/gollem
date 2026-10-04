@@ -74,6 +74,10 @@ type Client struct {
 	// contentType is the type of content to be generated.
 	contentType gollem.ContentType
 
+	// issuerScope distinguishes this client's provider-bound data from data
+	// issued by another client of the same model. See WithIssuerScope.
+	issuerScope string
+
 	// useResponsesAPI makes sessions call /v1/responses instead of
 	// /v1/chat/completions.
 	useResponsesAPI bool
@@ -196,6 +200,18 @@ func WithBaseURL(url string) Option {
 	}
 }
 
+// WithIssuerScope sets the scope recorded on the provider-bound data this
+// client creates, such as reasoning content. Reasoning is sent back only to a
+// session whose client has the same model and the same scope. Set a distinct
+// scope when clients of the same model must not exchange that data, for
+// example clients that reach different endpoints through WithBaseURL.
+// Default: "" (empty).
+func WithIssuerScope(scope string) Option {
+	return func(c *Client) {
+		c.issuerScope = scope
+	}
+}
+
 // WithResponsesAPI makes the client's sessions use the Responses API
 // (/v1/responses) instead of Chat Completions (/v1/chat/completions).
 //
@@ -274,6 +290,9 @@ type Session struct {
 	// currentHistory maintains the gollem.History for middleware access.
 	historyMessages []openai.ChatCompletionMessage
 
+	// issuer identifies this session as the issuer of provider-bound data.
+	issuer gollem.Issuer
+
 	// generation parameters
 	params generationParameters
 
@@ -292,9 +311,10 @@ func (c *Client) Model() string { return c.defaultModel }
 // It converts the provided tools to OpenAI's tool format and initializes a new chat session.
 func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 	cfg := gollem.NewSessionConfig(options...)
+	issuer := gollem.Issuer{Provider: gollem.LLMTypeOpenAI, Model: c.defaultModel, Scope: c.issuerScope}
 
 	if c.useResponsesAPI {
-		session, err := newResponsesSession(c.client, c.defaultModel, c.systemPrompt, c.params, cfg)
+		session, err := newResponsesSession(c.client, c.defaultModel, c.systemPrompt, c.params, cfg, issuer)
 		if err != nil {
 			return nil, err
 		}
@@ -311,7 +331,7 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 	var historyMessages []openai.ChatCompletionMessage
 	if cfg.History() != nil {
 		var err error
-		historyMessages, err = toMessages(cfg.History())
+		historyMessages, err = toMessages(cfg.History(), issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history to OpenAI format")
 		}
@@ -329,6 +349,7 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		tools:           openaiTools,
 		params:          c.params,
 		historyMessages: historyMessages,
+		issuer:          issuer,
 		cfg:             cfg,
 	}
 
@@ -338,14 +359,14 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 // History returns the conversation history. It does not contain the system
 // prompt.
 func (s *Session) History() (*gollem.History, error) {
-	return newHistory(s.historyMessages)
+	return newHistory(s.historyMessages, s.issuer)
 }
 
 func (s *Session) AppendHistory(h *gollem.History) error {
 	if h == nil {
 		return nil
 	}
-	messages, err := toMessages(h)
+	messages, err := toMessages(h, s.issuer)
 	if err != nil {
 		return goerr.Wrap(err, "failed to convert history to OpenAI format")
 	}
@@ -553,7 +574,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 	var historyCopy *gollem.History
 	var err error
 	if len(s.historyMessages) > 0 {
-		historyCopy, err = newHistory(s.historyMessages)
+		historyCopy, err = newHistory(s.historyMessages, s.issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to create history copy for middleware")
 		}
@@ -570,7 +591,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
 			var err error
-			s.historyMessages, err = toMessages(req.History)
+			s.historyMessages, err = toMessages(req.History, s.issuer)
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to convert history from middleware")
 			}
@@ -662,22 +683,26 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 				})
 			}
 
-			// Create assistant message with all tool calls
+			// Create assistant message with all tool calls. The reasoning is kept
+			// because OpenAI-compatible servers that return reasoning_content can
+			// require it back on later requests that carry tools.
 			assistantMessage := openai.ChatCompletionMessage{
-				Role:      openai.ChatMessageRoleAssistant,
-				Content:   message.Content,
-				ToolCalls: message.ToolCalls,
+				Role:             openai.ChatMessageRoleAssistant,
+				Content:          message.Content,
+				ReasoningContent: message.ReasoningContent,
+				ToolCalls:        message.ToolCalls,
 			}
 
 			// Update history with assistant response
 			if err := s.updateHistoryWithResponse(assistantMessage); err != nil {
 				return nil, goerr.Wrap(err, "failed to update history with assistant response")
 			}
-		} else if message.Content != "" {
+		} else if message.Content != "" || message.ReasoningContent != "" {
 			// Create assistant message without tool calls
 			assistantMessage := openai.ChatCompletionMessage{
-				Role:    openai.ChatMessageRoleAssistant,
-				Content: message.Content,
+				Role:             openai.ChatMessageRoleAssistant,
+				Content:          message.Content,
+				ReasoningContent: message.ReasoningContent,
 			}
 
 			// Update history with assistant response
@@ -736,7 +761,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 	var historyCopy *gollem.History
 	var err error
 	if len(s.historyMessages) > 0 {
-		historyCopy, err = newHistory(s.historyMessages)
+		historyCopy, err = newHistory(s.historyMessages, s.issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to create history copy for middleware")
 		}
@@ -753,7 +778,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
 			var err error
-			s.historyMessages, err = toMessages(req.History)
+			s.historyMessages, err = toMessages(req.History, s.issuer)
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to convert history from middleware")
 			}
@@ -956,10 +981,13 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					}
 				}
 
-				// Create assistant message with tool calls
+				// Create assistant message with tool calls. The reasoning is kept
+				// because OpenAI-compatible servers that return reasoning_content
+				// can require it back on later requests that carry tools.
 				assistantMessage := openai.ChatCompletionMessage{
-					Role:      openai.ChatMessageRoleAssistant,
-					ToolCalls: toolCalls,
+					Role:             openai.ChatMessageRoleAssistant,
+					ReasoningContent: reasoningContent,
+					ToolCalls:        toolCalls,
 				}
 				// Update history with assistant response
 				if err := s.updateHistoryWithResponse(assistantMessage); err != nil {
