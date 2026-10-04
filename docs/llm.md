@@ -453,7 +453,7 @@ client, err := openai.New(ctx, apiKey,
 )
 ```
 
-Reasoning content in a history is sent back only to a client with the same model and the same scope. The scope is empty by default. Set different scopes when clients of the same model must not exchange reasoning, for example clients of different endpoints. See [Provider-bound data](history.md#provider-bound-data).
+With Chat Completions, the `reasoning_content` that an OpenAI-compatible server returns is kept in the session history and sent back on later requests, because some servers reject a request with tools that does not send it back. Reasoning content in a history is sent back only to a client with the same model and the same scope. The scope is empty by default. Set different scopes when clients of the same model must not exchange reasoning, for example clients of different endpoints. See [Provider-bound data](history.md#provider-bound-data).
 
 ### Environment Variables
 

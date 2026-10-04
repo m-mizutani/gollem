@@ -361,8 +361,8 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 			result = append(result, toolResp)
 		}
 	} else {
-		// Add main message if it has content or tool calls
-		if len(textParts) > 0 || len(toolCalls) > 0 {
+		// Add main message if it has content, tool calls or reasoning
+		if len(textParts) > 0 || len(toolCalls) > 0 || reasoningContent != "" {
 			mainMsg := openai.ChatCompletionMessage{
 				Role: role,
 				Name: msg.Name,

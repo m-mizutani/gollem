@@ -643,22 +643,26 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 				})
 			}
 
-			// Create assistant message with all tool calls
+			// Create assistant message with all tool calls. The reasoning is kept
+			// because OpenAI-compatible servers that return reasoning_content can
+			// require it back on later requests that carry tools.
 			assistantMessage := openai.ChatCompletionMessage{
-				Role:      openai.ChatMessageRoleAssistant,
-				Content:   message.Content,
-				ToolCalls: message.ToolCalls,
+				Role:             openai.ChatMessageRoleAssistant,
+				Content:          message.Content,
+				ReasoningContent: message.ReasoningContent,
+				ToolCalls:        message.ToolCalls,
 			}
 
 			// Update history with assistant response
 			if err := s.updateHistoryWithResponse(assistantMessage); err != nil {
 				return nil, goerr.Wrap(err, "failed to update history with assistant response")
 			}
-		} else if message.Content != "" {
+		} else if message.Content != "" || message.ReasoningContent != "" {
 			// Create assistant message without tool calls
 			assistantMessage := openai.ChatCompletionMessage{
-				Role:    openai.ChatMessageRoleAssistant,
-				Content: message.Content,
+				Role:             openai.ChatMessageRoleAssistant,
+				Content:          message.Content,
+				ReasoningContent: message.ReasoningContent,
 			}
 
 			// Update history with assistant response
@@ -919,10 +923,13 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					}
 				}
 
-				// Create assistant message with tool calls
+				// Create assistant message with tool calls. The reasoning is kept
+				// because OpenAI-compatible servers that return reasoning_content
+				// can require it back on later requests that carry tools.
 				assistantMessage := openai.ChatCompletionMessage{
-					Role:      openai.ChatMessageRoleAssistant,
-					ToolCalls: toolCalls,
+					Role:             openai.ChatMessageRoleAssistant,
+					ReasoningContent: reasoningContent,
+					ToolCalls:        toolCalls,
 				}
 				// Update history with assistant response
 				if err := s.updateHistoryWithResponse(assistantMessage); err != nil {
