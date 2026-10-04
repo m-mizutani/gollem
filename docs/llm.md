@@ -408,7 +408,7 @@ client, err := openai.New(ctx, apiKey,
 )
 ```
 
-Use it for models that accept function tools together with reasoning only on the Responses API, or to receive prompt-cache writes in `CacheCreationInputToken`.
+Use it for models that accept function tools together with reasoning only on the Responses API.
 
 - Requests are stateless: each call sends the whole conversation with `store: false`, and `previous_response_id` is not used. Session History and history-rewriting middleware work as with Chat Completions.
 - The encrypted reasoning items of earlier turns are requested (`include: ["reasoning.encrypted_content"]`), kept in the History, and sent back on the next call. A History saved in Responses mode can be restored into a new session; a History saved with Chat Completions also loads, but its reasoning text is not sent because the Responses API accepts only reasoning items it issued.

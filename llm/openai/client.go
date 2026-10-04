@@ -199,8 +199,8 @@ func WithBaseURL(url string) Option {
 // WithResponsesAPI makes the client's sessions use the Responses API
 // (/v1/responses) instead of Chat Completions (/v1/chat/completions).
 //
-// Some reasoning models accept function tools only on the Responses API, and
-// only the Responses API reports prompt-cache writes. Requests are stateless:
+// Some reasoning models accept function tools only on the Responses API.
+// Requests are stateless:
 // every call sends the whole conversation with store set to false, and the
 // encrypted reasoning items of earlier turns are kept in the session History
 // and sent back. Chat Completions stays the default because many
@@ -243,6 +243,10 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 	if client.baseURL != "" {
 		config.BaseURL = client.baseURL
 	}
+
+	// go-openai drops usage.prompt_tokens_details.cache_write_tokens while
+	// decoding, so the response body is inspected before it reaches go-openai.
+	config.HTTPClient = &usageCaptureDoer{next: config.HTTPClient}
 
 	openaiClient := openai.NewClientWithConfig(config)
 	client.client = openaiClient
@@ -595,11 +599,17 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			defer func() { h.EndLLMCall(ctx, openaiTraceData, llmErr) }()
 		}
 
-		resp, err := s.apiClient.CreateChatCompletion(ctx, openaiReq)
+		apiCtx, capture := withUsageCapture(ctx, false)
+		resp, err := s.apiClient.CreateChatCompletion(apiCtx, openaiReq)
 		if err != nil {
 			llmErr = err
 			opts := tokenLimitErrorOptions(err)
 			return nil, goerr.Wrap(err, "failed to create chat completion", opts...)
+		}
+		cacheWriteTokens, err := capture.result()
+		if err != nil {
+			llmErr = err
+			return nil, goerr.Wrap(err, "failed to read chat completion usage")
 		}
 
 		if len(resp.Choices) == 0 {
@@ -619,13 +629,14 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			Texts:         make([]string, 0),
 			Thoughts:      make([]string, 0),
 			FunctionCalls: make([]*gollem.FunctionCall, 0),
-			// OpenAI caches automatically; PromptTokens already includes cached
-			// tokens, so InputToken stays total. Chat Completions reports cache
-			// reads but not cache writes, so CacheCreationInputToken stays 0 here;
-			// the Responses API (WithResponsesAPI) reports both.
-			InputToken:          resp.Usage.PromptTokens,
-			OutputToken:         resp.Usage.CompletionTokens,
-			CacheReadInputToken: cachedPromptTokens(resp.Usage),
+			// OpenAI caches automatically. PromptTokens counts the whole input,
+			// including tokens read from and written to the cache, so InputToken
+			// stays total. Cache reads come from cached_tokens and cache writes
+			// from cache_write_tokens, which go-openai does not decode.
+			InputToken:              resp.Usage.PromptTokens,
+			OutputToken:             resp.Usage.CompletionTokens,
+			CacheCreationInputToken: cacheWriteTokens,
+			CacheReadInputToken:     cachedPromptTokens(resp.Usage),
 		}
 
 		message := resp.Choices[0].Message
@@ -678,17 +689,18 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		// Set trace data for defer.
 		// Record only messages added in this turn; the full request history is
 		// captured incrementally across previous trace spans.
-		openaiTraceData = buildOpenAITraceData(resp, s.defaultModel, req.SystemPrompt, newMessages)
+		openaiTraceData = buildOpenAITraceData(resp, response.CacheCreationInputToken, req.SystemPrompt, newMessages)
 
 		// History is already updated by updateHistoryWithResponse above
 
 		return &gollem.ContentResponse{
-			Texts:               response.Texts,
-			Thoughts:            response.Thoughts,
-			FunctionCalls:       response.FunctionCalls,
-			InputToken:          response.InputToken,
-			OutputToken:         response.OutputToken,
-			CacheReadInputToken: response.CacheReadInputToken,
+			Texts:                   response.Texts,
+			Thoughts:                response.Thoughts,
+			FunctionCalls:           response.FunctionCalls,
+			InputToken:              response.InputToken,
+			OutputToken:             response.OutputToken,
+			CacheCreationInputToken: response.CacheCreationInputToken,
+			CacheReadInputToken:     response.CacheReadInputToken,
 		}, nil
 	}
 
@@ -707,12 +719,13 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 	// Update history after middleware execution (history was already updated in baseHandler)
 	// Convert ContentResponse back to gollem.Response
 	return &gollem.Response{
-		Texts:               contentResp.Texts,
-		Thoughts:            contentResp.Thoughts,
-		FunctionCalls:       contentResp.FunctionCalls,
-		InputToken:          contentResp.InputToken,
-		OutputToken:         contentResp.OutputToken,
-		CacheReadInputToken: contentResp.CacheReadInputToken,
+		Texts:                   contentResp.Texts,
+		Thoughts:                contentResp.Thoughts,
+		FunctionCalls:           contentResp.FunctionCalls,
+		InputToken:              contentResp.InputToken,
+		OutputToken:             contentResp.OutputToken,
+		CacheCreationInputToken: contentResp.CacheCreationInputToken,
+		CacheReadInputToken:     contentResp.CacheReadInputToken,
 	}, nil
 }
 
@@ -771,7 +784,8 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		openaiReq.StreamOptions = &openai.StreamOptions{
 			IncludeUsage: true,
 		}
-		stream, err := s.apiClient.CreateChatCompletionStream(ctx, openaiReq)
+		apiCtx, capture := withUsageCapture(ctx, true)
+		stream, err := s.apiClient.CreateChatCompletionStream(apiCtx, openaiReq)
 		if err != nil {
 			if traceHandler != nil {
 				traceHandler.EndLLMCall(ctx, nil, err)
@@ -798,6 +812,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			var totalInputTokens int
 			var totalOutputTokens int
 			var totalCacheRead int
+			var totalCacheWrite int
 
 			// Process streaming chunks
 			for {
@@ -827,6 +842,17 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					totalInputTokens = resp.Usage.PromptTokens
 					totalOutputTokens = resp.Usage.CompletionTokens
 					totalCacheRead = cachedPromptTokens(*resp.Usage)
+					// The capture has already seen this chunk: go-openai reads
+					// each event line through the capturing body before decoding.
+					cacheWrite, err := capture.result()
+					if err != nil {
+						streamErr = err
+						responseChan <- &gollem.ContentResponse{
+							Error: goerr.Wrap(err, "failed to read chat completion stream usage"),
+						}
+						return
+					}
+					totalCacheWrite = cacheWrite
 				}
 
 				if len(resp.Choices) == 0 {
@@ -840,10 +866,11 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				if delta.Content != "" {
 					textContent += delta.Content
 					responseChan <- &gollem.ContentResponse{
-						Texts:               []string{delta.Content},
-						InputToken:          totalInputTokens,
-						OutputToken:         totalOutputTokens,
-						CacheReadInputToken: totalCacheRead,
+						Texts:                   []string{delta.Content},
+						InputToken:              totalInputTokens,
+						OutputToken:             totalOutputTokens,
+						CacheCreationInputToken: totalCacheWrite,
+						CacheReadInputToken:     totalCacheRead,
 					}
 				}
 
@@ -851,10 +878,11 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				if delta.ReasoningContent != "" {
 					reasoningContent += delta.ReasoningContent
 					responseChan <- &gollem.ContentResponse{
-						Thoughts:            []string{delta.ReasoningContent},
-						InputToken:          totalInputTokens,
-						OutputToken:         totalOutputTokens,
-						CacheReadInputToken: totalCacheRead,
+						Thoughts:                []string{delta.ReasoningContent},
+						InputToken:              totalInputTokens,
+						OutputToken:             totalOutputTokens,
+						CacheCreationInputToken: totalCacheWrite,
+						CacheReadInputToken:     totalCacheRead,
 					}
 				}
 
@@ -920,10 +948,11 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 
 				if len(functionCalls) > 0 {
 					responseChan <- &gollem.ContentResponse{
-						FunctionCalls:       functionCalls,
-						InputToken:          totalInputTokens,
-						OutputToken:         totalOutputTokens,
-						CacheReadInputToken: totalCacheRead,
+						FunctionCalls:           functionCalls,
+						InputToken:              totalInputTokens,
+						OutputToken:             totalOutputTokens,
+						CacheCreationInputToken: totalCacheWrite,
+						CacheReadInputToken:     totalCacheRead,
 					}
 				}
 
@@ -959,10 +988,11 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			// Record only messages added in this turn; previous turns are already
 			// captured in earlier trace spans.
 			streamTraceData = &trace.LLMCallData{
-				InputTokens:          totalInputTokens,
-				OutputTokens:         totalOutputTokens,
-				Model:                s.defaultModel,
-				CacheReadInputTokens: totalCacheRead,
+				InputTokens:              totalInputTokens,
+				OutputTokens:             totalOutputTokens,
+				Model:                    s.defaultModel,
+				CacheCreationInputTokens: totalCacheWrite,
+				CacheReadInputTokens:     totalCacheRead,
 				Request: &trace.LLMRequest{
 					SystemPrompt: req.SystemPrompt,
 					Messages:     openaiMessagesToTraceMessages(newMessages),
@@ -986,9 +1016,10 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			// Send final response with complete token usage if available
 			if totalInputTokens > 0 || totalOutputTokens > 0 {
 				responseChan <- &gollem.ContentResponse{
-					InputToken:          totalInputTokens,
-					OutputToken:         totalOutputTokens,
-					CacheReadInputToken: totalCacheRead,
+					InputToken:              totalInputTokens,
+					OutputToken:             totalOutputTokens,
+					CacheCreationInputToken: totalCacheWrite,
+					CacheReadInputToken:     totalCacheRead,
 				}
 			}
 
@@ -1026,12 +1057,13 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				}
 			} else {
 				responseChan <- &gollem.Response{
-					Texts:               streamResp.Texts,
-					Thoughts:            streamResp.Thoughts,
-					FunctionCalls:       streamResp.FunctionCalls,
-					InputToken:          streamResp.InputToken,
-					OutputToken:         streamResp.OutputToken,
-					CacheReadInputToken: streamResp.CacheReadInputToken,
+					Texts:                   streamResp.Texts,
+					Thoughts:                streamResp.Thoughts,
+					FunctionCalls:           streamResp.FunctionCalls,
+					InputToken:              streamResp.InputToken,
+					OutputToken:             streamResp.OutputToken,
+					CacheCreationInputToken: streamResp.CacheCreationInputToken,
+					CacheReadInputToken:     streamResp.CacheReadInputToken,
 				}
 			}
 		}
@@ -1377,12 +1409,15 @@ func openaiMessagesToTraceMessages(messages []openai.ChatCompletionMessage) []tr
 }
 
 // buildOpenAITraceData builds trace.LLMCallData from an OpenAI API response.
-func buildOpenAITraceData(resp openai.ChatCompletionResponse, model string, systemPrompt string, messages []openai.ChatCompletionMessage) *trace.LLMCallData {
+// cacheWriteTokens is passed separately because go-openai does not decode it
+// into resp.
+func buildOpenAITraceData(resp openai.ChatCompletionResponse, cacheWriteTokens int, systemPrompt string, messages []openai.ChatCompletionMessage) *trace.LLMCallData {
 	data := &trace.LLMCallData{
-		InputTokens:          resp.Usage.PromptTokens,
-		OutputTokens:         resp.Usage.CompletionTokens,
-		Model:                resp.Model,
-		CacheReadInputTokens: cachedPromptTokens(resp.Usage),
+		InputTokens:              resp.Usage.PromptTokens,
+		OutputTokens:             resp.Usage.CompletionTokens,
+		Model:                    resp.Model,
+		CacheCreationInputTokens: cacheWriteTokens,
+		CacheReadInputTokens:     cachedPromptTokens(resp.Usage),
 		Request: &trace.LLMRequest{
 			SystemPrompt: systemPrompt,
 			Messages:     openaiMessagesToTraceMessages(messages),

@@ -916,7 +916,8 @@ func TestOpenAICacheTokenObservation(t *testing.T) {
 			// OpenAI's PromptTokens already includes cached tokens, so InputToken stays total.
 			gt.Equal(t, 200, resp.InputToken)
 			gt.Equal(t, wantCacheRead, resp.CacheReadInputToken)
-			// Chat Completions does not report cache writes.
+			// Cache writes are read from the HTTP response body, which the
+			// mocked apiClient bypasses.
 			gt.Equal(t, 0, resp.CacheCreationInputToken)
 		}
 	}

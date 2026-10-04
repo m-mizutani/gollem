@@ -30,8 +30,8 @@ type ContentResponse struct {
 	FunctionCalls []*FunctionCall // Function/tool call requests
 	InputToken    int             // Number of input tokens used (total, incl. cache reads)
 	OutputToken   int             // Number of output tokens used
-	// CacheCreationInputToken is input tokens written to the prompt cache. Reported by
-	// Claude and by OpenAI's Responses API; 0 when the provider does not report writes.
+	// CacheCreationInputToken is input tokens written to the prompt cache.
+	// Reported by Claude and OpenAI; 0 for providers that do not report writes.
 	CacheCreationInputToken int
 	// CacheReadInputToken is input tokens served from the prompt cache (cache hits).
 	CacheReadInputToken int
