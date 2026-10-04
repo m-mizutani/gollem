@@ -372,6 +372,30 @@ client, err := openai.New(ctx, apiKey,
 )
 ```
 
+#### Reasoning Effort and Verbosity
+
+```go
+client, err := openai.New(ctx, apiKey,
+    openai.WithModel("gpt-5.6"),
+    openai.WithReasoningEffort("low"),
+    openai.WithVerbosity("low"),
+)
+```
+
+Both values are sent to the API unchanged. Without these options gollem sends neither parameter and each model applies its own default. Not every model accepts every value (`gpt-5.6` rejects `reasoning_effort: "minimal"`, and `gpt-4.1` accepts only `verbosity: "medium"`); the API rejects an unsupported value with HTTP 400, so set a value only when you know the model supports it.
+
+Earlier versions of gollem sent `reasoning_effort: "minimal"` and `verbosity: "low"` when these options were not given. The model defaults can use more output tokens and take longer than those values. To keep the earlier behavior with `gpt-5`, set `openai.WithReasoningEffort("minimal")` and `openai.WithVerbosity("low")` explicitly.
+
+#### System Prompt
+
+```go
+client, err := openai.New(ctx, apiKey,
+    openai.WithSystemPrompt("You are concise."), // used when the session sets no system prompt
+)
+```
+
+The system prompt is sent as a `system` message at the head of every request and is not stored in the session history.
+
 #### Organization and Base URL
 
 ```go

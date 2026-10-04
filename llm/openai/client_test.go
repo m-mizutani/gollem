@@ -4,8 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -193,8 +198,276 @@ func TestPerCallGenerateOptions(t *testing.T) {
 	gt.True(t, parsed["name"] != nil)
 }
 
+// TestDefaultOptionsLive verifies that a client created without generation
+// options can call models that accept different reasoning_effort and
+// verbosity values, and that each model follows the session system prompt.
+func TestDefaultOptionsLive(t *testing.T) {
+	apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
+	if !ok {
+		t.Skip("TEST_OPENAI_API_KEY is not set")
+	}
+
+	runTest := func(model string) func(t *testing.T) {
+		return func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+			defer cancel()
+
+			client, err := openai.New(ctx, apiKey, openai.WithModel(model))
+			gt.NoError(t, err).Required()
+			session, err := client.NewSession(ctx, gollem.WithSessionSystemPrompt(
+				"Whatever the user says, reply with exactly the single word PINEAPPLE and nothing else."))
+			gt.NoError(t, err).Required()
+
+			resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("Say hello in one word")}, gollem.WithMaxTokens(maxTestTokens))
+			gt.NoError(t, err).Required()
+			gt.A(t, resp.Texts).Longer(0).Required()
+			gt.S(t, strings.ToUpper(strings.Join(resp.Texts, ""))).Contains("PINEAPPLE")
+		}
+	}
+
+	t.Run("default model", runTest(openai.DefaultModel))
+	t.Run("gpt-5.6", runTest("gpt-5.6"))
+	t.Run("gpt-4.1", runTest("gpt-4.1"))
+}
+
+// sentRequest is the part of a chat completion request body that the request
+// tests inspect.
+type sentRequest struct {
+	Messages []struct {
+		Role string `json:"role"`
+		// Content is a string for system messages and an array of parts for
+		// user messages.
+		Content json.RawMessage `json:"content"`
+	} `json:"messages"`
+	ReasoningEffort *string `json:"reasoning_effort"`
+	Verbosity       *string `json:"verbosity"`
+	Stream          bool    `json:"stream"`
+}
+
+// newRecordingServer returns the URL of a server that answers every chat
+// completion with "ok", as JSON or as server-sent events for a streaming
+// request, and a function returning the request bodies received.
+func newRecordingServer(t *testing.T) (string, func() []sentRequest) {
+	t.Helper()
+	var mu sync.Mutex
+	var received []sentRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req sentRequest
+		gt.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		mu.Lock()
+		received = append(received, req)
+		mu.Unlock()
+
+		if req.Stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, err := io.WriteString(w, `data: {"id":"c1","object":"chat.completion.chunk","model":"gpt-test",`+
+				`"choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":null}`+"\n\n"+
+				`data: {"id":"c1","object":"chat.completion.chunk","model":"gpt-test","choices":[],`+
+				`"usage":{"prompt_tokens":10,"completion_tokens":1,"total_tokens":11}}`+"\n\n"+
+				"data: [DONE]\n\n")
+			gt.NoError(t, err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, err := io.WriteString(w, `{"id":"chatcmpl-1","object":"chat.completion","model":"gpt-test",`+
+			`"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],`+
+			`"usage":{"prompt_tokens":10,"completion_tokens":1,"total_tokens":11}}`)
+		gt.NoError(t, err)
+	}))
+	t.Cleanup(srv.Close)
+
+	return srv.URL, func() []sentRequest {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(received)
+	}
+}
+
+func TestSystemPromptIsSent(t *testing.T) {
+	type testCase struct {
+		clientPrompt  string
+		sessionPrompt string
+		want          string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			url, received := newRecordingServer(t)
+			ctx := context.Background()
+
+			client, err := openai.New(ctx, "test-key", openai.WithBaseURL(url), openai.WithSystemPrompt(tc.clientPrompt))
+			gt.NoError(t, err).Required()
+			var opts []gollem.SessionOption
+			if tc.sessionPrompt != "" {
+				opts = append(opts, gollem.WithSessionSystemPrompt(tc.sessionPrompt))
+			}
+			session, err := client.NewSession(ctx, opts...)
+			gt.NoError(t, err).Required()
+
+			_, err = session.Generate(ctx, []gollem.Input{gollem.Text("first")})
+			gt.NoError(t, err).Required()
+			_, err = session.Generate(ctx, []gollem.Input{gollem.Text("second")})
+			gt.NoError(t, err).Required()
+
+			reqs := received()
+			gt.A(t, reqs).Length(2).Required()
+			for _, req := range reqs {
+				var systems []string
+				for _, m := range req.Messages {
+					if m.Role == "system" {
+						var content string
+						gt.NoError(t, json.Unmarshal(m.Content, &content))
+						systems = append(systems, content)
+					}
+				}
+				if tc.want == "" {
+					gt.A(t, systems).Length(0)
+					continue
+				}
+				// Exactly one system message, at the head, on every call.
+				gt.Equal(t, []string{tc.want}, systems)
+				gt.Equal(t, "system", req.Messages[0].Role)
+			}
+			// The second request carries first, ok, second after the system message.
+			wantLen := 3
+			if tc.want != "" {
+				wantLen = 4
+			}
+			gt.A(t, reqs[1].Messages).Length(wantLen)
+
+			history, err := session.History()
+			gt.NoError(t, err).Required()
+			for _, m := range history.Messages {
+				gt.NotEqual(t, gollem.RoleSystem, m.Role)
+			}
+		}
+	}
+
+	t.Run("session prompt", runTest(testCase{sessionPrompt: "session rules", want: "session rules"}))
+	t.Run("client prompt when the session sets none", runTest(testCase{clientPrompt: "client rules", want: "client rules"}))
+	t.Run("session prompt overrides client prompt", runTest(testCase{clientPrompt: "client rules", sessionPrompt: "session rules", want: "session rules"}))
+	t.Run("no prompt", runTest(testCase{}))
+}
+
+// TestClientSystemPromptReachesEveryConsumer verifies that the client system
+// prompt, used when the session sets none, is the prompt that streaming
+// requests send, middleware receives, trace records, and CountToken counts.
+func TestClientSystemPromptReachesEveryConsumer(t *testing.T) {
+	const prompt = "client rules that are long enough to change the token count"
+	url, received := newRecordingServer(t)
+	ctx := context.Background()
+
+	newSession := func(t *testing.T, systemPrompt string, opts ...gollem.SessionOption) gollem.Session {
+		t.Helper()
+		client, err := openai.New(ctx, "test-key", openai.WithBaseURL(url), openai.WithSystemPrompt(systemPrompt))
+		gt.NoError(t, err).Required()
+		session, err := client.NewSession(ctx, opts...)
+		gt.NoError(t, err).Required()
+		return session
+	}
+
+	t.Run("Stream sends it once at the head of every request", func(t *testing.T) {
+		var middlewarePrompts []string
+		session := newSession(t, prompt, gollem.WithSessionContentStreamMiddleware(
+			func(next gollem.ContentStreamHandler) gollem.ContentStreamHandler {
+				return func(ctx context.Context, req *gollem.ContentRequest) (<-chan *gollem.ContentResponse, error) {
+					middlewarePrompts = append(middlewarePrompts, req.SystemPrompt)
+					return next(ctx, req)
+				}
+			}))
+
+		rec := trace.New()
+		traceCtx := trace.WithHandler(rec.StartAgentExecute(ctx), rec)
+		before := len(received())
+		for _, text := range []string{"first", "second"} {
+			ch, err := session.Stream(traceCtx, []gollem.Input{gollem.Text(text)})
+			gt.NoError(t, err).Required()
+			for resp := range ch {
+				gt.NoError(t, resp.Error)
+			}
+		}
+		rec.EndAgentExecute(traceCtx, nil)
+
+		reqs := received()[before:]
+		gt.A(t, reqs).Length(2).Required()
+		for _, req := range reqs {
+			gt.True(t, req.Stream)
+			var systems int
+			for _, m := range req.Messages {
+				if m.Role == "system" {
+					systems++
+				}
+			}
+			gt.Equal(t, 1, systems)
+			gt.Equal(t, "system", req.Messages[0].Role)
+			var content string
+			gt.NoError(t, json.Unmarshal(req.Messages[0].Content, &content))
+			gt.Equal(t, prompt, content)
+		}
+		gt.Equal(t, []string{prompt, prompt}, middlewarePrompts)
+
+		var tracePrompts []string
+		for _, span := range rec.Trace().RootSpan.Children {
+			if span.Kind == trace.SpanKindLLMCall {
+				tracePrompts = append(tracePrompts, span.LLMCall.Request.SystemPrompt)
+			}
+		}
+		gt.Equal(t, []string{prompt, prompt}, tracePrompts)
+
+		history, err := session.History()
+		gt.NoError(t, err).Required()
+		for _, m := range history.Messages {
+			gt.NotEqual(t, gollem.RoleSystem, m.Role)
+		}
+	})
+
+	t.Run("CountToken counts it", func(t *testing.T) {
+		input := []gollem.Input{gollem.Text("hi")}
+		withPrompt, err := newSession(t, prompt).CountToken(ctx, input...)
+		gt.NoError(t, err).Required()
+		withoutPrompt, err := newSession(t, "").CountToken(ctx, input...)
+		gt.NoError(t, err).Required()
+		gt.True(t, withPrompt > withoutPrompt)
+	})
+}
+
+func TestGenerationParametersAreSentOnlyWhenSet(t *testing.T) {
+	type testCase struct {
+		options       []openai.Option
+		wantReasoning *string
+		wantVerbosity *string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			url, received := newRecordingServer(t)
+			ctx := context.Background()
+
+			client, err := openai.New(ctx, "test-key", append([]openai.Option{openai.WithBaseURL(url)}, tc.options...)...)
+			gt.NoError(t, err).Required()
+			session, err := client.NewSession(ctx)
+			gt.NoError(t, err).Required()
+			_, err = session.Generate(ctx, []gollem.Input{gollem.Text("hi")})
+			gt.NoError(t, err).Required()
+
+			reqs := received()
+			gt.A(t, reqs).Length(1).Required()
+			gt.Equal(t, tc.wantReasoning, reqs[0].ReasoningEffort)
+			gt.Equal(t, tc.wantVerbosity, reqs[0].Verbosity)
+		}
+	}
+
+	low, high := "low", "high"
+	t.Run("not sent by default", runTest(testCase{}))
+	t.Run("sent when set", runTest(testCase{
+		options:       []openai.Option{openai.WithReasoningEffort("high"), openai.WithVerbosity("low")},
+		wantReasoning: &high,
+		wantVerbosity: &low,
+	}))
+}
+
 // TestWithBaseURL tests the WithBaseURL option functionality for OpenAI
-// Reference: Brain Memory c4705651-435d-4cca-95eb-d39d1ea69a9c
 func TestWithBaseURL(t *testing.T) {
 	t.Run("default baseURL", func(t *testing.T) {
 		client, err := openai.New(context.Background(), "test-key", openai.WithBaseURL(""))
