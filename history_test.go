@@ -17,6 +17,13 @@ import (
 	"google.golang.org/genai"
 )
 
+// Issuers of the sessions that the cross-provider conversion tests stand in for.
+var (
+	openAIIssuer = gollem.Issuer{Provider: gollem.LLMTypeOpenAI, Model: "gpt-test"}
+	claudeIssuer = gollem.Issuer{Provider: gollem.LLMTypeClaude, Model: "claude-test"}
+	geminiIssuer = gollem.Issuer{Provider: gollem.LLMTypeGemini, Model: "gemini-test"}
+)
+
 // marshalClaudeMessages renders messages the way the Anthropic SDK sends them, so tests
 // compare what the API receives instead of the Go representation that produced it.
 func marshalClaudeMessages(t *testing.T, messages []anthropic.MessageParam) []string {
@@ -40,11 +47,11 @@ func TestOpenAIToClaudeConversion(t *testing.T) {
 	runTest := func(tc testCase) func(t *testing.T) {
 		return func(t *testing.T) {
 			// OpenAI → History
-			historyFromOpenAI, err := openai.NewHistory(tc.messages)
+			historyFromOpenAI, err := openai.NewHistory(tc.messages, openAIIssuer)
 			gt.NoError(t, err)
 
 			// History → Claude
-			claudeMsgs, err := claude.ToMessages(historyFromOpenAI)
+			claudeMsgs, err := claude.ToMessages(historyFromOpenAI, claudeIssuer)
 			gt.NoError(t, err)
 
 			// Compare the wire form rather than the Go values. A tool_use input is carried
@@ -211,11 +218,11 @@ func TestClaudeToGeminiConversion(t *testing.T) {
 	runTest := func(tc testCase) func(t *testing.T) {
 		return func(t *testing.T) {
 			// Claude → History
-			historyFromClaude, err := claude.NewHistory(tc.messages)
+			historyFromClaude, err := claude.NewHistory(tc.messages, claudeIssuer)
 			gt.NoError(t, err)
 
 			// History → Gemini
-			geminiContents, err := gemini.ToContents(historyFromClaude)
+			geminiContents, err := gemini.ToContents(historyFromClaude, geminiIssuer)
 			gt.NoError(t, err)
 
 			// Verify Gemini contents
@@ -393,11 +400,11 @@ func TestGeminiToOpenAIConversion(t *testing.T) {
 	runTest := func(tc testCase) func(t *testing.T) {
 		return func(t *testing.T) {
 			// Gemini → History
-			historyFromGemini, err := gemini.NewHistory(tc.contents)
+			historyFromGemini, err := gemini.NewHistory(tc.contents, geminiIssuer)
 			gt.NoError(t, err)
 
 			// History → OpenAI
-			openaiMsgs, err := openai.ToMessages(historyFromGemini)
+			openaiMsgs, err := openai.ToMessages(historyFromGemini, openAIIssuer)
 			gt.NoError(t, err)
 
 			// Verify OpenAI messages
@@ -552,16 +559,16 @@ func TestOpenAIRoundTrip(t *testing.T) {
 	runTest := func(tc testCase) func(t *testing.T) {
 		return func(t *testing.T) {
 			// OpenAI → History → Claude → History → OpenAI
-			historyFromOpenAI, err := openai.NewHistory(tc.messages)
+			historyFromOpenAI, err := openai.NewHistory(tc.messages, openAIIssuer)
 			gt.NoError(t, err)
 
-			claudeMsgs, err := claude.ToMessages(historyFromOpenAI)
+			claudeMsgs, err := claude.ToMessages(historyFromOpenAI, claudeIssuer)
 			gt.NoError(t, err)
 
-			historyFromClaude, err := claude.NewHistory(claudeMsgs)
+			historyFromClaude, err := claude.NewHistory(claudeMsgs, claudeIssuer)
 			gt.NoError(t, err)
 
-			restoredOpenAI, err := openai.ToMessages(historyFromClaude)
+			restoredOpenAI, err := openai.ToMessages(historyFromClaude, openAIIssuer)
 			gt.NoError(t, err)
 
 			// A = A'
@@ -633,16 +640,16 @@ func TestClaudeRoundTrip(t *testing.T) {
 	runTest := func(tc testCase) func(t *testing.T) {
 		return func(t *testing.T) {
 			// Claude → History → Gemini → History → Claude
-			historyFromClaude, err := claude.NewHistory(tc.messages)
+			historyFromClaude, err := claude.NewHistory(tc.messages, claudeIssuer)
 			gt.NoError(t, err)
 
-			geminiContents, err := gemini.ToContents(historyFromClaude)
+			geminiContents, err := gemini.ToContents(historyFromClaude, geminiIssuer)
 			gt.NoError(t, err)
 
-			historyFromGemini, err := gemini.NewHistory(geminiContents)
+			historyFromGemini, err := gemini.NewHistory(geminiContents, geminiIssuer)
 			gt.NoError(t, err)
 
-			restoredClaude, err := claude.ToMessages(historyFromGemini)
+			restoredClaude, err := claude.ToMessages(historyFromGemini, claudeIssuer)
 			gt.NoError(t, err)
 
 			// A = A'
@@ -684,16 +691,16 @@ func TestGeminiRoundTrip(t *testing.T) {
 	runTest := func(tc testCase) func(t *testing.T) {
 		return func(t *testing.T) {
 			// Gemini → History → OpenAI → History → Gemini
-			historyFromGemini, err := gemini.NewHistory(tc.contents)
+			historyFromGemini, err := gemini.NewHistory(tc.contents, geminiIssuer)
 			gt.NoError(t, err)
 
-			openaiMsgs, err := openai.ToMessages(historyFromGemini)
+			openaiMsgs, err := openai.ToMessages(historyFromGemini, openAIIssuer)
 			gt.NoError(t, err)
 
-			historyFromOpenAI, err := openai.NewHistory(openaiMsgs)
+			historyFromOpenAI, err := openai.NewHistory(openaiMsgs, openAIIssuer)
 			gt.NoError(t, err)
 
-			restoredGemini, err := gemini.ToContents(historyFromOpenAI)
+			restoredGemini, err := gemini.ToContents(historyFromOpenAI, geminiIssuer)
 			gt.NoError(t, err)
 
 			// A = A'
@@ -787,6 +794,11 @@ func TestHistoryUnmarshalVersionValidation(t *testing.T) {
 		expectErr: true,
 	}))
 
+	t.Run("old version 3", runTest(testCase{
+		version:   3,
+		expectErr: true,
+	}))
+
 	t.Run("future version", runTest(testCase{
 		version:   99,
 		expectErr: true,
@@ -808,11 +820,10 @@ func TestHistoryCloneWithCurrentVersion(t *testing.T) {
 	gt.Equal(t, original.Version, cloned.Version)
 }
 
-// TestClonePreservesContentMeta verifies that History.Clone performs a true deep
-// copy of every MessageContent field, including Meta (which carries Gemini's
-// ThoughtSignature and Claude content-block metadata).
-func TestClonePreservesContentMeta(t *testing.T) {
-	meta := json.RawMessage(`{"thought_signature":"YWJjZA=="}`)
+// History.Clone must deep-copy ProviderData, which carries signatures that are
+// sent back to the provider unchanged.
+func TestCloneCopiesProviderData(t *testing.T) {
+	issuer := gollem.Issuer{Provider: gollem.LLMTypeGemini, Model: "gemini-test", Scope: "s"}
 	original := &gollem.History{
 		LLType:  gollem.LLMTypeGemini,
 		Version: gollem.HistoryVersion,
@@ -823,7 +834,14 @@ func TestClonePreservesContentMeta(t *testing.T) {
 					{
 						Type: gollem.MessageContentTypeThinking,
 						Data: json.RawMessage(`{"text":"reasoning"}`),
-						Meta: meta,
+						Provider: &gollem.ProviderData{
+							Issuer: issuer,
+							Data:   json.RawMessage(`{"thought_signature":"YWJjZA=="}`),
+						},
+					},
+					{
+						Type: gollem.MessageContentTypeText,
+						Data: json.RawMessage(`{"text":"answer"}`),
 					},
 				},
 			},
@@ -832,9 +850,66 @@ func TestClonePreservesContentMeta(t *testing.T) {
 
 	cloned := original.Clone()
 
-	// Data was already copied; Meta must be too.
-	gt.Equal(t, original.Messages[0].Contents[0].Data, cloned.Messages[0].Contents[0].Data)
-	gt.Equal(t, original.Messages[0].Contents[0].Meta, cloned.Messages[0].Contents[0].Meta)
+	gotProvider := cloned.Messages[0].Contents[0].Provider
+	gt.NotNil(t, gotProvider)
+	gt.Equal(t, issuer, gotProvider.Issuer)
+	gt.Equal(t, string(original.Messages[0].Contents[0].Provider.Data), string(gotProvider.Data))
+	gt.Nil(t, cloned.Messages[0].Contents[1].Provider)
+
+	// Rewriting the clone's bytes must not reach the original.
+	gotProvider.Data[2] = 'X'
+	gotProvider.Issuer.Scope = "changed"
+	gt.Equal(t, `{"thought_signature":"YWJjZA=="}`, string(original.Messages[0].Contents[0].Provider.Data))
+	gt.Equal(t, "s", original.Messages[0].Contents[0].Provider.Issuer.Scope)
+}
+
+func TestHistoryProviderDataJSONRoundTrip(t *testing.T) {
+	issuer := gollem.Issuer{Provider: gollem.LLMTypeClaude, Model: "claude-test", Scope: "tenant-a"}
+	original := &gollem.History{
+		LLType:  gollem.LLMTypeClaude,
+		Version: gollem.HistoryVersion,
+		Messages: []gollem.Message{
+			{
+				Role: gollem.RoleAssistant,
+				Contents: []gollem.MessageContent{
+					{
+						Type: gollem.MessageContentTypeThinking,
+						Data: json.RawMessage(`{"text":"plan"}`),
+						Provider: &gollem.ProviderData{
+							Issuer: issuer,
+							Data:   json.RawMessage(`{"signature":"sig"}`),
+						},
+					},
+					{
+						Type: gollem.MessageContentTypeText,
+						Data: json.RawMessage(`{"text":"answer"}`),
+					},
+				},
+			},
+		},
+	}
+
+	data, err := json.Marshal(original)
+	gt.NoError(t, err)
+
+	var raw struct {
+		Messages []struct {
+			Contents []map[string]json.RawMessage `json:"contents"`
+		} `json:"messages"`
+	}
+	gt.NoError(t, json.Unmarshal(data, &raw))
+	_, hasProvider := raw.Messages[0].Contents[1]["provider"]
+	gt.False(t, hasProvider)
+	_, hasMeta := raw.Messages[0].Contents[0]["meta"]
+	gt.False(t, hasMeta)
+
+	var restored gollem.History
+	gt.NoError(t, json.Unmarshal(data, &restored))
+	got := restored.Messages[0].Contents[0].Provider
+	gt.NotNil(t, got)
+	gt.Equal(t, issuer, got.Issuer)
+	gt.Equal(t, `{"signature":"sig"}`, string(got.Data))
+	gt.Nil(t, restored.Messages[0].Contents[1].Provider)
 }
 
 // Clone used to deep-copy Metadata through a JSON round-trip, which dropped it entirely on

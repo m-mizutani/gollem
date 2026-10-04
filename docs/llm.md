@@ -136,6 +136,16 @@ client, err := gemini.New(ctx, projectID, location,
 )
 ```
 
+#### Issuer Scope
+
+```go
+client, err := gemini.New(ctx, projectID, location,
+    gemini.WithIssuerScope("project-a"),
+)
+```
+
+Thought signatures and thinking in a history are sent back only to a client with the same model and the same scope. The scope is empty by default. Set different scopes when clients of the same model must not exchange that data. See [Provider-bound data](history.md#provider-bound-data).
+
 ### Environment Variables
 
 - `GEMINI_PROJECT_ID` - Google Cloud project ID
@@ -207,6 +217,18 @@ A model that is not in the table — a model released after this table was writt
 
 **Note**: `max_tokens` is a ceiling, not a reservation — it does not by itself make a request slower or more expensive. But a response that actually approaches the ceiling takes time to generate, and `Generate` waits for the whole response. The default request timeout is 30 seconds (`WithTimeout`); raise it before expecting long outputs.
 
+#### Thinking and Issuer Scope
+
+The text of each thinking block is returned in `Response.Thoughts`. A block whose text the API omitted, and a redacted thinking block, add no element. Thinking blocks and their signatures are kept in the history in both `Generate` and `Stream`.
+
+```go
+client, err := claude.New(ctx, apiKey,
+    claude.WithIssuerScope("tenant-a"),
+)
+```
+
+Thinking blocks in a history are sent back only to a client with the same model and the same scope. The scope is empty by default. Set a different scope for each Anthropic account, because the API rejects a signature created with another account. See [Provider-bound data](history.md#provider-bound-data).
+
 ### Environment Variables
 
 - `ANTHROPIC_API_KEY` - Anthropic API key
@@ -271,6 +293,16 @@ client, err := claude.NewWithVertex(ctx, region, projectID,
 ```
 
 With structured outputs disabled, the system prompt changes with the schema, so Claude rejects a history whose thinking blocks were produced under a different system prompt. See [Provider-Specific Behavior](schema.md#claude).
+
+#### Issuer Scope
+
+```go
+client, err := claude.NewWithVertex(ctx, region, projectID,
+    claude.WithVertexIssuerScope("vertex:"+projectID),
+)
+```
+
+`WithVertexIssuerScope` works like `claude.WithIssuerScope` (see [Thinking and Issuer Scope](#thinking-and-issuer-scope)). A Vertex AI client and an Anthropic API client with the same model and scope send each other's thinking blocks. Whether the two services accept each other's signatures has not been confirmed, so set different scopes when you use both.
 
 ### Authentication
 
@@ -346,6 +378,16 @@ client, err := openai.New(ctx, apiKey,
     openai.WithBaseURL("https://custom-endpoint.com"),
 )
 ```
+
+#### Issuer Scope
+
+```go
+client, err := openai.New(ctx, apiKey,
+    openai.WithIssuerScope("endpoint-a"),
+)
+```
+
+Reasoning content in a history is sent back only to a client with the same model and the same scope. The scope is empty by default. Set different scopes when clients of the same model must not exchange reasoning, for example clients of different endpoints. See [Provider-bound data](history.md#provider-bound-data).
 
 ### Environment Variables
 
@@ -440,6 +482,16 @@ client, err := ollama.New(ctx, "qwen3:8b",
     ollama.WithEmbeddingModel("nomic-embed-text"), // required for GenerateEmbedding
 )
 ```
+
+#### Issuer Scope
+
+```go
+client, err := ollama.New(ctx, "qwen3:8b",
+    ollama.WithIssuerScope("gpu-box"),
+)
+```
+
+Thinking in a history is sent back only to a client with the same model and the same scope. The scope is empty by default. Set different scopes when clients of different servers use the same model name for different models. See [Provider-bound data](history.md#provider-bound-data).
 
 ### Differences from Other Providers
 

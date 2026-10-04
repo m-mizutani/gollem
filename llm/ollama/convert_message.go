@@ -107,14 +107,16 @@ func joinText(current, text string) string {
 	return current + "\n" + text
 }
 
-// toMessages converts a gollem.History into Ollama messages.
-func toMessages(h *gollem.History) ([]message, error) {
+// toMessages converts a gollem.History into Ollama messages to send to dest.
+// Provider-bound data is filtered by gollem.FilterProviderData first.
+func toMessages(h *gollem.History, dest gollem.Issuer) ([]message, error) {
 	if h == nil || len(h.Messages) == 0 {
 		return []message{}, nil
 	}
 
-	result := make([]message, 0, len(h.Messages))
-	for i, msg := range h.Messages {
+	filtered := gollem.FilterProviderData(h.Messages, dest)
+	result := make([]message, 0, len(filtered))
+	for i, msg := range filtered {
 		converted, err := convertMessage(msg)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history message", goerr.V("index", i))
@@ -240,11 +242,13 @@ func ollamaRole(role gollem.MessageRole) string {
 	}
 }
 
-// newHistory converts Ollama messages into a gollem.History.
-func newHistory(messages []message) (*gollem.History, error) {
+// newHistory converts Ollama messages into a gollem.History. Thinking is
+// recorded as issued by issuer: the messages hold only this session's API
+// responses and content that FilterProviderData kept for issuer.
+func newHistory(messages []message, issuer gollem.Issuer) (*gollem.History, error) {
 	result := make([]gollem.Message, 0, len(messages))
 	for i, msg := range messages {
-		converted, err := convertToCommon(msg)
+		converted, err := convertToCommon(msg, issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert Ollama message", goerr.V("index", i))
 		}
@@ -258,7 +262,7 @@ func newHistory(messages []message) (*gollem.History, error) {
 	}, nil
 }
 
-func convertToCommon(msg message) (gollem.Message, error) {
+func convertToCommon(msg message, issuer gollem.Issuer) (gollem.Message, error) {
 	var contents []gollem.MessageContent
 	add := func(c gollem.MessageContent, err error) error {
 		if err != nil {
@@ -282,9 +286,14 @@ func convertToCommon(msg message) (gollem.Message, error) {
 	}
 
 	if msg.Thinking != "" {
-		if err := add(gollem.NewThinkingContent(msg.Thinking)); err != nil {
+		thinking, err := gollem.NewThinkingContent(msg.Thinking)
+		if err != nil {
 			return gollem.Message{}, err
 		}
+		// Thinking has no signature, but recording the issuer sends it back
+		// only to the model that produced it.
+		thinking.Provider = &gollem.ProviderData{Issuer: issuer}
+		contents = append(contents, thinking)
 	}
 	if msg.Content != "" {
 		if err := add(gollem.NewTextContent(msg.Content)); err != nil {

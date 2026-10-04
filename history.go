@@ -35,7 +35,7 @@ const (
 )
 
 const (
-	HistoryVersion = 3 // Unified format version (v3: removed legacy function calls and provider dialects)
+	HistoryVersion = 4 // Unified format version (v4: provider-bound data with issuer replaces per-provider Meta)
 )
 
 type History struct {
@@ -99,12 +99,14 @@ func cloneMessage(m Message) Message {
 		for i, c := range m.Contents {
 			dataCopy := make(json.RawMessage, len(c.Data))
 			copy(dataCopy, c.Data)
-			var metaCopy json.RawMessage
-			if c.Meta != nil {
-				metaCopy = make(json.RawMessage, len(c.Meta))
-				copy(metaCopy, c.Meta)
+			var provider *ProviderData
+			if c.Provider != nil {
+				provider = &ProviderData{
+					Issuer: c.Provider.Issuer,
+					Data:   append(json.RawMessage(nil), c.Provider.Data...),
+				}
 			}
-			clone.Contents[i] = MessageContent{Type: c.Type, Data: dataCopy, Meta: metaCopy}
+			clone.Contents[i] = MessageContent{Type: c.Type, Data: dataCopy, Provider: provider}
 		}
 	}
 

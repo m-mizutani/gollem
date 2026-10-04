@@ -41,11 +41,11 @@ func TestOpenAIMessageRoundTrip(t *testing.T) {
 	runTest := func(tc testCase) func(t *testing.T) {
 		return func(t *testing.T) {
 			// Convert OpenAI messages to gollem.History
-			history, err := openai.NewHistory(tc.messages)
+			history, err := openai.NewHistory(tc.messages, testIssuer)
 			gt.NoError(t, err)
 
 			// Convert back to OpenAI messages
-			restored, err := openai.ToMessages(history)
+			restored, err := openai.ToMessages(history, testIssuer)
 			gt.NoError(t, err)
 
 			// Normalize JSON content in tool/function messages before comparison
@@ -143,7 +143,7 @@ func TestOpenAIMessageRoundTrip(t *testing.T) {
 				ReasoningContent: "Let me think through this step by step...",
 				Content:          "Here's the solution",
 			},
-		})
+		}, testIssuer)
 		gt.NoError(t, err)
 
 		// Find assistant message with reasoning content
@@ -165,6 +165,10 @@ func TestOpenAIMessageRoundTrip(t *testing.T) {
 		thinking, err := reasoningContent.GetThinkingContent()
 		gt.NoError(t, err)
 		gt.Equal(t, "Let me think through this step by step...", thinking.Text)
+		// Reasoning records only its issuer; it has no signature.
+		gt.NotNil(t, reasoningContent.Provider)
+		gt.Equal(t, testIssuer, reasoningContent.Provider.Issuer)
+		gt.A(t, reasoningContent.Provider.Data).Length(0)
 
 		// Second content should be text
 		textContent := assistantMsg.Contents[1]
@@ -175,12 +179,37 @@ func TestOpenAIMessageRoundTrip(t *testing.T) {
 		gt.Equal(t, "Here's the solution", text.Text)
 
 		// Test round-trip conversion (gollem → OpenAI)
-		restored, err := openai.ToMessages(history)
+		restored, err := openai.ToMessages(history, testIssuer)
 		gt.NoError(t, err)
 
 		gt.Equal(t, 2, len(restored))
 		gt.Equal(t, "Let me think through this step by step...", restored[1].ReasoningContent)
 		gt.Equal(t, "Here's the solution", restored[1].Content)
+	})
+
+	t.Run("reasoning from another issuer is not sent", func(t *testing.T) {
+		history, err := openai.NewHistory([]openaiSDK.ChatCompletionMessage{
+			{Role: "user", Content: "Help me"},
+			{Role: "assistant", ReasoningContent: "step by step", Content: "Here's the solution"},
+		}, testIssuer)
+		gt.NoError(t, err)
+
+		claudeThinking, err := gollem.NewThinkingContent("claude reasoning")
+		gt.NoError(t, err)
+		claudeThinking.Provider = &gollem.ProviderData{
+			Issuer: gollem.Issuer{Provider: gollem.LLMTypeClaude, Model: "claude-test"},
+			Data:   json.RawMessage(`{"signature":"sig"}`),
+		}
+		history.Messages[1].Contents = append([]gollem.MessageContent{claudeThinking}, history.Messages[1].Contents...)
+
+		restored, err := openai.ToMessages(history, testIssuer)
+		gt.NoError(t, err)
+		gt.Equal(t, "step by step", restored[1].ReasoningContent)
+
+		other, err := openai.ToMessages(history, gollem.Issuer{Provider: gollem.LLMTypeOpenAI, Model: "gpt-other"})
+		gt.NoError(t, err)
+		gt.Equal(t, "", other[1].ReasoningContent)
+		gt.Equal(t, "Here's the solution", other[1].Content)
 	})
 
 	// Legacy function calls are converted to tool calls internally,
@@ -205,10 +234,10 @@ func TestOpenAIHistoryPreservesWideIntegers(t *testing.T) {
 		{Role: "tool", ToolCallID: "call_1", Name: "lookup", Content: `{"account":` + wide + `}`},
 	}
 
-	history, err := openai.NewHistory(messages)
+	history, err := openai.NewHistory(messages, testIssuer)
 	gt.NoError(t, err)
 
-	restored, err := openai.ToMessages(history)
+	restored, err := openai.ToMessages(history, testIssuer)
 	gt.NoError(t, err)
 
 	gt.Equal(t, `{"id":`+wide+`}`, restored[0].ToolCalls[0].Function.Arguments)
@@ -222,10 +251,12 @@ func TestOpenAIToolContentWithTrailingTextIsKeptWhole(t *testing.T) {
 
 	history, err := openai.NewHistory([]openaiSDK.ChatCompletionMessage{
 		{Role: "tool", ToolCallID: "call_1", Name: "check", Content: content},
-	})
+	}, testIssuer)
 	gt.NoError(t, err)
 
 	resp, err := history.Messages[0].Contents[0].GetToolResponseContent()
 	gt.NoError(t, err)
 	gt.Equal(t, content, gt.Cast[string](t, resp.Response["content"]))
 }
+
+var testIssuer = gollem.Issuer{Provider: gollem.LLMTypeOpenAI, Model: "gpt-test"}

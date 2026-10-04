@@ -6,10 +6,20 @@ import (
 	"github.com/gollem-dev/gollem"
 )
 
+// TestIssuer is the issuer HistoryRoundTrip and HistoryFromWire record and
+// send to.
+var TestIssuer = gollem.Issuer{Provider: gollem.LLMTypeOllama, Model: "test-model"}
+
 // HistoryRoundTrip converts h to the Ollama format and back, returning the
 // intermediate messages as JSON so tests can inspect the wire format.
 func HistoryRoundTrip(h *gollem.History) (json.RawMessage, *gollem.History, error) {
-	messages, err := toMessages(h)
+	return HistoryRoundTripWith(h, TestIssuer, TestIssuer)
+}
+
+// HistoryRoundTripWith converts h to the Ollama format to send to dest, and
+// back to a gollem.History recorded as issued by issuer.
+func HistoryRoundTripWith(h *gollem.History, dest, issuer gollem.Issuer) (json.RawMessage, *gollem.History, error) {
+	messages, err := toMessages(h, dest)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -17,7 +27,7 @@ func HistoryRoundTrip(h *gollem.History) (json.RawMessage, *gollem.History, erro
 	if err != nil {
 		return nil, nil, err
 	}
-	back, err := newHistory(messages)
+	back, err := newHistory(messages, issuer)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -30,7 +40,7 @@ func HistoryFromWire(data []byte) (*gollem.History, error) {
 	if err := json.Unmarshal(data, &messages); err != nil {
 		return nil, err
 	}
-	return newHistory(messages)
+	return newHistory(messages, TestIssuer)
 }
 
 // ToolJSON returns the Ollama tool definition of t as JSON.

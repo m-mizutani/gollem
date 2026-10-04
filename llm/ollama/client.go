@@ -39,6 +39,10 @@ type Client struct {
 	think          *thinkValue
 	keepAlive      *time.Duration
 
+	// issuerScope distinguishes this client's provider-bound data from data
+	// issued by another client of the same model. See WithIssuerScope.
+	issuerScope string
+
 	// Set by options and consumed by New to build api.
 	baseURL    string
 	apiKey     string
@@ -155,6 +159,18 @@ func WithKeepAlive(d time.Duration) Option {
 	}
 }
 
+// WithIssuerScope sets the scope recorded on the provider-bound data this
+// client creates, such as thinking. Thinking is sent back only to a session
+// whose client has the same model and the same scope. Set a distinct scope when
+// clients of the same model name must not exchange that data, for example
+// clients of different servers whose models share a name.
+// Default: "" (empty).
+func WithIssuerScope(scope string) Option {
+	return func(c *Client) {
+		c.issuerScope = scope
+	}
+}
+
 // New creates a client for the Ollama server. model is the name of a model
 // pulled to the server, such as "qwen3:8b"; there is no default because no
 // model is available on every server.
@@ -206,7 +222,9 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		tools[i] = convertTool(t)
 	}
 
-	historyMessages, err := toMessages(cfg.History())
+	issuer := gollem.Issuer{Provider: gollem.LLMTypeOllama, Model: c.model, Scope: c.issuerScope}
+
+	historyMessages, err := toMessages(cfg.History(), issuer)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to convert history to Ollama format")
 	}
@@ -225,6 +243,7 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		think:           c.think,
 		keepAlive:       c.keepAlive,
 		historyMessages: historyMessages,
+		issuer:          issuer,
 		cfg:             cfg,
 	}, nil
 }
@@ -245,13 +264,15 @@ type Session struct {
 	keepAlive    *time.Duration
 
 	historyMessages []message
-	cfg             gollem.SessionConfig
+	// issuer identifies this session as the issuer of provider-bound data.
+	issuer gollem.Issuer
+	cfg    gollem.SessionConfig
 }
 
 // History returns the conversation history. It does not contain the system
 // prompt.
 func (s *Session) History() (*gollem.History, error) {
-	return newHistory(s.historyMessages)
+	return newHistory(s.historyMessages, s.issuer)
 }
 
 // AppendHistory appends h to the conversation history.
@@ -259,7 +280,7 @@ func (s *Session) AppendHistory(h *gollem.History) error {
 	if h == nil {
 		return nil
 	}
-	messages, err := toMessages(h)
+	messages, err := toMessages(h, s.issuer)
 	if err != nil {
 		return goerr.Wrap(err, "failed to convert history to Ollama format")
 	}
@@ -273,7 +294,7 @@ func (s *Session) historyForMiddleware() (*gollem.History, error) {
 	if len(s.historyMessages) == 0 {
 		return nil, nil
 	}
-	h, err := newHistory(s.historyMessages)
+	h, err := newHistory(s.historyMessages, s.issuer)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create history copy for middleware")
 	}
@@ -286,7 +307,7 @@ func (s *Session) historyForMiddleware() (*gollem.History, error) {
 // history as it was and a retry sends the inputs only once.
 func (s *Session) prepareTurn(req *gollem.ContentRequest) ([]message, error) {
 	if req.History != nil {
-		messages, err := toMessages(req.History)
+		messages, err := toMessages(req.History, s.issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history from middleware")
 		}

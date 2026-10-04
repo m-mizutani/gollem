@@ -24,11 +24,13 @@ func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model s
 		tools = append(tools, convertTool(tool))
 	}
 
+	issuer := gollem.Issuer{Provider: gollem.LLMTypeOpenAI, Model: model}
+
 	// Initialize historyMessages from config
 	var historyMessages []openai.ChatCompletionMessage
 	if cfg.History() != nil {
 		var err error
-		historyMessages, err = ToMessages(cfg.History())
+		historyMessages, err = ToMessages(cfg.History(), issuer)
 		if err != nil {
 			return nil, err
 		}
@@ -39,6 +41,7 @@ func NewSessionWithAPIClient(client apiClient, cfg gollem.SessionConfig, model s
 		defaultModel:    model,
 		tools:           tools,
 		historyMessages: historyMessages,
+		issuer:          issuer,
 		params:          generationParameters{},
 		cfg:             cfg,
 	}, nil

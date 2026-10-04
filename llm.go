@@ -39,7 +39,12 @@ type FunctionCall struct {
 
 // Response is a general response type for each gollem.
 type Response struct {
-	Texts         []string
+	Texts []string
+	// Thoughts holds the text of each thinking block in the response, in order.
+	// A thinking block without text (a signed block whose text the provider
+	// omitted, a redacted block, or a signature-only part) adds no element, so
+	// Thoughts is empty when no block has text. In streaming, each element is
+	// one text delta.
 	Thoughts      []string
 	FunctionCalls []*FunctionCall
 	InputToken    int

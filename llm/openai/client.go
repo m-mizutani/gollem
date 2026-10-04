@@ -71,6 +71,10 @@ type Client struct {
 
 	// contentType is the type of content to be generated.
 	contentType gollem.ContentType
+
+	// issuerScope distinguishes this client's provider-bound data from data
+	// issued by another client of the same model. See WithIssuerScope.
+	issuerScope string
 }
 
 const (
@@ -182,6 +186,18 @@ func WithBaseURL(url string) Option {
 	}
 }
 
+// WithIssuerScope sets the scope recorded on the provider-bound data this
+// client creates, such as reasoning content. Reasoning is sent back only to a
+// session whose client has the same model and the same scope. Set a distinct
+// scope when clients of the same model must not exchange that data, for
+// example clients that reach different endpoints through WithBaseURL.
+// Default: "" (empty).
+func WithIssuerScope(scope string) Option {
+	return func(c *Client) {
+		c.issuerScope = scope
+	}
+}
+
 // New creates a new client for the OpenAI API.
 // It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
@@ -228,6 +244,9 @@ type Session struct {
 	// currentHistory maintains the gollem.History for middleware access.
 	historyMessages []openai.ChatCompletionMessage
 
+	// issuer identifies this session as the issuer of provider-bound data.
+	issuer gollem.Issuer
+
 	// generation parameters
 	params generationParameters
 
@@ -253,11 +272,13 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		openaiTools[i] = convertTool(tool)
 	}
 
+	issuer := gollem.Issuer{Provider: gollem.LLMTypeOpenAI, Model: c.defaultModel, Scope: c.issuerScope}
+
 	// Initialize history from config (convert to OpenAI native format)
 	var historyMessages []openai.ChatCompletionMessage
 	if cfg.History() != nil {
 		var err error
-		historyMessages, err = ToMessages(cfg.History())
+		historyMessages, err = ToMessages(cfg.History(), issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history to OpenAI format")
 		}
@@ -269,6 +290,7 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		tools:           openaiTools,
 		params:          c.params,
 		historyMessages: historyMessages,
+		issuer:          issuer,
 		cfg:             cfg,
 	}
 
@@ -276,14 +298,14 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 }
 
 func (s *Session) History() (*gollem.History, error) {
-	return NewHistory(s.historyMessages)
+	return NewHistory(s.historyMessages, s.issuer)
 }
 
 func (s *Session) AppendHistory(h *gollem.History) error {
 	if h == nil {
 		return nil
 	}
-	messages, err := ToMessages(h)
+	messages, err := ToMessages(h, s.issuer)
 	if err != nil {
 		return goerr.Wrap(err, "failed to convert history to OpenAI format")
 	}
@@ -477,7 +499,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 	var historyCopy *gollem.History
 	var err error
 	if len(s.historyMessages) > 0 {
-		historyCopy, err = NewHistory(s.historyMessages)
+		historyCopy, err = NewHistory(s.historyMessages, s.issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to create history copy for middleware")
 		}
@@ -494,7 +516,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
 			var err error
-			s.historyMessages, err = ToMessages(req.History)
+			s.historyMessages, err = ToMessages(req.History, s.issuer)
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to convert history from middleware")
 			}
@@ -650,7 +672,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 	var historyCopy *gollem.History
 	var err error
 	if len(s.historyMessages) > 0 {
-		historyCopy, err = NewHistory(s.historyMessages)
+		historyCopy, err = NewHistory(s.historyMessages, s.issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to create history copy for middleware")
 		}
@@ -667,7 +689,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
 			var err error
-			s.historyMessages, err = ToMessages(req.History)
+			s.historyMessages, err = ToMessages(req.History, s.issuer)
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to convert history from middleware")
 			}

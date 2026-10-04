@@ -50,6 +50,10 @@ type Client struct {
 
 	// contentType is the type of content to be generated.
 	contentType gollem.ContentType
+
+	// issuerScope distinguishes this client's provider-bound data from data
+	// issued by another client of the same model. See WithIssuerScope.
+	issuerScope string
 }
 
 // Option is a configuration option for the Gemini client.
@@ -213,6 +217,18 @@ func WithContentType(contentType gollem.ContentType) Option {
 	}
 }
 
+// WithIssuerScope sets the scope recorded on the provider-bound data this
+// client creates, such as thought signatures. Data is sent back only to a
+// session whose client has the same model and the same scope. Set a distinct
+// scope when clients of the same model must not exchange that data, for
+// example clients of different Google Cloud projects.
+// Default: "" (empty).
+func WithIssuerScope(scope string) Option {
+	return func(c *Client) {
+		c.issuerScope = scope
+	}
+}
+
 // newConfiguredClient builds a Client from the defaults and the given options,
 // stopping short of the parts that need GCP credentials. It is split out of New
 // so that tests can exercise the real defaults and option handling without
@@ -327,11 +343,13 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		config.Tools = tools
 	}
 
+	issuer := gollem.Issuer{Provider: gollem.LLMTypeGemini, Model: c.defaultModel, Scope: c.issuerScope}
+
 	// Initialize history from config (convert to Gemini native format)
 	var historyContents []*genai.Content
 	if cfg.History() != nil {
 		var err error
-		historyContents, err = ToContents(cfg.History())
+		historyContents, err = ToContents(cfg.History(), issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history to Gemini format")
 		}
@@ -342,6 +360,7 @@ func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption
 		model:           c.defaultModel,
 		config:          config,
 		historyContents: historyContents,
+		issuer:          issuer,
 		cfg:             cfg,
 	}
 
@@ -363,19 +382,22 @@ type Session struct {
 	// historyContents maintains history in Gemini native format for efficiency
 	historyContents []*genai.Content
 
+	// issuer identifies this session as the issuer of provider-bound data.
+	issuer gollem.Issuer
+
 	// cfg is the session configuration
 	cfg gollem.SessionConfig
 }
 
 func (s *Session) History() (*gollem.History, error) {
-	return NewHistory(s.historyContents)
+	return NewHistory(s.historyContents, s.issuer)
 }
 
 func (s *Session) AppendHistory(h *gollem.History) error {
 	if h == nil {
 		return nil
 	}
-	contents, err := ToContents(h)
+	contents, err := ToContents(h, s.issuer)
 	if err != nil {
 		return goerr.Wrap(err, "failed to convert history to Gemini format")
 	}
@@ -525,7 +547,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	// Always create history (even if empty) to maintain consistency with middleware
-	historyCopy, err := NewHistory(s.historyContents)
+	historyCopy, err := NewHistory(s.historyContents, s.issuer)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to convert history from Gemini format")
 	}
@@ -541,7 +563,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
 			var err error
-			s.historyContents, err = ToContents(req.History)
+			s.historyContents, err = ToContents(req.History, s.issuer)
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to convert history to Gemini format")
 			}
@@ -669,7 +691,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 	// Build the content request for middleware
 	// Create a copy of the current history to avoid middleware side effects
 	// Always create history (even if empty) to maintain consistency with middleware
-	historyCopy, err := NewHistory(s.historyContents)
+	historyCopy, err := NewHistory(s.historyContents, s.issuer)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to convert history from Gemini format")
 	}
@@ -685,7 +707,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		// Always update history from middleware (even if same address, content may have changed)
 		if req.History != nil {
 			var err error
-			s.historyContents, err = ToContents(req.History)
+			s.historyContents, err = ToContents(req.History, s.issuer)
 			if err != nil {
 				return nil, goerr.Wrap(err, "failed to convert history to Gemini format")
 			}
