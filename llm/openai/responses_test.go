@@ -756,6 +756,8 @@ func TestResponsesHistoryRestore(t *testing.T) {
 		gt.A(t, messages).Length(2).Required()
 		gt.A(t, messages[1].ToolCalls).Length(1).Required()
 		gt.Equal(t, "call_1", messages[1].ToolCalls[0].ID)
+		// The Responses API reasoning item is not Chat Completions reasoning.
+		gt.Equal(t, "", messages[1].ReasoningContent)
 	})
 }
 
