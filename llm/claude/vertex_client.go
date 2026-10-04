@@ -378,13 +378,7 @@ func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Inpu
 		ctx = traceHandler.StartLLMCall(ctx)
 	}
 
-	ch, err := generateClaudeStream(
-		ctx,
-		s.client,
-		msgParams,
-		&s.messages,
-		messages,
-	)
+	ch, err := generateClaudeStream(s.client.Messages.NewStreaming(ctx, msgParams), &s.messages, messages)
 	if err != nil {
 		if traceHandler != nil {
 			traceHandler.EndLLMCall(ctx, nil, err)
@@ -392,71 +386,10 @@ func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Inpu
 		return nil, err
 	}
 
-	if traceHandler == nil {
-		return ch, nil
+	if traceHandler != nil {
+		ch = traceClaudeStream(ctx, traceHandler, s.defaultModel, s.cfg.SystemPrompt(), messages, ch)
 	}
-
-	// Wrap channel to capture trace data on stream completion
-	wrappedCh := make(chan *gollem.Response)
-	go func() {
-		defer close(wrappedCh)
-
-		var streamTraceData *trace.LLMCallData
-		var streamErr error
-		defer func() { traceHandler.EndLLMCall(ctx, streamTraceData, streamErr) }()
-
-		var allTexts []string
-		var allFunctionCalls []*trace.FunctionCall
-		var lastInputTokens, lastOutputTokens int
-		var lastCacheCreation, lastCacheRead int
-
-		for resp := range ch {
-			if resp.Error != nil && streamErr == nil {
-				streamErr = resp.Error
-			}
-			allTexts = append(allTexts, resp.Texts...)
-			for _, fc := range resp.FunctionCalls {
-				allFunctionCalls = append(allFunctionCalls, &trace.FunctionCall{
-					ID:        fc.ID,
-					Name:      fc.Name,
-					Arguments: fc.Arguments,
-				})
-			}
-			if resp.InputToken > 0 {
-				lastInputTokens = resp.InputToken
-			}
-			if resp.OutputToken > 0 {
-				lastOutputTokens = resp.OutputToken
-			}
-			if resp.CacheCreationInputToken > 0 {
-				lastCacheCreation = resp.CacheCreationInputToken
-			}
-			if resp.CacheReadInputToken > 0 {
-				lastCacheRead = resp.CacheReadInputToken
-			}
-			wrappedCh <- resp
-		}
-
-		streamTraceData = &trace.LLMCallData{
-			InputTokens:              lastInputTokens,
-			OutputTokens:             lastOutputTokens,
-			CacheCreationInputTokens: lastCacheCreation,
-			CacheReadInputTokens:     lastCacheRead,
-			Model:                    s.defaultModel,
-			Request: &trace.LLMRequest{
-				SystemPrompt: s.cfg.SystemPrompt(),
-				// Record only messages added in this turn; previous turns are
-				// already captured in earlier trace spans.
-				Messages: claudeMessagesToTraceMessages(messages),
-			},
-			Response: &trace.LLMResponse{
-				Texts:         allTexts,
-				FunctionCalls: allFunctionCalls,
-			},
-		}
-	}()
-
-	return wrappedCh, nil
+	return toResponseStream(ch), nil
 }
 
 // CountToken calculates the total number of tokens for the given inputs,

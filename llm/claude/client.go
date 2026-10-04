@@ -11,6 +11,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/internal/jsonutil"
 	"github.com/gollem-dev/gollem/internal/schema"
@@ -622,26 +623,24 @@ func (x streamBlocks) params() []anthropic.ContentBlockParamUnion {
 	return content
 }
 
-// generateClaudeStream is a shared helper function that handles the core logic for generating streaming content
-// This function is used by the Vertex AI Claude client.
+// generateClaudeStream reads a Messages API stream and sends its text,
+// thinking and tool calls as they arrive. It is shared by the Claude API and
+// the Vertex AI Claude clients.
 //
 // newMessages are the inputs of this call. They are appended to messageHistory
 // together with the response only when the stream completes without error, so
 // a failed call leaves the history as it was and can be retried as is. The
 // response is recorded as received, as Generate records it.
 func generateClaudeStream(
-	ctx context.Context,
-	client *anthropic.Client,
-	msgParams anthropic.MessageNewParams,
+	stream *ssestream.Stream[anthropic.MessageStreamEventUnion],
 	messageHistory *[]anthropic.MessageParam,
 	newMessages []anthropic.MessageParam,
-) (<-chan *gollem.Response, error) {
-	stream := client.Messages.NewStreaming(ctx, msgParams)
+) (<-chan *gollem.ContentResponse, error) {
 	if stream == nil {
 		return nil, goerr.New("failed to create message stream")
 	}
 
-	responseChan := make(chan *gollem.Response)
+	responseChan := make(chan *gollem.ContentResponse)
 
 	// Accumulate the response blocks, in index order, for message history
 	var blocks streamBlocks
@@ -663,7 +662,7 @@ func generateClaudeStream(
 				// An API error such as a 400 ends the stream before any event;
 				// without this check the caller would see an empty response.
 				if err := stream.Err(); err != nil {
-					responseChan <- &gollem.Response{
+					responseChan <- &gollem.ContentResponse{
 						Error: goerr.Wrap(err, "failed to stream message", tokenLimitErrorOptions(err)...),
 					}
 					return
@@ -678,10 +677,7 @@ func generateClaudeStream(
 			}
 
 			event := stream.Current()
-			response := &gollem.Response{
-				Texts:         make([]string, 0),
-				FunctionCalls: make([]*gollem.FunctionCall, 0),
-			}
+			response := &gollem.ContentResponse{}
 
 			switch event.Type {
 			case "message_delta":
@@ -772,13 +768,103 @@ func generateClaudeStream(
 				}
 			}
 
-			if response.HasData() {
+			if len(response.Texts) > 0 || len(response.Thoughts) > 0 || len(response.FunctionCalls) > 0 {
 				responseChan <- response
 			}
 		}
 	}()
 
 	return responseChan, nil
+}
+
+// traceClaudeStream passes the responses of ch through and ends the LLM call
+// span that the caller started on ctx when the stream ends. newMessages are the
+// inputs of this call; previous turns are already captured in earlier spans.
+func traceClaudeStream(
+	ctx context.Context,
+	handler trace.Handler,
+	model, systemPrompt string,
+	newMessages []anthropic.MessageParam,
+	ch <-chan *gollem.ContentResponse,
+) <-chan *gollem.ContentResponse {
+	wrapped := make(chan *gollem.ContentResponse)
+	go func() {
+		defer close(wrapped)
+
+		var streamErr error
+		var texts []string
+		var functionCalls []*trace.FunctionCall
+		var inputTokens, outputTokens, cacheCreation, cacheRead int
+
+		for resp := range ch {
+			if resp.Error != nil && streamErr == nil {
+				streamErr = resp.Error
+			}
+			texts = append(texts, resp.Texts...)
+			for _, fc := range resp.FunctionCalls {
+				functionCalls = append(functionCalls, &trace.FunctionCall{
+					ID:        fc.ID,
+					Name:      fc.Name,
+					Arguments: fc.Arguments,
+				})
+			}
+			if resp.InputToken > 0 {
+				inputTokens = resp.InputToken
+			}
+			if resp.OutputToken > 0 {
+				outputTokens = resp.OutputToken
+			}
+			if resp.CacheCreationInputToken > 0 {
+				cacheCreation = resp.CacheCreationInputToken
+			}
+			if resp.CacheReadInputToken > 0 {
+				cacheRead = resp.CacheReadInputToken
+			}
+			wrapped <- resp
+		}
+
+		handler.EndLLMCall(ctx, &trace.LLMCallData{
+			InputTokens:              inputTokens,
+			OutputTokens:             outputTokens,
+			CacheCreationInputTokens: cacheCreation,
+			CacheReadInputTokens:     cacheRead,
+			Model:                    model,
+			Request: &trace.LLMRequest{
+				SystemPrompt: systemPrompt,
+				Messages:     claudeMessagesToTraceMessages(newMessages),
+			},
+			Response: &trace.LLMResponse{
+				Texts:         texts,
+				FunctionCalls: functionCalls,
+			},
+		}, streamErr)
+	}()
+	return wrapped
+}
+
+// toResponseStream converts a stream of content responses to the responses a
+// Session returns.
+func toResponseStream(ch <-chan *gollem.ContentResponse) <-chan *gollem.Response {
+	responseChan := make(chan *gollem.Response)
+	go func() {
+		defer close(responseChan)
+		for streamResp := range ch {
+			if streamResp.Error != nil {
+				responseChan <- &gollem.Response{Error: streamResp.Error}
+				continue
+			}
+			responseChan <- &gollem.Response{
+				Texts:                   streamResp.Texts,
+				Thoughts:                streamResp.Thoughts,
+				FunctionCalls:           streamResp.FunctionCalls,
+				InputToken:              streamResp.InputToken,
+				OutputToken:             streamResp.OutputToken,
+				CacheCreationInputToken: streamResp.CacheCreationInputToken,
+				CacheReadInputToken:     streamResp.CacheReadInputToken,
+			}
+		}
+	}()
+	return responseChan
 }
 
 // processResponseWithContentType converts Claude response to gollem.Response.
@@ -1198,72 +1284,22 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			return nil, err
 		}
 
-		// Start LLM call trace span
-		var streamTraceData *trace.LLMCallData
-		var streamErr error
-		if h := trace.HandlerFrom(ctx); h != nil {
-			ctx = h.StartLLMCall(ctx)
-			defer func() { h.EndLLMCall(ctx, streamTraceData, streamErr) }()
+		traceHandler := trace.HandlerFrom(ctx)
+		if traceHandler != nil {
+			ctx = traceHandler.StartLLMCall(ctx)
 		}
 
-		// Simplified streaming implementation - full implementation would be complex
-		// For now, we'll use non-streaming API and simulate streaming
-		resp, err := s.apiClient.MessagesNew(ctx, request)
+		ch, err := generateClaudeStream(s.apiClient.MessagesNewStreaming(ctx, request), &s.historyMessages, messages)
 		if err != nil {
-			streamErr = err
-			opts := tokenLimitErrorOptions(err)
-			return nil, goerr.Wrap(err, "failed to create message stream", opts...)
+			if traceHandler != nil {
+				traceHandler.EndLLMCall(ctx, nil, err)
+			}
+			return nil, err
 		}
-
-		// Set trace data for defer.
-		// Record only messages added in this turn; previous turns are already
-		// captured in earlier trace spans.
-		streamTraceData = buildClaudeTraceData(resp, s.defaultModel, s.cfg.SystemPrompt(), messages)
-
-		responseChan := make(chan *gollem.ContentResponse)
-
-		go func() {
-			defer close(responseChan)
-
-			// Process response and send chunks
-			totalInput, cacheCreation, cacheRead := cacheTokensFromUsage(resp.Usage)
-			for _, content := range resp.Content {
-				switch content.Type {
-				case "text":
-					textBlock := content.AsText()
-					responseChan <- &gollem.ContentResponse{
-						Texts:                   []string{textBlock.Text},
-						InputToken:              totalInput,
-						OutputToken:             int(resp.Usage.OutputTokens),
-						CacheCreationInputToken: cacheCreation,
-						CacheReadInputToken:     cacheRead,
-					}
-				case "thinking":
-					thinking := content.AsThinking().Thinking
-					if thinking == "" {
-						continue
-					}
-					responseChan <- &gollem.ContentResponse{
-						Thoughts:                []string{thinking},
-						InputToken:              totalInput,
-						OutputToken:             int(resp.Usage.OutputTokens),
-						CacheCreationInputToken: cacheCreation,
-						CacheReadInputToken:     cacheRead,
-					}
-				}
-			}
-
-			// Update history after successful streaming (already in Claude format)
-			s.historyMessages = append(s.historyMessages, messages...)
-
-			// Only add response to history if it has content
-			respParam := resp.ToParam()
-			if len(respParam.Content) > 0 {
-				s.historyMessages = append(s.historyMessages, respParam)
-			}
-		}()
-
-		return responseChan, nil
+		if traceHandler == nil {
+			return ch, nil
+		}
+		return traceClaudeStream(ctx, traceHandler, s.defaultModel, s.cfg.SystemPrompt(), messages, ch), nil
 	}
 
 	// Build middleware chain
@@ -1278,30 +1314,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 		return nil, err
 	}
 
-	// Convert ContentResponse channel to Response channel
-	responseChan := make(chan *gollem.Response)
-	go func() {
-		defer close(responseChan)
-		for streamResp := range streamChan {
-			if streamResp.Error != nil {
-				responseChan <- &gollem.Response{
-					Error: streamResp.Error,
-				}
-			} else {
-				responseChan <- &gollem.Response{
-					Texts:                   streamResp.Texts,
-					Thoughts:                streamResp.Thoughts,
-					FunctionCalls:           streamResp.FunctionCalls,
-					InputToken:              streamResp.InputToken,
-					OutputToken:             streamResp.OutputToken,
-					CacheCreationInputToken: streamResp.CacheCreationInputToken,
-					CacheReadInputToken:     streamResp.CacheReadInputToken,
-				}
-			}
-		}
-	}()
-
-	return responseChan, nil
+	return toResponseStream(streamChan), nil
 }
 
 // countTokensWithParams is a helper function that builds the count tokens parameters
