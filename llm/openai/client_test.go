@@ -422,6 +422,39 @@ func TestClientSystemPromptReachesEveryConsumer(t *testing.T) {
 		}
 	})
 
+	t.Run("a middleware replacement is sent and traced instead", func(t *testing.T) {
+		const replaced = "rules set by middleware"
+		session := newSession(t, prompt, gollem.WithSessionContentBlockMiddleware(
+			func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+				return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+					req.SystemPrompt = replaced
+					return next(ctx, req)
+				}
+			}))
+
+		rec := trace.New()
+		traceCtx := trace.WithHandler(rec.StartAgentExecute(ctx), rec)
+		before := len(received())
+		_, err := session.Generate(traceCtx, []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		rec.EndAgentExecute(traceCtx, nil)
+
+		reqs := received()[before:]
+		gt.A(t, reqs).Length(1).Required()
+		gt.Equal(t, "system", reqs[0].Messages[0].Role)
+		var content string
+		gt.NoError(t, json.Unmarshal(reqs[0].Messages[0].Content, &content))
+		gt.Equal(t, replaced, content)
+
+		var tracePrompts []string
+		for _, span := range rec.Trace().RootSpan.Children {
+			if span.Kind == trace.SpanKindLLMCall {
+				tracePrompts = append(tracePrompts, span.LLMCall.Request.SystemPrompt)
+			}
+		}
+		gt.Equal(t, []string{replaced}, tracePrompts)
+	})
+
 	t.Run("CountToken counts it", func(t *testing.T) {
 		input := []gollem.Input{gollem.Text("hi")}
 		withPrompt, err := newSession(t, prompt).CountToken(ctx, input...)
@@ -495,6 +528,62 @@ func TestWithBaseURL(t *testing.T) {
 		gt.NoError(t, err2)
 		gt.Equal(t, "", openai.GetBaseURL(client2)) // Should be empty, not first URL
 	})
+}
+
+// TestChatReasoningEffort verifies that the chat path sends reasoning_effort
+// only when WithReasoningEffort is given; some models reject every default.
+func TestChatReasoningEffort(t *testing.T) {
+	runTest := func(options []openai.Option, expected any) func(t *testing.T) {
+		return func(t *testing.T) {
+			var sent map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/chat/completions" {
+					http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+					return
+				}
+				if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"id":"c1","object":"chat.completion","model":"gpt-test",
+					"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+					"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}`)
+			}))
+			defer srv.Close()
+
+			options = append([]openai.Option{openai.WithBaseURL(srv.URL + "/v1")}, options...)
+			client, err := openai.New(context.Background(), "test-key", options...)
+			gt.NoError(t, err).Required()
+			session, err := client.NewSession(context.Background())
+			gt.NoError(t, err).Required()
+			_, err = session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")})
+			gt.NoError(t, err).Required()
+
+			effort, ok := sent["reasoning_effort"]
+			if expected == nil {
+				gt.False(t, ok)
+				return
+			}
+			gt.Equal(t, expected, effort)
+		}
+	}
+
+	t.Run("not sent without the option", runTest(nil, nil))
+	t.Run("sent when set", runTest([]openai.Option{openai.WithReasoningEffort("high")}, any("high")))
+}
+
+func TestResponsesAPIRejectsPenalties(t *testing.T) {
+	runTest := func(options ...openai.Option) func(t *testing.T) {
+		return func(t *testing.T) {
+			options = append(options, openai.WithResponsesAPI())
+			_, err := openai.New(context.Background(), "test-key", options...)
+			gt.True(t, errors.Is(err, gollem.ErrInvalidParameter))
+		}
+	}
+
+	t.Run("presence penalty", runTest(openai.WithPresencePenalty(0.5)))
+	t.Run("frequency penalty", runTest(openai.WithFrequencyPenalty(0.5)))
 }
 
 func TestOpenaiMessagesToTraceMessages(t *testing.T) {
@@ -827,7 +916,7 @@ func TestOpenAICacheTokenObservation(t *testing.T) {
 			// OpenAI's PromptTokens already includes cached tokens, so InputToken stays total.
 			gt.Equal(t, 200, resp.InputToken)
 			gt.Equal(t, wantCacheRead, resp.CacheReadInputToken)
-			// OpenAI does not report cache writes.
+			// Chat Completions does not report cache writes.
 			gt.Equal(t, 0, resp.CacheCreationInputToken)
 		}
 	}

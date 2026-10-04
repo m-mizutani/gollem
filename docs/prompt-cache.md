@@ -21,7 +21,7 @@ type Response struct {
     // ...
     InputToken              int // total input tokens (includes cached reads)
     OutputToken             int // billed output tokens (includes thinking/reasoning)
-    CacheCreationInputToken int // input tokens written to the cache (Claude only)
+    CacheCreationInputToken int // input tokens written to the cache (Claude, OpenAI Responses API)
     CacheReadInputToken     int // input tokens served from the cache (cache hits)
 }
 ```
@@ -31,7 +31,9 @@ type Response struct {
   compacter) correct whether or not caching is active.
 - `CacheReadInputToken` is the portion of the input that was a cache hit.
 - `CacheCreationInputToken` is the portion written to the cache on this call.
-  Only Claude distinguishes cache writes; it is `0` for OpenAI and Gemini.
+  Claude and the OpenAI Responses API (`openai.WithResponsesAPI()`) report
+  cache writes. It is `0` for OpenAI Chat Completions and Gemini, which do not
+  report them.
 
 Example:
 
@@ -85,7 +87,8 @@ their cache usage is still reported through the observation fields above.
 | Provider | Observation | Write control | Notes |
 |----------|-------------|---------------|-------|
 | Claude   | ✅ read + write | ✅ auto breakpoints (`WithPromptCache`) | System, tools, and conversation tail are marked when enabled. |
-| OpenAI   | ✅ read | — (automatic) | Caches automatically for long prompts; `CacheReadInputToken` reflects `prompt_tokens_details.cached_tokens`. |
+| OpenAI (Chat Completions) | ✅ read | — (automatic) | Caches automatically for long prompts; `CacheReadInputToken` reflects `prompt_tokens_details.cached_tokens`. |
+| OpenAI (Responses API) | ✅ read + write | — (automatic) | With `openai.WithResponsesAPI()`: `CacheReadInputToken` reflects `input_tokens_details.cached_tokens` and `CacheCreationInputToken` reflects `input_tokens_details.cache_write_tokens`. |
 | Gemini   | ✅ read | — (implicit) | Caches implicitly for repeated prefixes; `CacheReadInputToken` reflects `cachedContentTokenCount`. Hit rate is model-dependent (see limitations). |
 
 ## Notes and limitations

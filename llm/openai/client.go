@@ -38,12 +38,12 @@ type generationParameters struct {
 	// Range: -2.0 to 2.0
 	FrequencyPenalty float32
 
-	// ReasoningEffort tunes how much reasoning time the model spends. It is
-	// sent only when set; otherwise the model applies its own default.
+	// ReasoningEffort tunes how much reasoning time the model spends. Empty means
+	// the parameter is not sent and the model applies its own default.
 	ReasoningEffort string
 
-	// Verbosity controls the amount of output tokens generated. It is sent
-	// only when set; otherwise the model applies its own default.
+	// Verbosity controls the amount of output tokens generated. Empty means the
+	// parameter is not sent and the model applies its own default.
 	Verbosity string
 }
 
@@ -73,6 +73,10 @@ type Client struct {
 
 	// contentType is the type of content to be generated.
 	contentType gollem.ContentType
+
+	// useResponsesAPI makes sessions call /v1/responses instead of
+	// /v1/chat/completions.
+	useResponsesAPI bool
 }
 
 const (
@@ -143,22 +147,24 @@ func WithFrequencyPenalty(penalty float32) Option {
 	}
 }
 
-// WithReasoningEffort sets the reasoning_effort parameter for reasoning models.
-// The value is sent to the API unchanged. Supported values depend on the model
-// (for example, gpt-5 accepts "minimal" and gpt-5.6 does not), and the API
-// rejects a value the model does not support with HTTP 400. Without this
-// option the parameter is not sent and the model applies its own default.
+// WithReasoningEffort sets the reasoning effort for reasoning models. It is sent
+// as reasoning_effort on Chat Completions and as reasoning.effort on the
+// Responses API. The value is passed to the API unchanged, and the accepted
+// values depend on the model (for example "none", "minimal", "low", "medium",
+// "high", "xhigh"); the API rejects a value the model does not support.
+// Without this option no effort is sent and the model applies its own default.
 func WithReasoningEffort(effort string) Option {
 	return func(c *Client) {
 		c.params.ReasoningEffort = effort
 	}
 }
 
-// WithVerbosity sets the verbosity parameter. The value is sent to the API
-// unchanged. Supported values depend on the model (for example, gpt-5 accepts
-// "low" and gpt-4.1 accepts only "medium"), and the API rejects a value the
-// model does not support with HTTP 400. Without this option the parameter is
-// not sent and the model applies its own default.
+// WithVerbosity sets the verbosity of the response. It is sent as verbosity on
+// Chat Completions and as text.verbosity on the Responses API. The value is
+// passed to the API unchanged, and the accepted values depend on the model (for
+// example, gpt-5 accepts "low" and gpt-4.1 accepts only "medium"); the API
+// rejects a value the model does not support. Without this option no verbosity
+// is sent and the model applies its own default.
 func WithVerbosity(verbosity string) Option {
 	return func(c *Client) {
 		c.params.Verbosity = verbosity
@@ -190,6 +196,26 @@ func WithBaseURL(url string) Option {
 	}
 }
 
+// WithResponsesAPI makes the client's sessions use the Responses API
+// (/v1/responses) instead of Chat Completions (/v1/chat/completions).
+//
+// Some reasoning models accept function tools only on the Responses API, and
+// only the Responses API reports prompt-cache writes. Requests are stateless:
+// every call sends the whole conversation with store set to false, and the
+// encrypted reasoning items of earlier turns are kept in the session History
+// and sent back. Chat Completions stays the default because many
+// OpenAI-compatible servers reached through WithBaseURL have no /responses
+// endpoint.
+//
+// The Responses API has no presence or frequency penalty, so New returns an
+// error when WithPresencePenalty or WithFrequencyPenalty is combined with this
+// option.
+func WithResponsesAPI() Option {
+	return func(c *Client) {
+		c.useResponsesAPI = true
+	}
+}
+
 // New creates a new client for the OpenAI API.
 // It requires an API key and can be configured with additional options.
 func New(ctx context.Context, apiKey string, options ...Option) (*Client, error) {
@@ -202,6 +228,13 @@ func New(ctx context.Context, apiKey string, options ...Option) (*Client, error)
 
 	for _, option := range options {
 		option(client)
+	}
+
+	if client.useResponsesAPI && (client.params.PresencePenalty != 0 || client.params.FrequencyPenalty != 0) {
+		return nil, goerr.Wrap(gollem.ErrInvalidParameter,
+			"presence and frequency penalties are not supported by the Responses API",
+			goerr.V("presence_penalty", client.params.PresencePenalty),
+			goerr.V("frequency_penalty", client.params.FrequencyPenalty))
 	}
 
 	config := openai.DefaultConfig(apiKey)
@@ -227,8 +260,8 @@ type Session struct {
 	defaultModel string
 
 	// systemPrompt is the session system prompt, or the client one when the
-	// session sets none. It is prepended to every request and is not stored in
-	// the history.
+	// session sets none. It is sent as a system message at the head of every
+	// request unless a middleware replaces it, and is not stored in the history.
 	systemPrompt string
 
 	// tools are the available tools for the session.
@@ -255,6 +288,14 @@ func (c *Client) Model() string { return c.defaultModel }
 // It converts the provided tools to OpenAI's tool format and initializes a new chat session.
 func (c *Client) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
 	cfg := gollem.NewSessionConfig(options...)
+
+	if c.useResponsesAPI {
+		session, err := newResponsesSession(c.client, c.defaultModel, c.systemPrompt, c.params, cfg)
+		if err != nil {
+			return nil, err
+		}
+		return session, nil
+	}
 
 	// Convert gollem.Tool to openai.Tool
 	openaiTools := make([]openai.Tool, len(cfg.Tools()))
@@ -427,8 +468,10 @@ func (s *Session) convertInputs(input ...gollem.Input) ([]openai.ChatCompletionM
 	return newMessages, nil
 }
 
-// createRequest creates a chat completion request with the current session state
-func (s *Session) createRequest(stream bool) (openai.ChatCompletionRequest, error) {
+// createRequest creates a chat completion request with the current session
+// state. systemPrompt is the value the middleware chain passed on in
+// ContentRequest.SystemPrompt.
+func (s *Session) createRequest(stream bool, systemPrompt string) (openai.ChatCompletionRequest, error) {
 	history, err := s.getMessages()
 	if err != nil {
 		return openai.ChatCompletionRequest{}, goerr.Wrap(err, "failed to get messages for API call")
@@ -438,10 +481,10 @@ func (s *Session) createRequest(stream bool) (openai.ChatCompletionRequest, erro
 	// compatible endpoints reached through WithBaseURL may not accept
 	// "developer", while OpenAI accepts "system" as well.
 	messages := make([]openai.ChatCompletionMessage, 0, len(history)+1)
-	if s.systemPrompt != "" {
+	if systemPrompt != "" {
 		messages = append(messages, openai.ChatCompletionMessage{
 			Role:    openai.ChatMessageRoleSystem,
-			Content: s.systemPrompt,
+			Content: systemPrompt,
 		})
 	}
 	messages = append(messages, history...)
@@ -535,7 +578,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			return nil, err
 		}
 
-		openaiReq, err := s.createRequest(false)
+		openaiReq, err := s.createRequest(false, req.SystemPrompt)
 		if err != nil {
 			return nil, err
 		}
@@ -577,8 +620,9 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			Thoughts:      make([]string, 0),
 			FunctionCalls: make([]*gollem.FunctionCall, 0),
 			// OpenAI caches automatically; PromptTokens already includes cached
-			// tokens, so InputToken stays total. Cached reads are reported for
-			// observability; OpenAI does not report cache writes (creation stays 0).
+			// tokens, so InputToken stays total. Chat Completions reports cache
+			// reads but not cache writes, so CacheCreationInputToken stays 0 here;
+			// the Responses API (WithResponsesAPI) reports both.
 			InputToken:          resp.Usage.PromptTokens,
 			OutputToken:         resp.Usage.CompletionTokens,
 			CacheReadInputToken: cachedPromptTokens(resp.Usage),
@@ -634,7 +678,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		// Set trace data for defer.
 		// Record only messages added in this turn; the full request history is
 		// captured incrementally across previous trace spans.
-		openaiTraceData = buildOpenAITraceData(resp, s.defaultModel, s.systemPrompt, newMessages)
+		openaiTraceData = buildOpenAITraceData(resp, s.defaultModel, req.SystemPrompt, newMessages)
 
 		// History is already updated by updateHistoryWithResponse above
 
@@ -708,7 +752,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			return nil, err
 		}
 
-		openaiReq, err := s.createRequest(true)
+		openaiReq, err := s.createRequest(true, req.SystemPrompt)
 		if err != nil {
 			return nil, err
 		}
@@ -920,7 +964,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				Model:                s.defaultModel,
 				CacheReadInputTokens: totalCacheRead,
 				Request: &trace.LLMRequest{
-					SystemPrompt: s.systemPrompt,
+					SystemPrompt: req.SystemPrompt,
 					Messages:     openaiMessagesToTraceMessages(newMessages),
 				},
 				Response: &trace.LLMResponse{},
@@ -1145,17 +1189,6 @@ func (s *Session) applyPerCallOverrides(req *openai.ChatCompletionRequest, opts 
 // including system prompt, history messages, and new inputs.
 // This uses tiktoken library for local token counting without API calls.
 func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, error) {
-	// Get tiktoken encoding for the model
-	// If model is not found, try to use a compatible encoding
-	encoding, err := tiktoken.EncodingForModel(s.defaultModel)
-	if err != nil {
-		// Fallback to cl100k_base encoding (used by gpt-4, gpt-3.5-turbo, gpt-4o, gpt-5, etc.)
-		encoding, err = tiktoken.GetEncoding("cl100k_base")
-		if err != nil {
-			return 0, goerr.Wrap(err, "failed to get encoding")
-		}
-	}
-
 	// Convert inputs to messages without modifying session state
 	newMessages, err := s.convertInputsToMessages(input...)
 	if err != nil {
@@ -1170,12 +1203,29 @@ func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, e
 	// Combine history copy with new inputs for counting
 	messages := append(historyMessagesCopy, newMessages...)
 
+	return countChatTokens(s.defaultModel, s.systemPrompt, messages, s.tools)
+}
+
+// countChatTokens estimates the input tokens of a request locally with tiktoken,
+// without an API call.
+func countChatTokens(model, systemPrompt string, messages []openai.ChatCompletionMessage, tools []openai.Tool) (int, error) {
+	// Get tiktoken encoding for the model
+	// If model is not found, try to use a compatible encoding
+	encoding, err := tiktoken.EncodingForModel(model)
+	if err != nil {
+		// Fallback to cl100k_base encoding (used by gpt-4, gpt-3.5-turbo, gpt-4o, gpt-5, etc.)
+		encoding, err = tiktoken.GetEncoding("cl100k_base")
+		if err != nil {
+			return 0, goerr.Wrap(err, "failed to get encoding")
+		}
+	}
+
 	// Count tokens for all messages
 	totalTokens := 0
 
 	// Add tokens for system prompt if present
-	if s.systemPrompt != "" {
-		totalTokens += len(encoding.Encode(s.systemPrompt, nil, nil))
+	if systemPrompt != "" {
+		totalTokens += len(encoding.Encode(systemPrompt, nil, nil))
 		totalTokens += 3 // System message formatting tokens
 	}
 
@@ -1185,7 +1235,7 @@ func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, e
 	tokensPerName := 1
 
 	// Adjust for specific model families
-	switch s.defaultModel {
+	switch model {
 	case "gpt-3.5-turbo-0301":
 		tokensPerMessage = 4
 		tokensPerName = -1
@@ -1219,12 +1269,8 @@ func (s *Session) CountToken(ctx context.Context, input ...gollem.Input) (int, e
 	}
 
 	// Add tokens for tools if present
-	// Create a copy of tools to avoid race conditions
-	toolsCopy := make([]openai.Tool, len(s.tools))
-	copy(toolsCopy, s.tools)
-
-	if len(toolsCopy) > 0 {
-		for _, tool := range toolsCopy {
+	if len(tools) > 0 {
+		for _, tool := range tools {
 			toolJSON, err := json.Marshal(tool)
 			if err != nil {
 				return 0, goerr.Wrap(err, "failed to marshal tool for token counting")
