@@ -9,7 +9,7 @@ require (
 	github.com/m-mizutani/gt v0.2.1
 	github.com/m-mizutani/jsonex v0.0.1
 	github.com/pkoukk/tiktoken-go v0.1.8
-	github.com/sashabaranov/go-openai v1.41.2
+	github.com/sashabaranov/go-openai v1.43.0
 	go.opentelemetry.io/otel/sdk v1.46.0
 	google.golang.org/api v0.278.0
 	google.golang.org/genai v1.53.0

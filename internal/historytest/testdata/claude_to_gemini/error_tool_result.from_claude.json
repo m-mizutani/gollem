@@ -1,0 +1,59 @@
+{
+  "type": "claude",
+  "version": 4,
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Get the weather"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "tool_call",
+          "data": {
+            "id": "toolu_error",
+            "name": "get_weather",
+            "arguments": {
+              "location": "InvalidCity"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "tool_response",
+          "data": {
+            "tool_call_id": "toolu_error",
+            "name": "get_weather",
+            "response": {
+              "error": "City not found"
+            },
+            "is_error": true
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "I couldn't find that city."
+          }
+        }
+      ]
+    }
+  ]
+}

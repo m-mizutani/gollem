@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/internal/historytest"
 	"github.com/gollem-dev/gollem/llm/gemini"
 	"github.com/m-mizutani/gt"
 	"google.golang.org/genai"
@@ -699,4 +700,256 @@ func TestToContentsDropsOtherProviderThinking(t *testing.T) {
 			gt.False(t, p.Thought)
 		}
 	}
+}
+
+// Cross-provider conversion tests. Each one is split at the gollem.History shared
+// through internal/historytest; the test with the same name in the other provider
+// package converts that History. See the historytest package documentation.
+
+// History → Gemini. llm/claude converts Claude messages to the History.
+func TestClaudeToGeminiConversion(t *testing.T) {
+	runTest := func(expected []*genai.Content) func(t *testing.T) {
+		return func(t *testing.T) {
+			contents, err := gemini.ToContents(historytest.Load(t, "claude_to_gemini", "claude"), testIssuer)
+			gt.NoError(t, err)
+			gt.Equal(t, expected, contents)
+		}
+	}
+
+	t.Run("text messages", runTest([]*genai.Content{
+		{Role: "user", Parts: []*genai.Part{{Text: "Hello, how are you?"}}},
+		{Role: "model", Parts: []*genai.Part{{Text: "I'm doing well, thank you!"}}},
+	}))
+
+	t.Run("tool use with multiple calls", runTest([]*genai.Content{
+		{Role: "user", Parts: []*genai.Part{{Text: "Calculate 5+3 and 10*2"}}},
+		{
+			Role: "model",
+			Parts: []*genai.Part{
+				// Claude's tool_use IDs must be propagated to Gemini for
+				// Gemini 3.x strict id matching.
+				{FunctionCall: &genai.FunctionCall{ID: "toolu_123", Name: "calculate", Args: map[string]any{"expression": "5+3"}}},
+				{FunctionCall: &genai.FunctionCall{ID: "toolu_456", Name: "calculate", Args: map[string]any{"expression": "10*2"}}},
+			},
+		},
+		{
+			Role: "user",
+			Parts: []*genai.Part{
+				// Claude now parses JSON, so result is properly structured. The tool name is
+				// recovered from the tool_use block with the same ID, since a Claude
+				// tool_result carries none and Gemini requires one.
+				{FunctionResponse: &genai.FunctionResponse{ID: "toolu_123", Name: "calculate", Response: map[string]any{"result": float64(8)}}},
+				{FunctionResponse: &genai.FunctionResponse{ID: "toolu_456", Name: "calculate", Response: map[string]any{"result": float64(20)}}},
+			},
+		},
+		{Role: "model", Parts: []*genai.Part{{Text: "5+3 equals 8, and 10*2 equals 20."}}},
+	}))
+
+	t.Run("mixed content blocks", runTest([]*genai.Content{
+		{Role: "user", Parts: []*genai.Part{{Text: "Tell me a joke and check the time"}}},
+		{
+			Role: "model",
+			Parts: []*genai.Part{
+				{Text: "Here's a joke: Why did the chicken cross the road?"},
+				{FunctionCall: &genai.FunctionCall{ID: "toolu_789", Name: "get_current_time", Args: map[string]any{}}},
+			},
+		},
+		{
+			Role: "user",
+			Parts: []*genai.Part{
+				// Claude parses JSON response
+				{FunctionResponse: &genai.FunctionResponse{ID: "toolu_789", Name: "get_current_time", Response: map[string]any{"time": "14:30:00", "timezone": "UTC"}}},
+			},
+		},
+		{Role: "model", Parts: []*genai.Part{{Text: "It's currently 14:30 UTC."}}},
+	}))
+
+	t.Run("image content", runTest([]*genai.Content{
+		{
+			Role: "user",
+			Parts: []*genai.Part{
+				{Text: "Analyze this image"},
+				{InlineData: &genai.Blob{MIMEType: "image/jpeg", Data: []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46}}},
+			},
+		},
+		{Role: "model", Parts: []*genai.Part{{Text: "This appears to be a landscape photo."}}},
+	}))
+
+	t.Run("error tool result", runTest([]*genai.Content{
+		{Role: "user", Parts: []*genai.Part{{Text: "Get the weather"}}},
+		{
+			Role: "model",
+			Parts: []*genai.Part{
+				{FunctionCall: &genai.FunctionCall{ID: "toolu_error", Name: "get_weather", Args: map[string]any{"location": "InvalidCity"}}},
+			},
+		},
+		{
+			Role: "user",
+			Parts: []*genai.Part{
+				// Error responses are also parsed as JSON
+				{FunctionResponse: &genai.FunctionResponse{ID: "toolu_error", Name: "get_weather", Response: map[string]any{"error": "City not found"}}},
+			},
+		},
+		{Role: "model", Parts: []*genai.Part{{Text: "I couldn't find that city."}}},
+	}))
+
+	t.Run("PDF content", runTest([]*genai.Content{
+		{
+			Role: "user",
+			Parts: []*genai.Part{
+				{Text: "Analyze this PDF"},
+				{InlineData: &genai.Blob{MIMEType: "application/pdf", Data: []byte("%PDF-1.4 test")}},
+			},
+		},
+		{Role: "model", Parts: []*genai.Part{{Text: "This PDF contains test data."}}},
+	}))
+}
+
+// Gemini → History. llm/openai converts the History to OpenAI messages.
+func TestGeminiToOpenAIConversion(t *testing.T) {
+	runTest := func(contents []*genai.Content) func(t *testing.T) {
+		return func(t *testing.T) {
+			history, err := gemini.NewHistory(contents, testIssuer)
+			gt.NoError(t, err).Required()
+			historytest.Equal(t, "gemini_to_openai", "gemini", history)
+		}
+	}
+
+	t.Run("text messages", runTest([]*genai.Content{
+		{Role: "user", Parts: []*genai.Part{{Text: "Hello from Gemini"}}},
+		{Role: "model", Parts: []*genai.Part{{Text: "Hello! How can I assist you?"}}},
+	}))
+
+	t.Run("function calls with complex args", runTest([]*genai.Content{
+		{Role: "user", Parts: []*genai.Part{{Text: "Search for Python tutorials"}}},
+		{
+			Role: "model",
+			Parts: []*genai.Part{{
+				FunctionCall: &genai.FunctionCall{
+					Name: "search",
+					Args: map[string]any{
+						"query":  "Python tutorials",
+						"limit":  float64(10),
+						"filter": map[string]any{"language": "en", "level": "beginner"},
+					},
+				},
+			}},
+		},
+		{
+			Role: "user",
+			Parts: []*genai.Part{{
+				FunctionResponse: &genai.FunctionResponse{
+					Name: "search",
+					Response: map[string]any{
+						"results": []any{
+							map[string]any{"title": "Python Basics", "url": "https://example.com/1"},
+							map[string]any{"title": "Learn Python", "url": "https://example.com/2"},
+						},
+						"total": float64(2),
+					},
+				},
+			}},
+		},
+		{Role: "model", Parts: []*genai.Part{{Text: "I found 2 Python tutorials for beginners."}}},
+	}))
+
+	t.Run("multiple parts in single message", runTest([]*genai.Content{
+		{
+			Role: "user",
+			Parts: []*genai.Part{
+				{Text: "First part"},
+				{Text: "Second part"},
+			},
+		},
+		{
+			Role: "model",
+			Parts: []*genai.Part{
+				{Text: "Response part 1"},
+				{Text: "Response part 2"},
+			},
+		},
+	}))
+
+	t.Run("PDF content", runTest([]*genai.Content{
+		{
+			Role: "user",
+			Parts: []*genai.Part{
+				{Text: "Analyze this PDF"},
+				{InlineData: &genai.Blob{MIMEType: "application/pdf", Data: []byte("%PDF-1.4 test")}},
+			},
+		},
+		{Role: "model", Parts: []*genai.Part{{Text: "This PDF contains test data."}}},
+	}))
+}
+
+// Gemini → History → OpenAI → History → Gemini must restore the original contents.
+// This test covers both ends; llm/openai converts the first History through OpenAI
+// messages into the second.
+func TestGeminiRoundTrip(t *testing.T) {
+	runTest := func(contents []*genai.Content) func(t *testing.T) {
+		return func(t *testing.T) {
+			history, err := gemini.NewHistory(contents, testIssuer)
+			gt.NoError(t, err).Required()
+			historytest.Equal(t, "gemini_round_trip", "gemini", history)
+
+			restored, err := gemini.ToContents(historytest.Load(t, "gemini_round_trip", "openai"), testIssuer)
+			gt.NoError(t, err)
+			gt.Equal(t, contents, restored)
+		}
+	}
+
+	t.Run("text messages", runTest([]*genai.Content{
+		{Role: "user", Parts: []*genai.Part{{Text: "Hello"}}},
+		{Role: "model", Parts: []*genai.Part{{Text: "Hi!"}}},
+	}))
+
+	t.Run("function calls", runTest([]*genai.Content{
+		{Role: "user", Parts: []*genai.Part{{Text: "Search Python"}}},
+		{
+			Role: "model",
+			Parts: []*genai.Part{{
+				FunctionCall: &genai.FunctionCall{
+					Name: "search",
+					Args: map[string]any{"query": "Python"},
+				},
+			}},
+		},
+		{
+			Role: "user",
+			Parts: []*genai.Part{{
+				FunctionResponse: &genai.FunctionResponse{
+					Name:     "search",
+					Response: map[string]any{"results": []any{"Python tutorial"}},
+				},
+			}},
+		},
+		{Role: "model", Parts: []*genai.Part{{Text: "Found Python tutorial."}}},
+	}))
+
+	t.Run("PDF content", runTest([]*genai.Content{
+		{
+			Role: "user",
+			Parts: []*genai.Part{
+				{Text: "Analyze this PDF"},
+				{InlineData: &genai.Blob{MIMEType: "application/pdf", Data: []byte("%PDF-1.4 test")}},
+			},
+		},
+		{Role: "model", Parts: []*genai.Part{{Text: "This PDF contains test data."}}},
+	}))
+}
+
+// The Gemini leg of Claude → History → Gemini → History → Claude. llm/claude covers
+// both ends and compares the restored messages with the original.
+func TestClaudeRoundTrip(t *testing.T) {
+	run := func(t *testing.T) {
+		contents, err := gemini.ToContents(historytest.Load(t, "claude_round_trip", "claude"), testIssuer)
+		gt.NoError(t, err).Required()
+
+		history, err := gemini.NewHistory(contents, testIssuer)
+		gt.NoError(t, err).Required()
+		historytest.Equal(t, "claude_round_trip", "gemini", history)
+	}
+
+	t.Run("text messages", run)
+	t.Run("PDF content", run)
 }

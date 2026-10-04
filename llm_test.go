@@ -371,7 +371,7 @@ func TestCountToken(t *testing.T) {
 		_, err = session.Generate(ctx, []gollem.Input{gollem.Text("Hi!")}, gollem.WithMaxTokens(maxTestTokens))
 		gt.NoError(t, err)
 
-		// Get history after GenerateContent
+		// Get history after Generate
 		historyAfterGenerate, err := session.History()
 		gt.NoError(t, err)
 

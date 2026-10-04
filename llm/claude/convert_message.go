@@ -473,18 +473,18 @@ func convertContentToClaude(content gollem.MessageContent, messageRole gollem.Me
 	}
 }
 
-// ToMessages converts gollem.History to Claude messages to send to dest. Provider-bound
+// toMessages converts gollem.History to Claude messages to send to dest. Provider-bound
 // data is filtered by gollem.FilterProviderData first.
-func ToMessages(h *gollem.History, dest gollem.Issuer) ([]anthropic.MessageParam, error) {
+func toMessages(h *gollem.History, dest gollem.Issuer) ([]anthropic.MessageParam, error) {
 	if h == nil || len(h.Messages) == 0 {
 		return []anthropic.MessageParam{}, nil
 	}
 	return convertMessagesToClaude(gollem.FilterProviderData(h.Messages, dest))
 }
 
-// NewHistory creates gollem.History from Claude messages, recording issuer on the
+// newHistory creates gollem.History from Claude messages, recording issuer on the
 // provider-bound data of each content.
-func NewHistory(messages []anthropic.MessageParam, issuer gollem.Issuer) (*gollem.History, error) {
+func newHistory(messages []anthropic.MessageParam, issuer gollem.Issuer) (*gollem.History, error) {
 	commonMessages, err := convertClaudeToMessages(messages, issuer)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to convert Claude messages to common format")

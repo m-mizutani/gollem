@@ -1,0 +1,28 @@
+{
+  "type": "gemini",
+  "version": 4,
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Hello from Gemini"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Hello! How can I assist you?"
+          }
+        }
+      ]
+    }
+  ]
+}

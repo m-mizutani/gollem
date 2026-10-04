@@ -66,17 +66,17 @@ Gemini 3.x replaces the numeric `thinking_budget` with a discrete `thinking_leve
 // Use minimal thinking for fast, simple responses
 client, err := gemini.New(ctx, projectID, location,
     gemini.WithModel("gemini-3.5-flash"),
-    gemini.WithThinkingLevel(genai.ThinkingLevelMinimal),
+    gemini.WithThinkingLevel(gemini.ThinkingLevelMinimal),
 )
 
 // Use higher levels for harder reasoning tasks
 client, err := gemini.New(ctx, projectID, location,
     gemini.WithModel("gemini-3.8-flash"),
-    gemini.WithThinkingLevel(genai.ThinkingLevelHigh),
+    gemini.WithThinkingLevel(gemini.ThinkingLevelHigh),
 )
 ```
 
-Available levels (lowest → highest): `ThinkingLevelMinimal`, `ThinkingLevelLow`, `ThinkingLevelMedium`, `ThinkingLevelHigh`.
+Available levels (lowest → highest): `gemini.ThinkingLevelMinimal`, `gemini.ThinkingLevelLow`, `gemini.ThinkingLevelMedium`, `gemini.ThinkingLevelHigh`. Each value is sent to the API unchanged, so a level that the API adds later can be passed as `gemini.ThinkingLevel("NEW_LEVEL")`.
 
 Without `WithThinkingLevel` (or `WithThinkingBudget`), gollem sends no thinking configuration at all and each model applies its own default — `MEDIUM` for Gemini 3.5 / 3.6 / 3.7 / 3.8 Flash, `HIGH` for Gemini 3 Pro, `MINIMAL` for Gemini 3.5 Flash Lite. Not every model accepts every level (`gemini-3.7-flash` and `gemini-3.8-flash` reject `MINIMAL` with HTTP 400, and `gemini-3-pro-preview` takes only `LOW` and `HIGH`), so set the level only when you know the model supports it.
 
@@ -197,6 +197,29 @@ client, err := claude.New(ctx, apiKey,
 
 **Note**: Claude Sonnet 4.5 does not allow both `temperature` and `top_p` to be specified simultaneously. Use one or the other.
 
+**Note**: Recent Claude models return HTTP 400 when `temperature` or `top_p` is set to a non-default value. On those models, control the depth of the response with `WithEffort` instead.
+
+#### Effort
+
+`WithEffort` sends `output_config.effort` on every request of the client's sessions. The effort level controls how many tokens Claude spends on a response, including text, tool calls, and thinking.
+
+```go
+client, err := claude.New(ctx, apiKey,
+    claude.WithModel("claude-opus-5-5"),
+    claude.WithEffort(claude.EffortHigh),
+)
+```
+
+| Constant | Value sent |
+| --- | --- |
+| `claude.EffortLow` | `low` |
+| `claude.EffortMedium` | `medium` |
+| `claude.EffortHigh` | `high` |
+| `claude.EffortXHigh` | `xhigh` |
+| `claude.EffortMax` | `max` |
+
+When `WithEffort` is not called, gollem does not send `effort`, and the model default applies. The default model, `claude-sonnet-4-5-20250929`, does not support effort, so select a model that supports it with `WithModel`. Which levels a model accepts depends on the model; see the [Anthropic effort documentation](https://platform.claude.com/docs/en/build-with-claude/effort). gollem does not check the level against the model, so the API rejects a level the model does not support. For Vertex AI, use `claude.WithVertexEffort` with the same constants.
+
 #### Max tokens
 
 The Anthropic Messages API requires `max_tokens` on every request, so gollem always sends a value. When `WithMaxTokens` is not called, gollem sends the model's documented maximum output tokens:
@@ -273,6 +296,17 @@ client, err := claude.NewWithVertex(ctx, region, projectID,
 ```
 
 `WithVertexMaxTokens` follows the same rules as `claude.WithMaxTokens` — see [Max tokens](#max-tokens) above. Vertex AI model IDs use `@` as the version separator (`claude-sonnet-4-5@20250929`) and are matched against the same table.
+
+#### Effort
+
+```go
+client, err := claude.NewWithVertex(ctx, region, projectID,
+    claude.WithVertexModel(modelID), // a Vertex AI model ID of a model that supports effort
+    claude.WithVertexEffort(claude.EffortMedium),
+)
+```
+
+`WithVertexEffort` follows the same rules as `claude.WithEffort` — see [Effort](#effort) above. The default Vertex AI model, `claude-sonnet-4@20250514`, does not support effort, so select a model that supports it with `WithVertexModel`.
 
 #### System Prompt
 
@@ -370,6 +404,38 @@ client, err := openai.New(ctx, apiKey,
 )
 ```
 
+#### Reasoning Effort
+
+```go
+client, err := openai.New(ctx, apiKey,
+    openai.WithReasoningEffort("low"),
+)
+```
+
+The value is sent unchanged (`reasoning_effort` on Chat Completions, `reasoning.effort` on the Responses API). Accepted values depend on the model, and the API rejects a value the model does not support. Without `WithReasoningEffort`, no effort is sent and the model applies its own default.
+
+#### Responses API
+
+By default the client calls Chat Completions (`/v1/chat/completions`). `WithResponsesAPI` switches every session of the client to the Responses API (`/v1/responses`):
+
+```go
+client, err := openai.New(ctx, apiKey,
+    openai.WithModel("gpt-6.1-sol"),
+    openai.WithResponsesAPI(),
+    openai.WithReasoningEffort("low"),
+)
+```
+
+Use it for models that accept function tools together with reasoning only on the Responses API, or to receive prompt-cache writes in `CacheCreationInputToken`.
+
+- Requests are stateless: each call sends the whole conversation with `store: false`, and `previous_response_id` is not used. Session History and history-rewriting middleware work as with Chat Completions.
+- The encrypted reasoning items of earlier turns are requested (`include: ["reasoning.encrypted_content"]`), kept in the History, and sent back on the next call. A History saved in Responses mode can be restored into a new session; a History saved with Chat Completions also loads, but its reasoning text is not sent because the Responses API accepts only reasoning items it issued.
+- Reasoning summaries, when the response contains them, are returned in `Thoughts`.
+- `WithMaxTokens` and the per-call `gollem.WithMaxTokens` are sent as `max_output_tokens`.
+- The Responses API has no presence or frequency penalty; `New` returns an error if `WithPresencePenalty` or `WithFrequencyPenalty` is combined with `WithResponsesAPI`.
+
+Chat Completions stays the default because many OpenAI-compatible servers reached through `WithBaseURL` have no `/responses` endpoint.
+
 #### Organization and Base URL
 
 ```go
@@ -459,7 +525,7 @@ client, err := ollama.New(ctx, "qwen3:8b",
 )
 ```
 
-Parameters that are not set are not sent, so the model defaults apply. `gollem.WithTemperature`, `gollem.WithTopP` and `gollem.WithMaxTokens` override them for a single `Generate` or `Stream` call.
+Parameters that are not set are not sent, so the model defaults apply. `gollem.WithMaxTokens` overrides `num_predict` for a single `Generate` or `Stream` call. Temperature and top-p cannot be changed per call; to use different values, create another client with different options.
 
 #### Thinking
 
@@ -562,7 +628,8 @@ fmt.Println(result.Texts)
 | Claude (Anthropic) | Yes | Document block with base64-encoded data |
 | Claude (Vertex AI) | Yes | Document block with base64-encoded data |
 | Gemini | Yes | Inline data with `application/pdf` MIME type |
-| OpenAI | No | OpenAI API does not accept PDF via the image_url field |
+| OpenAI (Chat Completions) | No | Chat Completions does not accept PDF via the image_url field |
+| OpenAI (Responses API) | Yes, with a model that accepts PDF input | Sent as an `input_file` item with base64-encoded PDF data (`openai.WithResponsesAPI()`) |
 | Ollama | No | Ollama has no PDF input; a PDF input or a history containing one returns `gollem.ErrInvalidParameter` |
 
 ### Validation and Safety
@@ -573,7 +640,7 @@ fmt.Println(result.Texts)
 
 ### History Round-Trip
 
-PDF inputs are preserved during cross-provider history conversion. A PDF sent to Claude can be restored when converting history to Gemini format, and vice versa. OpenAI history uses `data:application/pdf;base64,...` data URLs for storage, though OpenAI's API does not support PDF input directly.
+PDF inputs are preserved during cross-provider history conversion. A PDF sent to Claude can be restored when converting history to Gemini format, and vice versa. With OpenAI, a PDF in the History is sent as an `input_file` item in Responses API mode; the Chat Completions path sends it as a `data:application/pdf;base64,...` URL in an `image_url` part, which Chat Completions does not accept.
 
 ## Common Configuration Patterns
 
@@ -596,7 +663,6 @@ Override session defaults for a single `Generate` or `Stream` call:
 
 ```go
 resp, err := session.Generate(ctx, inputs,
-    gollem.WithTemperature(0.2),
     gollem.WithMaxTokens(256),
     gollem.WithGenerateResponseSchema(schema), // forces JSON output for this call
 )

@@ -83,6 +83,16 @@ func WithVertexMaxTokens(maxTokens int64) VertexOption {
 	}
 }
 
+// WithVertexEffort sets the effort level sent as output_config.effort on every
+// request of the client's sessions. When not set, no effort is sent and the
+// model default applies. A level the model does not support is sent as given
+// and rejected by the API.
+func WithVertexEffort(effort Effort) VertexOption {
+	return func(c *VertexClient) {
+		c.params.effort = effort
+	}
+}
+
 // WithVertexSystemPrompt sets the system prompt for the client.
 func WithVertexSystemPrompt(prompt string) VertexOption {
 	return func(c *VertexClient) {
@@ -238,7 +248,7 @@ func (c *VertexClient) NewSession(ctx context.Context, options ...gollem.Session
 
 	var messages []anthropic.MessageParam
 	if cfg.History() != nil {
-		history, err := ToMessages(cfg.History(), issuer)
+		history, err := toMessages(cfg.History(), issuer)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to convert history to anthropic.MessageParam")
 		}
@@ -261,14 +271,14 @@ func (c *VertexClient) NewSession(ctx context.Context, options ...gollem.Session
 
 // History returns the conversation history
 func (s *VertexAnthropicSession) History() (*gollem.History, error) {
-	return NewHistory(s.messages, s.issuer)
+	return newHistory(s.messages, s.issuer)
 }
 
 func (s *VertexAnthropicSession) AppendHistory(h *gollem.History) error {
 	if h == nil {
 		return nil
 	}
-	messages, err := ToMessages(h, s.issuer)
+	messages, err := toMessages(h, s.issuer)
 	if err != nil {
 		return goerr.Wrap(err, "failed to convert history to Claude format")
 	}
@@ -357,19 +367,7 @@ func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Inpu
 		}
 	}
 
-	// Per-call Temperature/TopP are folded into the generation parameters before
-	// the request is built, so that setTemperatureAndTopP rejects a per-call
-	// value combined with the other session value instead of sending both.
-	genCfg := gollem.NewGenerateConfig(opts...)
-	params := s.params
-	if t := genCfg.Temperature(); t != nil {
-		params.Temperature = *t
-	}
-	if p := genCfg.TopP(); p != nil {
-		params.TopP = *p
-	}
-
-	msgParams, err := buildMessageParams(ctx, s.defaultModel, params, apiMessages, tools, s.cfg, s.structuredOutputs, opts...)
+	msgParams, err := buildMessageParams(ctx, s.defaultModel, s.params, apiMessages, tools, s.cfg, s.structuredOutputs, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -459,16 +457,6 @@ func (s *VertexAnthropicSession) Stream(ctx context.Context, input []gollem.Inpu
 	}()
 
 	return wrappedCh, nil
-}
-
-// Deprecated: GenerateContent is deprecated. Use Generate instead.
-func (s *VertexAnthropicSession) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-	return s.Generate(ctx, input)
-}
-
-// Deprecated: GenerateStream is deprecated. Use Stream instead.
-func (s *VertexAnthropicSession) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
-	return s.Stream(ctx, input)
 }
 
 // CountToken calculates the total number of tokens for the given inputs,

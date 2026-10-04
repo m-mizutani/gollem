@@ -477,7 +477,7 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 			}
 
 			// Append user inputs to session history first
-			// This is necessary when strategy returns ExecuteResponse without calling GenerateContent
+			// This is necessary when strategy returns ExecuteResponse without calling Generate
 			if len(executeResponse.UserInputs) > 0 {
 				userHistory, err := convertInputsToHistory(executeResponse.UserInputs)
 				if err != nil {

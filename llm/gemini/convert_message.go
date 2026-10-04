@@ -557,18 +557,18 @@ func convertContentToGemini(content gollem.MessageContent) (*genai.Part, error) 
 	}
 }
 
-// ToContents converts gollem.History to Gemini contents to send to dest.
+// toContents converts gollem.History to Gemini contents to send to dest.
 // Provider-bound data is filtered by gollem.FilterProviderData first.
-func ToContents(h *gollem.History, dest gollem.Issuer) ([]*genai.Content, error) {
+func toContents(h *gollem.History, dest gollem.Issuer) ([]*genai.Content, error) {
 	if h == nil || len(h.Messages) == 0 {
 		return []*genai.Content{}, nil
 	}
 	return convertMessagesToGemini(gollem.FilterProviderData(h.Messages, dest))
 }
 
-// NewHistory creates gollem.History from Gemini contents, recording issuer on
+// newHistory creates gollem.History from Gemini contents, recording issuer on
 // the provider-bound data of each content.
-func NewHistory(contents []*genai.Content, issuer gollem.Issuer) (*gollem.History, error) {
+func newHistory(contents []*genai.Content, issuer gollem.Issuer) (*gollem.History, error) {
 	commonMessages, err := convertGeminiToMessages(contents, issuer)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to convert Gemini messages to common format")

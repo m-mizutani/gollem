@@ -1753,3 +1753,55 @@ func TestClaudeIssuerScopeSeparatesThinking(t *testing.T) {
 		expected:  [][]string{{"text"}, {"text"}, {"text"}},
 	}))
 }
+
+func TestWithEffort(t *testing.T) {
+	type testCase struct {
+		effort   claude.Effort
+		stream   bool
+		expected string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			rs := newRecordingServer(t, "ok")
+			options := []claude.Option{claude.WithBaseURL(rs.srv.URL), claude.WithModel("claude-opus-5-5")}
+			if tc.effort != "" {
+				options = append(options, claude.WithEffort(tc.effort))
+			}
+			client, err := claude.New(context.Background(), "test-key", options...)
+			gt.NoError(t, err).Required()
+			session, err := client.NewSession(context.Background())
+			gt.NoError(t, err).Required()
+
+			requestPath{stream: tc.stream}.send(t, session)
+
+			outputConfig, ok := rs.lastBody(t)["output_config"]
+			if tc.expected == "" {
+				gt.False(t, ok)
+				return
+			}
+			gt.True(t, ok).Required()
+			assertJSONEqual(t, tc.expected, outputConfig)
+		}
+	}
+
+	t.Run("low", runTest(testCase{effort: claude.EffortLow, expected: `{"effort":"low"}`}))
+	t.Run("medium", runTest(testCase{effort: claude.EffortMedium, expected: `{"effort":"medium"}`}))
+	t.Run("high", runTest(testCase{effort: claude.EffortHigh, expected: `{"effort":"high"}`}))
+	t.Run("xhigh", runTest(testCase{effort: claude.EffortXHigh, expected: `{"effort":"xhigh"}`}))
+	t.Run("max", runTest(testCase{effort: claude.EffortMax, expected: `{"effort":"max"}`}))
+	t.Run("stream", runTest(testCase{effort: claude.EffortLow, stream: true, expected: `{"effort":"low"}`}))
+	t.Run("not set", runTest(testCase{}))
+
+	t.Run("sent together with response schema", func(t *testing.T) {
+		rs := newRecordingServer(t, "{}")
+		client, err := claude.New(context.Background(), "test-key",
+			claude.WithBaseURL(rs.srv.URL), claude.WithModel("claude-opus-5-5"), claude.WithEffort(claude.EffortHigh))
+		gt.NoError(t, err).Required()
+		session, err := client.NewSession(context.Background())
+		gt.NoError(t, err).Required()
+
+		requestPath{}.send(t, session, gollem.WithGenerateResponseSchema(structuredOutputTestSchema()))
+		assertJSONEqual(t, `{"effort":"high","format":`+structuredOutputTestFormat+`}`, rs.lastBody(t)["output_config"])
+	})
+}

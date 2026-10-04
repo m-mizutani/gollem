@@ -1530,7 +1530,7 @@ func TestSubAgentMiddlewareWithSessionAccess(t *testing.T) {
 }
 
 // newToolCallingMockClient creates a mock LLM client that simulates a single tool call.
-// On the first GenerateContent call, it returns a FunctionCall for the given tool name and args.
+// On the first Generate call, it returns a FunctionCall for the given tool name and args.
 // On subsequent calls, it returns a text response of "done".
 func newToolCallingMockClient(toolName string, toolArgs map[string]any) *mock.LLMClientMock {
 	callCount := 0

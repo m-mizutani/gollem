@@ -13,8 +13,6 @@ func TestGenerateConfigDefaults(t *testing.T) {
 	cfg := gollem.NewGenerateConfig()
 
 	gt.Value(t, cfg.ResponseSchema()).Equal((*gollem.Parameter)(nil))
-	gt.Value(t, cfg.Temperature()).Equal((*float64)(nil))
-	gt.Value(t, cfg.TopP()).Equal((*float64)(nil))
 	gt.Value(t, cfg.MaxTokens()).Equal((*int)(nil))
 	gt.False(t, cfg.ToolCallsDisabled())
 }
@@ -26,31 +24,12 @@ func TestGenerateConfigWithToolCallsDisabled(t *testing.T) {
 	gt.Value(t, cfg.ResponseSchema()).Equal((*gollem.Parameter)(nil))
 }
 
-func TestGenerateConfigWithTemperature(t *testing.T) {
-	cfg := gollem.NewGenerateConfig(gollem.WithTemperature(0.5))
-
-	gt.NotNil(t, cfg.Temperature())
-	gt.Value(t, *cfg.Temperature()).Equal(0.5)
-	// Other fields remain nil
-	gt.Value(t, cfg.TopP()).Equal((*float64)(nil))
-	gt.Value(t, cfg.MaxTokens()).Equal((*int)(nil))
-	gt.Value(t, cfg.ResponseSchema()).Equal((*gollem.Parameter)(nil))
-}
-
-func TestGenerateConfigWithTopP(t *testing.T) {
-	cfg := gollem.NewGenerateConfig(gollem.WithTopP(0.9))
-
-	gt.NotNil(t, cfg.TopP())
-	gt.Value(t, *cfg.TopP()).Equal(0.9)
-	gt.Value(t, cfg.Temperature()).Equal((*float64)(nil))
-}
-
 func TestGenerateConfigWithMaxTokens(t *testing.T) {
 	cfg := gollem.NewGenerateConfig(gollem.WithMaxTokens(1024))
 
 	gt.NotNil(t, cfg.MaxTokens())
 	gt.Value(t, *cfg.MaxTokens()).Equal(1024)
-	gt.Value(t, cfg.Temperature()).Equal((*float64)(nil))
+	gt.Value(t, cfg.ResponseSchema()).Equal((*gollem.Parameter)(nil))
 }
 
 func TestGenerateConfigWithResponseSchema(t *testing.T) {
@@ -65,7 +44,7 @@ func TestGenerateConfigWithResponseSchema(t *testing.T) {
 
 	gt.NotNil(t, cfg.ResponseSchema())
 	gt.Value(t, cfg.ResponseSchema().Title).Equal("TestSchema")
-	gt.Value(t, cfg.Temperature()).Equal((*float64)(nil))
+	gt.Value(t, cfg.MaxTokens()).Equal((*int)(nil))
 }
 
 func TestGenerateConfigMultipleOptions(t *testing.T) {
@@ -74,41 +53,34 @@ func TestGenerateConfigMultipleOptions(t *testing.T) {
 		Title: "Multi",
 	}
 	cfg := gollem.NewGenerateConfig(
-		gollem.WithTemperature(0.3),
-		gollem.WithTopP(0.8),
 		gollem.WithMaxTokens(512),
 		gollem.WithGenerateResponseSchema(schema),
+		gollem.WithToolCallsDisabled(),
 	)
 
-	gt.NotNil(t, cfg.Temperature())
-	gt.Value(t, *cfg.Temperature()).Equal(0.3)
-	gt.NotNil(t, cfg.TopP())
-	gt.Value(t, *cfg.TopP()).Equal(0.8)
 	gt.NotNil(t, cfg.MaxTokens())
 	gt.Value(t, *cfg.MaxTokens()).Equal(512)
 	gt.NotNil(t, cfg.ResponseSchema())
 	gt.Value(t, cfg.ResponseSchema().Title).Equal("Multi")
+	gt.True(t, cfg.ToolCallsDisabled())
 }
 
 func TestGenerateConfigLastOptionWins(t *testing.T) {
 	cfg := gollem.NewGenerateConfig(
-		gollem.WithTemperature(0.1),
-		gollem.WithTemperature(0.9),
+		gollem.WithMaxTokens(100),
+		gollem.WithMaxTokens(900),
 	)
 
-	gt.NotNil(t, cfg.Temperature())
-	gt.Value(t, *cfg.Temperature()).Equal(0.9)
+	gt.NotNil(t, cfg.MaxTokens())
+	gt.Value(t, *cfg.MaxTokens()).Equal(900)
 }
 
 func TestGenerateConfigZeroValuesAreDistinctFromNil(t *testing.T) {
 	cfg := gollem.NewGenerateConfig(
-		gollem.WithTemperature(0.0),
 		gollem.WithMaxTokens(0),
 	)
 
-	// 0.0 and 0 are valid values, distinct from nil (unset)
-	gt.NotNil(t, cfg.Temperature())
-	gt.Value(t, *cfg.Temperature()).Equal(0.0)
+	// 0 is a valid value, distinct from nil (unset)
 	gt.NotNil(t, cfg.MaxTokens())
 	gt.Value(t, *cfg.MaxTokens()).Equal(0)
 }
@@ -178,24 +150,24 @@ func TestGeneratePassesOptionsToProvider(t *testing.T) {
 		gt.Value(t, len(receivedOpts)).Equal(0)
 	})
 
-	t.Run("with temperature", func(t *testing.T) {
+	t.Run("with max tokens", func(t *testing.T) {
 		_, err := session.Generate(context.Background(),
 			[]gollem.Input{gollem.Text("test")},
-			gollem.WithTemperature(0.7),
+			gollem.WithMaxTokens(70),
 		)
 		gt.NoError(t, err)
 		gt.Value(t, len(receivedOpts)).Equal(1)
 
 		cfg := gollem.NewGenerateConfig(receivedOpts...)
-		gt.NotNil(t, cfg.Temperature())
-		gt.Value(t, *cfg.Temperature()).Equal(0.7)
+		gt.NotNil(t, cfg.MaxTokens())
+		gt.Value(t, *cfg.MaxTokens()).Equal(70)
 	})
 
 	t.Run("with multiple options", func(t *testing.T) {
 		schema := &gollem.Parameter{Type: gollem.TypeObject, Title: "Test"}
 		_, err := session.Generate(context.Background(),
 			[]gollem.Input{gollem.Text("test")},
-			gollem.WithTemperature(0.5),
+			gollem.WithToolCallsDisabled(),
 			gollem.WithMaxTokens(100),
 			gollem.WithGenerateResponseSchema(schema),
 		)
@@ -203,7 +175,7 @@ func TestGeneratePassesOptionsToProvider(t *testing.T) {
 		gt.Value(t, len(receivedOpts)).Equal(3)
 
 		cfg := gollem.NewGenerateConfig(receivedOpts...)
-		gt.Value(t, *cfg.Temperature()).Equal(0.5)
+		gt.True(t, cfg.ToolCallsDisabled())
 		gt.Value(t, *cfg.MaxTokens()).Equal(100)
 		gt.Value(t, cfg.ResponseSchema().Title).Equal("Test")
 	})
@@ -228,7 +200,7 @@ func TestStreamAcceptsSliceInputAndOptions(t *testing.T) {
 	}
 
 	input := []gollem.Input{gollem.Text("stream me")}
-	resultCh, err := session.Stream(context.Background(), input, gollem.WithTemperature(0.3))
+	resultCh, err := session.Stream(context.Background(), input, gollem.WithMaxTokens(30))
 	gt.NoError(t, err)
 
 	// Drain channel
@@ -240,7 +212,7 @@ func TestStreamAcceptsSliceInputAndOptions(t *testing.T) {
 	gt.Value(t, len(receivedOpts)).Equal(1)
 
 	cfg := gollem.NewGenerateConfig(receivedOpts...)
-	gt.Value(t, *cfg.Temperature()).Equal(0.3)
+	gt.Value(t, *cfg.MaxTokens()).Equal(30)
 }
 
 func TestGenerateWithFunctionResponseInput(t *testing.T) {

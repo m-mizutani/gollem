@@ -84,8 +84,9 @@ session, err := client.NewSession(ctx,
 Send a natural language prompt and receive structured JSON:
 
 ```go
-resp, err := session.GenerateContent(ctx,
-    gollem.Text("Extract user information: Sarah Johnson is 28 years old, email: sarah.j@example.com, lives in Seattle, USA, and enjoys hiking, photography, and cooking."))
+resp, err := session.Generate(ctx, []gollem.Input{
+    gollem.Text("Extract user information: Sarah Johnson is 28 years old, email: sarah.j@example.com, lives in Seattle, USA, and enjoys hiking, photography, and cooking."),
+})
 
 // Response will be a valid JSON matching the schema
 ```

@@ -406,18 +406,18 @@ func convertMessageToOpenAI(msg gollem.Message) ([]openai.ChatCompletionMessage,
 	return result, nil
 }
 
-// ToMessages converts gollem.History to OpenAI messages to send to dest.
+// toMessages converts gollem.History to OpenAI messages to send to dest.
 // Provider-bound data is filtered by gollem.FilterProviderData first.
-func ToMessages(h *gollem.History, dest gollem.Issuer) ([]openai.ChatCompletionMessage, error) {
+func toMessages(h *gollem.History, dest gollem.Issuer) ([]openai.ChatCompletionMessage, error) {
 	if h == nil || len(h.Messages) == 0 {
 		return []openai.ChatCompletionMessage{}, nil
 	}
 	return convertMessagesToOpenAI(gollem.FilterProviderData(h.Messages, dest))
 }
 
-// NewHistory creates gollem.History from OpenAI messages, recording issuer on
+// newHistory creates gollem.History from OpenAI messages, recording issuer on
 // the reasoning content of each message.
-func NewHistory(messages []openai.ChatCompletionMessage, issuer gollem.Issuer) (*gollem.History, error) {
+func newHistory(messages []openai.ChatCompletionMessage, issuer gollem.Issuer) (*gollem.History, error) {
 	commonMessages, err := convertOpenAIToMessages(messages, issuer)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to convert OpenAI messages to common format")

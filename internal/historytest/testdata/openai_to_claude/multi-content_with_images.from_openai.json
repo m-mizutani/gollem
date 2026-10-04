@@ -1,0 +1,36 @@
+{
+  "type": "OpenAI",
+  "version": 4,
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "What's in this image?"
+          }
+        },
+        {
+          "type": "image",
+          "data": {
+            "media_type": "image/png",
+            "data": "iVBORw0KGgo=",
+            "detail": "high"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "I see a cat in the image."
+          }
+        }
+      ]
+    }
+  ]
+}

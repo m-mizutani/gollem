@@ -20,8 +20,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Do not create binary. If you need to run, use `go run` command instead
 - When a `tmp` directory is specified, search for files within the `./tmp` directory relative to the project root.
 - **Naming Convention**: In Go, package names already express the subject, so avoid redundancy in method/struct names
-  - Good: `openai.NewHistory()`, `claude.ToMessages()`, `gemini.ToContents()`
-  - Bad: `openai.NewHistoryFromOpenAI()`, `claude.ToClaude()`, `gemini.ToGemini()`
+  - Good: `openai.New()`, `claude.WithModel()`, `gemini.ThinkingLevel`
+  - Bad: `openai.NewOpenAIClient()`, `claude.WithClaudeModel()`, `gemini.GeminiThinkingLevel`
 - **Environment Variables**: Outside of test code, NEVER use `os.Getenv()` or `os.LookupEnv()` directly. Always use `github.com/urfave/cli/v3` for environment variable access
   - This ensures proper configuration management and testability
   - Test code may use `os.Getenv()` for test setup purposes
@@ -109,8 +109,7 @@ type ToolSet interface {
 
 - `Query[T]()` — One-shot structured query. Creates a new session, calls LLM with JSON schema, unmarshals into T.
 - `SessionQuery[T]()` — Structured query on an existing session. Reuses conversation context via per-call `GenerateOption` (ResponseSchema). History is preserved across calls.
-- Per-call `GenerateOption` (e.g. `WithTemperature`, `WithGenerateResponseSchema`) can override session defaults for a single `Generate`/`Stream` call.
-- Each LLM provider's concrete session type also keeps deprecated `GenerateContent`/`GenerateStream` wrappers for backward compatibility.
+- Per-call `GenerateOption` (e.g. `WithMaxTokens`, `WithGenerateResponseSchema`) can override session defaults for a single `Generate`/`Stream` call.
 ```
 
 ### LLM Provider Support

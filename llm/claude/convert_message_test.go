@@ -7,6 +7,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/internal/historytest"
 	"github.com/gollem-dev/gollem/llm/claude"
 	"github.com/m-mizutani/gt"
 )
@@ -435,4 +436,198 @@ func TestTraceMessagesReadRawToolUseInput(t *testing.T) {
 	gt.A(t, traced[0].Contents).Length(1)
 	gt.Equal(t, "get_weather", traced[0].Contents[0].Name)
 	gt.Equal(t, "Tokyo", gt.Cast[string](t, traced[0].Contents[0].Arguments["city"]))
+}
+
+// Cross-provider conversion tests. Each one is split at the gollem.History shared
+// through internal/historytest; the test with the same name in the other provider
+// package converts that History. See the historytest package documentation.
+
+// History → Claude. llm/openai converts OpenAI messages to the History.
+func TestOpenAIToClaudeConversion(t *testing.T) {
+	runTest := func(expected []anthropic.MessageParam) func(t *testing.T) {
+		return func(t *testing.T) {
+			messages, err := claude.ToMessages(historytest.Load(t, "openai_to_claude", "openai"), testIssuer)
+			gt.NoError(t, err)
+
+			// Compare the wire form rather than the Go values. A tool_use input is carried
+			// as json.RawMessage so that the SDK encoder emits the arguments verbatim, so
+			// two message lists that produce the same request can differ as Go structs.
+			gt.Equal(t, marshalMessages(t, expected), marshalMessages(t, messages))
+		}
+	}
+
+	t.Run("text messages with all fields", runTest([]anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock("Hi there!")),
+	}))
+
+	t.Run("tool calls with all fields", runTest([]anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("What's the weather in Tokyo and London?")),
+		anthropic.NewAssistantMessage(
+			anthropic.NewToolUseBlock("call_123", map[string]interface{}{
+				"location": "Tokyo",
+				"unit":     "celsius",
+			}, "get_weather"),
+			anthropic.NewToolUseBlock("call_456", map[string]interface{}{
+				"location": "London",
+				"unit":     "celsius",
+			}, "get_weather"),
+		),
+		// Claude requires every tool_result answering one assistant turn to be in a
+		// single user message, so the two OpenAI tool messages become one.
+		anthropic.NewUserMessage(
+			anthropic.NewToolResultBlock("call_123", `{"condition":"sunny","humidity":60,"temperature":25}`, false),
+			anthropic.NewToolResultBlock("call_456", `{"condition":"rainy","humidity":80,"temperature":15}`, false),
+		),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock("Tokyo is sunny at 25°C. London is rainy at 15°C.")),
+	}))
+
+	t.Run("multi-content with images", runTest([]anthropic.MessageParam{
+		anthropic.NewUserMessage(
+			anthropic.NewTextBlock("What's in this image?"),
+			anthropic.NewImageBlockBase64("image/png", "iVBORw0KGgo="),
+		),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock("I see a cat in the image.")),
+	}))
+
+	t.Run("system message", runTest([]anthropic.MessageParam{
+		// Claude merges system message into first user message with "\n\n" separator
+		anthropic.NewUserMessage(
+			anthropic.NewTextBlock("You are a helpful assistant.\n\n"),
+			anthropic.NewTextBlock("Hello"),
+		),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock("Hi! How can I help you?")),
+	}))
+
+	t.Run("PDF content", runTest([]anthropic.MessageParam{
+		anthropic.NewUserMessage(
+			anthropic.NewTextBlock("Analyze this PDF"),
+			anthropic.NewDocumentBlock(anthropic.Base64PDFSourceParam{
+				Data: "JVBERi0xLjQgdGVzdA==",
+			}),
+		),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock("This PDF contains test data.")),
+	}))
+}
+
+// Claude → History. llm/gemini converts the History to Gemini contents.
+func TestClaudeToGeminiConversion(t *testing.T) {
+	runTest := func(messages []anthropic.MessageParam) func(t *testing.T) {
+		return func(t *testing.T) {
+			history, err := claude.NewHistory(messages, testIssuer)
+			gt.NoError(t, err).Required()
+			historytest.Equal(t, "claude_to_gemini", "claude", history)
+		}
+	}
+
+	t.Run("text messages", runTest([]anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("Hello, how are you?")),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock("I'm doing well, thank you!")),
+	}))
+
+	t.Run("tool use with multiple calls", runTest([]anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("Calculate 5+3 and 10*2")),
+		anthropic.NewAssistantMessage(
+			anthropic.NewToolUseBlock("toolu_123", map[string]interface{}{"expression": "5+3"}, "calculate"),
+			anthropic.NewToolUseBlock("toolu_456", map[string]interface{}{"expression": "10*2"}, "calculate"),
+		),
+		anthropic.NewUserMessage(
+			anthropic.NewToolResultBlock("toolu_123", `{"result":8}`, false),
+			anthropic.NewToolResultBlock("toolu_456", `{"result":20}`, false),
+		),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock("5+3 equals 8, and 10*2 equals 20.")),
+	}))
+
+	t.Run("mixed content blocks", runTest([]anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("Tell me a joke and check the time")),
+		anthropic.NewAssistantMessage(
+			anthropic.NewTextBlock("Here's a joke: Why did the chicken cross the road?"),
+			anthropic.NewToolUseBlock("toolu_789", map[string]interface{}{}, "get_current_time"),
+		),
+		anthropic.NewUserMessage(
+			anthropic.NewToolResultBlock("toolu_789", `{"time":"14:30:00","timezone":"UTC"}`, false),
+		),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock("It's currently 14:30 UTC.")),
+	}))
+
+	t.Run("image content", runTest([]anthropic.MessageParam{
+		anthropic.NewUserMessage(
+			anthropic.NewTextBlock("Analyze this image"),
+			anthropic.NewImageBlockBase64("image/jpeg", "/9j/4AAQSkZJRg=="),
+		),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock("This appears to be a landscape photo.")),
+	}))
+
+	t.Run("error tool result", runTest([]anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("Get the weather")),
+		anthropic.NewAssistantMessage(
+			anthropic.NewToolUseBlock("toolu_error", map[string]interface{}{"location": "InvalidCity"}, "get_weather"),
+		),
+		anthropic.NewUserMessage(
+			anthropic.NewToolResultBlock("toolu_error", `{"error":"City not found"}`, true),
+		),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock("I couldn't find that city.")),
+	}))
+
+	t.Run("PDF content", runTest([]anthropic.MessageParam{
+		anthropic.NewUserMessage(
+			anthropic.NewTextBlock("Analyze this PDF"),
+			anthropic.NewDocumentBlock(anthropic.Base64PDFSourceParam{
+				Data: base64.StdEncoding.EncodeToString([]byte("%PDF-1.4 test")),
+			}),
+		),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock("This PDF contains test data.")),
+	}))
+}
+
+// Claude → History → Gemini → History → Claude must restore the original messages.
+// This test covers both ends; llm/gemini converts the first History through Gemini
+// contents into the second.
+func TestClaudeRoundTrip(t *testing.T) {
+	runTest := func(messages []anthropic.MessageParam) func(t *testing.T) {
+		return func(t *testing.T) {
+			history, err := claude.NewHistory(messages, testIssuer)
+			gt.NoError(t, err).Required()
+			historytest.Equal(t, "claude_round_trip", "claude", history)
+
+			restored, err := claude.ToMessages(historytest.Load(t, "claude_round_trip", "gemini"), testIssuer)
+			gt.NoError(t, err)
+			gt.Equal(t, messages, restored)
+		}
+	}
+
+	t.Run("text messages", runTest([]anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("Hello")),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock("Hi!")),
+	}))
+
+	t.Run("PDF content", runTest([]anthropic.MessageParam{
+		anthropic.NewUserMessage(
+			anthropic.NewTextBlock("Analyze this PDF"),
+			anthropic.NewDocumentBlock(anthropic.Base64PDFSourceParam{
+				Data: base64.StdEncoding.EncodeToString([]byte("%PDF-1.4 test")),
+			}),
+		),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock("This PDF contains test data.")),
+	}))
+
+	// Note: Tool IDs cannot be perfectly round-tripped because Gemini
+	// regenerates tool call IDs. Text-only messages can round-trip perfectly.
+}
+
+// The Claude leg of OpenAI → History → Claude → History → OpenAI. llm/openai covers
+// both ends and compares the restored messages with the original.
+func TestOpenAIRoundTrip(t *testing.T) {
+	run := func(t *testing.T) {
+		messages, err := claude.ToMessages(historytest.Load(t, "openai_round_trip", "openai"), testIssuer)
+		gt.NoError(t, err).Required()
+
+		history, err := claude.NewHistory(messages, testIssuer)
+		gt.NoError(t, err).Required()
+		historytest.Equal(t, "openai_round_trip", "claude", history)
+	}
+
+	t.Run("text messages", run)
+	t.Run("tool calls", run)
+	t.Run("PDF content", run)
 }

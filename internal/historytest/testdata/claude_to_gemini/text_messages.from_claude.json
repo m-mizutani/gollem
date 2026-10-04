@@ -1,0 +1,28 @@
+{
+  "type": "claude",
+  "version": 4,
+  "messages": [
+    {
+      "role": "user",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "Hello, how are you?"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "contents": [
+        {
+          "type": "text",
+          "data": {
+            "text": "I'm doing well, thank you!"
+          }
+        }
+      ]
+    }
+  ]
+}
