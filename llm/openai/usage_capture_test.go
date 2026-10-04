@@ -344,7 +344,8 @@ func TestCacheWriteTokensLive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*testTimeout)
 	defer cancel()
 
-	client, err := openai.New(ctx, apiKey, openai.WithModel(model))
+	// The client default reasoning effort "minimal" is rejected by gpt-5.6.
+	client, err := openai.New(ctx, apiKey, openai.WithModel(model), openai.WithReasoningEffort("low"))
 	gt.NoError(t, err).Required()
 
 	// A random prefix keeps the prompt out of any cache left by earlier runs,
