@@ -19,9 +19,9 @@ There are two independent capabilities:
 ```go
 type Response struct {
     // ...
-    InputToken              int // total input tokens (includes cached reads)
+    InputToken              int // total input tokens (includes cache reads and writes)
     OutputToken             int // billed output tokens (includes thinking/reasoning)
-    CacheCreationInputToken int // input tokens written to the cache (Claude only)
+    CacheCreationInputToken int // input tokens written to the cache (Claude, OpenAI)
     CacheReadInputToken     int // input tokens served from the cache (cache hits)
 }
 ```
@@ -31,7 +31,9 @@ type Response struct {
   compacter) correct whether or not caching is active.
 - `CacheReadInputToken` is the portion of the input that was a cache hit.
 - `CacheCreationInputToken` is the portion written to the cache on this call.
-  Only Claude distinguishes cache writes; it is `0` for OpenAI and Gemini.
+  Claude and OpenAI report cache writes; it is `0` for Gemini. OpenAI bills
+  written tokens at a higher rate than uncached input on models that report
+  them, so price this portion separately.
 
 Example:
 
@@ -85,7 +87,7 @@ their cache usage is still reported through the observation fields above.
 | Provider | Observation | Write control | Notes |
 |----------|-------------|---------------|-------|
 | Claude   | ✅ read + write | ✅ auto breakpoints (`WithPromptCache`) | System, tools, and conversation tail are marked when enabled. |
-| OpenAI   | ✅ read | — (automatic) | Caches automatically for long prompts; `CacheReadInputToken` reflects `prompt_tokens_details.cached_tokens`. |
+| OpenAI   | ✅ read + write | — (automatic) | Caches automatically for long prompts; `CacheReadInputToken` reflects `prompt_tokens_details.cached_tokens` and `CacheCreationInputToken` reflects `prompt_tokens_details.cache_write_tokens` (0 when the model does not report it). |
 | Gemini   | ✅ read | — (implicit) | Caches implicitly for repeated prefixes; `CacheReadInputToken` reflects `cachedContentTokenCount`. Hit rate is model-dependent (see limitations). |
 
 ## Notes and limitations
