@@ -1011,16 +1011,6 @@ func effectiveContentType(sessionContentType gollem.ContentType, opts ...gollem.
 	return sessionContentType
 }
 
-// Deprecated: GenerateContent is deprecated. Use Generate instead.
-func (s *Session) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
-	return s.Generate(ctx, input)
-}
-
-// Deprecated: GenerateStream is deprecated. Use Stream instead.
-func (s *Session) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
-	return s.Stream(ctx, input)
-}
-
 // FunctionCallAccumulator accumulates function call information from stream
 type FunctionCallAccumulator struct {
 	ID        string

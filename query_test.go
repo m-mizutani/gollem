@@ -169,7 +169,7 @@ func TestQueryEmptyResponse(t *testing.T) {
 	gt.Error(t, err)
 }
 
-func TestQueryGenerateContentError(t *testing.T) {
+func TestQueryGenerateError(t *testing.T) {
 	callCount := 0
 	sessionMock := &mock.SessionMock{
 		GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
@@ -185,7 +185,7 @@ func TestQueryGenerateContentError(t *testing.T) {
 
 	_, err := gollem.Query[testQueryResult](context.Background(), clientWithCounter, "test")
 	gt.Error(t, err)
-	// Should not retry on GenerateContent error
+	// Should not retry on Generate error
 	gt.Value(t, callCount).Equal(1)
 }
 

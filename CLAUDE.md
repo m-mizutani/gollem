@@ -110,7 +110,6 @@ type ToolSet interface {
 - `Query[T]()` — One-shot structured query. Creates a new session, calls LLM with JSON schema, unmarshals into T.
 - `SessionQuery[T]()` — Structured query on an existing session. Reuses conversation context via per-call `GenerateOption` (ResponseSchema). History is preserved across calls.
 - Per-call `GenerateOption` (e.g. `WithMaxTokens`, `WithGenerateResponseSchema`) can override session defaults for a single `Generate`/`Stream` call.
-- Each LLM provider's concrete session type also keeps deprecated `GenerateContent`/`GenerateStream` wrappers for backward compatibility.
 ```
 
 ### LLM Provider Support

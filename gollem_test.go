@@ -1360,7 +1360,7 @@ func TestWithHistoryRepository(t *testing.T) {
 		}
 	}
 
-	t.Run("Load is called once on first Execute, Save is called after GenerateContent", func(t *testing.T) {
+	t.Run("Load is called once on first Execute, Save is called after Generate", func(t *testing.T) {
 		repo := &mockHistoryRepository{}
 		mockSession := newSimpleSession()
 
@@ -1378,7 +1378,7 @@ func TestWithHistoryRepository(t *testing.T) {
 		gt.Equal(t, 1, len(repo.loadCalls))
 		gt.Equal(t, "sess1", repo.loadCalls[0])
 
-		// Save should be called at least once (after GenerateContent)
+		// Save should be called at least once (after Generate)
 		gt.Equal(t, true, len(repo.saveCalls) > 0)
 	})
 
