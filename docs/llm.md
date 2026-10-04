@@ -372,6 +372,38 @@ client, err := openai.New(ctx, apiKey,
 )
 ```
 
+#### Reasoning Effort
+
+```go
+client, err := openai.New(ctx, apiKey,
+    openai.WithReasoningEffort("low"),
+)
+```
+
+The value is sent unchanged (`reasoning_effort` on Chat Completions, `reasoning.effort` on the Responses API). Accepted values depend on the model, and the API rejects a value the model does not support. Without `WithReasoningEffort`, no effort is sent and the model applies its own default.
+
+#### Responses API
+
+By default the client calls Chat Completions (`/v1/chat/completions`). `WithResponsesAPI` switches every session of the client to the Responses API (`/v1/responses`):
+
+```go
+client, err := openai.New(ctx, apiKey,
+    openai.WithModel("gpt-6.1-sol"),
+    openai.WithResponsesAPI(),
+    openai.WithReasoningEffort("low"),
+)
+```
+
+Use it for models that accept function tools together with reasoning only on the Responses API, or to receive prompt-cache writes in `CacheCreationInputToken`.
+
+- Requests are stateless: each call sends the whole conversation with `store: false`, and `previous_response_id` is not used. Session History and history-rewriting middleware work as with Chat Completions.
+- The encrypted reasoning items of earlier turns are requested (`include: ["reasoning.encrypted_content"]`), kept in the History, and sent back on the next call. A History saved in Responses mode can be restored into a new session; a History saved with Chat Completions also loads, but its reasoning text is not sent because the Responses API accepts only reasoning items it issued.
+- Reasoning summaries, when the response contains them, are returned in `Thoughts`.
+- `WithMaxTokens` and the per-call `gollem.WithMaxTokens` are sent as `max_output_tokens`.
+- The Responses API has no presence or frequency penalty; `New` returns an error if `WithPresencePenalty` or `WithFrequencyPenalty` is combined with `WithResponsesAPI`.
+
+Chat Completions stays the default because many OpenAI-compatible servers reached through `WithBaseURL` have no `/responses` endpoint.
+
 #### Organization and Base URL
 
 ```go
@@ -544,7 +576,8 @@ fmt.Println(result.Texts)
 | Claude (Anthropic) | Yes | Document block with base64-encoded data |
 | Claude (Vertex AI) | Yes | Document block with base64-encoded data |
 | Gemini | Yes | Inline data with `application/pdf` MIME type |
-| OpenAI | No | OpenAI API does not accept PDF via the image_url field |
+| OpenAI (Chat Completions) | No | Chat Completions does not accept PDF via the image_url field |
+| OpenAI (Responses API) | Yes, with a model that accepts PDF input | Sent as an `input_file` item with base64-encoded PDF data (`openai.WithResponsesAPI()`) |
 | Ollama | No | Ollama has no PDF input; a PDF input or a history containing one returns `gollem.ErrInvalidParameter` |
 
 ### Validation and Safety
@@ -555,7 +588,7 @@ fmt.Println(result.Texts)
 
 ### History Round-Trip
 
-PDF inputs are preserved during cross-provider history conversion. A PDF sent to Claude can be restored when converting history to Gemini format, and vice versa. OpenAI history uses `data:application/pdf;base64,...` data URLs for storage, though OpenAI's API does not support PDF input directly.
+PDF inputs are preserved during cross-provider history conversion. A PDF sent to Claude can be restored when converting history to Gemini format, and vice versa. With OpenAI, a PDF in the History is sent as an `input_file` item in Responses API mode; the Chat Completions path sends it as a `data:application/pdf;base64,...` URL in an `image_url` part, which Chat Completions does not accept.
 
 ## Common Configuration Patterns
 
