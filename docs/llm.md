@@ -372,15 +372,29 @@ client, err := openai.New(ctx, apiKey,
 )
 ```
 
-#### Reasoning Effort
+#### Reasoning Effort and Verbosity
 
 ```go
 client, err := openai.New(ctx, apiKey,
+    openai.WithModel("gpt-5.6"),
     openai.WithReasoningEffort("low"),
+    openai.WithVerbosity("low"),
 )
 ```
 
-The value is sent unchanged (`reasoning_effort` on Chat Completions, `reasoning.effort` on the Responses API). Accepted values depend on the model, and the API rejects a value the model does not support. Without `WithReasoningEffort`, no effort is sent and the model applies its own default.
+Both values are sent unchanged: the effort as `reasoning_effort` on Chat Completions and `reasoning.effort` on the Responses API, the verbosity as `verbosity` on Chat Completions and `text.verbosity` on the Responses API. Without these options gollem sends neither parameter and each model applies its own default. Not every model accepts every value (`gpt-5.6` rejects `reasoning_effort: "minimal"`, and `gpt-4.1` accepts only `verbosity: "medium"`); the API rejects an unsupported value with HTTP 400, so set a value only when you know the model supports it.
+
+Earlier versions of gollem sent `reasoning_effort: "minimal"` and `verbosity: "low"` when these options were not given. The model defaults can use more output tokens and take longer than those values. To keep the earlier behavior with `gpt-5`, set `openai.WithReasoningEffort("minimal")` and `openai.WithVerbosity("low")` explicitly.
+
+#### System Prompt
+
+```go
+client, err := openai.New(ctx, apiKey,
+    openai.WithSystemPrompt("You are concise."), // used when the session sets no system prompt
+)
+```
+
+The system prompt is sent on every request and is not stored in the session history: as a `system` message at the head of the messages on Chat Completions, and as `instructions` on the Responses API. A content middleware can replace it through `ContentRequest.SystemPrompt`.
 
 #### Responses API
 
