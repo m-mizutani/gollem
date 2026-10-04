@@ -12,6 +12,13 @@ type apiClient interface {
 	CreateChatCompletionStream(ctx context.Context, req openai.ChatCompletionRequest) (*openai.ChatCompletionStream, error)
 }
 
+// responsesAPI is the part of the OpenAI client that a Responses API session
+// calls. *openai.Client satisfies it.
+type responsesAPI interface {
+	CreateResponse(ctx context.Context, req openai.CreateResponseRequest) (openai.CreateResponseResponse, error)
+	CreateResponseStream(ctx context.Context, req openai.CreateResponseRequest) (*openai.ResponseStream, error)
+}
+
 // realAPIClient wraps the actual OpenAI client
 type realAPIClient struct {
 	client *openai.Client

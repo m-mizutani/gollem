@@ -49,8 +49,9 @@ type Response struct {
 	OutputToken int
 
 	// CacheCreationInputToken is the number of input tokens written to the
-	// prompt cache on this call. Reported by Claude and OpenAI; 0 for providers
-	// that do not report writes. InputToken includes these tokens.
+	// prompt cache on this call. Reported by Claude and OpenAI (Chat Completions
+	// and the Responses API); 0 for providers that do not report writes.
+	// InputToken includes these tokens.
 	CacheCreationInputToken int
 	// CacheReadInputToken is the number of input tokens served from the prompt
 	// cache (cache hits) on this call. Reported by all providers when caching
