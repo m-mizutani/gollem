@@ -441,7 +441,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		s.commitTurn(newMessages, assistant)
 
 		traceData = buildTraceData(resp.Model, resp.PromptEvalCount, resp.EvalCount, resp.PromptEvalCachedCount,
-			s.systemPrompt, newMessages, assistant)
+			s.systemPrompt, newMessages, assistant, resp.DoneReason)
 
 		return &gollem.ContentResponse{
 			Texts:               nonEmpty(assistant.Content),
@@ -605,7 +605,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			s.commitTurn(newMessages, assistant)
 
 			traceData = buildTraceData(s.model, inputTokens, outputTokens, cachedTokens,
-				s.systemPrompt, newMessages, assistant)
+				s.systemPrompt, newMessages, assistant, doneReason)
 		}()
 
 		return responseChan, nil
@@ -703,7 +703,8 @@ func tokenLimitErrorOptions(err error) []goerr.Option {
 
 // buildTraceData builds the trace record of one chat call. messages are the
 // messages added in this turn; earlier turns are recorded by earlier spans.
-func buildTraceData(model string, inputTokens, outputTokens, cachedTokens int, systemPrompt string, messages []message, assistant message) *trace.LLMCallData {
+// doneReason is the done_reason of the response, recorded as the finish reason.
+func buildTraceData(model string, inputTokens, outputTokens, cachedTokens int, systemPrompt string, messages []message, assistant message, doneReason string) *trace.LLMCallData {
 	data := &trace.LLMCallData{
 		InputTokens:          inputTokens,
 		OutputTokens:         outputTokens,
@@ -713,7 +714,9 @@ func buildTraceData(model string, inputTokens, outputTokens, cachedTokens int, s
 			SystemPrompt: systemPrompt,
 			Messages:     messagesToTraceMessages(messages),
 		},
-		Response: &trace.LLMResponse{},
+		Response: &trace.LLMResponse{
+			FinishReason: doneReason,
+		},
 	}
 	if assistant.Content != "" {
 		data.Response.Texts = []string{assistant.Content}

@@ -927,14 +927,18 @@ func TestOpenAICacheTokenObservation(t *testing.T) {
 }
 
 func TestOpenAIFinishReason(t *testing.T) {
-	runTest := func(reason openaiapi.FinishReason) func(t *testing.T) {
+	type testCase struct {
+		content string
+		reason  openaiapi.FinishReason
+	}
+	runTest := func(tc testCase) func(t *testing.T) {
 		return func(t *testing.T) {
 			mockClient := &apiClientMock{
 				CreateChatCompletionFunc: func(ctx context.Context, req openaiapi.ChatCompletionRequest) (openaiapi.ChatCompletionResponse, error) {
 					return openaiapi.ChatCompletionResponse{
 						Choices: []openaiapi.ChatCompletionChoice{{
-							Message:      openaiapi.ChatCompletionMessage{Content: "ok", Role: openaiapi.ChatMessageRoleAssistant},
-							FinishReason: reason,
+							Message:      openaiapi.ChatCompletionMessage{Content: tc.content, Role: openaiapi.ChatMessageRoleAssistant},
+							FinishReason: tc.reason,
 						}},
 						Usage: openaiapi.Usage{PromptTokens: 20, CompletionTokens: 3},
 					}, nil
@@ -943,16 +947,24 @@ func TestOpenAIFinishReason(t *testing.T) {
 			session, err := openai.NewSessionWithAPIClient(mockClient, gollem.NewSessionConfig(), "gpt-4")
 			gt.NoError(t, err).Required()
 
-			resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")})
+			rec := trace.New()
+			ctx := trace.WithHandler(rec.StartAgentExecute(context.Background()), rec)
+			resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("hi")})
 			gt.NoError(t, err).Required()
-			gt.Equal(t, string(reason), resp.FinishReason)
-			gt.Equal(t, []string{"ok"}, resp.Texts)
+			gt.Equal(t, string(tc.reason), resp.FinishReason)
+			gt.Equal(t, resp.FinishReason, findLLMCallSpan(t, rec.Trace().RootSpan).LLMCall.Response.FinishReason)
+			if tc.content == "" {
+				gt.A(t, resp.Texts).Length(0)
+			} else {
+				gt.Equal(t, []string{tc.content}, resp.Texts)
+			}
 		}
 	}
-	t.Run("stop", runTest(openaiapi.FinishReasonStop))
-	t.Run("length", runTest(openaiapi.FinishReasonLength))
-	t.Run("content_filter", runTest(openaiapi.FinishReasonContentFilter))
-	t.Run("no reason", runTest(""))
+	t.Run("stop", runTest(testCase{content: "ok", reason: openaiapi.FinishReasonStop}))
+	t.Run("length", runTest(testCase{content: "ok", reason: openaiapi.FinishReasonLength}))
+	t.Run("content_filter", runTest(testCase{content: "ok", reason: openaiapi.FinishReasonContentFilter}))
+	t.Run("content_filter without content", runTest(testCase{content: "", reason: openaiapi.FinishReasonContentFilter}))
+	t.Run("no reason", runTest(testCase{content: "ok", reason: ""}))
 
 	t.Run("Stream sets the reason on the chunk that carries it", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -977,7 +989,9 @@ func TestOpenAIFinishReason(t *testing.T) {
 		session, err := client.NewSession(context.Background())
 		gt.NoError(t, err).Required()
 
-		ch, err := session.Stream(context.Background(), []gollem.Input{gollem.Text("hi")})
+		rec := trace.New()
+		ctx := trace.WithHandler(rec.StartAgentExecute(context.Background()), rec)
+		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("hi")})
 		gt.NoError(t, err).Required()
 		var reasons, texts []string
 		for resp := range ch {
@@ -990,6 +1004,7 @@ func TestOpenAIFinishReason(t *testing.T) {
 		}
 		gt.Equal(t, []string{"length"}, reasons)
 		gt.Equal(t, []string{"partial"}, texts)
+		gt.Equal(t, "length", findLLMCallSpan(t, rec.Trace().RootSpan).LLMCall.Response.FinishReason)
 	})
 }
 

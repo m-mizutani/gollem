@@ -219,17 +219,33 @@ func TestGenerate(t *testing.T) {
 	})
 
 	t.Run("done_reason becomes FinishReason", func(t *testing.T) {
-		fs := newFakeServer(t, func(w http.ResponseWriter, req recordedRequest) {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"model":       "test-model",
-				"message":     map[string]any{"role": "assistant", "content": "cut"},
-				"done":        true,
-				"done_reason": "length",
-			})
-		})
-		resp, err := newTestSession(t, newTestClient(t, fs)).Generate(ctx, []gollem.Input{gollem.Text("hello")})
-		gt.NoError(t, err).Required()
-		gt.Equal(t, resp.FinishReason, "length")
+		type testCase struct {
+			content    string
+			doneReason string
+		}
+		runTest := func(tc testCase) func(t *testing.T) {
+			return func(t *testing.T) {
+				fs := newFakeServer(t, func(w http.ResponseWriter, req recordedRequest) {
+					writeJSON(w, http.StatusOK, map[string]any{
+						"model":       "test-model",
+						"message":     map[string]any{"role": "assistant", "content": tc.content},
+						"done":        true,
+						"done_reason": tc.doneReason,
+					})
+				})
+				rec := trace.New()
+				tctx := trace.WithHandler(rec.StartAgentExecute(ctx), rec)
+				resp, err := newTestSession(t, newTestClient(t, fs)).Generate(tctx, []gollem.Input{gollem.Text("hello")})
+				gt.NoError(t, err).Required()
+				gt.Equal(t, resp.FinishReason, tc.doneReason)
+
+				spans := llmCallSpans(rec.Trace().RootSpan)
+				gt.A(t, spans).Length(1).Required()
+				gt.Equal(t, spans[0].LLMCall.Response.FinishReason, resp.FinishReason)
+			}
+		}
+		t.Run("with content", runTest(testCase{content: "cut", doneReason: "length"}))
+		t.Run("without content", runTest(testCase{content: "", doneReason: "load"}))
 	})
 
 	t.Run("cache count absent", func(t *testing.T) {
@@ -823,9 +839,15 @@ func TestStream(t *testing.T) {
 			)
 		})
 		session := newTestSession(t, newTestClient(t, fs), gollem.WithSessionTools(weatherTool{}))
-		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("weather?")})
+		rec := trace.New()
+		tctx := trace.WithHandler(rec.StartAgentExecute(ctx), rec)
+		ch, err := session.Stream(tctx, []gollem.Input{gollem.Text("weather?")})
 		gt.NoError(t, err).Required()
 		responses := collect(t, ch)
+
+		spans := llmCallSpans(rec.Trace().RootSpan)
+		gt.A(t, spans).Length(1).Required()
+		gt.Equal(t, spans[0].LLMCall.Response.FinishReason, "stop")
 
 		gt.Equal(t, fs.Last(t).Body["stream"], any(true))
 		gt.Equal(t, fs.Last(t).Body["truncate"], any(false))

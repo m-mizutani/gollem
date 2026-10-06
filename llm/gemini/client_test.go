@@ -2193,28 +2193,36 @@ func TestGeminiFinishReason(t *testing.T) {
 	}
 
 	type testCase struct {
+		text   string
 		reason genai.FinishReason
 	}
 	runTest := func(tc testCase) func(t *testing.T) {
 		return func(t *testing.T) {
 			mock := &apiClientMock{
 				GenerateContentFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
-					return makeResp("ok", tc.reason), nil
+					return makeResp(tc.text, tc.reason), nil
 				},
 			}
 			session, err := gemini.NewSessionWithAPIClient(mock, gollem.NewSessionConfig(), "gemini-2.5-flash")
 			gt.NoError(t, err).Required()
 
-			resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")})
+			ctx, rec := newTraceContext()
+			resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("hi")})
 			gt.NoError(t, err).Required()
 			gt.Equal(t, string(tc.reason), resp.FinishReason)
-			gt.Equal(t, []string{"ok"}, resp.Texts)
+			gt.Equal(t, resp.FinishReason, llmCallResponse(t, rec).FinishReason)
+			if tc.text == "" {
+				gt.A(t, resp.Texts).Length(0)
+			} else {
+				gt.Equal(t, []string{tc.text}, resp.Texts)
+			}
 		}
 	}
-	t.Run("STOP", runTest(testCase{reason: genai.FinishReasonStop}))
-	t.Run("MAX_TOKENS", runTest(testCase{reason: genai.FinishReasonMaxTokens}))
-	t.Run("SAFETY", runTest(testCase{reason: genai.FinishReasonSafety}))
-	t.Run("no reason", runTest(testCase{reason: ""}))
+	t.Run("STOP", runTest(testCase{text: "ok", reason: genai.FinishReasonStop}))
+	t.Run("MAX_TOKENS", runTest(testCase{text: "ok", reason: genai.FinishReasonMaxTokens}))
+	t.Run("SAFETY", runTest(testCase{text: "ok", reason: genai.FinishReasonSafety}))
+	t.Run("SAFETY without text", runTest(testCase{text: "", reason: genai.FinishReasonSafety}))
+	t.Run("no reason", runTest(testCase{text: "ok", reason: ""}))
 
 	t.Run("Stream sets the reason on the chunk that carries it", func(t *testing.T) {
 		mock := &apiClientMock{
@@ -2229,7 +2237,8 @@ func TestGeminiFinishReason(t *testing.T) {
 		session, err := gemini.NewSessionWithAPIClient(mock, gollem.NewSessionConfig(), "gemini-2.5-flash")
 		gt.NoError(t, err).Required()
 
-		ch, err := session.Stream(context.Background(), []gollem.Input{gollem.Text("hi")})
+		ctx, rec := newTraceContext()
+		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("hi")})
 		gt.NoError(t, err).Required()
 		var reasons []string
 		for resp := range ch {
@@ -2237,7 +2246,32 @@ func TestGeminiFinishReason(t *testing.T) {
 			reasons = append(reasons, resp.FinishReason)
 		}
 		gt.Equal(t, []string{"", "MAX_TOKENS"}, reasons)
+		gt.Equal(t, "MAX_TOKENS", llmCallResponse(t, rec).FinishReason)
 	})
+}
+
+// newTraceContext returns a context whose LLM calls are recorded by the
+// returned recorder.
+func newTraceContext() (context.Context, *trace.Recorder) {
+	rec := trace.New()
+	ctx := rec.StartAgentExecute(context.Background())
+	return trace.WithHandler(ctx, rec), rec
+}
+
+// llmCallResponse returns the response data of the only llm_call span that rec
+// recorded.
+func llmCallResponse(t *testing.T, rec *trace.Recorder) *trace.LLMResponse {
+	t.Helper()
+	var spans []*trace.Span
+	for _, child := range rec.Trace().RootSpan.Children {
+		if child.Kind == trace.SpanKindLLMCall {
+			spans = append(spans, child)
+		}
+	}
+	gt.A(t, spans).Length(1).Required()
+	gt.V(t, spans[0].LLMCall).NotNil().Required()
+	gt.V(t, spans[0].LLMCall.Response).NotNil().Required()
+	return spans[0].LLMCall.Response
 }
 
 var _ gollem.ModelNamer = (*gemini.Client)(nil)

@@ -805,11 +805,15 @@ func traceClaudeStream(
 		var streamErr error
 		var texts []string
 		var functionCalls []*trace.FunctionCall
+		var finishReason string
 		var inputTokens, outputTokens, cacheCreation, cacheRead int
 
 		for resp := range ch {
 			if resp.Error != nil && streamErr == nil {
 				streamErr = resp.Error
+			}
+			if resp.FinishReason != "" {
+				finishReason = resp.FinishReason
 			}
 			texts = append(texts, resp.Texts...)
 			for _, fc := range resp.FunctionCalls {
@@ -847,6 +851,7 @@ func traceClaudeStream(
 			Response: &trace.LLMResponse{
 				Texts:         texts,
 				FunctionCalls: functionCalls,
+				FinishReason:  finishReason,
 			},
 		}, streamErr)
 	}()
@@ -1580,7 +1585,9 @@ func buildClaudeTraceData(resp *anthropic.Message, model string, systemPrompt st
 			SystemPrompt: systemPrompt,
 			Messages:     claudeMessagesToTraceMessages(messages),
 		},
-		Response: &trace.LLMResponse{},
+		Response: &trace.LLMResponse{
+			FinishReason: string(resp.StopReason),
+		},
 	}
 
 	for _, content := range resp.Content {
