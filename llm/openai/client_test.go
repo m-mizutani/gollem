@@ -1008,6 +1008,109 @@ func TestOpenAIFinishReason(t *testing.T) {
 	})
 }
 
+func TestOpenAIRefusal(t *testing.T) {
+	type testCase struct {
+		content  string
+		refusal  string
+		reason   openaiapi.FinishReason
+		expected *gollem.Refusal
+	}
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			mockClient := &apiClientMock{
+				CreateChatCompletionFunc: func(ctx context.Context, req openaiapi.ChatCompletionRequest) (openaiapi.ChatCompletionResponse, error) {
+					return openaiapi.ChatCompletionResponse{
+						Choices: []openaiapi.ChatCompletionChoice{{
+							Message: openaiapi.ChatCompletionMessage{
+								Content: tc.content,
+								Refusal: tc.refusal,
+								Role:    openaiapi.ChatMessageRoleAssistant,
+							},
+							FinishReason: tc.reason,
+						}},
+						Usage: openaiapi.Usage{PromptTokens: 20, CompletionTokens: 3},
+					}, nil
+				},
+			}
+			session, err := openai.NewSessionWithAPIClient(mockClient, gollem.NewSessionConfig(), "gpt-4")
+			gt.NoError(t, err).Required()
+
+			rec := trace.New()
+			ctx := trace.WithHandler(rec.StartAgentExecute(context.Background()), rec)
+			resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("hi")})
+			gt.NoError(t, err).Required()
+			gt.Equal(t, tc.expected, resp.Refusal)
+
+			traced := findLLMCallSpan(t, rec.Trace().RootSpan).LLMCall.Response.Refusal
+			if tc.expected == nil {
+				gt.Nil(t, traced)
+				return
+			}
+			gt.Equal(t, &trace.Refusal{Reason: tc.expected.Reason, Explanation: tc.expected.Explanation}, traced)
+		}
+	}
+
+	t.Run("refusal message", runTest(testCase{
+		refusal:  "I can't help with that.",
+		reason:   openaiapi.FinishReasonStop,
+		expected: &gollem.Refusal{Reason: "refusal", Explanation: "I can't help with that."},
+	}))
+	t.Run("content_filter without a refusal message", runTest(testCase{
+		reason:   openaiapi.FinishReasonContentFilter,
+		expected: &gollem.Refusal{Reason: "content_filter"},
+	}))
+	t.Run("content_filter with a refusal message", runTest(testCase{
+		refusal:  "I can't help with that.",
+		reason:   openaiapi.FinishReasonContentFilter,
+		expected: &gollem.Refusal{Reason: "content_filter", Explanation: "I can't help with that."},
+	}))
+	t.Run("stop without a refusal message", runTest(testCase{
+		content: "ok",
+		reason:  openaiapi.FinishReasonStop,
+	}))
+
+	t.Run("Stream reports the refusal message with the finish reason", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			for _, c := range []string{
+				`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"role":"assistant","refusal":"I can't "}}]}`,
+				`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"refusal":"help with that."}}]}`,
+				`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+				`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[],"usage":{"prompt_tokens":20,"completion_tokens":3,"total_tokens":23}}`,
+				"[DONE]",
+			} {
+				if _, err := io.WriteString(w, "data: "+c+"\n\n"); err != nil {
+					t.Errorf("failed to write chunk: %v", err)
+					return
+				}
+			}
+		}))
+		t.Cleanup(srv.Close)
+
+		client, err := openai.New(context.Background(), "test-key",
+			openai.WithBaseURL(srv.URL+"/v1"), openai.WithModel("gpt-test"))
+		gt.NoError(t, err).Required()
+		session, err := client.NewSession(context.Background())
+		gt.NoError(t, err).Required()
+
+		rec := trace.New()
+		ctx := trace.WithHandler(rec.StartAgentExecute(context.Background()), rec)
+		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		var refusals []*gollem.Refusal
+		for resp := range ch {
+			gt.NoError(t, resp.Error)
+			if resp.Refusal != nil {
+				gt.Equal(t, "stop", resp.FinishReason)
+				refusals = append(refusals, resp.Refusal)
+			}
+		}
+		gt.Equal(t, []*gollem.Refusal{{Reason: "refusal", Explanation: "I can't help with that."}}, refusals)
+		gt.Equal(t, &trace.Refusal{Reason: "refusal", Explanation: "I can't help with that."},
+			findLLMCallSpan(t, rec.Trace().RootSpan).LLMCall.Response.Refusal)
+	})
+}
+
 // TestOpenAIStreamUsageLive verifies that streaming reports token usage. Before
 // the fix the loop broke on the finish reason and never read the trailing usage
 // chunk, so streamed responses reported zero tokens.

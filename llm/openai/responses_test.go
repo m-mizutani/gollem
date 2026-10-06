@@ -876,9 +876,40 @@ func TestResponsesRefusal(t *testing.T) {
 		session, err := rs.client(t).NewSession(context.Background())
 		gt.NoError(t, err).Required()
 
-		resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")})
+		rec := trace.New()
+		ctx := trace.WithHandler(rec.StartAgentExecute(context.Background()), rec)
+		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("hi")})
 		gt.NoError(t, err).Required()
 		gt.Equal(t, []string{"I can't help with that."}, resp.Texts)
+		gt.Equal(t, &gollem.Refusal{Reason: "refusal", Explanation: "I can't help with that."}, resp.Refusal)
+		gt.Equal(t, &trace.Refusal{Reason: "refusal", Explanation: "I can't help with that."},
+			findLLMCallSpan(t, rec.Trace().RootSpan).LLMCall.Response.Refusal)
+	})
+
+	t.Run("Generate reports content_filter", func(t *testing.T) {
+		rs := newResponsesServer(t, replyJSON(`{
+			"id": "resp_1", "object": "response", "status": "incomplete", "model": "gpt-test",
+			"incomplete_details": {"reason": "content_filter"},
+			"output": [],
+			"usage": {"input_tokens": 10, "output_tokens": 0}
+		}`))
+		session, err := rs.client(t).NewSession(context.Background())
+		gt.NoError(t, err).Required()
+
+		resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		gt.Equal(t, "content_filter", resp.FinishReason)
+		gt.Equal(t, &gollem.Refusal{Reason: "content_filter"}, resp.Refusal)
+	})
+
+	t.Run("Generate reports no refusal for text", func(t *testing.T) {
+		rs := newResponsesServer(t, replyJSON(textReplyBody))
+		session, err := rs.client(t).NewSession(context.Background())
+		gt.NoError(t, err).Required()
+
+		resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		gt.Nil(t, resp.Refusal)
 	})
 
 	t.Run("Stream", func(t *testing.T) {
@@ -891,14 +922,23 @@ func TestResponsesRefusal(t *testing.T) {
 		session, err := rs.client(t).NewSession(context.Background())
 		gt.NoError(t, err).Required()
 
-		ch, err := session.Stream(context.Background(), []gollem.Input{gollem.Text("hi")})
+		rec := trace.New()
+		ctx := trace.WithHandler(rec.StartAgentExecute(context.Background()), rec)
+		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("hi")})
 		gt.NoError(t, err).Required()
 		var texts []string
+		var refusals []*gollem.Refusal
 		for resp := range ch {
 			gt.NoError(t, resp.Error).Required()
 			texts = append(texts, resp.Texts...)
+			if resp.Refusal != nil {
+				refusals = append(refusals, resp.Refusal)
+			}
 		}
 		gt.Equal(t, []string{"I can't ", "help with that."}, texts)
+		gt.Equal(t, []*gollem.Refusal{{Reason: "refusal", Explanation: "I can't help with that."}}, refusals)
+		gt.Equal(t, &trace.Refusal{Reason: "refusal", Explanation: "I can't help with that."},
+			findLLMCallSpan(t, rec.Trace().RootSpan).LLMCall.Response.Refusal)
 
 		h, err := session.History()
 		gt.NoError(t, err).Required()

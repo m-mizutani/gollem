@@ -1884,6 +1884,10 @@ func TestClaudeFinishReason(t *testing.T) {
 			gt.Equal(t, tc.stopSequence, resp.StopSequence)
 			gt.Equal(t, []string{"ok"}, resp.Texts)
 			gt.Equal(t, resp.FinishReason, llmCallResponse(t, rec).FinishReason)
+			if tc.stopReason != anthropic.StopReasonRefusal {
+				gt.Nil(t, resp.Refusal)
+				gt.Nil(t, llmCallResponse(t, rec).Refusal)
+			}
 		}
 	}
 
@@ -1901,6 +1905,10 @@ func TestClaudeFinishReason(t *testing.T) {
 					Role:       "assistant",
 					Model:      "claude-3-opus-20240229",
 					StopReason: anthropic.StopReasonRefusal,
+					StopDetails: anthropic.RefusalStopDetails{
+						Category:    anthropic.RefusalStopDetailsCategoryCyber,
+						Explanation: "The request could enable cyber harm.",
+					},
 					Usage: anthropic.Usage{
 						InputTokens:              12,
 						OutputTokens:             0,
@@ -1924,10 +1932,35 @@ func TestClaudeFinishReason(t *testing.T) {
 		gt.Equal(t, 0, resp.OutputToken)
 		gt.Equal(t, 3, resp.CacheCreationInputToken)
 		gt.Equal(t, 5, resp.CacheReadInputToken)
+		gt.Equal(t, &gollem.Refusal{
+			Reason:      "refusal",
+			Categories:  []string{"cyber"},
+			Explanation: "The request could enable cyber harm.",
+		}, resp.Refusal)
 
 		traced := llmCallResponse(t, rec)
 		gt.Equal(t, "refusal", traced.FinishReason)
 		gt.A(t, traced.Texts).Length(0)
+		gt.Equal(t, &trace.Refusal{
+			Reason:      "refusal",
+			Categories:  []string{"cyber"},
+			Explanation: "The request could enable cyber harm.",
+		}, traced.Refusal)
+	})
+
+	t.Run("refusal with a null explanation keeps the category", func(t *testing.T) {
+		ss := newScriptedServer(t, `{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[],`+
+			`"stop_reason":"refusal","stop_sequence":null,`+
+			`"stop_details":{"type":"refusal","category":"general_harms","explanation":null},`+
+			`"usage":{"input_tokens":12,"output_tokens":0}}`, nil)
+		session := newScopedAPISession(t, ss.srv.URL, "claude-test", "")
+
+		resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		gt.Equal(t, &gollem.Refusal{
+			Reason:     "refusal",
+			Categories: []string{"general_harms"},
+		}, resp.Refusal)
 	})
 
 	t.Run("blocks other than text and tool_use are reported by type", func(t *testing.T) {
@@ -1996,7 +2029,9 @@ func TestClaudeFinishReason(t *testing.T) {
 	t.Run("Stream records a refusal without content in the trace", func(t *testing.T) {
 		ss := newScriptedServer(t, "", [][2]string{
 			{"message_start", sseMessageStart},
-			{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"refusal"},"usage":{"output_tokens":0}}`},
+			{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"refusal",` +
+				`"stop_details":{"type":"refusal","category":"bio","explanation":"The request could enable biological harm."}},` +
+				`"usage":{"output_tokens":0}}`},
 			{"message_stop", `{"type":"message_stop"}`},
 		})
 		session := newScopedAPISession(t, ss.srv.URL, "claude-test", "")
@@ -2005,18 +2040,32 @@ func TestClaudeFinishReason(t *testing.T) {
 		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("hi")})
 		gt.NoError(t, err).Required()
 		var reasons []string
+		var refusals []*gollem.Refusal
 		for resp := range ch {
 			gt.NoError(t, resp.Error)
 			gt.A(t, resp.Texts).Length(0)
 			if resp.FinishReason != "" {
 				reasons = append(reasons, resp.FinishReason)
 			}
+			if resp.Refusal != nil {
+				refusals = append(refusals, resp.Refusal)
+			}
 		}
 		gt.Equal(t, []string{"refusal"}, reasons)
+		gt.Equal(t, []*gollem.Refusal{{
+			Reason:      "refusal",
+			Categories:  []string{"bio"},
+			Explanation: "The request could enable biological harm.",
+		}}, refusals)
 
 		traced := llmCallResponse(t, rec)
 		gt.Equal(t, "refusal", traced.FinishReason)
 		gt.A(t, traced.Texts).Length(0)
+		gt.Equal(t, &trace.Refusal{
+			Reason:      "refusal",
+			Categories:  []string{"bio"},
+			Explanation: "The request could enable biological harm.",
+		}, traced.Refusal)
 	})
 }
 

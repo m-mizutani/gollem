@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/internal/convert"
 	gollemschema "github.com/gollem-dev/gollem/internal/schema"
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
@@ -482,10 +483,41 @@ func (s *Session) convertInputs(input ...gollem.Input) ([]*genai.Part, error) {
 	return parts, nil
 }
 
-// processResponse converts Gemini response to gollem.Response
+// processResponse converts Gemini response to gollem.Response. It returns an
+// error for a finish reason that gollem reports as an error.
 func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, error) {
+	if err := finishReasonError(resp); err != nil {
+		return nil, err
+	}
+	return convertResponse(resp), nil
+}
+
+// finishReasonError returns the error for a candidate whose finish reason
+// gollem reports as an error, or nil when there is none.
+func finishReasonError(resp *genai.GenerateContentResponse) error {
+	for _, candidate := range resp.Candidates {
+		if strings.Contains(string(candidate.FinishReason), "MALFORMED_FUNCTION_CALL") {
+			return goerr.Wrap(gollem.ErrFunctionCallFormat, "malformed function call")
+		}
+		if strings.Contains(string(candidate.FinishReason), "PROHIBITED_CONTENT") {
+			return goerr.Wrap(gollem.ErrProhibitedContent, "prohibited content",
+				goerr.V("refusal_reason", string(candidate.FinishReason)),
+				goerr.V("refusal_categories", blockedCategories(candidate.SafetyRatings)),
+				goerr.V("refusal_explanation", candidate.FinishMessage),
+			)
+		}
+	}
+	return nil
+}
+
+// convertResponse converts Gemini response to gollem.Response regardless of
+// the finish reason. Besides processResponse, it builds the trace record of a
+// response that processResponse rejected.
+func convertResponse(resp *genai.GenerateContentResponse) *gollem.Response {
+	// A blocked prompt has no candidates; the block is reported only in
+	// promptFeedback.
 	if len(resp.Candidates) == 0 {
-		return &gollem.Response{}, nil
+		return &gollem.Response{Refusal: promptRefusal(resp.PromptFeedback)}
 	}
 
 	response := &gollem.Response{
@@ -515,11 +547,8 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 			if response.FinishReason == "" {
 				response.FinishReason = string(candidate.FinishReason)
 			}
-			if strings.Contains(string(candidate.FinishReason), "MALFORMED_FUNCTION_CALL") {
-				return nil, goerr.Wrap(gollem.ErrFunctionCallFormat, "malformed function call")
-			}
-			if strings.Contains(string(candidate.FinishReason), "PROHIBITED_CONTENT") {
-				return nil, goerr.Wrap(gollem.ErrProhibitedContent, "prohibited content")
+			if response.Refusal == nil {
+				response.Refusal = candidateRefusal(candidate)
 			}
 		}
 
@@ -560,7 +589,54 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 		}
 	}
 
-	return response, nil
+	return response
+}
+
+// candidateRefusal returns the refusal details of a candidate whose output was
+// blocked, or nil when the finish reason does not report a block.
+func candidateRefusal(candidate *genai.Candidate) *gollem.Refusal {
+	switch candidate.FinishReason {
+	case genai.FinishReasonSafety,
+		genai.FinishReasonRecitation,
+		genai.FinishReasonBlocklist,
+		genai.FinishReasonProhibitedContent,
+		genai.FinishReasonSPII,
+		genai.FinishReasonImageSafety,
+		genai.FinishReasonImageProhibitedContent,
+		genai.FinishReasonImageRecitation:
+		return &gollem.Refusal{
+			Reason:      string(candidate.FinishReason),
+			Categories:  blockedCategories(candidate.SafetyRatings),
+			Explanation: candidate.FinishMessage,
+		}
+	default:
+		return nil
+	}
+}
+
+// promptRefusal returns the refusal details of a blocked prompt, or nil when
+// the prompt was not blocked.
+func promptRefusal(feedback *genai.GenerateContentResponsePromptFeedback) *gollem.Refusal {
+	if feedback == nil || feedback.BlockReason == "" {
+		return nil
+	}
+	return &gollem.Refusal{
+		Reason:      string(feedback.BlockReason),
+		Categories:  blockedCategories(feedback.SafetyRatings),
+		Explanation: feedback.BlockReasonMessage,
+	}
+}
+
+// blockedCategories returns the harm category of each safety rating that
+// caused the block.
+func blockedCategories(ratings []*genai.SafetyRating) []string {
+	var categories []string
+	for _, rating := range ratings {
+		if rating != nil && rating.Blocked {
+			categories = append(categories, string(rating.Category))
+		}
+	}
+	return categories
 }
 
 // Generate generates content based on the input with optional per-call overrides.
@@ -642,6 +718,9 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		response, err := processResponse(result)
 		if err != nil {
 			llmErr = err
+			// The span records only the error message; record the response as
+			// well so that the finish reason and the refusal details are kept.
+			geminiTraceData = buildGeminiTraceData(convertResponse(result), s.model, s.cfg.SystemPrompt(), newTurnContents)
 			return nil, err
 		}
 
@@ -682,6 +761,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			OutputToken:         response.OutputToken,
 			CacheReadInputToken: response.CacheReadInputToken,
 			FinishReason:        response.FinishReason,
+			Refusal:             response.Refusal,
 		}, nil
 	}
 
@@ -706,6 +786,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		OutputToken:         contentResp.OutputToken,
 		CacheReadInputToken: contentResp.CacheReadInputToken,
 		FinishReason:        contentResp.FinishReason,
+		Refusal:             contentResp.Refusal,
 	}, nil
 }
 
@@ -801,6 +882,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			var totalInputTokens, totalOutputTokens int
 			var totalCacheRead int
 			var finishReason string
+			var refusal *gollem.Refusal
 
 			for streamResp := range apiStreamChan {
 				if streamResp.Err != nil {
@@ -816,6 +898,10 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				response, err := processResponse(streamResp.Resp)
 				if err != nil {
 					streamErr = err
+					// The span records only the error message; record the
+					// chunk as well so that the finish reason and the refusal
+					// details are kept.
+					streamTraceData = buildGeminiTraceData(convertResponse(streamResp.Resp), s.model, s.cfg.SystemPrompt(), newTurnContents)
 					streamChan <- &gollem.ContentResponse{
 						Error: err,
 					}
@@ -845,6 +931,9 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				if response.FinishReason != "" {
 					finishReason = response.FinishReason
 				}
+				if response.Refusal != nil {
+					refusal = response.Refusal
+				}
 
 				// Send streaming response with the running totals
 				streamChan <- &gollem.ContentResponse{
@@ -855,6 +944,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					OutputToken:         totalOutputTokens,
 					CacheReadInputToken: totalCacheRead,
 					FinishReason:        response.FinishReason,
+					Refusal:             response.Refusal,
 				}
 			}
 
@@ -905,6 +995,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				},
 				Response: &trace.LLMResponse{
 					FinishReason: finishReason,
+					Refusal:      convert.TraceRefusal(refusal),
 				},
 			}
 			if len(accumulatedTexts) > 0 {
@@ -957,6 +1048,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				OutputToken:         contentResp.OutputToken,
 				CacheReadInputToken: contentResp.CacheReadInputToken,
 				FinishReason:        contentResp.FinishReason,
+				Refusal:             contentResp.Refusal,
 			}
 
 			respChan <- resp
@@ -1392,6 +1484,7 @@ func buildGeminiTraceData(response *gollem.Response, model string, systemPrompt 
 		},
 		Response: &trace.LLMResponse{
 			FinishReason: response.FinishReason,
+			Refusal:      convert.TraceRefusal(response.Refusal),
 		},
 	}
 

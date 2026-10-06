@@ -2250,6 +2250,183 @@ func TestGeminiFinishReason(t *testing.T) {
 	})
 }
 
+func TestGeminiRefusal(t *testing.T) {
+	ratings := []*genai.SafetyRating{
+		{Category: genai.HarmCategoryDangerousContent, Probability: genai.HarmProbabilityHigh, Blocked: true},
+		{Category: genai.HarmCategoryHarassment, Probability: genai.HarmProbabilityNegligible},
+	}
+	blockedCandidate := func(reason genai.FinishReason) *genai.GenerateContentResponse {
+		return &genai.GenerateContentResponse{
+			Candidates: []*genai.Candidate{{
+				FinishReason:  reason,
+				FinishMessage: "The response was blocked.",
+				SafetyRatings: ratings,
+			}},
+			UsageMetadata: &genai.GenerateContentResponseUsageMetadata{PromptTokenCount: 10},
+		}
+	}
+	blockedPrompt := &genai.GenerateContentResponse{
+		PromptFeedback: &genai.GenerateContentResponsePromptFeedback{
+			BlockReason:        genai.BlockedReasonSafety,
+			BlockReasonMessage: "The prompt was blocked.",
+			SafetyRatings:      ratings,
+		},
+	}
+
+	type testCase struct {
+		resp         *genai.GenerateContentResponse
+		finishReason string
+		expected     *gollem.Refusal
+	}
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			mock := &apiClientMock{
+				GenerateContentFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+					return tc.resp, nil
+				},
+			}
+			session, err := gemini.NewSessionWithAPIClient(mock, gollem.NewSessionConfig(), "gemini-2.5-flash")
+			gt.NoError(t, err).Required()
+
+			ctx, rec := newTraceContext()
+			resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("hi")})
+			gt.NoError(t, err).Required()
+			gt.Equal(t, tc.finishReason, resp.FinishReason)
+			gt.Equal(t, tc.expected, resp.Refusal)
+
+			traced := llmCallResponse(t, rec)
+			if tc.expected == nil {
+				gt.Nil(t, traced.Refusal)
+				return
+			}
+			gt.Equal(t, &trace.Refusal{
+				Reason:      tc.expected.Reason,
+				Categories:  tc.expected.Categories,
+				Explanation: tc.expected.Explanation,
+			}, traced.Refusal)
+		}
+	}
+
+	t.Run("SAFETY reports the blocked categories and the finish message", runTest(testCase{
+		resp:         blockedCandidate(genai.FinishReasonSafety),
+		finishReason: "SAFETY",
+		expected: &gollem.Refusal{
+			Reason:      "SAFETY",
+			Categories:  []string{"HARM_CATEGORY_DANGEROUS_CONTENT"},
+			Explanation: "The response was blocked.",
+		},
+	}))
+	t.Run("blocked prompt reports promptFeedback", runTest(testCase{
+		resp: blockedPrompt,
+		expected: &gollem.Refusal{
+			Reason:      "SAFETY",
+			Categories:  []string{"HARM_CATEGORY_DANGEROUS_CONTENT"},
+			Explanation: "The prompt was blocked.",
+		},
+	}))
+	t.Run("STOP reports no refusal", runTest(testCase{
+		resp: &genai.GenerateContentResponse{
+			Candidates: []*genai.Candidate{{
+				Content:      &genai.Content{Role: "model", Parts: []*genai.Part{{Text: "ok"}}},
+				FinishReason: genai.FinishReasonStop,
+			}},
+		},
+		finishReason: "STOP",
+	}))
+
+	t.Run("PROHIBITED_CONTENT returns the details in the error and the trace", func(t *testing.T) {
+		mock := &apiClientMock{
+			GenerateContentFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+				return blockedCandidate(genai.FinishReasonProhibitedContent), nil
+			},
+		}
+		session, err := gemini.NewSessionWithAPIClient(mock, gollem.NewSessionConfig(), "gemini-2.5-flash")
+		gt.NoError(t, err).Required()
+
+		ctx, rec := newTraceContext()
+		_, err = session.Generate(ctx, []gollem.Input{gollem.Text("hi")})
+		gt.Error(t, err).Required()
+		gt.True(t, errors.Is(err, gollem.ErrProhibitedContent))
+		values := goerr.Values(err)
+		gt.Equal(t, any("PROHIBITED_CONTENT"), values["refusal_reason"])
+		gt.Equal(t, any([]string{"HARM_CATEGORY_DANGEROUS_CONTENT"}), values["refusal_categories"])
+		gt.Equal(t, any("The response was blocked."), values["refusal_explanation"])
+
+		traced := llmCallResponse(t, rec)
+		gt.Equal(t, "PROHIBITED_CONTENT", traced.FinishReason)
+		gt.Equal(t, &trace.Refusal{
+			Reason:      "PROHIBITED_CONTENT",
+			Categories:  []string{"HARM_CATEGORY_DANGEROUS_CONTENT"},
+			Explanation: "The response was blocked.",
+		}, traced.Refusal)
+	})
+
+	t.Run("Stream sets the refusal on the chunk that carries it", func(t *testing.T) {
+		mock := &apiClientMock{
+			GenerateContentStreamFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) <-chan gemini.StreamResponse {
+				ch := make(chan gemini.StreamResponse, 2)
+				ch <- gemini.StreamResponse{Resp: &genai.GenerateContentResponse{
+					Candidates: []*genai.Candidate{{
+						Content: &genai.Content{Role: "model", Parts: []*genai.Part{{Text: "a"}}},
+					}},
+				}}
+				ch <- gemini.StreamResponse{Resp: blockedCandidate(genai.FinishReasonSafety)}
+				close(ch)
+				return ch
+			},
+		}
+		session, err := gemini.NewSessionWithAPIClient(mock, gollem.NewSessionConfig(), "gemini-2.5-flash")
+		gt.NoError(t, err).Required()
+
+		ctx, rec := newTraceContext()
+		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		var refusals []*gollem.Refusal
+		for resp := range ch {
+			gt.NoError(t, resp.Error)
+			refusals = append(refusals, resp.Refusal)
+		}
+		expected := &gollem.Refusal{
+			Reason:      "SAFETY",
+			Categories:  []string{"HARM_CATEGORY_DANGEROUS_CONTENT"},
+			Explanation: "The response was blocked.",
+		}
+		gt.Equal(t, []*gollem.Refusal{nil, expected}, refusals)
+		gt.Equal(t, &trace.Refusal{
+			Reason:      "SAFETY",
+			Categories:  []string{"HARM_CATEGORY_DANGEROUS_CONTENT"},
+			Explanation: "The response was blocked.",
+		}, llmCallResponse(t, rec).Refusal)
+	})
+
+	t.Run("Stream records the details of PROHIBITED_CONTENT in the trace", func(t *testing.T) {
+		mock := &apiClientMock{
+			GenerateContentStreamFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) <-chan gemini.StreamResponse {
+				ch := make(chan gemini.StreamResponse, 1)
+				ch <- gemini.StreamResponse{Resp: blockedCandidate(genai.FinishReasonProhibitedContent)}
+				close(ch)
+				return ch
+			},
+		}
+		session, err := gemini.NewSessionWithAPIClient(mock, gollem.NewSessionConfig(), "gemini-2.5-flash")
+		gt.NoError(t, err).Required()
+
+		ctx, rec := newTraceContext()
+		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		var errs []error
+		for resp := range ch {
+			if resp.Error != nil {
+				errs = append(errs, resp.Error)
+			}
+		}
+		gt.A(t, errs).Length(1).Required()
+		gt.True(t, errors.Is(errs[0], gollem.ErrProhibitedContent))
+		gt.Equal(t, any("PROHIBITED_CONTENT"), goerr.Values(errs[0])["refusal_reason"])
+		gt.Equal(t, "PROHIBITED_CONTENT", llmCallResponse(t, rec).Refusal.Reason)
+	})
+}
+
 // newTraceContext returns a context whose LLM calls are recorded by the
 // returned recorder.
 func newTraceContext() (context.Context, *trace.Recorder) {

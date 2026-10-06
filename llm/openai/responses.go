@@ -100,6 +100,9 @@ type responseTurn struct {
 	texts         []string
 	thoughts      []string
 	functionCalls []*gollem.FunctionCall
+	// refusals holds the text of each refusal content part. The same text is
+	// also in texts.
+	refusals []string
 	// message is the assistant message to append to the history. It has no
 	// contents when the response produced no output items.
 	message gollem.Message
@@ -353,6 +356,7 @@ func (s *responsesSession) Generate(ctx context.Context, input []gollem.Input, o
 			CacheCreationInputToken: usage.cacheWrite,
 			CacheReadInputToken:     usage.cacheRead,
 			FinishReason:            finishReason(&resp),
+			Refusal:                 responsesRefusal(&resp, turn),
 		}, nil
 	}
 
@@ -371,6 +375,7 @@ func (s *responsesSession) Generate(ctx context.Context, input []gollem.Input, o
 		CacheCreationInputToken: contentResp.CacheCreationInputToken,
 		CacheReadInputToken:     contentResp.CacheReadInputToken,
 		FinishReason:            contentResp.FinishReason,
+		Refusal:                 contentResp.Refusal,
 	}, nil
 }
 
@@ -383,6 +388,21 @@ func finishReason(resp *openai.CreateResponseResponse) string {
 		return resp.IncompleteDetails.Reason
 	}
 	return string(resp.Status)
+}
+
+// responsesRefusal returns the refusal details of a response, or nil when the
+// model did not refuse and no content filter stopped the output. The refusal
+// message comes from the refusal content parts of turn.
+func responsesRefusal(resp *openai.CreateResponseResponse, turn *responseTurn) *gollem.Refusal {
+	explanation := strings.Join(turn.refusals, "\n")
+	switch {
+	case resp.IncompleteDetails != nil && resp.IncompleteDetails.Reason == string(openai.FinishReasonContentFilter):
+		return &gollem.Refusal{Reason: resp.IncompleteDetails.Reason, Explanation: explanation}
+	case explanation != "":
+		return &gollem.Refusal{Reason: refusalReason, Explanation: explanation}
+	default:
+		return nil
+	}
 }
 
 // Stream sends the conversation and the inputs to the Responses API and
@@ -474,6 +494,7 @@ func (s *responsesSession) Stream(ctx context.Context, input []gollem.Input, opt
 				CacheCreationInputToken: usage.cacheWrite,
 				CacheReadInputToken:     usage.cacheRead,
 				FinishReason:            finishReason(completed),
+				Refusal:                 responsesRefusal(completed, turn),
 			})
 		}()
 
@@ -504,6 +525,7 @@ func (s *responsesSession) Stream(ctx context.Context, input []gollem.Input, opt
 					CacheCreationInputToken: streamResp.CacheCreationInputToken,
 					CacheReadInputToken:     streamResp.CacheReadInputToken,
 					FinishReason:            streamResp.FinishReason,
+					Refusal:                 streamResp.Refusal,
 				}
 			}
 			if !sendOrDone(ctx, responseChan, resp) {
@@ -936,6 +958,9 @@ func outputItemsToTurn(items []responseOutputItem, issuer gollem.Issuer) (*respo
 					text = part.Text
 				case responseContentRefusal:
 					text = part.Refusal
+					if text != "" {
+						turn.refusals = append(turn.refusals, text)
+					}
 				}
 				if text == "" {
 					continue
@@ -1013,6 +1038,7 @@ func buildResponsesTraceData(resp *openai.CreateResponseResponse, systemPrompt s
 		},
 		Response: &trace.LLMResponse{
 			FinishReason: finishReason(resp),
+			Refusal:      convert.TraceRefusal(responsesRefusal(resp, turn)),
 		},
 	}
 	if len(turn.texts) > 0 {

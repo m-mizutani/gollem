@@ -1810,7 +1810,8 @@ func TestStreamingKeepsFinishReason(t *testing.T) {
 						ch <- &gollem.Response{OtherBlockTypes: []string{"redacted_thinking"}}
 						ch <- &gollem.Response{Texts: []string{"partial"}}
 						ch <- &gollem.Response{OtherBlockTypes: []string{"server_tool_use"}}
-						ch <- &gollem.Response{FinishReason: "stop_sequence", StopSequence: "###"}
+						ch <- &gollem.Response{FinishReason: "stop_sequence", StopSequence: "###",
+							Refusal: &gollem.Refusal{Reason: "refusal", Categories: []string{"cyber"}}}
 						ch <- &gollem.Response{InputToken: 10, OutputToken: 4}
 					}()
 					return ch, nil
@@ -1831,6 +1832,7 @@ func TestStreamingKeepsFinishReason(t *testing.T) {
 
 	gt.Equal(t, "stop_sequence", strat.got.FinishReason)
 	gt.Equal(t, "###", strat.got.StopSequence)
+	gt.Equal(t, &gollem.Refusal{Reason: "refusal", Categories: []string{"cyber"}}, strat.got.Refusal)
 	gt.Equal(t, []string{"redacted_thinking", "server_tool_use"}, strat.got.OtherBlockTypes)
 	gt.Equal(t, 10, strat.got.InputToken)
 }

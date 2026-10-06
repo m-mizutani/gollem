@@ -116,6 +116,18 @@ func queryWithRetry[T any](ctx context.Context, session Session, input []Input, 
 		totalInputToken += resp.InputToken
 		totalOutputToken += resp.OutputToken
 
+		// Retrying with a JSON correction prompt does not address a refusal,
+		// and the text of a refused response is not the requested JSON.
+		if resp.Refusal != nil {
+			return nil, goerr.Wrap(ErrProhibitedContent, "the provider refused the query",
+				goerr.V("attempt", attempt+1),
+				goerr.V("finish_reason", resp.FinishReason),
+				goerr.V("refusal_reason", resp.Refusal.Reason),
+				goerr.V("refusal_categories", resp.Refusal.Categories),
+				goerr.V("refusal_explanation", resp.Refusal.Explanation),
+			)
+		}
+
 		if len(resp.Texts) == 0 {
 			return nil, goerr.New("no text in response",
 				goerr.V("attempt", attempt+1),

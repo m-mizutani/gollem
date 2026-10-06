@@ -757,12 +757,14 @@ The field is empty when the provider returned no value. For Claude,
 `Response.StopSequence` holds the custom stop sequence that ended the
 generation, when there is one.
 
-gollem does not return an error because the provider reports a refusal or a
-truncated response; the caller decides how to handle it. Errors that existed
-before are still returned, for example when the arguments of a tool call cut
-off by the token limit cannot be decoded. Check `err` first, then
-`FinishReason`. This matters for a structured query, where an empty `Texts`
-alone does not tell why no JSON came back:
+`Session.Generate` and `Session.Stream` do not return an error because the
+provider reports a refusal or a truncated response; the caller decides how to
+handle it. Errors that existed before are still returned, for example when the
+arguments of a tool call cut off by the token limit cannot be decoded, or when
+Gemini reports `PROHIBITED_CONTENT`. `Query` and `SessionQuery` return an error
+for a refusal (see [Refusal Details](#refusal-details)). Check `err` first,
+then `FinishReason`. This matters for a structured query through `Generate`,
+where an empty `Texts` alone does not tell why no JSON came back:
 
 ```go
 resp, err := session.Generate(ctx, input, gollem.WithGenerateResponseSchema(schema))
@@ -791,6 +793,61 @@ for the event that carried them, and each block type on the response for the
 event that started the block. Such a response can have no texts, thoughts or
 function calls. For the OpenAI Responses API and Ollama, the finish reason
 arrives with the final token counts and is set on the last response.
+
+### Refusal Details
+
+When the provider refuses the request, or blocks the prompt or the output,
+`Response.Refusal` holds the details the provider gave. It is `nil` otherwise.
+The values are passed through as the provider returned them:
+
+| Provider | Set when | `Reason` | `Categories` | `Explanation` |
+|---|---|---|---|---|
+| Claude (Anthropic, Vertex AI) | `stop_reason` is `refusal` | `refusal` | `stop_details.category`, for example `cyber`, `bio`, `frontier_llm`, `reasoning_extraction`, `general_harms` | `stop_details.explanation` |
+| Gemini | the candidate's `finishReason` is `SAFETY`, `RECITATION`, `BLOCKLIST`, `PROHIBITED_CONTENT`, `SPII`, `IMAGE_SAFETY`, `IMAGE_PROHIBITED_CONTENT` or `IMAGE_RECITATION` | that `finishReason` | the `category` of each safety rating marked `blocked` | `finishMessage` |
+| Gemini | `promptFeedback.blockReason` is set (the prompt was blocked and no candidate was returned) | `blockReason` | the `category` of each prompt safety rating marked `blocked` | `blockReasonMessage` |
+| OpenAI (Chat Completions) | the message has `refusal`, or `finish_reason` is `content_filter` | `content_filter` when `finish_reason` is `content_filter`, otherwise `refusal` | always empty | the `refusal` message |
+| OpenAI (Responses API) | the output has a `refusal` content part, or `incomplete_details.reason` is `content_filter` | `content_filter` when `incomplete_details.reason` is `content_filter`, otherwise `refusal` | always empty | the text of the `refusal` content parts |
+| Ollama | never; the API reports no refusal | | | |
+
+`Categories` and `Explanation` are empty when the provider gave no value; for
+example, Claude returns no explanation for some categories. The explanation
+text is not guaranteed to be stable, so do not compare it with fixed strings.
+For a Gemini prompt block, `FinishReason` is empty because no candidate was
+returned. The OpenAI Responses API also returns the refusal message in `Texts`,
+as before.
+
+```go
+resp, err := session.Generate(ctx, input)
+if err != nil {
+    return err
+}
+if r := resp.Refusal; r != nil {
+    slog.Warn("the provider refused the request",
+        "reason", r.Reason, "categories", r.Categories, "explanation", r.Explanation)
+}
+```
+
+With `Stream`, the refusal is set on the response for the event that carried
+it: for Claude, the event with the stop reason; for OpenAI Chat Completions,
+the chunk with the finish reason; for the OpenAI Responses API, the last
+response; for Gemini, the chunk that reported the block.
+
+`Query` and `SessionQuery` return an error that wraps
+`gollem.ErrProhibitedContent` when the response has a refusal, without retrying,
+because a correction prompt does not resolve a refusal. The error carries the
+details as goerr values `finish_reason`, `refusal_reason`, `refusal_categories`
+and `refusal_explanation`. The Gemini error for `PROHIBITED_CONTENT`, which
+also wraps `gollem.ErrProhibitedContent`, carries `refusal_reason`,
+`refusal_categories` and `refusal_explanation`:
+
+```go
+_, err := gollem.Query[Answer](ctx, client, prompt)
+if errors.Is(err, gollem.ErrProhibitedContent) {
+    values := goerr.Values(err)
+    log.Printf("refused: category=%v explanation=%v",
+        values["refusal_categories"], values["refusal_explanation"])
+}
+```
 
 ### Error Handling
 

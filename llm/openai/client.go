@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/internal/convert"
 	"github.com/gollem-dev/gollem/internal/jsonutil"
 	"github.com/gollem-dev/gollem/internal/schema"
 	"github.com/gollem-dev/gollem/trace"
@@ -659,6 +660,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			CacheCreationInputToken: cacheWriteTokens,
 			CacheReadInputToken:     cachedPromptTokens(resp.Usage),
 			FinishReason:            string(resp.Choices[0].FinishReason),
+			Refusal:                 chatRefusal(resp.Choices[0].FinishReason, resp.Choices[0].Message.Refusal),
 		}
 
 		message := resp.Choices[0].Message
@@ -728,6 +730,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			CacheCreationInputToken: response.CacheCreationInputToken,
 			CacheReadInputToken:     response.CacheReadInputToken,
 			FinishReason:            response.FinishReason,
+			Refusal:                 response.Refusal,
 		}, nil
 	}
 
@@ -754,7 +757,27 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		CacheCreationInputToken: contentResp.CacheCreationInputToken,
 		CacheReadInputToken:     contentResp.CacheReadInputToken,
 		FinishReason:            contentResp.FinishReason,
+		Refusal:                 contentResp.Refusal,
 	}, nil
+}
+
+// refusalReason is the Refusal.Reason of a response whose refusal message is
+// the only report of the refusal. The value is the name of the field that
+// carries the message: "refusal" in Chat Completions and the content part type
+// "refusal" in the Responses API.
+const refusalReason = "refusal"
+
+// chatRefusal returns the refusal details of a Chat Completions choice, or nil
+// when the model did not refuse and no content filter stopped the output.
+func chatRefusal(finishReason openai.FinishReason, refusal string) *gollem.Refusal {
+	switch {
+	case finishReason == openai.FinishReasonContentFilter:
+		return &gollem.Refusal{Reason: string(finishReason), Explanation: refusal}
+	case refusal != "":
+		return &gollem.Refusal{Reason: refusalReason, Explanation: refusal}
+	default:
+		return nil
+	}
 }
 
 // Stream processes the input and generates a response stream with optional per-call overrides.
@@ -842,6 +865,8 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			var totalCacheRead int
 			var totalCacheWrite int
 			var finishReason string
+			var refusalText string
+			var refusal *gollem.Refusal
 
 			// Process streaming chunks
 			for {
@@ -903,6 +928,10 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					}
 				}
 
+				// The refusal message arrives in deltas before the finish
+				// reason, which reports it as a whole.
+				refusalText += delta.Refusal
+
 				// Handle reasoning content
 				if delta.ReasoningContent != "" {
 					reasoningContent += delta.ReasoningContent
@@ -950,8 +979,10 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 
 				if choice.FinishReason != "" {
 					finishReason = string(choice.FinishReason)
+					refusal = chatRefusal(choice.FinishReason, refusalText)
 					responseChan <- &gollem.ContentResponse{
 						FinishReason:            string(choice.FinishReason),
+						Refusal:                 refusal,
 						InputToken:              totalInputTokens,
 						OutputToken:             totalOutputTokens,
 						CacheCreationInputToken: totalCacheWrite,
@@ -1044,6 +1075,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				},
 				Response: &trace.LLMResponse{
 					FinishReason: finishReason,
+					Refusal:      convert.TraceRefusal(refusal),
 				},
 			}
 			if textContent != "" {
@@ -1112,6 +1144,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					CacheCreationInputToken: streamResp.CacheCreationInputToken,
 					CacheReadInputToken:     streamResp.CacheReadInputToken,
 					FinishReason:            streamResp.FinishReason,
+					Refusal:                 streamResp.Refusal,
 				}
 			}
 		}
@@ -1475,6 +1508,7 @@ func buildOpenAITraceData(resp openai.ChatCompletionResponse, cacheWriteTokens i
 
 	if len(resp.Choices) > 0 {
 		data.Response.FinishReason = string(resp.Choices[0].FinishReason)
+		data.Response.Refusal = convert.TraceRefusal(chatRefusal(resp.Choices[0].FinishReason, resp.Choices[0].Message.Refusal))
 		message := resp.Choices[0].Message
 		if message.Content != "" {
 			data.Response.Texts = append(data.Response.Texts, message.Content)

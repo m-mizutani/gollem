@@ -591,6 +591,9 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 					streamedResponse.FinishReason = output.FinishReason
 					streamedResponse.StopSequence = output.StopSequence
 				}
+				if output.Refusal != nil {
+					streamedResponse.Refusal = output.Refusal
+				}
 				if output.InputToken > 0 {
 					streamedResponse.InputToken = output.InputToken
 				}

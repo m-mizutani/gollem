@@ -30,6 +30,19 @@ type LLMResponse struct {
 	// as returned by the provider. It is the same value as the FinishReason of
 	// the gollem.Response produced by the call.
 	FinishReason string `json:"finish_reason,omitempty"`
+
+	// Refusal is the details of a refusal or a block, recorded as returned by
+	// the provider. It holds the same values as the Refusal of the
+	// gollem.Response produced by the call, and is nil when there is none.
+	Refusal *Refusal `json:"refusal,omitempty"`
+}
+
+// Refusal is the details a provider reported for a refusal or a block. See
+// gollem.Refusal for the source of each value.
+type Refusal struct {
+	Reason      string   `json:"reason,omitempty"`
+	Categories  []string `json:"categories,omitempty"`
+	Explanation string   `json:"explanation,omitempty"`
 }
 
 // Message represents a message in the trace with structured content blocks.

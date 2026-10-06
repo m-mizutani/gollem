@@ -124,8 +124,15 @@ func TestLLMCallLogsFinishReason(t *testing.T) {
 
 	llmCtx := h.StartLLMCall(context.Background())
 	h.EndLLMCall(llmCtx, &trace.LLMCallData{
-		Model:    "test-model",
-		Response: &trace.LLMResponse{FinishReason: "refusal"},
+		Model: "test-model",
+		Response: &trace.LLMResponse{
+			FinishReason: "refusal",
+			Refusal: &trace.Refusal{
+				Reason:      "refusal",
+				Categories:  []string{"cyber"},
+				Explanation: "declined",
+			},
+		},
 	}, nil)
 
 	var record struct {
@@ -133,6 +140,11 @@ func TestLLMCallLogsFinishReason(t *testing.T) {
 	}
 	gt.NoError(t, json.Unmarshal(buf.Bytes(), &record)).Required()
 	gt.Equal(t, any("refusal"), record.Response["finish_reason"])
+	gt.Equal(t, any(map[string]any{
+		"reason":      "refusal",
+		"categories":  []any{"cyber"},
+		"explanation": "declined",
+	}), record.Response["refusal"])
 }
 
 func TestLLMCallWithError(t *testing.T) {

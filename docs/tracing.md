@@ -153,10 +153,11 @@ Each span contains:
   - Claude (Claude API and Vertex AI): `stop_reason`, for example `end_turn`, `max_tokens`, or `refusal`
   - Gemini: the candidate's `finishReason`, for example `STOP`, `MAX_TOKENS`, or `SAFETY`
   - OpenAI Chat Completions: the choice's `finish_reason`, for example `stop`, `length`, or `content_filter`
-  - OpenAI Responses API: `incomplete_details.reason` when the response is incomplete (for example `max_output_tokens`), otherwise the response `status` (for example `completed`). The Responses API has no finish reason, so a refusal is reported as `completed`, with the refusal message in `Texts`.
+  - OpenAI Responses API: `incomplete_details.reason` when the response is incomplete (for example `max_output_tokens`), otherwise the response `status` (for example `completed`). The Responses API has no finish reason, so a refusal is reported as `completed`, with the refusal message in `Texts` and in `Refusal`.
   - Ollama: `done_reason`, for example `stop` or `length`
 
   The JSON key `finish_reason` is omitted when the value is empty.
+- `Refusal`: the same values as `Response.Refusal` of the call, recorded under the JSON key `refusal` with `reason`, `categories` and `explanation`. It is omitted when the provider reported no refusal. For Claude it holds `stop_details.category` and `stop_details.explanation`; see [Refusal Details](llm.md#refusal-details) for the other providers. For `Stream`, it is the last refusal the stream returned. When Gemini reports `PROHIBITED_CONTENT`, the call returns an error and the span records the error, and `Response` is still recorded with the finish reason and the refusal, because the span keeps only the error message.
 
 ### OpenTelemetry Handler (`trace/otel`)
 

@@ -13,6 +13,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
 	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/internal/convert"
 	"github.com/gollem-dev/gollem/internal/jsonutil"
 	"github.com/gollem-dev/gollem/internal/schema"
 	"github.com/gollem-dev/gollem/trace"
@@ -687,6 +688,7 @@ func generateClaudeStream(
 				if messageDelta.Delta.StopReason != "" {
 					response.FinishReason = string(messageDelta.Delta.StopReason)
 					response.StopSequence = messageDelta.Delta.StopSequence
+					response.Refusal = refusalFrom(messageDelta.Delta.StopReason, messageDelta.Delta.StopDetails)
 					response.InputToken = totalInputTokens
 					response.OutputToken = totalOutputTokens
 					response.CacheCreationInputToken = totalCacheCreation
@@ -806,6 +808,7 @@ func traceClaudeStream(
 		var texts []string
 		var functionCalls []*trace.FunctionCall
 		var finishReason string
+		var refusal *gollem.Refusal
 		var inputTokens, outputTokens, cacheCreation, cacheRead int
 
 		for resp := range ch {
@@ -814,6 +817,9 @@ func traceClaudeStream(
 			}
 			if resp.FinishReason != "" {
 				finishReason = resp.FinishReason
+			}
+			if resp.Refusal != nil {
+				refusal = resp.Refusal
 			}
 			texts = append(texts, resp.Texts...)
 			for _, fc := range resp.FunctionCalls {
@@ -852,6 +858,7 @@ func traceClaudeStream(
 				Texts:         texts,
 				FunctionCalls: functionCalls,
 				FinishReason:  finishReason,
+				Refusal:       convert.TraceRefusal(refusal),
 			},
 		}, streamErr)
 	}()
@@ -880,10 +887,27 @@ func toResponseStream(ch <-chan *gollem.ContentResponse) <-chan *gollem.Response
 				FinishReason:            streamResp.FinishReason,
 				StopSequence:            streamResp.StopSequence,
 				OtherBlockTypes:         streamResp.OtherBlockTypes,
+				Refusal:                 streamResp.Refusal,
 			}
 		}
 	}()
 	return responseChan
+}
+
+// refusalFrom returns the refusal details reported with stopReason, or nil
+// when the generation did not stop because of a refusal.
+func refusalFrom(stopReason anthropic.StopReason, details anthropic.RefusalStopDetails) *gollem.Refusal {
+	if stopReason != anthropic.StopReasonRefusal {
+		return nil
+	}
+	refusal := &gollem.Refusal{
+		Reason:      string(stopReason),
+		Explanation: details.Explanation,
+	}
+	if details.Category != "" {
+		refusal.Categories = []string{string(details.Category)}
+	}
+	return refusal
 }
 
 // processResponseWithContentType converts Claude response to gollem.Response.
@@ -903,6 +927,7 @@ func processResponseWithContentType(ctx context.Context, resp *anthropic.Message
 		CacheReadInputToken:     cacheRead,
 		FinishReason:            string(resp.StopReason),
 		StopSequence:            resp.StopSequence,
+		Refusal:                 refusalFrom(resp.StopReason, resp.StopDetails),
 	}
 
 	for _, content := range resp.Content {
@@ -1033,6 +1058,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			FinishReason:            processedResp.FinishReason,
 			StopSequence:            processedResp.StopSequence,
 			OtherBlockTypes:         processedResp.OtherBlockTypes,
+			Refusal:                 processedResp.Refusal,
 		}, nil
 	}
 
@@ -1060,6 +1086,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		FinishReason:            contentResp.FinishReason,
 		StopSequence:            contentResp.StopSequence,
 		OtherBlockTypes:         contentResp.OtherBlockTypes,
+		Refusal:                 contentResp.Refusal,
 	}, nil
 }
 
@@ -1587,6 +1614,7 @@ func buildClaudeTraceData(resp *anthropic.Message, model string, systemPrompt st
 		},
 		Response: &trace.LLMResponse{
 			FinishReason: string(resp.StopReason),
+			Refusal:      convert.TraceRefusal(refusalFrom(resp.StopReason, resp.StopDetails)),
 		},
 	}
 
