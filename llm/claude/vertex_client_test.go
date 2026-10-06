@@ -10,6 +10,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/llm/claude"
+	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/gt"
 )
 
@@ -474,6 +475,7 @@ func TestVertexIssuerScopeSeparatesThinking(t *testing.T) {
 func TestVertexGenerateRefusalWithoutContent(t *testing.T) {
 	ss := newScriptedServer(t, `{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[],`+
 		`"stop_reason":"refusal","stop_sequence":null,`+
+		`"stop_details":{"type":"refusal","category":"frontier_llm","explanation":"explained"},`+
 		`"usage":{"input_tokens":12,"output_tokens":0,"cache_creation_input_tokens":3,"cache_read_input_tokens":5}}`, nil)
 	session := newScopedVertexSession(t, ss.srv.URL, "claude-test", "")
 
@@ -487,16 +489,28 @@ func TestVertexGenerateRefusalWithoutContent(t *testing.T) {
 	gt.Equal(t, 0, resp.OutputToken)
 	gt.Equal(t, 3, resp.CacheCreationInputToken)
 	gt.Equal(t, 5, resp.CacheReadInputToken)
+	gt.Equal(t, &gollem.Refusal{
+		Reason:      "refusal",
+		Categories:  []string{"frontier_llm"},
+		Explanation: "explained",
+	}, resp.Refusal)
 
 	traced := llmCallResponse(t, rec)
 	gt.Equal(t, "refusal", traced.FinishReason)
 	gt.A(t, traced.Texts).Length(0)
+	gt.Equal(t, &trace.Refusal{
+		Reason:      "refusal",
+		Categories:  []string{"frontier_llm"},
+		Explanation: "explained",
+	}, traced.Refusal)
 }
 
 func TestVertexStreamRefusalWithoutContent(t *testing.T) {
 	ss := newScriptedServer(t, "", [][2]string{
 		{"message_start", sseMessageStart},
-		{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"refusal"},"usage":{"output_tokens":0}}`},
+		{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"refusal",` +
+			`"stop_details":{"type":"refusal","category":"reasoning_extraction","explanation":null}},` +
+			`"usage":{"output_tokens":0}}`},
 		{"message_stop", `{"type":"message_stop"}`},
 	})
 	session := newScopedVertexSession(t, ss.srv.URL, "claude-test", "")
@@ -505,17 +519,24 @@ func TestVertexStreamRefusalWithoutContent(t *testing.T) {
 	ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("question")})
 	gt.NoError(t, err).Required()
 	var reasons []string
+	var refusals []*gollem.Refusal
 	for resp := range ch {
 		gt.NoError(t, resp.Error)
 		if resp.FinishReason != "" {
 			reasons = append(reasons, resp.FinishReason)
 		}
+		if resp.Refusal != nil {
+			refusals = append(refusals, resp.Refusal)
+		}
 	}
 	gt.Equal(t, []string{"refusal"}, reasons)
+	expected := &gollem.Refusal{Reason: "refusal", Categories: []string{"reasoning_extraction"}}
+	gt.Equal(t, []*gollem.Refusal{expected}, refusals)
 
 	traced := llmCallResponse(t, rec)
 	gt.Equal(t, "refusal", traced.FinishReason)
 	gt.A(t, traced.Texts).Length(0)
+	gt.Equal(t, &trace.Refusal{Reason: "refusal", Categories: []string{"reasoning_extraction"}}, traced.Refusal)
 }
 
 func TestWithVertexEffort(t *testing.T) {

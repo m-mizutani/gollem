@@ -86,9 +86,45 @@ type Response struct {
 	// other providers. In streaming, a type is set on the response for the event
 	// that started the block.
 	OtherBlockTypes []string
+	// Refusal holds the details the provider gave when it refused the request
+	// or blocked the prompt or the output. nil when the provider reported no
+	// refusal. See Refusal for the source of each value. In streaming, it is set
+	// on the response for the event that carried it.
+	Refusal *Refusal
 
 	// Error is an error that occurred during the generation for streaming response.
 	Error error
+}
+
+// Refusal is the details a provider reported for a refusal or a block. The
+// values are passed through unchanged; gollem does not map them to its own
+// values.
+//
+//   - Claude: set when stop_reason is "refusal". Reason is "refusal",
+//     Categories holds stop_details.category (e.g. "cyber", "bio",
+//     "general_harms") and Explanation holds stop_details.explanation.
+//   - Gemini: set when the candidate's finishReason reports a block (e.g.
+//     "SAFETY", "PROHIBITED_CONTENT") or promptFeedback.blockReason is set.
+//     Reason is that finishReason or blockReason, Categories holds the category
+//     of each safety rating marked as blocked (e.g.
+//     "HARM_CATEGORY_DANGEROUS_CONTENT") and Explanation holds finishMessage or
+//     blockReasonMessage.
+//   - OpenAI Chat Completions: set when the message has a refusal or
+//     finish_reason is "content_filter". Reason is "refusal" or
+//     "content_filter", and Explanation holds the refusal message.
+//   - OpenAI Responses API: set when the output has a refusal content part or
+//     incomplete_details.reason is "content_filter". Reason is "refusal" or
+//     "content_filter", and Explanation holds the refusal message.
+//   - Ollama: never set; the API reports no refusal.
+type Refusal struct {
+	// Reason is the provider's code that reported the refusal or the block.
+	Reason string
+	// Categories is the policy or harm categories the provider gave. Empty
+	// when the provider gave none.
+	Categories []string
+	// Explanation is the human-readable text the provider gave. Empty when the
+	// provider gave none. The text is not guaranteed to be stable.
+	Explanation string
 }
 
 func (r *Response) HasData() bool {

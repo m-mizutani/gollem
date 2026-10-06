@@ -62,7 +62,11 @@ var (
 	// ErrFunctionCallFormat is returned when the function call format is invalid
 	ErrFunctionCallFormat = errors.New("function call format error")
 
-	// ErrProhibitedContent is returned when the content violates policy
+	// ErrProhibitedContent is returned when the content violates policy: by the
+	// Gemini client when the finish reason is PROHIBITED_CONTENT, and by Query
+	// and SessionQuery when the response has a Refusal. The error carries the
+	// refusal details as the goerr values refusal_reason, refusal_categories
+	// and refusal_explanation.
 	ErrProhibitedContent = errors.New("prohibited content")
 
 	// ErrToolArgsValidation is returned when the tool arguments from LLM fail validation.

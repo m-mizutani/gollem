@@ -8,6 +8,7 @@ import (
 
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/mock"
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 )
 
@@ -167,6 +168,44 @@ func TestQueryEmptyResponse(t *testing.T) {
 
 	_, err := gollem.Query[testQueryResult](context.Background(), client, "test")
 	gt.Error(t, err)
+}
+
+func TestQueryRefusal(t *testing.T) {
+	type testCase struct {
+		texts []string
+	}
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			callCount := 0
+			client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+				callCount++
+				return &gollem.Response{
+					Texts:        tc.texts,
+					FinishReason: "refusal",
+					Refusal: &gollem.Refusal{
+						Reason:      "refusal",
+						Categories:  []string{"general_harms"},
+						Explanation: "The request was declined.",
+					},
+				}, nil
+			})
+
+			_, err := gollem.Query[testQueryResult](context.Background(), client, "test")
+			gt.Error(t, err).Required()
+			gt.True(t, errors.Is(err, gollem.ErrProhibitedContent))
+			// A refusal is not retried with a JSON correction prompt.
+			gt.Equal(t, 1, callCount)
+
+			values := goerr.Values(err)
+			gt.Equal(t, any("refusal"), values["finish_reason"])
+			gt.Equal(t, any("refusal"), values["refusal_reason"])
+			gt.Equal(t, any([]string{"general_harms"}), values["refusal_categories"])
+			gt.Equal(t, any("The request was declined."), values["refusal_explanation"])
+		}
+	}
+
+	t.Run("without text", runTest(testCase{texts: []string{}}))
+	t.Run("with a partial text", runTest(testCase{texts: []string{`{"name":`}}))
 }
 
 func TestQueryGenerateError(t *testing.T) {

@@ -44,7 +44,9 @@ type ContentResponse struct {
 	// OtherBlockTypes is the type of each content block other than text and
 	// tool_use. See Response.OtherBlockTypes.
 	OtherBlockTypes []string
-	Error           error // Error if any occurred
+	// Refusal is the details of a refusal or a block. See Response.Refusal.
+	Refusal *Refusal
+	Error   error // Error if any occurred
 }
 
 // ToolMiddleware is a function that wraps a ToolHandler to add behavior.
