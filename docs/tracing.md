@@ -143,6 +143,21 @@ Each span contains:
 
 `LLMCallData.Request.Messages` records only the messages newly added in that turn (e.g. the latest user input and any tool responses), not the full conversation history that was actually sent to the provider. This keeps each span proportional to the work done in that turn — the prior history can be reconstructed by walking the chronologically earlier `llm_call` spans in the same trace.
 
+#### LLM Call Response
+
+`LLMCallData.Response` records what the provider returned in that call:
+
+- `Texts`: the text blocks
+- `FunctionCalls`: the tool calls
+- `FinishReason`: the same value as `Response.FinishReason` of the call. For `Stream`, it is the last non-empty finish reason the stream returned. It is recorded even when `Texts` is empty, so a span with no text shows why the generation ended. The value depends on the provider:
+  - Claude (Claude API and Vertex AI): `stop_reason`, for example `end_turn`, `max_tokens`, or `refusal`
+  - Gemini: the candidate's `finishReason`, for example `STOP`, `MAX_TOKENS`, or `SAFETY`
+  - OpenAI Chat Completions: the choice's `finish_reason`, for example `stop`, `length`, or `content_filter`
+  - OpenAI Responses API: `incomplete_details.reason` when the response is incomplete (for example `max_output_tokens`), otherwise the response `status` (for example `completed`). The Responses API has no finish reason, so a refusal is reported as `completed`, with the refusal message in `Texts`.
+  - Ollama: `done_reason`, for example `stop` or `length`
+
+  The JSON key `finish_reason` is omitted when the value is empty.
+
 ### OpenTelemetry Handler (`trace/otel`)
 
 The `trace/otel` package bridges gollem's trace events to OpenTelemetry spans. This integrates with any OTel-compatible backend such as Jaeger, Zipkin, or OTLP collectors.

@@ -1877,11 +1877,13 @@ func TestClaudeFinishReason(t *testing.T) {
 			session, err := claude.NewSessionWithAPIClient(mockClient, gollem.NewSessionConfig(), "claude-3-opus-20240229")
 			gt.NoError(t, err).Required()
 
-			resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")})
+			ctx, rec := newTraceContext()
+			resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("hi")})
 			gt.NoError(t, err).Required()
 			gt.Equal(t, string(tc.stopReason), resp.FinishReason)
 			gt.Equal(t, tc.stopSequence, resp.StopSequence)
 			gt.Equal(t, []string{"ok"}, resp.Texts)
+			gt.Equal(t, resp.FinishReason, llmCallResponse(t, rec).FinishReason)
 		}
 	}
 
@@ -1911,7 +1913,8 @@ func TestClaudeFinishReason(t *testing.T) {
 		session, err := claude.NewSessionWithAPIClient(mockClient, gollem.NewSessionConfig(), "claude-3-opus-20240229")
 		gt.NoError(t, err).Required()
 
-		resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")},
+		ctx, rec := newTraceContext()
+		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("hi")},
 			gollem.WithGenerateResponseSchema(structuredOutputTestSchema()))
 		gt.NoError(t, err).Required()
 		gt.Equal(t, "refusal", resp.FinishReason)
@@ -1921,6 +1924,10 @@ func TestClaudeFinishReason(t *testing.T) {
 		gt.Equal(t, 0, resp.OutputToken)
 		gt.Equal(t, 3, resp.CacheCreationInputToken)
 		gt.Equal(t, 5, resp.CacheReadInputToken)
+
+		traced := llmCallResponse(t, rec)
+		gt.Equal(t, "refusal", traced.FinishReason)
+		gt.A(t, traced.Texts).Length(0)
 	})
 
 	t.Run("blocks other than text and tool_use are reported by type", func(t *testing.T) {
@@ -1962,7 +1969,8 @@ func TestClaudeFinishReason(t *testing.T) {
 		ss := newScriptedServer(t, "", events)
 		session := newScopedAPISession(t, ss.srv.URL, "claude-test", "")
 
-		ch, err := session.Stream(context.Background(), []gollem.Input{gollem.Text("hi")})
+		ctx, rec := newTraceContext()
+		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("hi")})
 		gt.NoError(t, err).Required()
 
 		var finished []*gollem.Response
@@ -1982,5 +1990,56 @@ func TestClaudeFinishReason(t *testing.T) {
 		gt.Equal(t, 4, finished[0].OutputToken)
 		gt.Equal(t, []string{"redacted_thinking"}, blockTypes)
 		gt.Equal(t, []string{"answer"}, texts)
+		gt.Equal(t, finished[0].FinishReason, llmCallResponse(t, rec).FinishReason)
 	})
+
+	t.Run("Stream records a refusal without content in the trace", func(t *testing.T) {
+		ss := newScriptedServer(t, "", [][2]string{
+			{"message_start", sseMessageStart},
+			{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"refusal"},"usage":{"output_tokens":0}}`},
+			{"message_stop", `{"type":"message_stop"}`},
+		})
+		session := newScopedAPISession(t, ss.srv.URL, "claude-test", "")
+
+		ctx, rec := newTraceContext()
+		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		var reasons []string
+		for resp := range ch {
+			gt.NoError(t, resp.Error)
+			gt.A(t, resp.Texts).Length(0)
+			if resp.FinishReason != "" {
+				reasons = append(reasons, resp.FinishReason)
+			}
+		}
+		gt.Equal(t, []string{"refusal"}, reasons)
+
+		traced := llmCallResponse(t, rec)
+		gt.Equal(t, "refusal", traced.FinishReason)
+		gt.A(t, traced.Texts).Length(0)
+	})
+}
+
+// newTraceContext returns a context whose LLM calls are recorded by the
+// returned recorder.
+func newTraceContext() (context.Context, *trace.Recorder) {
+	rec := trace.New()
+	ctx := rec.StartAgentExecute(context.Background())
+	return trace.WithHandler(ctx, rec), rec
+}
+
+// llmCallResponse returns the response data of the only llm_call span that rec
+// recorded.
+func llmCallResponse(t *testing.T, rec *trace.Recorder) *trace.LLMResponse {
+	t.Helper()
+	var spans []*trace.Span
+	for _, child := range rec.Trace().RootSpan.Children {
+		if child.Kind == trace.SpanKindLLMCall {
+			spans = append(spans, child)
+		}
+	}
+	gt.A(t, spans).Length(1).Required()
+	gt.V(t, spans[0].LLMCall).NotNil().Required()
+	gt.V(t, spans[0].LLMCall.Response).NotNil().Required()
+	return spans[0].LLMCall.Response
 }

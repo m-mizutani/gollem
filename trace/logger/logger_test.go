@@ -1,7 +1,9 @@
 package logger_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"sync"
@@ -114,6 +116,23 @@ func TestLLMCallLogging(t *testing.T) {
 	gt.Value(t, entries[0].Attrs["output_tokens"]).NotNil()
 	gt.Value(t, entries[0].Attrs["request"]).NotNil()
 	gt.Value(t, entries[0].Attrs["response"]).NotNil()
+}
+
+func TestLLMCallLogsFinishReason(t *testing.T) {
+	var buf bytes.Buffer
+	h := logger.New(logger.WithLogger(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))))
+
+	llmCtx := h.StartLLMCall(context.Background())
+	h.EndLLMCall(llmCtx, &trace.LLMCallData{
+		Model:    "test-model",
+		Response: &trace.LLMResponse{FinishReason: "refusal"},
+	}, nil)
+
+	var record struct {
+		Response map[string]any `json:"response"`
+	}
+	gt.NoError(t, json.Unmarshal(buf.Bytes(), &record)).Required()
+	gt.Equal(t, any("refusal"), record.Response["finish_reason"])
 }
 
 func TestLLMCallWithError(t *testing.T) {

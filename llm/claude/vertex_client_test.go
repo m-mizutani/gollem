@@ -477,7 +477,8 @@ func TestVertexGenerateRefusalWithoutContent(t *testing.T) {
 		`"usage":{"input_tokens":12,"output_tokens":0,"cache_creation_input_tokens":3,"cache_read_input_tokens":5}}`, nil)
 	session := newScopedVertexSession(t, ss.srv.URL, "claude-test", "")
 
-	resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("question")},
+	ctx, rec := newTraceContext()
+	resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("question")},
 		gollem.WithGenerateResponseSchema(structuredOutputTestSchema()))
 	gt.NoError(t, err).Required()
 	gt.Equal(t, "refusal", resp.FinishReason)
@@ -486,6 +487,35 @@ func TestVertexGenerateRefusalWithoutContent(t *testing.T) {
 	gt.Equal(t, 0, resp.OutputToken)
 	gt.Equal(t, 3, resp.CacheCreationInputToken)
 	gt.Equal(t, 5, resp.CacheReadInputToken)
+
+	traced := llmCallResponse(t, rec)
+	gt.Equal(t, "refusal", traced.FinishReason)
+	gt.A(t, traced.Texts).Length(0)
+}
+
+func TestVertexStreamRefusalWithoutContent(t *testing.T) {
+	ss := newScriptedServer(t, "", [][2]string{
+		{"message_start", sseMessageStart},
+		{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"refusal"},"usage":{"output_tokens":0}}`},
+		{"message_stop", `{"type":"message_stop"}`},
+	})
+	session := newScopedVertexSession(t, ss.srv.URL, "claude-test", "")
+
+	ctx, rec := newTraceContext()
+	ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("question")})
+	gt.NoError(t, err).Required()
+	var reasons []string
+	for resp := range ch {
+		gt.NoError(t, resp.Error)
+		if resp.FinishReason != "" {
+			reasons = append(reasons, resp.FinishReason)
+		}
+	}
+	gt.Equal(t, []string{"refusal"}, reasons)
+
+	traced := llmCallResponse(t, rec)
+	gt.Equal(t, "refusal", traced.FinishReason)
+	gt.A(t, traced.Texts).Length(0)
 }
 
 func TestWithVertexEffort(t *testing.T) {

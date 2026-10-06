@@ -800,6 +800,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			var accumulatedParts []*genai.Part
 			var totalInputTokens, totalOutputTokens int
 			var totalCacheRead int
+			var finishReason string
 
 			for streamResp := range apiStreamChan {
 				if streamResp.Err != nil {
@@ -840,6 +841,9 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				}
 				if response.CacheReadInputToken > 0 {
 					totalCacheRead = response.CacheReadInputToken
+				}
+				if response.FinishReason != "" {
+					finishReason = response.FinishReason
 				}
 
 				// Send streaming response with the running totals
@@ -899,7 +903,9 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					SystemPrompt: s.cfg.SystemPrompt(),
 					Messages:     contentsToTraceMessages(newTurnContents),
 				},
-				Response: &trace.LLMResponse{},
+				Response: &trace.LLMResponse{
+					FinishReason: finishReason,
+				},
 			}
 			if len(accumulatedTexts) > 0 {
 				streamTraceData.Response.Texts = accumulatedTexts
@@ -1384,7 +1390,9 @@ func buildGeminiTraceData(response *gollem.Response, model string, systemPrompt 
 			SystemPrompt: systemPrompt,
 			Messages:     contentsToTraceMessages(contents),
 		},
-		Response: &trace.LLMResponse{},
+		Response: &trace.LLMResponse{
+			FinishReason: response.FinishReason,
+		},
 	}
 
 	if len(response.Texts) > 0 {

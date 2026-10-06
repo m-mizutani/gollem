@@ -841,6 +841,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			var totalOutputTokens int
 			var totalCacheRead int
 			var totalCacheWrite int
+			var finishReason string
 
 			// Process streaming chunks
 			for {
@@ -948,6 +949,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				}
 
 				if choice.FinishReason != "" {
+					finishReason = string(choice.FinishReason)
 					responseChan <- &gollem.ContentResponse{
 						FinishReason:            string(choice.FinishReason),
 						InputToken:              totalInputTokens,
@@ -1040,7 +1042,9 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					SystemPrompt: req.SystemPrompt,
 					Messages:     openaiMessagesToTraceMessages(newMessages),
 				},
-				Response: &trace.LLMResponse{},
+				Response: &trace.LLMResponse{
+					FinishReason: finishReason,
+				},
 			}
 			if textContent != "" {
 				streamTraceData.Response.Texts = []string{textContent}
@@ -1470,6 +1474,7 @@ func buildOpenAITraceData(resp openai.ChatCompletionResponse, cacheWriteTokens i
 	}
 
 	if len(resp.Choices) > 0 {
+		data.Response.FinishReason = string(resp.Choices[0].FinishReason)
 		message := resp.Choices[0].Message
 		if message.Content != "" {
 			data.Response.Texts = append(data.Response.Texts, message.Content)

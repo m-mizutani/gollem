@@ -342,7 +342,7 @@ func (s *responsesSession) Generate(ctx context.Context, input []gollem.Input, o
 		}
 
 		usage := usageFromResponse(resp.Usage)
-		traceData = buildResponsesTraceData(resp.Model, req.SystemPrompt, newMessages, turn, usage)
+		traceData = buildResponsesTraceData(&resp, req.SystemPrompt, newMessages, turn, usage)
 
 		return &gollem.ContentResponse{
 			Texts:                   turn.texts,
@@ -455,7 +455,7 @@ func (s *responsesSession) Stream(ctx context.Context, input []gollem.Input, opt
 			}
 
 			usage := usageFromResponse(completed.Usage)
-			traceData = buildResponsesTraceData(completed.Model, req.SystemPrompt, newMessages, turn, usage)
+			traceData = buildResponsesTraceData(completed, req.SystemPrompt, newMessages, turn, usage)
 
 			if len(turn.functionCalls) > 0 {
 				if !send(&gollem.ContentResponse{
@@ -1000,18 +1000,20 @@ func usageFromResponse(u *openai.ResponseUsage) responseUsage {
 
 // buildResponsesTraceData records the messages added in this turn, not the
 // whole conversation sent to the API; earlier turns are in earlier spans.
-func buildResponsesTraceData(model, systemPrompt string, newMessages []gollem.Message, turn *responseTurn, usage responseUsage) *trace.LLMCallData {
+func buildResponsesTraceData(resp *openai.CreateResponseResponse, systemPrompt string, newMessages []gollem.Message, turn *responseTurn, usage responseUsage) *trace.LLMCallData {
 	data := &trace.LLMCallData{
 		InputTokens:              usage.input,
 		OutputTokens:             usage.output,
-		Model:                    model,
+		Model:                    resp.Model,
 		CacheCreationInputTokens: usage.cacheWrite,
 		CacheReadInputTokens:     usage.cacheRead,
 		Request: &trace.LLMRequest{
 			SystemPrompt: systemPrompt,
 			Messages:     messagesToTraceMessages(newMessages),
 		},
-		Response: &trace.LLMResponse{},
+		Response: &trace.LLMResponse{
+			FinishReason: finishReason(resp),
+		},
 	}
 	if len(turn.texts) > 0 {
 		data.Response.Texts = append(data.Response.Texts, turn.texts...)

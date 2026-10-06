@@ -312,9 +312,12 @@ func TestResponsesFinishReason(t *testing.T) {
 			session, err := rs.client(t).NewSession(context.Background())
 			gt.NoError(t, err).Required()
 
-			resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")})
+			rec := trace.New()
+			ctx := trace.WithHandler(rec.StartAgentExecute(context.Background()), rec)
+			resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("hi")})
 			gt.NoError(t, err).Required()
 			gt.Equal(t, tc.expected, resp.FinishReason)
+			gt.Equal(t, resp.FinishReason, findLLMCallSpan(t, rec.Trace().RootSpan).LLMCall.Response.FinishReason)
 		}
 	}
 	t.Run("completed reports the status", runTest(testCase{body: textReplyBody, expected: "completed"}))
@@ -329,7 +332,9 @@ func TestResponsesFinishReason(t *testing.T) {
 		session, err := rs.client(t).NewSession(context.Background())
 		gt.NoError(t, err).Required()
 
-		ch, err := session.Stream(context.Background(), []gollem.Input{gollem.Text("hi")})
+		rec := trace.New()
+		ctx := trace.WithHandler(rec.StartAgentExecute(context.Background()), rec)
+		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("hi")})
 		gt.NoError(t, err).Required()
 		var reasons []string
 		for resp := range ch {
@@ -337,6 +342,7 @@ func TestResponsesFinishReason(t *testing.T) {
 			reasons = append(reasons, resp.FinishReason)
 		}
 		gt.Equal(t, []string{"", "max_output_tokens"}, reasons)
+		gt.Equal(t, "max_output_tokens", findLLMCallSpan(t, rec.Trace().RootSpan).LLMCall.Response.FinishReason)
 	})
 }
 

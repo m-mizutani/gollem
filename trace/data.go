@@ -25,6 +25,11 @@ type LLMRequest struct {
 type LLMResponse struct {
 	Texts         []string        `json:"texts,omitempty"`
 	FunctionCalls []*FunctionCall `json:"function_calls,omitempty"`
+
+	// FinishReason is the provider's reason for ending the generation, recorded
+	// as returned by the provider. It is the same value as the FinishReason of
+	// the gollem.Response produced by the call.
+	FinishReason string `json:"finish_reason,omitempty"`
 }
 
 // Message represents a message in the trace with structured content blocks.
