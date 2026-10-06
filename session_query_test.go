@@ -6,6 +6,7 @@ import (
 
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/mock"
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 )
 
@@ -55,6 +56,67 @@ func TestSessionQueryRetry(t *testing.T) {
 	gt.NoError(t, err)
 	gt.Value(t, resp.Data.Answer).Equal("retried")
 	gt.Value(t, callCount).Equal(2)
+}
+
+func TestSessionQueryContinuesAfterResponseWithoutText(t *testing.T) {
+	var inputs [][]gollem.Input
+	session := &mock.SessionMock{
+		GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+			inputs = append(inputs, input)
+			if len(inputs) == 1 {
+				return thinkingOnlyResponse(), nil
+			}
+			return &gollem.Response{
+				Texts:        []string{`{"answer":"continued"}`},
+				FinishReason: "end_turn",
+			}, nil
+		},
+	}
+
+	resp, err := gollem.SessionQuery[testSessionQueryResult](context.Background(), session, "test prompt")
+	gt.NoError(t, err).Required()
+	gt.Equal(t, "continued", resp.Data.Answer)
+
+	gt.A(t, inputs).Length(2).Required()
+	gt.Equal(t, []gollem.Input{gollem.Text(gollem.ContinuePrompt)}, inputs[1])
+}
+
+func TestSessionQueryResponseWithoutTextExhausted(t *testing.T) {
+	callCount := 0
+	session := &mock.SessionMock{
+		GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+			callCount++
+			return thinkingOnlyResponse(), nil
+		},
+	}
+
+	_, err := gollem.SessionQuery[testSessionQueryResult](context.Background(), session, "test prompt",
+		gollem.WithSessionQueryMaxRetry(2),
+	)
+	gt.Error(t, err).Required()
+	gt.Equal(t, 3, callCount)
+
+	values := goerr.Values(err)
+	gt.Equal(t, any("end_turn"), values["finish_reason"])
+	gt.Equal(t, any([]string{"thinking"}), values["other_block_types"])
+}
+
+func TestSessionQueryResponseWithoutTextNotContinued(t *testing.T) {
+	callCount := 0
+	session := &mock.SessionMock{
+		GenerateFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+			callCount++
+			return &gollem.Response{
+				FinishReason:    "max_tokens",
+				OtherBlockTypes: []string{"thinking"},
+			}, nil
+		},
+	}
+
+	_, err := gollem.SessionQuery[testSessionQueryResult](context.Background(), session, "test prompt")
+	gt.Error(t, err).Required()
+	gt.Equal(t, 1, callCount)
+	gt.Equal(t, any("max_tokens"), goerr.Values(err)["finish_reason"])
 }
 
 func TestSessionQueryNilSession(t *testing.T) {

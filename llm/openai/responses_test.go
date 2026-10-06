@@ -346,6 +346,53 @@ func TestResponsesFinishReason(t *testing.T) {
 	})
 }
 
+// TestResponsesHistoryAfterResponseWithoutText pins the request that follows a
+// response without text, which is what gollem.Query sends when it asks the
+// model to continue.
+func TestResponsesHistoryAfterResponseWithoutText(t *testing.T) {
+	type testCase struct {
+		output string
+		items  []string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			rs := newResponsesServer(t, replyJSON(`{
+				"id": "resp_1", "object": "response", "status": "completed", "model": "gpt-test",
+				"output": [`+tc.output+`],
+				"usage": {"input_tokens": 100, "output_tokens": 10}
+			}`))
+			session, err := rs.client(t).NewSession(context.Background())
+			gt.NoError(t, err).Required()
+
+			resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("question")})
+			gt.NoError(t, err).Required()
+			gt.A(t, resp.Texts).Length(0)
+			_, err = session.Generate(context.Background(), []gollem.Input{gollem.Text("continue")})
+			gt.NoError(t, err).Required()
+
+			sent := rs.sent()
+			gt.A(t, sent).Length(2).Required()
+			var items []string
+			for _, item := range sent[1].Input {
+				items = append(items, item.Type+":"+item.Role)
+			}
+			gt.Equal(t, tc.items, items)
+		}
+	}
+
+	t.Run("reasoning only", runTest(testCase{
+		output: `{"type": "reasoning", "id": "rs_1", "encrypted_content": "enc-1", "summary": []}`,
+		items:  []string{"message:user", "reasoning:", "message:user"},
+	}))
+
+	// A turn without output items is not kept, so the next user message
+	// follows the previous one.
+	t.Run("no output item", runTest(testCase{
+		items: []string{"message:user", "message:user"},
+	}))
+}
+
 func TestResponsesTraceRecordsThoughts(t *testing.T) {
 	t.Run("Generate", func(t *testing.T) {
 		rs := newResponsesServer(t, replyJSON(functionCallReplyBody))

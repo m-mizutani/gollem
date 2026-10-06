@@ -263,6 +263,43 @@ func TestGenerate(t *testing.T) {
 		gt.A(t, spans[0].LLMCall.Response.OtherBlockTypes).Length(0)
 	})
 
+	// The request that follows a response without text is what gollem.Query
+	// sends when it asks the model to continue.
+	t.Run("history after a response without text", func(t *testing.T) {
+		type testCase struct {
+			thinking string
+			roles    []any
+		}
+		runTest := func(tc testCase) func(t *testing.T) {
+			return func(t *testing.T) {
+				fs := newFakeServer(t, replyText("", tc.thinking))
+				session := newTestSession(t, newTestClient(t, fs))
+
+				resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("question")})
+				gt.NoError(t, err).Required()
+				gt.A(t, resp.Texts).Length(0)
+				_, err = session.Generate(ctx, []gollem.Input{gollem.Text("continue")})
+				gt.NoError(t, err).Required()
+
+				var roles []any
+				for _, m := range messagesOf(t, fs.Last(t)) {
+					roles = append(roles, m["role"])
+				}
+				gt.Equal(t, tc.roles, roles)
+			}
+		}
+
+		t.Run("thinking only", runTest(testCase{
+			thinking: "plan",
+			roles:    []any{"user", "assistant", "user"},
+		}))
+		// An assistant message without content is not kept, so the next user
+		// message follows the previous one.
+		t.Run("no content", runTest(testCase{
+			roles: []any{"user", "user"},
+		}))
+	})
+
 	t.Run("cache count absent", func(t *testing.T) {
 		fs := newFakeServer(t, replyText("hi", ""))
 		resp, err := newTestSession(t, newTestClient(t, fs)).Generate(ctx, []gollem.Input{gollem.Text("hello")})

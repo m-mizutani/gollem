@@ -98,7 +98,31 @@ fmt.Printf("Tokens used: %d input, %d output\n",
 |--------|-------------|
 | `WithQuerySystemPrompt(string)` | Set the system prompt for the query |
 | `WithQueryHistory(*History)` | Provide conversation history |
-| `WithQueryMaxRetry(int)` | Maximum retries on JSON parse failure (default: 3) |
+| `WithQueryMaxRetry(int)` | Maximum retries on JSON parse failure or on a response without text (default: 3) |
+
+### Retries
+
+`Query` and `SessionQuery` send another request in these cases, up to the
+maximum number of retries:
+
+- The response text is not valid JSON, or does not match the schema. The next
+  message gives the error and the response text, and asks for valid JSON.
+- The response has no text and no function call, and the model ended the
+  generation on its own: `FinishReason` is `end_turn` (Claude), `STOP`
+  (Gemini), `stop` (OpenAI Chat Completions and Ollama) or `completed` (OpenAI
+  Responses API). This happens, for example, when a Claude model answers with
+  only a thinking block whose text was omitted. The same request would be
+  answered the same way, so the next message asks the model to continue. The
+  response stays in the session history as received; a response without any
+  content is not added, so the new message directly follows the previous user
+  message.
+
+A response without text that does not meet these conditions, for example one
+that stopped at the token limit, is returned as an error without a retry. The
+error carries the goerr values `attempt`, `finish_reason`, `other_block_types`,
+`output_tokens` and `function_calls` (the number of function calls). A
+response with a refusal is also returned as an error without a retry; see
+[Refusal Details](llm.md#refusal-details).
 
 ## Session-Based Typed Query with `SessionQuery[T]()`
 
@@ -125,7 +149,7 @@ Internally, `SessionQuery` passes a per-call `GenerateOption` with the response 
 
 | Option | Description |
 |--------|-------------|
-| `WithSessionQueryMaxRetry(int)` | Maximum retries on JSON parse failure (default: 3) |
+| `WithSessionQueryMaxRetry(int)` | Maximum retries on JSON parse failure or on a response without text (default: 3) |
 
 ## Per-Call Generate Options
 

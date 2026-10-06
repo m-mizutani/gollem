@@ -18,3 +18,7 @@ func init() {
 }
 
 func DebugLogger() *slog.Logger { return debugLogger }
+
+var IsNaturalFinishReason = isNaturalFinishReason
+
+const ContinuePrompt = continuePrompt

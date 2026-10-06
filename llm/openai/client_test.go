@@ -1008,6 +1008,62 @@ func TestOpenAIFinishReason(t *testing.T) {
 	})
 }
 
+// TestOpenAIHistoryAfterResponseWithoutText pins the request that follows a
+// response without text, which is what gollem.Query sends when it asks the
+// model to continue.
+func TestOpenAIHistoryAfterResponseWithoutText(t *testing.T) {
+	type testCase struct {
+		reasoning string
+		roles     []string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			var requests []openaiapi.ChatCompletionRequest
+			mockClient := &apiClientMock{
+				CreateChatCompletionFunc: func(ctx context.Context, req openaiapi.ChatCompletionRequest) (openaiapi.ChatCompletionResponse, error) {
+					requests = append(requests, req)
+					return openaiapi.ChatCompletionResponse{
+						Choices: []openaiapi.ChatCompletionChoice{{
+							Message: openaiapi.ChatCompletionMessage{
+								Role:             openaiapi.ChatMessageRoleAssistant,
+								ReasoningContent: tc.reasoning,
+							},
+							FinishReason: openaiapi.FinishReasonStop,
+						}},
+					}, nil
+				},
+			}
+			session, err := openai.NewSessionWithAPIClient(mockClient, gollem.NewSessionConfig(), "gpt-4")
+			gt.NoError(t, err).Required()
+
+			resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("question")})
+			gt.NoError(t, err).Required()
+			gt.A(t, resp.Texts).Length(0)
+			_, err = session.Generate(context.Background(), []gollem.Input{gollem.Text("continue")})
+			gt.NoError(t, err).Required()
+
+			gt.A(t, requests).Length(2).Required()
+			var roles []string
+			for _, m := range requests[1].Messages {
+				roles = append(roles, m.Role)
+			}
+			gt.Equal(t, tc.roles, roles)
+		}
+	}
+
+	t.Run("reasoning only", runTest(testCase{
+		reasoning: "plan",
+		roles:     []string{"user", "assistant", "user"},
+	}))
+
+	// An assistant message without content is not kept, so the next user
+	// message follows the previous one.
+	t.Run("no content", runTest(testCase{
+		roles: []string{"user", "user"},
+	}))
+}
+
 func TestOpenAITraceRecordsThoughts(t *testing.T) {
 	t.Run("Generate", func(t *testing.T) {
 		mockClient := &apiClientMock{

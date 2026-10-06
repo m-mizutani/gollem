@@ -11,6 +11,23 @@ import (
 
 const defaultMaxRetry = 3
 
+// continuePrompt is sent after a response that ended without an answer.
+const continuePrompt = "Your previous response ended without an answer. Respond now with valid JSON matching the schema."
+
+// isNaturalFinishReason reports whether a Response.FinishReason means that the
+// model ended the generation on its own, as opposed to a token limit, a
+// refusal or a tool call.
+func isNaturalFinishReason(reason string) bool {
+	switch reason {
+	case "end_turn", // Claude
+		"STOP",      // Gemini
+		"stop",      // OpenAI Chat Completions and Ollama
+		"completed": // OpenAI Responses API
+		return true
+	}
+	return false
+}
+
 // QueryResponse holds the result of a Query call.
 type QueryResponse[T any] struct {
 	Data        *T
@@ -41,7 +58,8 @@ func WithQueryHistory(history *History) QueryOption {
 	}
 }
 
-// WithQueryMaxRetry sets the maximum number of retries when JSON unmarshal fails. Default is 3.
+// WithQueryMaxRetry sets the maximum number of retries when JSON unmarshal
+// fails or the response has no text. Default is 3.
 func WithQueryMaxRetry(n int) QueryOption {
 	return func(cfg *queryConfig) {
 		cfg.maxRetry = n
@@ -52,7 +70,10 @@ func WithQueryMaxRetry(n int) QueryOption {
 // It generates a JSON schema from T, creates a session with JSON content type,
 // calls the LLM, and unmarshals the response into T.
 // If JSON unmarshalling fails, it retries up to maxRetry times (default 3),
-// feeding back the error to the LLM for correction.
+// feeding back the error to the LLM for correction. A response that has no
+// text although the model ended the generation on its own (for example a
+// response with only a thinking block) is answered with a message asking the
+// model to continue, within the same number of retries.
 func Query[T any](ctx context.Context, client LLMClient, prompt string, opts ...QueryOption) (*QueryResponse[T], error) {
 	cfg := &queryConfig{
 		maxRetry: defaultMaxRetry,
@@ -129,8 +150,22 @@ func queryWithRetry[T any](ctx context.Context, session Session, input []Input, 
 		}
 
 		if len(resp.Texts) == 0 {
+			// The model ended its turn without an answer, for example with only a
+			// thinking block. Resending the same request is answered the same way,
+			// so a new user message asks it to continue, as the Claude
+			// documentation recommends for an empty end_turn response. A response
+			// with function calls is excluded because the calls must be answered
+			// with their results before any other user message.
+			if isNaturalFinishReason(resp.FinishReason) && len(resp.FunctionCalls) == 0 && attempt < maxRetry {
+				input = []Input{Text(continuePrompt)}
+				continue
+			}
 			return nil, goerr.New("no text in response",
 				goerr.V("attempt", attempt+1),
+				goerr.V("finish_reason", resp.FinishReason),
+				goerr.V("other_block_types", resp.OtherBlockTypes),
+				goerr.V("output_tokens", resp.OutputToken),
+				goerr.V("function_calls", len(resp.FunctionCalls)),
 			)
 		}
 
