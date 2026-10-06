@@ -658,6 +658,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			OutputToken:             resp.Usage.CompletionTokens,
 			CacheCreationInputToken: cacheWriteTokens,
 			CacheReadInputToken:     cachedPromptTokens(resp.Usage),
+			FinishReason:            string(resp.Choices[0].FinishReason),
 		}
 
 		message := resp.Choices[0].Message
@@ -726,6 +727,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			OutputToken:             response.OutputToken,
 			CacheCreationInputToken: response.CacheCreationInputToken,
 			CacheReadInputToken:     response.CacheReadInputToken,
+			FinishReason:            response.FinishReason,
 		}, nil
 	}
 
@@ -751,6 +753,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		OutputToken:             contentResp.OutputToken,
 		CacheCreationInputToken: contentResp.CacheCreationInputToken,
 		CacheReadInputToken:     contentResp.CacheReadInputToken,
+		FinishReason:            contentResp.FinishReason,
 	}, nil
 }
 
@@ -944,6 +947,16 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					}
 				}
 
+				if choice.FinishReason != "" {
+					responseChan <- &gollem.ContentResponse{
+						FinishReason:            string(choice.FinishReason),
+						InputToken:              totalInputTokens,
+						OutputToken:             totalOutputTokens,
+						CacheCreationInputToken: totalCacheWrite,
+						CacheReadInputToken:     totalCacheRead,
+					}
+				}
+
 				// Do not break on the finish reason: with StreamOptions.IncludeUsage
 				// the usage arrives in a trailing chunk (empty choices) after the
 				// finish-reason chunk. Keep reading until io.EOF so token usage
@@ -1094,6 +1107,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					OutputToken:             streamResp.OutputToken,
 					CacheCreationInputToken: streamResp.CacheCreationInputToken,
 					CacheReadInputToken:     streamResp.CacheReadInputToken,
+					FinishReason:            streamResp.FinishReason,
 				}
 			}
 		}

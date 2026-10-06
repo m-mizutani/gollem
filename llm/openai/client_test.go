@@ -926,6 +926,73 @@ func TestOpenAICacheTokenObservation(t *testing.T) {
 	t.Run("nil details yields zero", runTest(nil, 0))
 }
 
+func TestOpenAIFinishReason(t *testing.T) {
+	runTest := func(reason openaiapi.FinishReason) func(t *testing.T) {
+		return func(t *testing.T) {
+			mockClient := &apiClientMock{
+				CreateChatCompletionFunc: func(ctx context.Context, req openaiapi.ChatCompletionRequest) (openaiapi.ChatCompletionResponse, error) {
+					return openaiapi.ChatCompletionResponse{
+						Choices: []openaiapi.ChatCompletionChoice{{
+							Message:      openaiapi.ChatCompletionMessage{Content: "ok", Role: openaiapi.ChatMessageRoleAssistant},
+							FinishReason: reason,
+						}},
+						Usage: openaiapi.Usage{PromptTokens: 20, CompletionTokens: 3},
+					}, nil
+				},
+			}
+			session, err := openai.NewSessionWithAPIClient(mockClient, gollem.NewSessionConfig(), "gpt-4")
+			gt.NoError(t, err).Required()
+
+			resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")})
+			gt.NoError(t, err).Required()
+			gt.Equal(t, string(reason), resp.FinishReason)
+			gt.Equal(t, []string{"ok"}, resp.Texts)
+		}
+	}
+	t.Run("stop", runTest(openaiapi.FinishReasonStop))
+	t.Run("length", runTest(openaiapi.FinishReasonLength))
+	t.Run("content_filter", runTest(openaiapi.FinishReasonContentFilter))
+	t.Run("no reason", runTest(""))
+
+	t.Run("Stream sets the reason on the chunk that carries it", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			for _, c := range []string{
+				`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"partial"}}]}`,
+				`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}`,
+				`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[],"usage":{"prompt_tokens":20,"completion_tokens":3,"total_tokens":23}}`,
+				"[DONE]",
+			} {
+				if _, err := io.WriteString(w, "data: "+c+"\n\n"); err != nil {
+					t.Errorf("failed to write chunk: %v", err)
+					return
+				}
+			}
+		}))
+		t.Cleanup(srv.Close)
+
+		client, err := openai.New(context.Background(), "test-key",
+			openai.WithBaseURL(srv.URL+"/v1"), openai.WithModel("gpt-test"))
+		gt.NoError(t, err).Required()
+		session, err := client.NewSession(context.Background())
+		gt.NoError(t, err).Required()
+
+		ch, err := session.Stream(context.Background(), []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		var reasons, texts []string
+		for resp := range ch {
+			gt.NoError(t, resp.Error)
+			if resp.FinishReason != "" {
+				reasons = append(reasons, resp.FinishReason)
+				gt.A(t, resp.Texts).Length(0)
+			}
+			texts = append(texts, resp.Texts...)
+		}
+		gt.Equal(t, []string{"length"}, reasons)
+		gt.Equal(t, []string{"partial"}, texts)
+	})
+}
+
 // TestOpenAIStreamUsageLive verifies that streaming reports token usage. Before
 // the fix the loop broke on the finish reason and never read the trailing usage
 // chunk, so streamed responses reported zero tokens.

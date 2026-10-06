@@ -242,7 +242,7 @@ A model that is not in the table — a model released after this table was writt
 
 #### Thinking and Issuer Scope
 
-The text of each thinking block is returned in `Response.Thoughts`. A block whose text the API omitted, and a redacted thinking block, add no element. `Stream` uses the streaming Messages API and returns thinking and text deltas and tool calls as they arrive. Thinking blocks and their signatures are kept in the history in both `Generate` and `Stream`.
+The text of each thinking block is returned in `Response.Thoughts`. A block whose text the API omitted, and a redacted thinking block, add no element; their types are still listed in `Response.OtherBlockTypes` (see [Finish Reason](#finish-reason)). `Stream` uses the streaming Messages API and returns thinking and text deltas and tool calls as they arrive. Thinking blocks and their signatures are kept in the history in both `Generate` and `Stream`.
 
 ```go
 client, err := claude.New(ctx, apiKey,
@@ -738,6 +738,59 @@ was given. It is not the model id an API response may report: an alias can
 resolve to a dated snapshot, and returning that would break a caller keying a
 price table by the name it configured. The value is fixed at construction time,
 so calling `Model()` performs no API request and is safe to call concurrently.
+
+### Finish Reason
+
+`Response.FinishReason` holds the reason the provider gave for ending the
+generation, as the provider returned it. gollem does not map it to its own
+values, so compare it with the provider's documented strings:
+
+| Provider | Source field | Example values |
+|---|---|---|
+| Claude (Anthropic, Vertex AI) | `stop_reason` | `end_turn`, `max_tokens`, `stop_sequence`, `tool_use`, `refusal` |
+| Gemini | `finishReason` of the candidate | `STOP`, `MAX_TOKENS`, `SAFETY` |
+| OpenAI (Chat Completions) | `finish_reason` of the first choice | `stop`, `length`, `tool_calls`, `content_filter` |
+| OpenAI (Responses API) | `incomplete_details.reason`, or `status` when the response has no incomplete details | `max_output_tokens`, `content_filter`, `completed` |
+| Ollama | `done_reason` | `stop`, `length` |
+
+The field is empty when the provider returned no value. For Claude,
+`Response.StopSequence` holds the custom stop sequence that ended the
+generation, when there is one.
+
+gollem does not return an error because the provider reports a refusal or a
+truncated response; the caller decides how to handle it. Errors that existed
+before are still returned, for example when the arguments of a tool call cut
+off by the token limit cannot be decoded. Check `err` first, then
+`FinishReason`. This matters for a structured query, where an empty `Texts`
+alone does not tell why no JSON came back:
+
+```go
+resp, err := session.Generate(ctx, input, gollem.WithGenerateResponseSchema(schema))
+if err != nil {
+    return err
+}
+if len(resp.Texts) == 0 {
+    switch resp.FinishReason {
+    case "refusal":
+        return errors.New("the model refused the request")
+    case "max_tokens":
+        return errors.New("the response was cut off by max_tokens")
+    }
+}
+```
+
+Claude also reports, in `Response.OtherBlockTypes`, the type of every content
+block other than `text` and `tool_use`, in the order received (for example
+`thinking`, `redacted_thinking`, `server_tool_use`). Only the type is recorded;
+the text of thinking blocks is in `Response.Thoughts`. A response with no
+`Texts` and only a `redacted_thinking` block can therefore be told apart from a
+response with no content blocks at all. Other providers leave the field empty.
+
+With `Stream`, the finish reason and the stop sequence are set on the response
+for the event that carried them, and each block type on the response for the
+event that started the block. Such a response can have no texts, thoughts or
+function calls. For the OpenAI Responses API and Ollama, the finish reason
+arrives with the final token counts and is set on the last response.
 
 ### Error Handling
 

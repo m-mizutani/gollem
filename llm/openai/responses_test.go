@@ -291,6 +291,55 @@ func TestResponsesGenerateText(t *testing.T) {
 	gt.Equal(t, "hello there", llmSpan.LLMCall.Response.Texts[0])
 }
 
+func TestResponsesFinishReason(t *testing.T) {
+	const incompleteReplyBody = `{
+		"id": "resp_1", "object": "response", "status": "incomplete", "model": "gpt-test",
+		"incomplete_details": {"reason": "max_output_tokens"},
+		"output": [
+			{"type": "message", "id": "msg_1", "role": "assistant", "status": "incomplete",
+			 "content": [{"type": "output_text", "text": "partial", "annotations": []}]}
+		],
+		"usage": {"input_tokens": 10, "output_tokens": 5}
+	}`
+
+	type testCase struct {
+		body     string
+		expected string
+	}
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			rs := newResponsesServer(t, replyJSON(tc.body))
+			session, err := rs.client(t).NewSession(context.Background())
+			gt.NoError(t, err).Required()
+
+			resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")})
+			gt.NoError(t, err).Required()
+			gt.Equal(t, tc.expected, resp.FinishReason)
+		}
+	}
+	t.Run("completed reports the status", runTest(testCase{body: textReplyBody, expected: "completed"}))
+	t.Run("incomplete reports the reason", runTest(testCase{body: incompleteReplyBody, expected: "max_output_tokens"}))
+
+	t.Run("Stream sets the reason on the response for the final event", func(t *testing.T) {
+		rs := newResponsesServer(t, replyEvents(
+			`{"type":"response.output_text.delta","sequence_number":1,"output_index":0,"content_index":0,"item_id":"msg_1","delta":"partial"}`,
+			`{"type":"response.output_item.done","sequence_number":2,"output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant","status":"incomplete","content":[{"type":"output_text","text":"partial","annotations":[]}]}}`,
+			`{"type":"response.incomplete","sequence_number":3,"response":{"id":"resp_1","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"model":"gpt-test","output":[],"usage":{"input_tokens":10,"output_tokens":5}}}`,
+		))
+		session, err := rs.client(t).NewSession(context.Background())
+		gt.NoError(t, err).Required()
+
+		ch, err := session.Stream(context.Background(), []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		var reasons []string
+		for resp := range ch {
+			gt.NoError(t, resp.Error).Required()
+			reasons = append(reasons, resp.FinishReason)
+		}
+		gt.Equal(t, []string{"", "max_output_tokens"}, reasons)
+	})
+}
+
 func TestResponsesFunctionCallRoundTrip(t *testing.T) {
 	rs := newResponsesServer(t, replySequence(functionCallReplyBody, finalAnswerReplyBody))
 	client := rs.client(t)

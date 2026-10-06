@@ -218,6 +218,20 @@ func TestGenerate(t *testing.T) {
 		gt.Equal(t, msgs[1]["content"], any("hello"))
 	})
 
+	t.Run("done_reason becomes FinishReason", func(t *testing.T) {
+		fs := newFakeServer(t, func(w http.ResponseWriter, req recordedRequest) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"model":       "test-model",
+				"message":     map[string]any{"role": "assistant", "content": "cut"},
+				"done":        true,
+				"done_reason": "length",
+			})
+		})
+		resp, err := newTestSession(t, newTestClient(t, fs)).Generate(ctx, []gollem.Input{gollem.Text("hello")})
+		gt.NoError(t, err).Required()
+		gt.Equal(t, resp.FinishReason, "length")
+	})
+
 	t.Run("cache count absent", func(t *testing.T) {
 		fs := newFakeServer(t, replyText("hi", ""))
 		resp, err := newTestSession(t, newTestClient(t, fs)).Generate(ctx, []gollem.Input{gollem.Text("hello")})
@@ -829,6 +843,10 @@ func TestStream(t *testing.T) {
 		gt.Equal(t, responses[5].InputToken, 20)
 		gt.Equal(t, responses[5].OutputToken, 9)
 		gt.Equal(t, responses[5].CacheReadInputToken, 7)
+		gt.Equal(t, responses[5].FinishReason, "stop")
+		for _, r := range responses[:5] {
+			gt.Equal(t, r.FinishReason, "")
+		}
 		for _, r := range responses {
 			gt.NoError(t, r.Error)
 		}

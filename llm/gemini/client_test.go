@@ -2181,6 +2181,65 @@ func TestGeminiStreamUsageNotSummed(t *testing.T) {
 	gt.Equal(t, 50, lastCacheRead)
 }
 
+func TestGeminiFinishReason(t *testing.T) {
+	makeResp := func(text string, reason genai.FinishReason) *genai.GenerateContentResponse {
+		return &genai.GenerateContentResponse{
+			Candidates: []*genai.Candidate{{
+				Content:      &genai.Content{Role: "model", Parts: []*genai.Part{{Text: text}}},
+				FinishReason: reason,
+			}},
+			UsageMetadata: &genai.GenerateContentResponseUsageMetadata{PromptTokenCount: 10, CandidatesTokenCount: 3},
+		}
+	}
+
+	type testCase struct {
+		reason genai.FinishReason
+	}
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			mock := &apiClientMock{
+				GenerateContentFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+					return makeResp("ok", tc.reason), nil
+				},
+			}
+			session, err := gemini.NewSessionWithAPIClient(mock, gollem.NewSessionConfig(), "gemini-2.5-flash")
+			gt.NoError(t, err).Required()
+
+			resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")})
+			gt.NoError(t, err).Required()
+			gt.Equal(t, string(tc.reason), resp.FinishReason)
+			gt.Equal(t, []string{"ok"}, resp.Texts)
+		}
+	}
+	t.Run("STOP", runTest(testCase{reason: genai.FinishReasonStop}))
+	t.Run("MAX_TOKENS", runTest(testCase{reason: genai.FinishReasonMaxTokens}))
+	t.Run("SAFETY", runTest(testCase{reason: genai.FinishReasonSafety}))
+	t.Run("no reason", runTest(testCase{reason: ""}))
+
+	t.Run("Stream sets the reason on the chunk that carries it", func(t *testing.T) {
+		mock := &apiClientMock{
+			GenerateContentStreamFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) <-chan gemini.StreamResponse {
+				ch := make(chan gemini.StreamResponse, 2)
+				ch <- gemini.StreamResponse{Resp: makeResp("a", "")}
+				ch <- gemini.StreamResponse{Resp: makeResp("b", genai.FinishReasonMaxTokens)}
+				close(ch)
+				return ch
+			},
+		}
+		session, err := gemini.NewSessionWithAPIClient(mock, gollem.NewSessionConfig(), "gemini-2.5-flash")
+		gt.NoError(t, err).Required()
+
+		ch, err := session.Stream(context.Background(), []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		var reasons []string
+		for resp := range ch {
+			gt.NoError(t, resp.Error)
+			reasons = append(reasons, resp.FinishReason)
+		}
+		gt.Equal(t, []string{"", "MAX_TOKENS"}, reasons)
+	})
+}
+
 var _ gollem.ModelNamer = (*gemini.Client)(nil)
 
 // TestClientModel verifies that the client reports the model name it was

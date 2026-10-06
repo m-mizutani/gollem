@@ -471,6 +471,23 @@ func TestVertexIssuerScopeSeparatesThinking(t *testing.T) {
 	}))
 }
 
+func TestVertexGenerateRefusalWithoutContent(t *testing.T) {
+	ss := newScriptedServer(t, `{"id":"msg_1","type":"message","role":"assistant","model":"m","content":[],`+
+		`"stop_reason":"refusal","stop_sequence":null,`+
+		`"usage":{"input_tokens":12,"output_tokens":0,"cache_creation_input_tokens":3,"cache_read_input_tokens":5}}`, nil)
+	session := newScopedVertexSession(t, ss.srv.URL, "claude-test", "")
+
+	resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("question")},
+		gollem.WithGenerateResponseSchema(structuredOutputTestSchema()))
+	gt.NoError(t, err).Required()
+	gt.Equal(t, "refusal", resp.FinishReason)
+	gt.A(t, resp.Texts).Length(0)
+	gt.Equal(t, 20, resp.InputToken)
+	gt.Equal(t, 0, resp.OutputToken)
+	gt.Equal(t, 3, resp.CacheCreationInputToken)
+	gt.Equal(t, 5, resp.CacheReadInputToken)
+}
+
 func TestWithVertexEffort(t *testing.T) {
 	type testCase struct {
 		effort   claude.Effort

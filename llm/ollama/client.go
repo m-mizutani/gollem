@@ -450,6 +450,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			InputToken:          resp.PromptEvalCount,
 			OutputToken:         resp.EvalCount,
 			CacheReadInputToken: resp.PromptEvalCachedCount,
+			FinishReason:        resp.DoneReason,
 		}, nil
 	}
 
@@ -471,6 +472,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		InputToken:          contentResp.InputToken,
 		OutputToken:         contentResp.OutputToken,
 		CacheReadInputToken: contentResp.CacheReadInputToken,
+		FinishReason:        contentResp.FinishReason,
 	}, nil
 }
 
@@ -538,6 +540,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 
 			received := message{Role: roleAssistant}
 			var inputTokens, outputTokens, cachedTokens int
+			var doneReason string
 
 			for {
 				select {
@@ -577,6 +580,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					inputTokens = chunk.PromptEvalCount
 					outputTokens = chunk.EvalCount
 					cachedTokens = chunk.PromptEvalCachedCount
+					doneReason = chunk.DoneReason
 				}
 			}
 
@@ -588,11 +592,14 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			if len(calls) > 0 {
 				responseChan <- &gollem.ContentResponse{FunctionCalls: calls}
 			}
-			if inputTokens > 0 || outputTokens > 0 {
+			// The final chunk carries both the token counts and done_reason, so
+			// they are sent together after the function calls it completed.
+			if inputTokens > 0 || outputTokens > 0 || doneReason != "" {
 				responseChan <- &gollem.ContentResponse{
 					InputToken:          inputTokens,
 					OutputToken:         outputTokens,
 					CacheReadInputToken: cachedTokens,
+					FinishReason:        doneReason,
 				}
 			}
 			s.commitTurn(newMessages, assistant)
@@ -633,6 +640,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				InputToken:          streamResp.InputToken,
 				OutputToken:         streamResp.OutputToken,
 				CacheReadInputToken: streamResp.CacheReadInputToken,
+				FinishReason:        streamResp.FinishReason,
 			}
 		}
 	}()

@@ -35,7 +35,16 @@ type ContentResponse struct {
 	CacheCreationInputToken int
 	// CacheReadInputToken is input tokens served from the prompt cache (cache hits).
 	CacheReadInputToken int
-	Error               error // Error if any occurred
+	// FinishReason is the provider's reason for ending the generation. See
+	// Response.FinishReason.
+	FinishReason string
+	// StopSequence is the stop sequence that ended the generation. See
+	// Response.StopSequence.
+	StopSequence string
+	// OtherBlockTypes is the type of each content block other than text and
+	// tool_use. See Response.OtherBlockTypes.
+	OtherBlockTypes []string
+	Error           error // Error if any occurred
 }
 
 // ToolMiddleware is a function that wraps a ToolHandler to add behavior.
