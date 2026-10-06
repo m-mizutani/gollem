@@ -1008,6 +1008,79 @@ func TestOpenAIFinishReason(t *testing.T) {
 	})
 }
 
+func TestOpenAITraceRecordsThoughts(t *testing.T) {
+	t.Run("Generate", func(t *testing.T) {
+		mockClient := &apiClientMock{
+			CreateChatCompletionFunc: func(ctx context.Context, req openaiapi.ChatCompletionRequest) (openaiapi.ChatCompletionResponse, error) {
+				return openaiapi.ChatCompletionResponse{
+					Choices: []openaiapi.ChatCompletionChoice{{
+						Message: openaiapi.ChatCompletionMessage{
+							Role:             openaiapi.ChatMessageRoleAssistant,
+							Content:          "answer",
+							ReasoningContent: "plan",
+						},
+						FinishReason: openaiapi.FinishReasonStop,
+					}},
+					Usage: openaiapi.Usage{PromptTokens: 20, CompletionTokens: 3},
+				}, nil
+			},
+		}
+		session, err := openai.NewSessionWithAPIClient(mockClient, gollem.NewSessionConfig(), "gpt-4")
+		gt.NoError(t, err).Required()
+
+		rec := trace.New()
+		ctx := trace.WithHandler(rec.StartAgentExecute(context.Background()), rec)
+		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		gt.Equal(t, []string{"plan"}, resp.Thoughts)
+
+		traced := findLLMCallSpan(t, rec.Trace().RootSpan).LLMCall.Response
+		gt.Equal(t, resp.Thoughts, traced.Thoughts)
+		gt.Equal(t, []string{"answer"}, traced.Texts)
+		gt.A(t, traced.OtherBlockTypes).Length(0)
+	})
+
+	t.Run("Stream", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			for _, c := range []string{
+				`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"pl"}}]}`,
+				`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"reasoning_content":"an"}}]}`,
+				`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"content":"answer"}}]}`,
+				`{"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+				"[DONE]",
+			} {
+				if _, err := io.WriteString(w, "data: "+c+"\n\n"); err != nil {
+					t.Errorf("failed to write chunk: %v", err)
+					return
+				}
+			}
+		}))
+		t.Cleanup(srv.Close)
+
+		client, err := openai.New(context.Background(), "test-key",
+			openai.WithBaseURL(srv.URL+"/v1"), openai.WithModel("gpt-test"))
+		gt.NoError(t, err).Required()
+		session, err := client.NewSession(context.Background())
+		gt.NoError(t, err).Required()
+
+		rec := trace.New()
+		ctx := trace.WithHandler(rec.StartAgentExecute(context.Background()), rec)
+		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		var thoughts []string
+		for resp := range ch {
+			gt.NoError(t, resp.Error)
+			thoughts = append(thoughts, resp.Thoughts...)
+		}
+		gt.Equal(t, []string{"pl", "an"}, thoughts)
+
+		traced := findLLMCallSpan(t, rec.Trace().RootSpan).LLMCall.Response
+		gt.Equal(t, []string{"plan"}, traced.Thoughts)
+		gt.Equal(t, []string{"answer"}, traced.Texts)
+	})
+}
+
 func TestOpenAIRefusal(t *testing.T) {
 	type testCase struct {
 		content  string

@@ -721,6 +721,9 @@ func buildTraceData(model string, inputTokens, outputTokens, cachedTokens int, s
 	if assistant.Content != "" {
 		data.Response.Texts = []string{assistant.Content}
 	}
+	if assistant.Thinking != "" {
+		data.Response.Thoughts = []string{assistant.Thinking}
+	}
 	for _, call := range assistant.ToolCalls {
 		data.Response.FunctionCalls = append(data.Response.FunctionCalls, &trace.FunctionCall{
 			ID:        call.ID,

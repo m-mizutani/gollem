@@ -1044,6 +1044,9 @@ func buildResponsesTraceData(resp *openai.CreateResponseResponse, systemPrompt s
 	if len(turn.texts) > 0 {
 		data.Response.Texts = append(data.Response.Texts, turn.texts...)
 	}
+	if len(turn.thoughts) > 0 {
+		data.Response.Thoughts = append(data.Response.Thoughts, turn.thoughts...)
+	}
 	for _, fc := range turn.functionCalls {
 		data.Response.FunctionCalls = append(data.Response.FunctionCalls, &trace.FunctionCall{
 			ID:        fc.ID,

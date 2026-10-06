@@ -346,6 +346,47 @@ func TestResponsesFinishReason(t *testing.T) {
 	})
 }
 
+func TestResponsesTraceRecordsThoughts(t *testing.T) {
+	t.Run("Generate", func(t *testing.T) {
+		rs := newResponsesServer(t, replyJSON(functionCallReplyBody))
+		session, err := rs.client(t).NewSession(context.Background(), gollem.WithSessionTools(&lookupTool{}))
+		gt.NoError(t, err).Required()
+
+		rec := trace.New()
+		ctx := trace.WithHandler(rec.StartAgentExecute(context.Background()), rec)
+		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("what is alpha?")})
+		gt.NoError(t, err).Required()
+		gt.Equal(t, []string{"need to look it up"}, resp.Thoughts)
+
+		traced := findLLMCallSpan(t, rec.Trace().RootSpan).LLMCall.Response
+		gt.Equal(t, resp.Thoughts, traced.Thoughts)
+		gt.A(t, traced.OtherBlockTypes).Length(0)
+	})
+
+	t.Run("Stream", func(t *testing.T) {
+		rs := newResponsesServer(t, replyEvents(
+			`{"type":"response.reasoning_summary_text.delta","sequence_number":1,"output_index":0,"item_id":"rs_1","summary_index":0,"delta":"need to "}`,
+			`{"type":"response.reasoning_summary_text.delta","sequence_number":2,"output_index":0,"item_id":"rs_1","summary_index":0,"delta":"look it up"}`,
+			`{"type":"response.output_item.done","sequence_number":3,"output_index":0,"item":{"type":"reasoning","id":"rs_1","encrypted_content":"enc-1","summary":[{"type":"summary_text","text":"need to look it up"}]}}`,
+			`{"type":"response.output_item.done","sequence_number":4,"output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"lookup","arguments":"{\"key\":\"alpha\"}","status":"completed"}}`,
+			`{"type":"response.completed","sequence_number":5,"response":{"id":"resp_1","status":"completed","model":"gpt-test","output":[],"usage":{"input_tokens":100,"output_tokens":10}}}`,
+		))
+		session, err := rs.client(t).NewSession(context.Background(), gollem.WithSessionTools(&lookupTool{}))
+		gt.NoError(t, err).Required()
+
+		rec := trace.New()
+		ctx := trace.WithHandler(rec.StartAgentExecute(context.Background()), rec)
+		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("what is alpha?")})
+		gt.NoError(t, err).Required()
+		for resp := range ch {
+			gt.NoError(t, resp.Error).Required()
+		}
+
+		traced := findLLMCallSpan(t, rec.Trace().RootSpan).LLMCall.Response
+		gt.Equal(t, []string{"need to look it up"}, traced.Thoughts)
+	})
+}
+
 func TestResponsesFunctionCallRoundTrip(t *testing.T) {
 	rs := newResponsesServer(t, replySequence(functionCallReplyBody, finalAnswerReplyBody))
 	client := rs.client(t)
