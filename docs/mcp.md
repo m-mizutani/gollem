@@ -48,6 +48,14 @@ if err != nil {
 defer mcpClient.Close()
 ```
 
+### Parallel Search MCP example
+
+The [Parallel Search example](../examples/parallel-search) connects to the remote
+`https://search.parallel.ai/mcp` endpoint to search the web or fetch a page without
+a Parallel API key. It uses `NewStreamableHTTP`, discovers tools through `Specs`,
+and calls them through `Run`. You can run it without configuring an LLM, or reuse
+the client with `WithToolSets` in your agent. The anonymous service has rate limits.
+
 ### SSE Transport (Deprecated)
 
 ⚠️ **DEPRECATED**: SSE transport is deprecated and will be removed in future versions. Use StreamableHTTP transport instead.

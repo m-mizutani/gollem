@@ -254,6 +254,7 @@ See the [examples](https://github.com/gollem-dev/gollem/tree/main/examples) dire
 - **[Basic](examples/basic)**: Simple agent with custom tools
 - **[Chat](examples/chat)**: Interactive chat application
 - **[MCP](examples/mcp)**: Integration with MCP servers
+- **[Parallel Search](examples/parallel-search)**: Keyless web search and fetch via Streamable HTTP MCP
 - **[Tools](examples/tools)**: Custom tool development
 - **[JSON Schema](examples/json_schema)**: Structured output with JSON Schema validation
 - **[Embedding](examples/embedding)**: Text embedding generation
