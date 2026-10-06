@@ -352,6 +352,7 @@ func (s *responsesSession) Generate(ctx context.Context, input []gollem.Input, o
 			OutputToken:             usage.output,
 			CacheCreationInputToken: usage.cacheWrite,
 			CacheReadInputToken:     usage.cacheRead,
+			FinishReason:            finishReason(&resp),
 		}, nil
 	}
 
@@ -369,7 +370,19 @@ func (s *responsesSession) Generate(ctx context.Context, input []gollem.Input, o
 		OutputToken:             contentResp.OutputToken,
 		CacheCreationInputToken: contentResp.CacheCreationInputToken,
 		CacheReadInputToken:     contentResp.CacheReadInputToken,
+		FinishReason:            contentResp.FinishReason,
 	}, nil
+}
+
+// finishReason returns the value reported as gollem.Response.FinishReason. The
+// Responses API has no finish reason: incomplete_details.reason says why an
+// incomplete response stopped, and the status is the only value for the other
+// responses.
+func finishReason(resp *openai.CreateResponseResponse) string {
+	if resp.IncompleteDetails != nil && resp.IncompleteDetails.Reason != "" {
+		return resp.IncompleteDetails.Reason
+	}
+	return string(resp.Status)
 }
 
 // Stream sends the conversation and the inputs to the Responses API and
@@ -460,6 +473,7 @@ func (s *responsesSession) Stream(ctx context.Context, input []gollem.Input, opt
 				OutputToken:             usage.output,
 				CacheCreationInputToken: usage.cacheWrite,
 				CacheReadInputToken:     usage.cacheRead,
+				FinishReason:            finishReason(completed),
 			})
 		}()
 
@@ -489,6 +503,7 @@ func (s *responsesSession) Stream(ctx context.Context, input []gollem.Input, opt
 					OutputToken:             streamResp.OutputToken,
 					CacheCreationInputToken: streamResp.CacheCreationInputToken,
 					CacheReadInputToken:     streamResp.CacheReadInputToken,
+					FinishReason:            streamResp.FinishReason,
 				}
 			}
 			if !sendOrDone(ctx, responseChan, resp) {

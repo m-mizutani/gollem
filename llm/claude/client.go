@@ -684,6 +684,14 @@ func generateClaudeStream(
 				if messageDelta.Usage.OutputTokens > 0 {
 					totalOutputTokens = int(messageDelta.Usage.OutputTokens)
 				}
+				if messageDelta.Delta.StopReason != "" {
+					response.FinishReason = string(messageDelta.Delta.StopReason)
+					response.StopSequence = messageDelta.Delta.StopSequence
+					response.InputToken = totalInputTokens
+					response.OutputToken = totalOutputTokens
+					response.CacheCreationInputToken = totalCacheCreation
+					response.CacheReadInputToken = totalCacheRead
+				}
 			case "message_start":
 				messageStart := event.AsMessageStart()
 				// input_tokens counts only tokens after the last cache breakpoint;
@@ -725,6 +733,9 @@ func generateClaudeStream(
 				}
 			case "content_block_start":
 				startEvent := event.AsContentBlockStart()
+				if t := startEvent.ContentBlock.Type; t != "text" && t != "tool_use" {
+					response.OtherBlockTypes = append(response.OtherBlockTypes, t)
+				}
 				switch startEvent.ContentBlock.Type {
 				case "tool_use":
 					toolUseBlock := startEvent.ContentBlock.AsToolUse()
@@ -767,7 +778,8 @@ func generateClaudeStream(
 				}
 			}
 
-			if len(response.Texts) > 0 || len(response.Thoughts) > 0 || len(response.FunctionCalls) > 0 {
+			if len(response.Texts) > 0 || len(response.Thoughts) > 0 || len(response.FunctionCalls) > 0 ||
+				response.FinishReason != "" || len(response.OtherBlockTypes) > 0 {
 				responseChan <- response
 			}
 		}
@@ -860,6 +872,9 @@ func toResponseStream(ch <-chan *gollem.ContentResponse) <-chan *gollem.Response
 				OutputToken:             streamResp.OutputToken,
 				CacheCreationInputToken: streamResp.CacheCreationInputToken,
 				CacheReadInputToken:     streamResp.CacheReadInputToken,
+				FinishReason:            streamResp.FinishReason,
+				StopSequence:            streamResp.StopSequence,
+				OtherBlockTypes:         streamResp.OtherBlockTypes,
 			}
 		}
 	}()
@@ -869,11 +884,10 @@ func toResponseStream(ch <-chan *gollem.ContentResponse) <-chan *gollem.Response
 // processResponseWithContentType converts Claude response to gollem.Response.
 // extractJSONText selects whether JSON is extracted from text blocks; see
 // needsJSONExtraction.
+//
+// A response without content blocks, such as a refusal, still carries the
+// usage and the stop reason, so that the caller can tell why no text came back.
 func processResponseWithContentType(ctx context.Context, resp *anthropic.Message, extractJSONText bool) *gollem.Response {
-	if len(resp.Content) == 0 {
-		return &gollem.Response{}
-	}
-
 	totalInput, cacheCreation, cacheRead := cacheTokensFromUsage(resp.Usage)
 	response := &gollem.Response{
 		Texts:                   make([]string, 0),
@@ -882,9 +896,15 @@ func processResponseWithContentType(ctx context.Context, resp *anthropic.Message
 		OutputToken:             int(resp.Usage.OutputTokens),
 		CacheCreationInputToken: cacheCreation,
 		CacheReadInputToken:     cacheRead,
+		FinishReason:            string(resp.StopReason),
+		StopSequence:            resp.StopSequence,
 	}
 
 	for _, content := range resp.Content {
+		if content.Type != "text" && content.Type != "tool_use" {
+			response.OtherBlockTypes = append(response.OtherBlockTypes, content.Type)
+		}
+
 		switch content.Type {
 		case "text":
 			textBlock := content.AsText()
@@ -1005,6 +1025,9 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			OutputToken:             processedResp.OutputToken,
 			CacheCreationInputToken: processedResp.CacheCreationInputToken,
 			CacheReadInputToken:     processedResp.CacheReadInputToken,
+			FinishReason:            processedResp.FinishReason,
+			StopSequence:            processedResp.StopSequence,
+			OtherBlockTypes:         processedResp.OtherBlockTypes,
 		}, nil
 	}
 
@@ -1029,6 +1052,9 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		OutputToken:             contentResp.OutputToken,
 		CacheCreationInputToken: contentResp.CacheCreationInputToken,
 		CacheReadInputToken:     contentResp.CacheReadInputToken,
+		FinishReason:            contentResp.FinishReason,
+		StopSequence:            contentResp.StopSequence,
+		OtherBlockTypes:         contentResp.OtherBlockTypes,
 	}, nil
 }
 

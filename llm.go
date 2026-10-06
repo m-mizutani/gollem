@@ -63,6 +63,30 @@ type Response struct {
 	// occurs. InputToken always counts total input (including these).
 	CacheReadInputToken int
 
+	// FinishReason is the reason the provider gave for ending the generation,
+	// unchanged: stop_reason for Claude (e.g. "end_turn", "max_tokens",
+	// "refusal"), finishReason for Gemini (e.g. "STOP", "MAX_TOKENS"),
+	// finish_reason for OpenAI Chat Completions (e.g. "stop", "length") and
+	// done_reason for Ollama. The OpenAI Responses API has no finish reason; it
+	// reports incomplete_details.reason when the response is incomplete (e.g.
+	// "max_output_tokens") and the response status otherwise (e.g. "completed").
+	// Empty when the provider returned no value. A refusal is reported here and
+	// not as an error; the caller decides how to handle it. In streaming, it is
+	// set on the response for the event that carried it, which may have no other
+	// content.
+	FinishReason string
+	// StopSequence is the stop sequence that ended the generation, when Claude
+	// reports one (FinishReason "stop_sequence"). Empty otherwise and for other
+	// providers.
+	StopSequence string
+	// OtherBlockTypes holds the type of each content block other than text and
+	// tool_use, in the order received, for example "thinking",
+	// "redacted_thinking" or "server_tool_use". Only the type is recorded; the
+	// text of thinking blocks is in Thoughts. Reported by Claude; empty for
+	// other providers. In streaming, a type is set on the response for the event
+	// that started the block.
+	OtherBlockTypes []string
+
 	// Error is an error that occurred during the generation for streaming response.
 	Error error
 }

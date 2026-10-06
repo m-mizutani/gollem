@@ -1850,3 +1850,137 @@ func TestWithEffort(t *testing.T) {
 		assertJSONEqual(t, `{"effort":"high","format":`+structuredOutputTestFormat+`}`, rs.lastBody(t)["output_config"])
 	})
 }
+
+func TestClaudeFinishReason(t *testing.T) {
+	type testCase struct {
+		stopReason   anthropic.StopReason
+		stopSequence string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			mockClient := &apiClientMock{
+				MessagesNewFunc: func(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
+					stopSequence := "null"
+					if tc.stopSequence != "" {
+						stopSequence = `"` + tc.stopSequence + `"`
+					}
+					var msg anthropic.Message
+					if err := json.Unmarshal([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"m",`+
+						`"content":[{"type":"text","text":"ok"}],"stop_reason":"`+string(tc.stopReason)+
+						`","stop_sequence":`+stopSequence+`,"usage":{"input_tokens":10,"output_tokens":4}}`), &msg); err != nil {
+						return nil, err
+					}
+					return &msg, nil
+				},
+			}
+			session, err := claude.NewSessionWithAPIClient(mockClient, gollem.NewSessionConfig(), "claude-3-opus-20240229")
+			gt.NoError(t, err).Required()
+
+			resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")})
+			gt.NoError(t, err).Required()
+			gt.Equal(t, string(tc.stopReason), resp.FinishReason)
+			gt.Equal(t, tc.stopSequence, resp.StopSequence)
+			gt.Equal(t, []string{"ok"}, resp.Texts)
+		}
+	}
+
+	t.Run("end_turn", runTest(testCase{stopReason: anthropic.StopReasonEndTurn}))
+	t.Run("max_tokens", runTest(testCase{stopReason: anthropic.StopReasonMaxTokens}))
+	t.Run("refusal", runTest(testCase{stopReason: anthropic.StopReasonRefusal}))
+	t.Run("stop_sequence keeps the sequence", runTest(testCase{
+		stopReason: anthropic.StopReasonStopSequence, stopSequence: "###",
+	}))
+
+	t.Run("refusal without content keeps usage and the stop reason", func(t *testing.T) {
+		mockClient := &apiClientMock{
+			MessagesNewFunc: func(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, error) {
+				return &anthropic.Message{
+					Role:       "assistant",
+					Model:      "claude-3-opus-20240229",
+					StopReason: anthropic.StopReasonRefusal,
+					Usage: anthropic.Usage{
+						InputTokens:              12,
+						OutputTokens:             0,
+						CacheCreationInputTokens: 3,
+						CacheReadInputTokens:     5,
+					},
+				}, nil
+			},
+		}
+		session, err := claude.NewSessionWithAPIClient(mockClient, gollem.NewSessionConfig(), "claude-3-opus-20240229")
+		gt.NoError(t, err).Required()
+
+		resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")},
+			gollem.WithGenerateResponseSchema(structuredOutputTestSchema()))
+		gt.NoError(t, err).Required()
+		gt.Equal(t, "refusal", resp.FinishReason)
+		gt.A(t, resp.Texts).Length(0)
+		gt.A(t, resp.FunctionCalls).Length(0)
+		gt.Equal(t, 20, resp.InputToken)
+		gt.Equal(t, 0, resp.OutputToken)
+		gt.Equal(t, 3, resp.CacheCreationInputToken)
+		gt.Equal(t, 5, resp.CacheReadInputToken)
+	})
+
+	t.Run("blocks other than text and tool_use are reported by type", func(t *testing.T) {
+		ss := newScriptedServer(t, messageJSON(
+			`{"type":"thinking","thinking":"plan","signature":"sig"},`+
+				`{"type":"redacted_thinking","data":"opaque"},`+
+				`{"type":"text","text":"answer"}`), nil)
+		session := newScopedAPISession(t, ss.srv.URL, "claude-test", "")
+
+		resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		gt.Equal(t, []string{"thinking", "redacted_thinking"}, resp.OtherBlockTypes)
+		gt.Equal(t, []string{"plan"}, resp.Thoughts)
+		gt.Equal(t, []string{"answer"}, resp.Texts)
+		gt.Equal(t, "end_turn", resp.FinishReason)
+	})
+
+	t.Run("text and tool_use report no other block types", func(t *testing.T) {
+		ss := newScriptedServer(t, messageJSON(
+			`{"type":"text","text":"answer"},{"type":"tool_use","id":"call_1","name":"search","input":{}}`), nil)
+		session := newScopedAPISession(t, ss.srv.URL, "claude-test", "")
+
+		resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		gt.A(t, resp.OtherBlockTypes).Length(0)
+	})
+
+	t.Run("Stream sets the stop reason and block types on the events that carry them", func(t *testing.T) {
+		events := [][2]string{
+			{"message_start", sseMessageStart},
+			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"opaque"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+			{"content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"answer"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":1}`},
+			{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"stop_sequence","stop_sequence":"###"},"usage":{"output_tokens":4}}`},
+			{"message_stop", `{"type":"message_stop"}`},
+		}
+		ss := newScriptedServer(t, "", events)
+		session := newScopedAPISession(t, ss.srv.URL, "claude-test", "")
+
+		ch, err := session.Stream(context.Background(), []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+
+		var finished []*gollem.Response
+		var blockTypes, texts []string
+		for resp := range ch {
+			gt.NoError(t, resp.Error)
+			if resp.FinishReason != "" {
+				finished = append(finished, resp)
+			}
+			blockTypes = append(blockTypes, resp.OtherBlockTypes...)
+			texts = append(texts, resp.Texts...)
+		}
+		gt.A(t, finished).Length(1).Required()
+		gt.Equal(t, "stop_sequence", finished[0].FinishReason)
+		gt.Equal(t, "###", finished[0].StopSequence)
+		gt.Equal(t, 1, finished[0].InputToken)
+		gt.Equal(t, 4, finished[0].OutputToken)
+		gt.Equal(t, []string{"redacted_thinking"}, blockTypes)
+		gt.Equal(t, []string{"answer"}, texts)
+	})
+}

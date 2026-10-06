@@ -1796,6 +1796,45 @@ func TestStreamingAccumulatesThoughts(t *testing.T) {
 	gt.Equal(t, "second thought", strat.got.Thoughts[1])
 }
 
+func TestStreamingKeepsFinishReason(t *testing.T) {
+	// The finish reason comes on one chunk without content and is followed by a
+	// usage chunk, so the response handed to the strategy must keep it as the
+	// blocking mode does.
+	mockClient := &mock.LLMClientMock{
+		NewSessionFunc: func(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				StreamFunc: func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
+					ch := make(chan *gollem.Response)
+					go func() {
+						defer close(ch)
+						ch <- &gollem.Response{OtherBlockTypes: []string{"redacted_thinking"}}
+						ch <- &gollem.Response{Texts: []string{"partial"}}
+						ch <- &gollem.Response{OtherBlockTypes: []string{"server_tool_use"}}
+						ch <- &gollem.Response{FinishReason: "stop_sequence", StopSequence: "###"}
+						ch <- &gollem.Response{InputToken: 10, OutputToken: 4}
+					}()
+					return ch, nil
+				},
+			}, nil
+		},
+	}
+
+	strat := &captureStrategy{}
+	s := gollem.New(mockClient,
+		gollem.WithResponseMode(gollem.ResponseModeStreaming),
+		gollem.WithStrategy(strat),
+		gollem.WithLoopLimit(3),
+	)
+	_, err := s.Execute(t.Context(), gollem.Text("hi"))
+	gt.NoError(t, err)
+	gt.Value(t, strat.got).NotNil().Required()
+
+	gt.Equal(t, "stop_sequence", strat.got.FinishReason)
+	gt.Equal(t, "###", strat.got.StopSequence)
+	gt.Equal(t, []string{"redacted_thinking", "server_tool_use"}, strat.got.OtherBlockTypes)
+	gt.Equal(t, 10, strat.got.InputToken)
+}
+
 // TestToolOrderIsDeterministic pins the order of the tools handed to the session
 // to be sorted by name and identical between executions. The tool definitions
 // are the first element of the request prefix that Anthropic matches the prompt

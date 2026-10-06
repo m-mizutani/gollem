@@ -509,6 +509,12 @@ func processResponse(resp *genai.GenerateContentResponse) (*gollem.Response, err
 
 	for _, candidate := range resp.Candidates {
 		if candidate.FinishReason != "" {
+			// gollem does not set candidateCount, so the API returns one
+			// candidate and the first reported reason is the reason for the
+			// whole response.
+			if response.FinishReason == "" {
+				response.FinishReason = string(candidate.FinishReason)
+			}
 			if strings.Contains(string(candidate.FinishReason), "MALFORMED_FUNCTION_CALL") {
 				return nil, goerr.Wrap(gollem.ErrFunctionCallFormat, "malformed function call")
 			}
@@ -675,6 +681,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 			InputToken:          response.InputToken,
 			OutputToken:         response.OutputToken,
 			CacheReadInputToken: response.CacheReadInputToken,
+			FinishReason:        response.FinishReason,
 		}, nil
 	}
 
@@ -698,6 +705,7 @@ func (s *Session) Generate(ctx context.Context, input []gollem.Input, opts ...go
 		InputToken:          contentResp.InputToken,
 		OutputToken:         contentResp.OutputToken,
 		CacheReadInputToken: contentResp.CacheReadInputToken,
+		FinishReason:        contentResp.FinishReason,
 	}, nil
 }
 
@@ -842,6 +850,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 					InputToken:          totalInputTokens,
 					OutputToken:         totalOutputTokens,
 					CacheReadInputToken: totalCacheRead,
+					FinishReason:        response.FinishReason,
 				}
 			}
 
@@ -941,6 +950,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				InputToken:          contentResp.InputToken,
 				OutputToken:         contentResp.OutputToken,
 				CacheReadInputToken: contentResp.CacheReadInputToken,
+				FinishReason:        contentResp.FinishReason,
 			}
 
 			respChan <- resp

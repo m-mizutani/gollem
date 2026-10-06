@@ -584,6 +584,13 @@ func (g *Agent) Execute(ctx context.Context, input ...Input) (_ *ExecuteResponse
 				streamedResponse.Texts = append(streamedResponse.Texts, output.Texts...)
 				streamedResponse.Thoughts = append(streamedResponse.Thoughts, output.Thoughts...)
 				streamedResponse.FunctionCalls = append(streamedResponse.FunctionCalls, output.FunctionCalls...)
+				streamedResponse.OtherBlockTypes = append(streamedResponse.OtherBlockTypes, output.OtherBlockTypes...)
+				// The finish reason arrives on one chunk, possibly followed by
+				// chunks without it, so keep the value instead of the last chunk's.
+				if output.FinishReason != "" {
+					streamedResponse.FinishReason = output.FinishReason
+					streamedResponse.StopSequence = output.StopSequence
+				}
 				if output.InputToken > 0 {
 					streamedResponse.InputToken = output.InputToken
 				}
