@@ -2069,6 +2069,146 @@ func TestClaudeFinishReason(t *testing.T) {
 	})
 }
 
+func TestClaudeTraceRecordsThinking(t *testing.T) {
+	type testCase struct {
+		content         string
+		events          [][2]string
+		texts           []string
+		thoughts        []string
+		otherBlockTypes []string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			ss := newScriptedServer(t, messageJSON(tc.content), append(append([][2]string{
+				{"message_start", sseMessageStart},
+			}, tc.events...), sseMessageEnd...))
+
+			t.Run("Generate", func(t *testing.T) {
+				session := newScopedAPISession(t, ss.srv.URL, "claude-test", "")
+				ctx, rec := newTraceContext()
+				_, err := session.Generate(ctx, []gollem.Input{gollem.Text("hi")})
+				gt.NoError(t, err).Required()
+
+				traced := llmCallResponse(t, rec)
+				gt.Equal(t, tc.texts, traced.Texts)
+				gt.Equal(t, tc.thoughts, traced.Thoughts)
+				gt.Equal(t, tc.otherBlockTypes, traced.OtherBlockTypes)
+				gt.Equal(t, "end_turn", traced.FinishReason)
+			})
+
+			t.Run("Stream", func(t *testing.T) {
+				session := newScopedAPISession(t, ss.srv.URL, "claude-test", "")
+				ctx, rec := newTraceContext()
+				ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("hi")})
+				gt.NoError(t, err).Required()
+				for resp := range ch {
+					gt.NoError(t, resp.Error)
+				}
+
+				traced := llmCallResponse(t, rec)
+				gt.Equal(t, tc.texts, traced.Texts)
+				gt.Equal(t, tc.thoughts, traced.Thoughts)
+				gt.Equal(t, tc.otherBlockTypes, traced.OtherBlockTypes)
+				gt.Equal(t, "end_turn", traced.FinishReason)
+			})
+		}
+	}
+
+	t.Run("thinking block whose text was omitted is the only block", runTest(testCase{
+		content: `{"type":"thinking","thinking":"","signature":"sig"}`,
+		events: [][2]string{
+			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+		},
+		otherBlockTypes: []string{"thinking"},
+	}))
+
+	t.Run("thinking text and answer text", runTest(testCase{
+		content: `{"type":"thinking","thinking":"plan","signature":"sig"},{"type":"text","text":"answer"}`,
+		events: [][2]string{
+			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"plan"}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+			{"content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"answer"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":1}`},
+		},
+		texts:           []string{"answer"},
+		thoughts:        []string{"plan"},
+		otherBlockTypes: []string{"thinking"},
+	}))
+}
+
+// TestClaudeHistoryAfterResponseWithoutText pins the request that follows a
+// response without text, which is what gollem.Query sends when it asks the
+// model to continue.
+func TestClaudeHistoryAfterResponseWithoutText(t *testing.T) {
+	type testCase struct {
+		content   string
+		events    [][2]string
+		roles     []string
+		types     [][]string
+		signature string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			for _, p := range requestPaths {
+				t.Run(p.name, func(t *testing.T) {
+					ss := newScriptedServer(t, messageJSON(tc.content), append(append([][2]string{
+						{"message_start", sseMessageStart},
+					}, tc.events...), sseMessageEnd...))
+					session := p.newSession(t, ss.srv.URL, "claude-test")
+					gt.Equal(t, "", p.send(t, session))
+					p.send(t, session)
+
+					messages := ss.lastMessages(t)
+					var roles []string
+					for _, msg := range messages {
+						role, _ := msg["role"].(string)
+						roles = append(roles, role)
+					}
+					gt.Equal(t, tc.roles, roles)
+					gt.Equal(t, tc.types, blockTypes(messages))
+					if tc.signature != "" {
+						blocks, _ := messages[1]["content"].([]any)
+						block, _ := blocks[0].(map[string]any)
+						gt.Equal(t, any(tc.signature), block["signature"])
+					}
+				})
+			}
+		}
+	}
+
+	// The assistant turn is kept as received, so the signed thinking block is
+	// sent back before the next user message.
+	t.Run("thinking block whose text was omitted", runTest(testCase{
+		content: `{"type":"thinking","thinking":"","signature":"sig"}`,
+		events: [][2]string{
+			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+		},
+		roles:     []string{"user", "assistant", "user"},
+		types:     [][]string{{"text"}, {"thinking"}, {"text"}},
+		signature: "sig",
+	}))
+
+	// An assistant turn without content blocks cannot be sent, so it is not
+	// kept and the next user message follows the previous one. The Messages API
+	// accepts this: "Consecutive user or assistant turns in your request will
+	// be combined into a single turn."
+	// (https://platform.claude.com/docs/en/api/messages)
+	t.Run("no content block", runTest(testCase{
+		content: ``,
+		roles:   []string{"user", "user"},
+		types:   [][]string{{"text"}, {"text"}},
+	}))
+}
+
 // newTraceContext returns a context whose LLM calls are recorded by the
 // returned recorder.
 func newTraceContext() (context.Context, *trace.Recorder) {

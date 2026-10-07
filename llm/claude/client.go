@@ -735,7 +735,7 @@ func generateClaudeStream(
 				}
 			case "content_block_start":
 				startEvent := event.AsContentBlockStart()
-				if t := startEvent.ContentBlock.Type; t != "text" && t != "tool_use" {
+				if t := startEvent.ContentBlock.Type; isOtherBlockType(t) {
 					response.OtherBlockTypes = append(response.OtherBlockTypes, t)
 				}
 				switch startEvent.ContentBlock.Type {
@@ -805,7 +805,7 @@ func traceClaudeStream(
 		defer close(wrapped)
 
 		var streamErr error
-		var texts []string
+		var texts, thoughts, otherBlockTypes []string
 		var functionCalls []*trace.FunctionCall
 		var finishReason string
 		var refusal *gollem.Refusal
@@ -822,6 +822,8 @@ func traceClaudeStream(
 				refusal = resp.Refusal
 			}
 			texts = append(texts, resp.Texts...)
+			thoughts = append(thoughts, resp.Thoughts...)
+			otherBlockTypes = append(otherBlockTypes, resp.OtherBlockTypes...)
 			for _, fc := range resp.FunctionCalls {
 				functionCalls = append(functionCalls, &trace.FunctionCall{
 					ID:        fc.ID,
@@ -855,10 +857,12 @@ func traceClaudeStream(
 				Messages:     claudeMessagesToTraceMessages(newMessages),
 			},
 			Response: &trace.LLMResponse{
-				Texts:         texts,
-				FunctionCalls: functionCalls,
-				FinishReason:  finishReason,
-				Refusal:       convert.TraceRefusal(refusal),
+				Texts:           texts,
+				Thoughts:        thoughts,
+				OtherBlockTypes: otherBlockTypes,
+				FunctionCalls:   functionCalls,
+				FinishReason:    finishReason,
+				Refusal:         convert.TraceRefusal(refusal),
 			},
 		}, streamErr)
 	}()
@@ -910,6 +914,30 @@ func refusalFrom(stopReason anthropic.StopReason, details anthropic.RefusalStopD
 	return refusal
 }
 
+// isOtherBlockType reports whether a content block of type t is reported in
+// Response.OtherBlockTypes.
+func isOtherBlockType(t string) bool {
+	return t != "text" && t != "tool_use"
+}
+
+// appendOtherBlock appends the type of content to types when it is neither
+// text nor tool_use, and its thinking text to thoughts when it is a thinking
+// block with text. A block whose text was omitted adds no element to thoughts;
+// see Response.Thoughts. Both the response and its trace use it, so that they
+// report the same values.
+func appendOtherBlock(types, thoughts []string, content anthropic.ContentBlockUnion) ([]string, []string) {
+	if !isOtherBlockType(content.Type) {
+		return types, thoughts
+	}
+	types = append(types, content.Type)
+	if content.Type == "thinking" {
+		if thinking := content.AsThinking().Thinking; thinking != "" {
+			thoughts = append(thoughts, thinking)
+		}
+	}
+	return types, thoughts
+}
+
 // processResponseWithContentType converts Claude response to gollem.Response.
 // extractJSONText selects whether JSON is extracted from text blocks; see
 // needsJSONExtraction.
@@ -931,9 +959,7 @@ func processResponseWithContentType(ctx context.Context, resp *anthropic.Message
 	}
 
 	for _, content := range resp.Content {
-		if content.Type != "text" && content.Type != "tool_use" {
-			response.OtherBlockTypes = append(response.OtherBlockTypes, content.Type)
-		}
+		response.OtherBlockTypes, response.Thoughts = appendOtherBlock(response.OtherBlockTypes, response.Thoughts, content)
 
 		switch content.Type {
 		case "text":
@@ -945,11 +971,6 @@ func processResponseWithContentType(ctx context.Context, resp *anthropic.Message
 			}
 
 			response.Texts = append(response.Texts, text)
-		case "thinking":
-			// A block whose text was omitted adds no element; see Response.Thoughts.
-			if thinking := content.AsThinking().Thinking; thinking != "" {
-				response.Thoughts = append(response.Thoughts, thinking)
-			}
 		case "tool_use":
 			toolUseBlock := content.AsToolUse()
 			args, err := jsonutil.DecodeObject(toolUseBlock.Input)
@@ -1619,6 +1640,8 @@ func buildClaudeTraceData(resp *anthropic.Message, model string, systemPrompt st
 	}
 
 	for _, content := range resp.Content {
+		data.Response.OtherBlockTypes, data.Response.Thoughts = appendOtherBlock(data.Response.OtherBlockTypes, data.Response.Thoughts, content)
+
 		switch content.Type {
 		case "text":
 			data.Response.Texts = append(data.Response.Texts, content.AsText().Text)

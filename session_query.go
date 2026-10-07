@@ -13,7 +13,8 @@ type sessionQueryConfig struct {
 	maxRetry int
 }
 
-// WithSessionQueryMaxRetry sets the maximum number of retries when JSON unmarshal fails. Default is 3.
+// WithSessionQueryMaxRetry sets the maximum number of retries when JSON
+// unmarshal fails or the response has no text. Default is 3.
 func WithSessionQueryMaxRetry(n int) SessionQueryOption {
 	return func(cfg *sessionQueryConfig) {
 		cfg.maxRetry = n
@@ -26,7 +27,8 @@ func WithSessionQueryMaxRetry(n int) SessionQueryOption {
 // The response schema is derived from T and passed as a per-call
 // [GenerateOption], leaving the session's default config unchanged.
 // If JSON unmarshalling or schema validation fails, it retries up to
-// maxRetry times (default 3), feeding back the error for correction.
+// maxRetry times (default 3), feeding back the error for correction. A
+// response without text is handled as in [Query].
 //
 // Example:
 //

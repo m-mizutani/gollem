@@ -2250,6 +2250,127 @@ func TestGeminiFinishReason(t *testing.T) {
 	})
 }
 
+// TestGeminiHistoryAfterResponseWithoutText pins the request that follows a
+// response without text, which is what gollem.Query sends when it asks the
+// model to continue.
+func TestGeminiHistoryAfterResponseWithoutText(t *testing.T) {
+	type testCase struct {
+		content *genai.Content
+		roles   []string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			var requests [][]*genai.Content
+			mock := &apiClientMock{
+				GenerateContentFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+					requests = append(requests, contents)
+					return &genai.GenerateContentResponse{
+						Candidates: []*genai.Candidate{{
+							Content:      tc.content,
+							FinishReason: genai.FinishReasonStop,
+						}},
+					}, nil
+				},
+			}
+			session, err := gemini.NewSessionWithAPIClient(mock, gollem.NewSessionConfig(), "gemini-2.5-flash")
+			gt.NoError(t, err).Required()
+
+			resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("question")})
+			gt.NoError(t, err).Required()
+			gt.A(t, resp.Texts).Length(0)
+			_, err = session.Generate(context.Background(), []gollem.Input{gollem.Text("continue")})
+			gt.NoError(t, err).Required()
+
+			gt.A(t, requests).Length(2).Required()
+			var roles []string
+			for _, c := range requests[1] {
+				roles = append(roles, c.Role)
+			}
+			gt.Equal(t, tc.roles, roles)
+		}
+	}
+
+	// The thought signature is kept so that the model turn is sent back before
+	// the next user message.
+	t.Run("thought signature only", runTest(testCase{
+		content: &genai.Content{Role: "model", Parts: []*genai.Part{
+			{Thought: true, ThoughtSignature: []byte("sig")},
+		}},
+		roles: []string{"user", "model", "user"},
+	}))
+
+	// A model turn without parts is not kept, so the next user message follows
+	// the previous one.
+	t.Run("no part", runTest(testCase{
+		content: &genai.Content{Role: "model"},
+		roles:   []string{"user", "user"},
+	}))
+}
+
+func TestGeminiTraceRecordsThoughts(t *testing.T) {
+	makeResp := func(thought, text string) *genai.GenerateContentResponse {
+		return &genai.GenerateContentResponse{
+			Candidates: []*genai.Candidate{{
+				Content: &genai.Content{Role: "model", Parts: []*genai.Part{
+					{Text: thought, Thought: true},
+					{Text: text},
+				}},
+				FinishReason: genai.FinishReasonStop,
+			}},
+			UsageMetadata: &genai.GenerateContentResponseUsageMetadata{PromptTokenCount: 10, CandidatesTokenCount: 3},
+		}
+	}
+
+	t.Run("Generate", func(t *testing.T) {
+		mock := &apiClientMock{
+			GenerateContentFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+				return makeResp("plan", "answer"), nil
+			},
+		}
+		session, err := gemini.NewSessionWithAPIClient(mock, gollem.NewSessionConfig(), "gemini-2.5-flash")
+		gt.NoError(t, err).Required()
+
+		ctx, rec := newTraceContext()
+		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		gt.Equal(t, []string{"plan"}, resp.Thoughts)
+
+		traced := llmCallResponse(t, rec)
+		gt.Equal(t, resp.Thoughts, traced.Thoughts)
+		gt.Equal(t, []string{"answer"}, traced.Texts)
+		gt.A(t, traced.OtherBlockTypes).Length(0)
+	})
+
+	t.Run("Stream", func(t *testing.T) {
+		mock := &apiClientMock{
+			GenerateContentStreamFunc: func(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) <-chan gemini.StreamResponse {
+				ch := make(chan gemini.StreamResponse, 2)
+				ch <- gemini.StreamResponse{Resp: makeResp("pl", "ans")}
+				ch <- gemini.StreamResponse{Resp: makeResp("an", "wer")}
+				close(ch)
+				return ch
+			},
+		}
+		session, err := gemini.NewSessionWithAPIClient(mock, gollem.NewSessionConfig(), "gemini-2.5-flash")
+		gt.NoError(t, err).Required()
+
+		ctx, rec := newTraceContext()
+		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("hi")})
+		gt.NoError(t, err).Required()
+		var thoughts []string
+		for resp := range ch {
+			gt.NoError(t, resp.Error)
+			thoughts = append(thoughts, resp.Thoughts...)
+		}
+		gt.Equal(t, []string{"pl", "an"}, thoughts)
+
+		traced := llmCallResponse(t, rec)
+		gt.Equal(t, thoughts, traced.Thoughts)
+		gt.Equal(t, []string{"ans", "wer"}, traced.Texts)
+	})
+}
+
 func TestGeminiRefusal(t *testing.T) {
 	ratings := []*genai.SafetyRating{
 		{Category: genai.HarmCategoryDangerousContent, Probability: genai.HarmProbabilityHigh, Blocked: true},

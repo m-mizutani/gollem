@@ -26,6 +26,24 @@ type LLMResponse struct {
 	Texts         []string        `json:"texts,omitempty"`
 	FunctionCalls []*FunctionCall `json:"function_calls,omitempty"`
 
+	// Thoughts is the thinking text returned by the model. It is the same
+	// value as the Thoughts of the gollem.Response produced by the call; for a
+	// streamed call, it holds the thinking text of all responses of the stream,
+	// which some providers record joined instead of as one element per delta.
+	// A thinking block whose text the provider omitted, as Claude does when
+	// thinking display is "omitted", adds no element.
+	Thoughts []string `json:"thoughts,omitempty"`
+
+	// OtherBlockTypes is the types of the content blocks other than text and
+	// tool_use, in the order received. It is the same value as the
+	// OtherBlockTypes of the gollem.Response produced by the call; for a
+	// streamed call, it holds the types of all responses of the stream. Only
+	// Claude reports it. A thinking block whose text was omitted adds no
+	// element to Thoughts but is listed here as "thinking", so a response that
+	// holds only such a block can be told apart from a response without
+	// content.
+	OtherBlockTypes []string `json:"other_block_types,omitempty"`
+
 	// FinishReason is the provider's reason for ending the generation, recorded
 	// as returned by the provider. It is the same value as the FinishReason of
 	// the gollem.Response produced by the call.

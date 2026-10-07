@@ -654,6 +654,93 @@ func TestSessionQueryWithRealLLM(t *testing.T) {
 	})
 }
 
+// TestConsecutiveUserTurnsWithRealLLM checks that each provider accepts a user
+// message that directly follows another user message. A session is in this
+// state when a response had no content, so no assistant turn was kept, and
+// gollem.Query then asks the model to continue.
+func TestConsecutiveUserTurnsWithRealLLM(t *testing.T) {
+	t.Parallel()
+
+	testFn := func(t *testing.T, newClient func(t *testing.T) (gollem.LLMClient, error)) {
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+
+		client, err := newClient(t)
+		gt.NoError(t, err).Required()
+
+		question, err := gollem.NewTextContent("Name one primary color.")
+		gt.NoError(t, err).Required()
+		session, err := client.NewSession(ctx, gollem.WithSessionHistory(&gollem.History{
+			Version:  gollem.HistoryVersion,
+			Messages: []gollem.Message{{Role: gollem.RoleUser, Contents: []gollem.MessageContent{question}}},
+		}))
+		gt.NoError(t, err).Required()
+
+		resp, err := session.Generate(ctx, []gollem.Input{
+			gollem.Text("Your previous response ended without an answer. Answer in one word."),
+		}, gollem.WithMaxTokens(maxTestTokens))
+		gt.NoError(t, err).Required()
+		gt.A(t, resp.Texts).Longer(0)
+	}
+
+	t.Run("Ollama", func(t *testing.T) {
+		t.Parallel()
+		testFn(t, newOllamaClient)
+	})
+
+	t.Run("OpenAI", func(t *testing.T) {
+		t.Parallel()
+		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
+		if !ok {
+			t.Skip("TEST_OPENAI_API_KEY is not set")
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return openai.New(context.Background(), apiKey)
+		})
+	})
+
+	t.Run("OpenAI Responses API", func(t *testing.T) {
+		t.Parallel()
+		apiKey, ok := os.LookupEnv("TEST_OPENAI_API_KEY")
+		if !ok {
+			t.Skip("TEST_OPENAI_API_KEY is not set")
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return openai.New(context.Background(), apiKey, openai.WithResponsesAPI())
+		})
+	})
+
+	t.Run("Claude", func(t *testing.T) {
+		t.Parallel()
+		apiKey, ok := os.LookupEnv("TEST_CLAUDE_API_KEY")
+		if !ok {
+			t.Skip("TEST_CLAUDE_API_KEY is not set")
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return claude.New(context.Background(), apiKey)
+		})
+	})
+
+	t.Run("Gemini", func(t *testing.T) {
+		t.Parallel()
+		projectID, ok := os.LookupEnv("TEST_GCP_PROJECT_ID")
+		if !ok {
+			t.Skip("TEST_GCP_PROJECT_ID is not set")
+		}
+		location, ok := os.LookupEnv("TEST_GCP_LOCATION")
+		if !ok {
+			t.Skip("TEST_GCP_LOCATION is not set")
+		}
+		var opts []gemini.Option
+		if model := os.Getenv("TEST_GCP_MODEL"); model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
+		testFn(t, func(t *testing.T) (gollem.LLMClient, error) {
+			return gemini.New(context.Background(), projectID, location, opts...)
+		})
+	})
+}
+
 // newOllamaClient creates an Ollama client for the model named by
 // TEST_OLLAMA_MODEL, skipping the test when it is not set. TEST_OLLAMA_BASE_URL
 // overrides the server address.

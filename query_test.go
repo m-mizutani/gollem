@@ -170,6 +170,104 @@ func TestQueryEmptyResponse(t *testing.T) {
 	gt.Error(t, err)
 }
 
+func TestIsNaturalFinishReason(t *testing.T) {
+	// The natural finish reason of each provider, as documented on
+	// Response.FinishReason.
+	for _, reason := range []string{"end_turn", "STOP", "stop", "completed"} {
+		gt.True(t, gollem.IsNaturalFinishReason(reason))
+	}
+	for _, reason := range []string{"", "max_tokens", "tool_use", "refusal", "MAX_TOKENS", "SAFETY", "length", "tool_calls", "max_output_tokens"} {
+		gt.False(t, gollem.IsNaturalFinishReason(reason))
+	}
+}
+
+// thinkingOnlyResponse is a response that ended the turn with only a thinking
+// block whose text was omitted.
+func thinkingOnlyResponse() *gollem.Response {
+	return &gollem.Response{
+		FinishReason:    "end_turn",
+		OtherBlockTypes: []string{"thinking"},
+		InputToken:      10,
+		OutputToken:     1300,
+	}
+}
+
+func TestQueryContinuesAfterResponseWithoutText(t *testing.T) {
+	var inputs [][]gollem.Input
+	client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+		inputs = append(inputs, input)
+		if len(inputs) == 1 {
+			return thinkingOnlyResponse(), nil
+		}
+		return &gollem.Response{
+			Texts:        []string{`{"name":"ok","count":1}`},
+			FinishReason: "end_turn",
+			InputToken:   12,
+			OutputToken:  6,
+		}, nil
+	})
+
+	resp, err := gollem.Query[testQueryResult](context.Background(), client, "test")
+	gt.NoError(t, err).Required()
+	gt.Equal(t, "ok", resp.Data.Name)
+	gt.Equal(t, 22, resp.InputToken)
+	gt.Equal(t, 1306, resp.OutputToken)
+
+	gt.A(t, inputs).Length(2).Required()
+	gt.Equal(t, []gollem.Input{gollem.Text(gollem.ContinuePrompt)}, inputs[1])
+}
+
+func TestQueryResponseWithoutTextExhausted(t *testing.T) {
+	callCount := 0
+	client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+		callCount++
+		return thinkingOnlyResponse(), nil
+	})
+
+	_, err := gollem.Query[testQueryResult](context.Background(), client, "test",
+		gollem.WithQueryMaxRetry(2),
+	)
+	gt.Error(t, err).Required()
+	// 1 initial + 2 retries = 3 calls
+	gt.Equal(t, 3, callCount)
+
+	values := goerr.Values(err)
+	gt.Equal(t, any(3), values["attempt"])
+	gt.Equal(t, any("end_turn"), values["finish_reason"])
+	gt.Equal(t, any([]string{"thinking"}), values["other_block_types"])
+	gt.Equal(t, any(1300), values["output_tokens"])
+}
+
+func TestQueryResponseWithoutTextNotContinued(t *testing.T) {
+	type testCase struct {
+		resp *gollem.Response
+	}
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			callCount := 0
+			client := setupQueryMock(t, func(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
+				callCount++
+				return tc.resp, nil
+			})
+
+			_, err := gollem.Query[testQueryResult](context.Background(), client, "test")
+			gt.Error(t, err).Required()
+			gt.Equal(t, 1, callCount)
+			gt.Equal(t, any(tc.resp.FinishReason), goerr.Values(err)["finish_reason"])
+		}
+	}
+
+	t.Run("token limit", runTest(testCase{resp: &gollem.Response{
+		FinishReason:    "max_tokens",
+		OtherBlockTypes: []string{"thinking"},
+	}}))
+	t.Run("no finish reason", runTest(testCase{resp: &gollem.Response{}}))
+	t.Run("function call with a natural finish reason", runTest(testCase{resp: &gollem.Response{
+		FinishReason:  "STOP",
+		FunctionCalls: []*gollem.FunctionCall{{ID: "call_1", Name: "lookup"}},
+	}}))
+}
+
 func TestQueryRefusal(t *testing.T) {
 	type testCase struct {
 		texts []string

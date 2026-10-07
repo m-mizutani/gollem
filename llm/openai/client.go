@@ -1081,6 +1081,9 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			if textContent != "" {
 				streamTraceData.Response.Texts = []string{textContent}
 			}
+			if reasoningContent != "" {
+				streamTraceData.Response.Thoughts = []string{reasoningContent}
+			}
 			for _, tc := range toolCalls {
 				if tc.ID != "" && tc.Function.Name != "" {
 					args := traceArguments(tc.Function.Arguments)
@@ -1512,6 +1515,9 @@ func buildOpenAITraceData(resp openai.ChatCompletionResponse, cacheWriteTokens i
 		message := resp.Choices[0].Message
 		if message.Content != "" {
 			data.Response.Texts = append(data.Response.Texts, message.Content)
+		}
+		if message.ReasoningContent != "" {
+			data.Response.Thoughts = append(data.Response.Thoughts, message.ReasoningContent)
 		}
 		for _, toolCall := range message.ToolCalls {
 			var args map[string]any

@@ -248,6 +248,58 @@ func TestGenerate(t *testing.T) {
 		t.Run("without content", runTest(testCase{content: "", doneReason: "load"}))
 	})
 
+	t.Run("thinking is recorded in the trace", func(t *testing.T) {
+		fs := newFakeServer(t, replyText("answer", "plan"))
+		rec := trace.New()
+		tctx := trace.WithHandler(rec.StartAgentExecute(ctx), rec)
+		resp, err := newTestSession(t, newTestClient(t, fs)).Generate(tctx, []gollem.Input{gollem.Text("hello")})
+		gt.NoError(t, err).Required()
+		gt.Equal(t, resp.Thoughts, []string{"plan"})
+
+		spans := llmCallSpans(rec.Trace().RootSpan)
+		gt.A(t, spans).Length(1).Required()
+		gt.Equal(t, spans[0].LLMCall.Response.Thoughts, resp.Thoughts)
+		gt.Equal(t, spans[0].LLMCall.Response.Texts, []string{"answer"})
+		gt.A(t, spans[0].LLMCall.Response.OtherBlockTypes).Length(0)
+	})
+
+	// The request that follows a response without text is what gollem.Query
+	// sends when it asks the model to continue.
+	t.Run("history after a response without text", func(t *testing.T) {
+		type testCase struct {
+			thinking string
+			roles    []any
+		}
+		runTest := func(tc testCase) func(t *testing.T) {
+			return func(t *testing.T) {
+				fs := newFakeServer(t, replyText("", tc.thinking))
+				session := newTestSession(t, newTestClient(t, fs))
+
+				resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("question")})
+				gt.NoError(t, err).Required()
+				gt.A(t, resp.Texts).Length(0)
+				_, err = session.Generate(ctx, []gollem.Input{gollem.Text("continue")})
+				gt.NoError(t, err).Required()
+
+				var roles []any
+				for _, m := range messagesOf(t, fs.Last(t)) {
+					roles = append(roles, m["role"])
+				}
+				gt.Equal(t, tc.roles, roles)
+			}
+		}
+
+		t.Run("thinking only", runTest(testCase{
+			thinking: "plan",
+			roles:    []any{"user", "assistant", "user"},
+		}))
+		// An assistant message without content is not kept, so the next user
+		// message follows the previous one.
+		t.Run("no content", runTest(testCase{
+			roles: []any{"user", "user"},
+		}))
+	})
+
 	t.Run("cache count absent", func(t *testing.T) {
 		fs := newFakeServer(t, replyText("hi", ""))
 		resp, err := newTestSession(t, newTestClient(t, fs)).Generate(ctx, []gollem.Input{gollem.Text("hello")})
@@ -848,6 +900,8 @@ func TestStream(t *testing.T) {
 		spans := llmCallSpans(rec.Trace().RootSpan)
 		gt.A(t, spans).Length(1).Required()
 		gt.Equal(t, spans[0].LLMCall.Response.FinishReason, "stop")
+		gt.Equal(t, spans[0].LLMCall.Response.Thoughts, []string{"th1th2"})
+		gt.Equal(t, spans[0].LLMCall.Response.Texts, []string{"Hello"})
 
 		gt.Equal(t, fs.Last(t).Body["stream"], any(true))
 		gt.Equal(t, fs.Last(t).Body["truncate"], any(false))

@@ -874,7 +874,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			apiStreamChan := s.apiClient.GenerateContentStream(ctx, s.model, contents, effectiveConfig)
 
 			// Accumulate response data for history
-			var accumulatedTexts []string
+			var accumulatedTexts, accumulatedThoughts []string
 			var accumulatedFunctionCalls []*gollem.FunctionCall
 			// accumulatedParts keeps the raw parts as returned by the API so
 			// that ThoughtSignature and FunctionCall.ID survive into history.
@@ -912,6 +912,7 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 				// reports the running total, not per-chunk deltas), so take the
 				// latest non-zero value instead of summing.
 				accumulatedTexts = append(accumulatedTexts, response.Texts...)
+				accumulatedThoughts = append(accumulatedThoughts, response.Thoughts...)
 				accumulatedFunctionCalls = append(accumulatedFunctionCalls, response.FunctionCalls...)
 				for _, candidate := range streamResp.Resp.Candidates {
 					if candidate.Content == nil {
@@ -1000,6 +1001,9 @@ func (s *Session) Stream(ctx context.Context, input []gollem.Input, opts ...goll
 			}
 			if len(accumulatedTexts) > 0 {
 				streamTraceData.Response.Texts = accumulatedTexts
+			}
+			if len(accumulatedThoughts) > 0 {
+				streamTraceData.Response.Thoughts = accumulatedThoughts
 			}
 			for _, fc := range accumulatedFunctionCalls {
 				streamTraceData.Response.FunctionCalls = append(streamTraceData.Response.FunctionCalls, &trace.FunctionCall{
@@ -1490,6 +1494,9 @@ func buildGeminiTraceData(response *gollem.Response, model string, systemPrompt 
 
 	if len(response.Texts) > 0 {
 		data.Response.Texts = response.Texts
+	}
+	if len(response.Thoughts) > 0 {
+		data.Response.Thoughts = response.Thoughts
 	}
 	for _, fc := range response.FunctionCalls {
 		data.Response.FunctionCalls = append(data.Response.FunctionCalls, &trace.FunctionCall{

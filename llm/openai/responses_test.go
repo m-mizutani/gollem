@@ -346,6 +346,94 @@ func TestResponsesFinishReason(t *testing.T) {
 	})
 }
 
+// TestResponsesHistoryAfterResponseWithoutText pins the request that follows a
+// response without text, which is what gollem.Query sends when it asks the
+// model to continue.
+func TestResponsesHistoryAfterResponseWithoutText(t *testing.T) {
+	type testCase struct {
+		output string
+		items  []string
+	}
+
+	runTest := func(tc testCase) func(t *testing.T) {
+		return func(t *testing.T) {
+			rs := newResponsesServer(t, replyJSON(`{
+				"id": "resp_1", "object": "response", "status": "completed", "model": "gpt-test",
+				"output": [`+tc.output+`],
+				"usage": {"input_tokens": 100, "output_tokens": 10}
+			}`))
+			session, err := rs.client(t).NewSession(context.Background())
+			gt.NoError(t, err).Required()
+
+			resp, err := session.Generate(context.Background(), []gollem.Input{gollem.Text("question")})
+			gt.NoError(t, err).Required()
+			gt.A(t, resp.Texts).Length(0)
+			_, err = session.Generate(context.Background(), []gollem.Input{gollem.Text("continue")})
+			gt.NoError(t, err).Required()
+
+			sent := rs.sent()
+			gt.A(t, sent).Length(2).Required()
+			var items []string
+			for _, item := range sent[1].Input {
+				items = append(items, item.Type+":"+item.Role)
+			}
+			gt.Equal(t, tc.items, items)
+		}
+	}
+
+	t.Run("reasoning only", runTest(testCase{
+		output: `{"type": "reasoning", "id": "rs_1", "encrypted_content": "enc-1", "summary": []}`,
+		items:  []string{"message:user", "reasoning:", "message:user"},
+	}))
+
+	// A turn without output items is not kept, so the next user message
+	// follows the previous one.
+	t.Run("no output item", runTest(testCase{
+		items: []string{"message:user", "message:user"},
+	}))
+}
+
+func TestResponsesTraceRecordsThoughts(t *testing.T) {
+	t.Run("Generate", func(t *testing.T) {
+		rs := newResponsesServer(t, replyJSON(functionCallReplyBody))
+		session, err := rs.client(t).NewSession(context.Background(), gollem.WithSessionTools(&lookupTool{}))
+		gt.NoError(t, err).Required()
+
+		rec := trace.New()
+		ctx := trace.WithHandler(rec.StartAgentExecute(context.Background()), rec)
+		resp, err := session.Generate(ctx, []gollem.Input{gollem.Text("what is alpha?")})
+		gt.NoError(t, err).Required()
+		gt.Equal(t, []string{"need to look it up"}, resp.Thoughts)
+
+		traced := findLLMCallSpan(t, rec.Trace().RootSpan).LLMCall.Response
+		gt.Equal(t, resp.Thoughts, traced.Thoughts)
+		gt.A(t, traced.OtherBlockTypes).Length(0)
+	})
+
+	t.Run("Stream", func(t *testing.T) {
+		rs := newResponsesServer(t, replyEvents(
+			`{"type":"response.reasoning_summary_text.delta","sequence_number":1,"output_index":0,"item_id":"rs_1","summary_index":0,"delta":"need to "}`,
+			`{"type":"response.reasoning_summary_text.delta","sequence_number":2,"output_index":0,"item_id":"rs_1","summary_index":0,"delta":"look it up"}`,
+			`{"type":"response.output_item.done","sequence_number":3,"output_index":0,"item":{"type":"reasoning","id":"rs_1","encrypted_content":"enc-1","summary":[{"type":"summary_text","text":"need to look it up"}]}}`,
+			`{"type":"response.output_item.done","sequence_number":4,"output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"lookup","arguments":"{\"key\":\"alpha\"}","status":"completed"}}`,
+			`{"type":"response.completed","sequence_number":5,"response":{"id":"resp_1","status":"completed","model":"gpt-test","output":[],"usage":{"input_tokens":100,"output_tokens":10}}}`,
+		))
+		session, err := rs.client(t).NewSession(context.Background(), gollem.WithSessionTools(&lookupTool{}))
+		gt.NoError(t, err).Required()
+
+		rec := trace.New()
+		ctx := trace.WithHandler(rec.StartAgentExecute(context.Background()), rec)
+		ch, err := session.Stream(ctx, []gollem.Input{gollem.Text("what is alpha?")})
+		gt.NoError(t, err).Required()
+		for resp := range ch {
+			gt.NoError(t, resp.Error).Required()
+		}
+
+		traced := findLLMCallSpan(t, rec.Trace().RootSpan).LLMCall.Response
+		gt.Equal(t, []string{"need to look it up"}, traced.Thoughts)
+	})
+}
+
 func TestResponsesFunctionCallRoundTrip(t *testing.T) {
 	rs := newResponsesServer(t, replySequence(functionCallReplyBody, finalAnswerReplyBody))
 	client := rs.client(t)
